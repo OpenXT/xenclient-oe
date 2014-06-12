@@ -1,0 +1,232 @@
+This patch is used for enabling audio devices in stubdomain
+diff --git a/audio/alsaaudio.c b/audio/alsaaudio.c
+index e4e5442..de62c43 100644
+--- a/audio/alsaaudio.c
++++ b/audio/alsaaudio.c
+@@ -26,6 +26,9 @@
+ #include "qemu/main-loop.h"
+ #include "audio.h"
+ 
++/* XenClient: audio-alsa */
++#define DEBUG 0
++
+ #if QEMU_GNUC_PREREQ(4, 3)
+ #pragma GCC diagnostic ignored "-Waddress"
+ #endif
+@@ -73,11 +76,15 @@ static struct {
+     int buffer_size_out_overridden;
+     int period_size_out_overridden;
+     int verbose;
++
++    /* XenClient: audio-alsa */
++    char const *volume_control;
+ } conf = {
+     .buffer_size_out = 4096,
+     .period_size_out = 1024,
+     .pcm_name_out = "default",
+     .pcm_name_in = "default",
++    .volume_control = "master",
+ };
+ 
+ struct alsa_params_req {
+@@ -505,6 +512,23 @@ static int alsa_open (int in, struct alsa_params_req *req,
+         return -1;
+     }
+ 
++    /* XenClient: audio-alsa
++     * Close and then open again: volume control seems to only work
++     * after the device has been closed once. */
++    err = snd_pcm_close(handle);
++    if (err < 0) {
++        alsa_logerr2(err, typ, "Failed to close `%s':\n", pcm_name);
++        return -1;
++    }
++
++    err = snd_pcm_open(&handle, pcm_name,
++                       in ? SND_PCM_STREAM_CAPTURE : SND_PCM_STREAM_PLAYBACK,
++                       SND_PCM_NONBLOCK);
++    if (err < 0) {
++        alsa_logerr2(err, typ, "Failed to re-open `%s':\n", pcm_name);
++        return -1;
++    }
++
+     err = snd_pcm_hw_params_any (handle, hw_params);
+     if (err < 0) {
+         alsa_logerr2 (err, typ, "Failed to initialize hardware parameters\n");
+@@ -1162,6 +1186,86 @@ static void alsa_audio_fini (void *opaque)
+     (void) opaque;
+ }
+ 
++/* XenClient: audio-alsa */
++static struct alsa_volume {
++    snd_mixer_t *handle;
++    char const *card;
++} av_g = {
++    .handle = NULL,
++    .card = "default",
++};
++
++void alsa_volume(int rvol, int lvol, int mute)
++{
++    snd_mixer_elem_t *elem;
++    snd_mixer_selem_id_t *sid;
++    int err, chn, volume;
++
++    snd_mixer_selem_id_alloca(&sid);
++
++    if (av_g.handle == NULL) {
++        err = snd_mixer_open(&(av_g.handle), 0);
++        if (err < 0) {
++            alsa_logerr(err, "Mixer %s open error: %s\n", av_g.card,
++                        snd_strerror(err));
++            return;
++        }
++        err = snd_mixer_attach(av_g.handle, av_g.card);
++        if (err < 0) {
++            alsa_logerr(err, "Mixer attach %s error: %s", av_g.card,
++                        snd_strerror(err));
++            snd_mixer_close(av_g.handle);
++            av_g.handle = NULL;
++            return;
++        }
++        err = snd_mixer_selem_register(av_g.handle, NULL, NULL);
++        if (err < 0) {
++            alsa_logerr(err, "Mixer register error: %s", snd_strerror(err));
++            snd_mixer_close(av_g.handle);
++            av_g.handle = NULL;
++            return;
++        }
++        err = snd_mixer_load(av_g.handle);
++        if (err < 0) {
++            alsa_logerr(err, "Mixer %s load error: %s",
++                        av_g.card, snd_strerror(err));
++            snd_mixer_close(av_g.handle);
++            av_g.handle = NULL;
++            return;
++        }
++    }
++    snd_mixer_selem_id_set_index(sid, 0);
++    snd_mixer_selem_id_set_name(sid, conf.volume_control);
++    elem = snd_mixer_find_selem(av_g.handle, sid);
++    if (!elem) {
++        alsa_logerr(ENOENT, "Unable to find simple control '%s',%i\n",
++                    snd_mixer_selem_id_get_name(sid),
++                    snd_mixer_selem_id_get_index(sid));
++        snd_mixer_close(av_g.handle);
++        av_g.handle = NULL;
++        return;
++    }
++
++    for (chn = 0; chn <= SND_MIXER_SCHN_LAST; chn++) {
++        if (!snd_mixer_selem_has_playback_channel(elem, chn)) {
++            continue;
++        }
++        if (snd_mixer_selem_has_playback_switch(elem)) {
++            err = snd_mixer_selem_set_playback_switch(elem, chn, mute);
++        } else if (mute) {
++            rvol = lvol = 0;
++        }
++        volume = (chn == 1) ? rvol : lvol;
++        err = snd_mixer_selem_set_playback_volume(elem, chn, volume);
++        if (err < 0) {
++            alsa_logerr(err, "Unable to set volume for channel %d\n", chn);
++            snd_mixer_close(av_g.handle);
++            av_g.handle = NULL;
++            return;
++        }
++    }
++}
++
+ static struct audio_option alsa_options[] = {
+     {
+         .name        = "DAC_SIZE_IN_USEC",
+@@ -1228,6 +1332,13 @@ static struct audio_option alsa_options[] = {
+         .valp        = &conf.verbose,
+         .descr       = "Behave in a more verbose way"
+     },
++    {
++        /* XenClient: audio-alsa */
++        .name        = "VOL_CTRL",
++        .tag         = AUD_OPT_STR,
++        .valp        = &conf.volume_control,
++        .descr       = "Volume control voice name"
++    },
+     { /* End of list */ }
+ };
+ 
+diff --git a/audio/audio.h b/audio/audio.h
+index e7ea397..d890290 100644
+--- a/audio/audio.h
++++ b/audio/audio.h
+@@ -163,4 +163,7 @@ static inline void *advance (void *p, int incr)
+ int wav_start_capture (CaptureState *s, const char *path, int freq,
+                        int bits, int nchannels);
+ 
++/* XenClient: audio-alsa */
++void alsa_volume(int, int, int);
++
+ #endif  /* audio.h */
+diff --git a/configure b/configure
+index 74245e7..294fc03 100755
+--- a/configure
++++ b/configure
+@@ -2023,9 +2023,11 @@ audio_drv_list=`echo "$audio_drv_list" | sed -e 's/,/ /g'`
+ for drv in $audio_drv_list; do
+     case $drv in
+     alsa)
+-    audio_drv_probe $drv alsa/asoundlib.h -lasound \
++    # XenClient: audio-alsa
++    # TODO: it doesn't look like sexy to do that for static compilation...
++    audio_drv_probe $drv alsa/asoundlib.h "-lasound -lpthread -ldl" \
+         "return snd_pcm_close((snd_pcm_t *)0);"
+-    libs_softmmu="-lasound $libs_softmmu"
++    libs_softmmu="-lasound -lpthread -ldl $libs_softmmu"
+     ;;
+ 
+     fmod)
+diff --git a/hw/ac97.c b/hw/ac97.c
+index 6c565e7..981647c 100644
+--- a/hw/ac97.c
++++ b/hw/ac97.c
+@@ -122,6 +122,10 @@ enum {
+ 
+ #define MUTE_SHIFT 15
+ 
++/* XenClient: audio-alsa */
++#define VOL_MASK 0x3f
++#define MAX_VOL_MASK 0xff
++
+ #define REC_MASK 7
+ enum {
+     REC_MIC = 0,
+@@ -481,9 +485,30 @@ static void update_volume_in (AC97LinkState *s)
+ 
+ static void set_volume (AC97LinkState *s, int index, uint32_t val)
+ {
++    /* XenClient: audio-alsa */
++    int mute = 0;
++    uint8_t rvol = 0;
++    uint8_t lvol = 0;
++
+     switch (index) {
+     case AC97_Master_Volume_Mute:
++        mute = (val >> MUTE_SHIFT) & 1;
++        rvol = val & MAX_VOL_MASK;
++        lvol = (val >> 8) & MAX_VOL_MASK;
++
++        if (rvol > VOL_MASK) {
++            rvol = VOL_MASK;
++        }
++        if (lvol > VOL_MASK) {
++            lvol = VOL_MASK;
++        }
++
++        rvol = 255 * (VOL_MASK - rvol) / VOL_MASK;
++        lvol = 255 * (VOL_MASK - lvol) / VOL_MASK;
++
+         val &= 0xbf3f;
++
++        alsa_volume(rvol, lvol, mute);
+         mixer_store (s, index, val);
+         update_combined_volume_out (s);
+         break;
