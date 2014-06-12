@@ -1,0 +1,58 @@
+diff --git a/hw/pci.c b/hw/pci.c
+index f051de1..0334e90 100644
+--- a/hw/pci.c
++++ b/hw/pci.c
+@@ -913,6 +913,38 @@ PCIDevice *pci_find_device(int bus_num, int slot, int function)
+     return bus->devices[PCI_DEVFN(slot, function)];
+ }
+ 
++
++static int intel_bridge_irq_function(PCIDevice *pci_dev, int irq_num)
++{
++    return irq_num;
++}
++
++PCIBus *intel_pci_bridge_init(PCIBus *bus, int devfn, uint16_t vid, uint16_t did,
++                              const char *name, uint16_t revision)
++{
++    PCIBridge *s;
++    s = (PCIBridge *)pci_register_device(bus, name, sizeof(PCIBridge),
++                                         devfn, NULL, pci_bridge_write_config);
++
++    pci_config_set_vendor_id(s->dev.config, vid);
++    pci_config_set_device_id(s->dev.config, did);
++
++    s->dev.config[0x04] = 0x06; // command = bus master, pci mem
++    s->dev.config[0x05] = 0x00;
++    s->dev.config[0x06] = 0xa0; // status = fast back-to-back, 66MHz, no error
++    s->dev.config[0x07] = 0x00; // status = fast devsel
++    s->dev.config[0x08] = revision; // revision
++    s->dev.config[0x09] = 0x00; // programming i/f
++    pci_config_set_class(s->dev.config, PCI_CLASS_BRIDGE_PCI);
++    s->dev.config[0x0D] = 0x10; // latency_timer
++    s->dev.config[0x0E] = 0x81; // header_type
++    s->dev.config[0x1E] = 0xa0; // secondary status
++
++    s->bus = pci_register_secondary_bus(&s->dev, intel_bridge_irq_function);
++    return s->bus;
++}
++
++
+ PCIBus *pci_bridge_init(PCIBus *bus, int devfn, uint16_t vid, uint16_t did,
+                         uint8_t rid, pci_map_irq_fn map_irq, const char *name)
+ {
+diff --git a/hw/pci.h b/hw/pci.h
+index 7fc3171..1117d07 100644
+--- a/hw/pci.h
++++ b/hw/pci.h
+@@ -265,6 +265,10 @@ int pci_read_devaddr(const char *addr, int *domp, int *busp, unsigned *slotp);
+ int pci_assign_devaddr(const char *addr, int *domp, int *busp, unsigned *slotp);
+ 
+ void pci_info(void);
++
++PCIBus *intel_pci_bridge_init(PCIBus *bus, int devfn, uint16_t vid, uint16_t did,
++                             const char *name, uint16_t revision);
++
+ PCIBus *pci_bridge_init(PCIBus *bus, int devfn, uint16_t vid, uint16_t did,
+                         uint8_t rid, pci_map_irq_fn map_irq, const char *name);
+ 

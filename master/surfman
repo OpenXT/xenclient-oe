@@ -1,0 +1,1002 @@
+diff --git a/hw/pass-through.c b/hw/pass-through.c
+index 615594c..8ff6c28 100644
+--- a/hw/pass-through.c
++++ b/hw/pass-through.c
+@@ -99,6 +99,7 @@
+ 
+ extern int gfx_passthru;
+ int igd_passthru = 0;
++extern int surfman;
+ 
+ struct php_dev {
+     struct pt_dev *pt_dev;
+diff --git a/hw/pass-through.h b/hw/pass-through.h
+index 09a7de0..8fbe1ae 100644
+--- a/hw/pass-through.h
++++ b/hw/pass-through.h
+@@ -232,6 +232,7 @@ struct pt_dev {
+ #define PCI_IOMUL_INVALID_FD    (-1)
+     int fd;
+     unsigned io_enable:1;
++    void *opaque;
+ };
+ 
+ static inline int pt_is_iomul(struct pt_dev *dev)
+diff --git a/hw/pc.c b/hw/pc.c
+index 8d78de3..8c16ebd 100644
+--- a/hw/pc.c
++++ b/hw/pc.c
+@@ -71,6 +71,8 @@ void tpm_tis_init(SetIRQFunc *set_irq, void *opaque, int irq);
+ extern uint8_t *acpi_tables;
+ extern size_t acpi_tables_len;
+ 
++extern int vgpu_enabled;
++
+ static fdctrl_t *floppy_controller;
+ static RTCState *rtc_state;
+ static PITState *pit;
+@@ -1010,6 +1012,9 @@ vga_bios_error:
+         else
+             fprintf(stderr, "%s: vmware_vga: no PCI bus\n", __FUNCTION__);
+ #endif
++    } else if (vgpu_enabled) {
++        if (pci_enabled)
++            pci_vgpu_init(pci_bus, -1);
+     } else if (std_vga_enabled) {
+         if (pci_enabled) {
+             pci_vga_init(pci_bus, phys_ram_base + vga_ram_addr,
+@@ -1067,6 +1072,9 @@ vga_bios_error:
+             pci_xen_platform_init(pci_bus);
+             platform_fixed_ioport_init();
+         }
++        if (!gfx_passthru && vgpu_enabled) {
++            pci_vgpu_init(pci_bus, -1);
++        }
+         pci_xenmou_init (pci_bus, -1);
+     }
+ 
+diff --git a/hw/pt-graphics.c b/hw/pt-graphics.c
+index f07a366..21f2acf 100644
+--- a/hw/pt-graphics.c
++++ b/hw/pt-graphics.c
+@@ -5,6 +5,7 @@
+ #include "pass-through.h"
+ #include "pci/header.h"
+ #include "pci/pci.h"
++#include "surfman.h"
+ 
+ #include <unistd.h>
+ #include <sys/ioctl.h>
+@@ -12,6 +13,7 @@
+ 
+ extern int gfx_passthru;
+ extern int igd_passthru;
++extern int surfman;
+ 
+ static int pch_map_irq(PCIDevice *pci_dev, int irq_num)
+ {
+@@ -150,6 +152,11 @@ int register_vga_regions(struct pt_dev *real_device)
+         PT_LOG("register_vga: igd_opregion = %x\n", igd_opregion);
+     }
+ 
++    if (!ret && surfman) {
++        PT_LOG("Passing device to surfman\n");
++        surfman_passthrough_init(real_device);
++    }
++
+     if ( ret != 0 )
+         PT_LOG("VGA region mapping failed\n");
+ 
+diff --git a/hw/surfman.c b/hw/surfman.c
+new file mode 100644
+index 0000000..845de85
+--- /dev/null
++++ b/hw/surfman.c
+@@ -0,0 +1,451 @@
++#include <stdio.h>
++#include <stdlib.h>
++#include <stdint.h>
++#include <sys/mman.h>
++#include <sys/types.h>
++#include <sys/stat.h>
++#include <fcntl.h>
++#include <assert.h>
++#include <signal.h>
++#include <sys/socket.h>
++#include <sys/un.h>
++
++#include "hw.h"
++#include "qemu-common.h"
++#include "qemu-timer.h"
++#include "console.h"
++#include "pci.h"
++#include "surfman.h"
++#include "dmbus.h"
++#include "vga_int.h"
++#include "pass-through.h"
++#include "pt-msi.h"
++
++/* VGPU */
++
++struct vgpu_dev
++{
++    PCIDevice pci_dev;
++    dmbus_service_t serv;
++};
++
++static uint32_t
++pci_vgpu_config_read(PCIDevice *dev, uint32_t address, int len)
++{
++    struct vgpu_dev *d = (struct vgpu_dev *)dev;
++    struct msg_config_io_read io;
++    struct msg_config_io_reply reply;
++    int rc;
++
++    io.offset = address;
++    io.size = len;
++
++    rc = dmbus_send(d->serv, DMBUS_MSG_CONFIG_IO_READ,
++                    &io, sizeof (io));
++    if (rc == -1)
++        return 0xffffffff;
++
++    rc = dmbus_sync_recv(d->serv, DMBUS_MSG_CONFIG_IO_REPLY,
++                         &reply, sizeof (reply));
++    if (rc == -1)
++        return 0xffffffff;
++
++    if (reply.hdr.return_value)
++        return 0xffffffff;
++
++    return reply.data;
++}
++
++static void
++pci_vgpu_config_write(PCIDevice *dev, uint32_t address, uint32_t val,
++                      int len)
++{
++    struct vgpu_dev *d = (struct vgpu_dev *)dev;
++    struct msg_config_io_write io;
++    struct msg_empty_reply reply;
++    int rc;
++
++    io.offset = address;
++    io.size = len;
++    io.data = val;
++
++    rc = dmbus_send(d->serv, DMBUS_MSG_CONFIG_IO_WRITE,
++                    &io, sizeof (io));
++    if (rc == -1)
++        return;
++
++    dmbus_sync_recv(d->serv, DMBUS_MSG_EMPTY_REPLY,
++                    &reply, sizeof (reply));
++}
++
++static void vgpu_attach(dmbus_service_t s, void *opaque)
++{
++    struct vgpu_dev *d = opaque;
++    struct msg_attach_pci_device attach;
++    struct msg_empty_reply reply;
++
++    attach.bus = pci_bus_num(d->pci_dev.bus);
++    attach.device = PCI_SLOT(d->pci_dev.devfn);
++    attach.function = PCI_FUNC(d->pci_dev.devfn);
++
++    dmbus_send(d->serv, DMBUS_MSG_ATTACH_PCI_DEVICE, &attach,
++              sizeof (attach));
++
++    dmbus_sync_recv(d->serv, DMBUS_MSG_EMPTY_REPLY,
++                    &reply, sizeof (reply));
++}
++
++PCIDevice *
++pci_vgpu_init(PCIBus * bus, int devfn)
++{
++    struct vgpu_dev *d;
++    int rc;
++
++    d = (struct vgpu_dev *) pci_register_device(bus, "VGPU",
++                                                sizeof (*d), devfn,
++                                                pci_vgpu_config_read,
++                                                pci_vgpu_config_write);
++    if (!d)
++        return NULL;
++
++    d->serv = dmbus_service_connect(DMBUS_SERVICE_SURFMAN,
++                                    DEVICE_TYPE_EMULATION,
++                                    NULL, vgpu_attach, d);
++    if (!d->serv) {
++        pci_unregister_device(&d->pci_dev);
++        return NULL;
++    }
++
++    vgpu_attach(d->serv, d);
++
++    return &d->pci_dev;
++}
++
++void
++pci_vgpu_cleanup(PCIDevice *dev)
++{
++    struct vgpu_dev *d = (struct vgpu_dev *)dev;
++
++    dmbus_service_disconnect(d->serv);
++    pci_unregister_device(&d->pci_dev);
++}
++
++/* XenVesa Display */
++
++#define QEMU_VRAM_SURFACE_FLAG 0x4
++extern VGAState *xen_vga_state;
++
++typedef struct
++{
++    DisplayChangeListener dcl;
++    DisplayAllocator da;
++
++    DisplayState *ds;
++    dmbus_client_t serv;
++
++    void *data;
++} SurfmanState;
++
++static void surfman_update(DisplayState *ds, int x, int y, int w, int h)
++{
++    SurfmanState *s = ds->opaque;
++
++    if ((ds->surface->flags & QEMU_ALLOCATED_FLAG) || s->data) {
++        uint8_t *src, *dest;
++        int linesize = ds_get_linesize(ds);
++        int bpp = ds_get_bytes_per_pixel(ds);
++        unsigned int offset = (linesize * y) + (bpp * x);
++        int i;
++
++        if (s->data)
++            src = s->data + offset;
++        else
++            src = ds_get_data(ds) + offset;
++        dest = xen_vga_state->vram_ptr + xen_vga_state->vram_size / 2 + offset;
++
++        for (i = 0; i < h; i++) {
++            memcpy(dest, src, w * bpp);
++            src += linesize;
++            dest += linesize;
++        }
++    }
++}
++
++static void surfman_resize(DisplayState *ds)
++{
++    SurfmanState *s = ds->opaque;
++    struct msg_display_resize msg;
++    struct msg_empty_reply reply;
++
++    if (ds->surface->flags & QEMU_ALLOCATED_FLAG ||
++        ds->surface->flags & QEMU_VRAM_SURFACE_FLAG) {
++        msg.lfb_addr = xen_vga_state->vram_gmfn +
++                       (xen_vga_state->vram_size / 2);
++        msg.fb_offset = 0;
++        msg.lfb_traceable = 0;
++    } else {
++        msg.lfb_addr = xen_vga_state->vram_gmfn;
++        msg.fb_offset = xen_vga_state->start_addr * 4;
++        msg.lfb_traceable = 1;
++    }
++
++    msg.DisplayID = 0;
++    msg.width = ds_get_width(ds);
++    msg.height = ds_get_height(ds);
++    msg.linesize = ds_get_linesize(ds);
++    if (ds_get_bits_per_pixel(ds) == 32)
++        msg.format = FRAMEBUFFER_FORMAT_BGRX8888;
++    else if (ds_get_bits_per_pixel(ds) == 16)
++        msg.format = FRAMEBUFFER_FORMAT_BGR565;
++    else {
++        fprintf(stderr, "%s: Unsupported pixel format\n", __func__);
++        return;
++    }
++
++    fprintf(stderr, "Sending surfman a resize event: %dx%d/%d (bpp:%d) lfb:%llx\n",
++            msg.width, msg.height, msg.linesize, ds_get_bits_per_pixel(ds),
++            msg.lfb_addr);
++
++    dmbus_send(s->serv, DMBUS_MSG_DISPLAY_RESIZE, &msg, sizeof (msg));
++    dmbus_sync_recv(s->serv, DMBUS_MSG_EMPTY_REPLY,
++                    &reply, sizeof (reply));
++
++    s->data = NULL;
++}
++
++static void surfman_setdata(DisplayState *ds)
++{
++    SurfmanState *s = ds->opaque;
++
++    fprintf(stderr, "%s: data=%p\n", __func__, ds_get_data(ds));
++
++    s->data = ds_get_data(ds);
++}
++
++static void surfman_refresh(DisplayState *ds)
++{
++    vga_hw_update();
++}
++
++static int get_display_info(SurfmanState *s, int displayid, int *max_xres,
++                                                            int *max_yres,
++                                                            int *stride_align)
++{
++    struct msg_display_get_info request;
++    struct msg_display_info reply;
++    int rc;
++
++    request.DisplayID = displayid;
++    rc = dmbus_send(s->serv, DMBUS_MSG_DISPLAY_GET_INFO, &request, sizeof (request));
++    if (rc != sizeof (request))
++        return -1;
++    rc = dmbus_sync_recv(s->serv, DMBUS_MSG_DISPLAY_INFO, &reply, sizeof (reply));
++    if (rc != sizeof (reply))
++        return -1;
++
++    fprintf(stderr, "Get display info from surfman: Max res %dx%d FB align: %d\n",
++            reply.max_xres, reply.max_yres, reply.align);
++
++    if (max_xres)
++        *max_xres = reply.max_xres;
++    if (max_yres)
++        *max_yres = reply.max_yres;
++    if (stride_align)
++        *stride_align = reply.align;
++
++    return 0;
++}
++
++static void surfman_get_max_res(DisplayState *ds, int *xres, int *yres)
++{
++    SurfmanState *s = ds->opaque;
++
++    get_display_info(s, 0, xres, yres, NULL);
++}
++
++static unsigned int surfman_get_stride_alignment(DisplayState *ds)
++{
++    SurfmanState *s = ds->opaque;
++    unsigned int align;
++
++    get_display_info(s, 0, NULL, NULL, &align);
++
++    return align;
++}
++
++#define DIV_CEIL(a, b) (((a) + (b) - 1) / (b))
++static DisplaySurface *surfman_surface_create(int width, int height)
++{
++    DisplaySurface *surface = qemu_malloc(sizeof (*surface));
++
++    fprintf(stderr, "Create surfman buffer in local memory: %dx%d\n", width, height);
++    surface->width = width;
++    surface->height = height;
++    surface->pf = qemu_default_pixelformat(32);
++    surface->linesize = DIV_CEIL(width * 4, 64) * 64;
++    surface->data = qemu_mallocz(height * surface->linesize);
++    surface->flags = QEMU_ALLOCATED_FLAG;
++    return surface;
++}
++
++static void surfman_surface_free(DisplaySurface *s)
++{
++    if (s->flags & QEMU_ALLOCATED_FLAG) {
++        qemu_free(s->data);
++    }
++    qemu_free(s);
++}
++
++static DisplaySurface *surfman_surface_resize(DisplaySurface *s, int width, int height)
++{
++    fprintf(stderr, "Resize surfman buffer in local memory (%ux%u -> %ux%u).",
++            s->width, s->height, width, height);
++    if (s->flags & QEMU_ALLOCATED_FLAG) {
++        qemu_free(s->data);
++    }
++    s->width = width;
++    s->height = height;
++    s->pf = qemu_default_pixelformat(32);
++    s->linesize = DIV_CEIL(width * 4, 64) * 64;
++    s->data = qemu_mallocz(height * s->linesize);
++    s->flags = QEMU_ALLOCATED_FLAG;
++    return s;
++}
++
++static void on_reconnect(dmbus_service_t service, void *opaque)
++{
++    SurfmanState *s = opaque;
++
++    surfman_resize(s->ds);
++}
++
++int surfman_xenvesa_init(DisplayState *ds)
++{
++    SurfmanState *s;
++    DisplaySurface *surface;
++
++    s = qemu_mallocz(sizeof (SurfmanState));
++    if (!s)
++        return -1;
++
++    s->serv = dmbus_service_connect(DMBUS_SERVICE_SURFMAN,
++                                    DEVICE_TYPE_VESA,
++                                    NULL, on_reconnect, s);
++    if (!s->serv) {
++        qemu_free (s);
++        return -1;
++    }
++    s->data = NULL;
++    s->ds = ds;
++
++    s->dcl.dpy_update = surfman_update;
++    s->dcl.dpy_resize = surfman_resize;
++    s->dcl.dpy_setdata = surfman_setdata;
++    s->dcl.dpy_refresh = surfman_refresh;
++    s->dcl.dpy_get_max_res = surfman_get_max_res;
++    s->dcl.dpy_get_stride_alignment = surfman_get_stride_alignment;
++
++    register_displaychangelistener(ds, &s->dcl);
++
++    s->da.create_displaysurface = surfman_surface_create;
++    s->da.resize_displaysurface = surfman_surface_resize;
++    s->da.free_displaysurface = surfman_surface_free;
++
++    if (register_displayallocator(ds, &s->da) != &s->da) {
++        dmbus_service_disconnect(s->serv);
++        qemu_free(s);
++        return -1;
++    }
++
++    surface = surfman_surface_create(ds_get_width(ds), ds_get_height(ds));
++    defaultallocator_free_displaysurface(ds->surface);
++    ds->surface = surface;
++
++    ds->opaque = s;
++
++    surfman_resize(ds);
++
++    return 0;
++}
++
++/* GPU Passthrough */
++
++static void passthrough_map(PCIDevice *d, int i, uint32_t e_phys, uint32_t e_size,
++                            int type)
++{
++    struct pt_dev *dev  = (struct pt_dev *)d;
++    struct msg_update_pci_bar update;
++    struct msg_empty_reply reply;
++
++    uint64_t maddr = dev->bases[i].access.maddr;
++    uint32_t old_base = dev->bases[i].e_physbase;
++    uint32_t old_size = dev->bases[i].e_size;
++
++    dev->bases[i].e_physbase = e_phys;
++    dev->bases[i].e_size= e_size;
++
++    if ( e_size == 0 || old_size != 0)
++        return;
++
++    if (old_size != 0 && old_base != -1) {
++        add_msix_mapping(dev, i);
++    }
++
++    update.barID = i;
++    update.hostaddr = maddr;
++    update.guestaddr = e_phys;
++    update.len = e_size;
++
++    dmbus_send(dev->opaque, DMBUS_MSG_UPDATE_PCI_BAR, &update,
++              sizeof (update));
++    dmbus_sync_recv(dev->opaque, DMBUS_MSG_EMPTY_REPLY,
++                    &reply, sizeof (reply));
++
++    if (e_phys != -1) {
++        if (remove_msix_mapping(dev, i) != 0)
++            fprintf(stderr, "%s: remove MSI-X mmio mapping failed!\n",
++                    __func__);
++        if (old_base != e_phys && old_base != -1)
++            pt_msix_update_remap(dev, i);
++    }
++}
++
++static void passthrough_attach(dmbus_service_t s, void *opaque)
++{
++    struct pt_dev *d = opaque;
++    struct msg_attach_pci_device attach;
++    struct msg_empty_reply reply;
++
++    attach.bus = pci_bus_num(d->dev.bus);
++    attach.device = PCI_SLOT(d->dev.devfn);
++    attach.function = PCI_FUNC(d->dev.devfn);
++
++    dmbus_send(d->opaque, DMBUS_MSG_ATTACH_PCI_DEVICE, &attach,
++              sizeof (attach));
++    dmbus_sync_recv(d->opaque, DMBUS_MSG_EMPTY_REPLY,
++                    &reply, sizeof (reply));
++}
++
++void surfman_passthrough_init(struct pt_dev *d)
++{
++    PCIIORegion *r;
++    int i;
++
++    d->opaque = dmbus_service_connect(DMBUS_SERVICE_SURFMAN,
++                                      DEVICE_TYPE_PASSTHROUGH,
++                                      NULL, passthrough_attach, d);
++    if (!d->opaque)
++        return;
++
++    passthrough_attach(d->opaque, d);
++
++    for (i = 0; i < PCI_NUM_REGIONS; i++) {
++        if (pt_pci_base_addr(d->pci_dev->base_addr[i]))
++        {
++            r = &d->dev.io_regions[i];
++            if (r->map_func && r->type != PCI_ADDRESS_SPACE_IO)
++                /* XXX let qemu handle ioports for now */
++                r->map_func = passthrough_map;
++        }
++    }
++}
+diff --git a/hw/surfman.h b/hw/surfman.h
+new file mode 100644
+index 0000000..23e0987
+--- /dev/null
++++ b/hw/surfman.h
+@@ -0,0 +1,12 @@
++#ifndef __SURFMAN_H__
++#define __SURFMAN_H__
++#include "pass-through.h"
++
++PCIDevice *pci_vgpu_init (PCIBus * bus, int devfn);
++void pci_vgpu_cleanup (PCIDevice *dev);
++
++int surfman_xenvesa_init(DisplayState *ds);
++
++void surfman_passthrough_init(struct pt_dev *d);
++
++#endif /* __SURFMAN_H__ */
+diff --git a/hw/xen_machine_pv.c b/hw/xen_machine_pv.c
+index bc207fc..65c6d2f 100644
+--- a/hw/xen_machine_pv.c
++++ b/hw/xen_machine_pv.c
+@@ -28,6 +28,7 @@
+ #include "boards.h"
+ #include "xen_backend.h"
+ #include "qemu-xen.h"
++#include "dmbus.h"
+ 
+ #ifndef CONFIG_STUBDOM
+ #include <hw/xen_blktap.h>
+@@ -35,6 +36,7 @@
+ 
+ uint32_t xen_domid;
+ enum xen_mode xen_mode = XEN_EMULATE;
++extern int surfman;
+ 
+ static void xen_init_pv(ram_addr_t ram_size, int vga_ram_size,
+ 			const char *boot_device,
+@@ -46,6 +48,7 @@ static void xen_init_pv(ram_addr_t ram_size, int vga_ram_size,
+ {
+     CPUState *env;
+     uint32_t domid_target;
++    struct XenDevice *kbddev;
+ 
+     /* Initialize a dummy CPU */
+     if (cpu_model == NULL) {
+@@ -65,7 +68,6 @@ static void xen_init_pv(ram_addr_t ram_size, int vga_ram_size,
+     }
+     xen_be_register("console", &xen_console_ops);
+     xen_be_register("vkbd", &xen_kbdmouse_ops);
+-    xen_be_register("vfb", &xen_framebuffer_ops);
+ #ifndef CONFIG_STUBDOM
+     xen_be_register("qdisk", &xen_blkdev_ops);
+     domid_target = xenstore_read_target();
+@@ -73,8 +75,19 @@ static void xen_init_pv(ram_addr_t ram_size, int vga_ram_size,
+         xenstore_scan("qdisk", domid_target, &xen_blkdev_ops);
+ #endif
+ 
+-    /* setup framebuffer */
+-    xen_init_display(xen_domid);
++    kbddev = xen_be_find_xendev("vkbd", xen_domid, 0);
++    if (kbddev) {
++        xen_be_check_state(kbddev);
++    }
++
++    if (surfman) {
++        /* Just connecting to surfman should be enough */
++        dmbus_service_connect(DMBUS_SERVICE_SURFMAN,
++                              DEVICE_TYPE_XENFB,
++                              NULL, NULL, NULL);
++        /* Don't initialize surfman's display listener */
++        surfman = 0;
++    }
+ }
+ 
+ QEMUMachine xenpv_machine = {
+diff --git a/hw/xenfb.c b/hw/xenfb.c
+index 04c58d7..7903b78 100644
+--- a/hw/xenfb.c
++++ b/hw/xenfb.c
+@@ -339,11 +339,8 @@ static void xenfb_mouse_event(void *opaque,
+ 			      int dx, int dy, int dz, int button_state)
+ {
+     struct XenInput *xenfb = opaque;
+-    int dw = ds_get_width(xenfb->c.ds);
+-    int dh = ds_get_height(xenfb->c.ds);
+ 
+     xenfb_send_motion(xenfb, dx, dy, dz);
+-
+     xenfb_buttons(xenfb, button_state);
+ }
+ 
+@@ -355,13 +352,6 @@ static void xenfb_tablet_event(void *opaque,
+ {
+     struct XenInput *xenfb = opaque;
+ 
+-
+-#if 0
+-    xenfb_send_position(xenfb,
+-                        dx * (ds_get_width(xenfb->c.ds) - 1) / 0x7fff,
+-                        dy * (ds_get_height(xenfb->c.ds) - 1) / 0x7fff,
+-                        dz);
+-#endif
+     xenfb_send_position(xenfb, dx, dy, dz);
+     xenfb_buttons(xenfb, button_state);
+ }
+@@ -370,11 +360,6 @@ static int input_init(struct XenDevice *xendev)
+ {
+     struct XenInput *in = container_of(xendev, struct XenInput, c.xendev);
+ 
+-    if (!in->c.ds) {
+-        xen_be_printf(xendev, 1, "ds not set (yet)\n");
+-	return -1;
+-    }
+-
+     xenstore_write_be_int(xendev, "feature-abs-pointer", 1);
+     return 0;
+ }
+@@ -396,11 +381,6 @@ static void input_connected(struct XenDevice *xendev)
+ {
+     struct XenInput *in = container_of(xendev, struct XenInput, c.xendev);
+ 
+-#if 0
+-    if (xenstore_read_fe_int(xendev, "request-abs-pointer",
+-                             &in->abs_pointer_wanted) == -1)
+-	in->abs_pointer_wanted = 0;
+-#endif
+     if (in->qmouse)
+ 	qemu_remove_mouse_event_handler(in->qmouse);
+     in->qmouse = qemu_add_mouse_event_handler(xenfb_mouse_event, in, 0,
+@@ -631,74 +611,6 @@ static int xenfb_configure_fb(struct XenFB *xenfb, size_t fb_len_lim,
+     }
+ 
+ 
+-/*
+- * This copies data from the guest framebuffer region, into QEMU's
+- * displaysurface. qemu uses 16 or 32 bpp.  In case the pv framebuffer
+- * uses something else we must convert and copy, otherwise we can
+- * supply the buffer directly and no thing here.
+- */
+-static void xenfb_guest_copy(struct XenFB *xenfb, int x, int y, int w, int h)
+-{
+-    int line, oops = 0;
+-    int bpp = ds_get_bits_per_pixel(xenfb->c.ds);
+-    int linesize = ds_get_linesize(xenfb->c.ds);
+-    uint8_t *data = ds_get_data(xenfb->c.ds);
+-
+-    if (!is_buffer_shared(xenfb->c.ds->surface)) {
+-        switch (xenfb->depth) {
+-        case 8:
+-            if (bpp == 16) {
+-                BLT(uint8_t, uint16_t,   3, 3, 2,   5, 6, 5);
+-            } else if (bpp == 32) {
+-                BLT(uint8_t, uint32_t,   3, 3, 2,   8, 8, 8);
+-            } else {
+-                oops = 1;
+-            }
+-            break;
+-    case 16:
+-            if (bpp == 16) {
+-                for (line = y; line < (y+h); line++) {
+-                        memcpy (data + (line * linesize) + (x * bpp / 8), xenfb->pixels + xenfb->offset
+-                              + (line * xenfb->row_stride) + (x * xenfb->depth / 8), w * xenfb->depth / 8);
+-                }
+-            } else if (bpp == 32) {
+-                BLT(uint16_t, uint32_t,   5, 6, 5,   8, 8, 8);
+-            } else {
+-                oops = 1;
+-            }
+-            break;
+-        case 24:
+-            if (bpp == 16) {
+-                BLT(uint32_t, uint16_t,  8, 8, 8,   5, 6, 5);
+-            } else if (bpp == 32) {
+-                BLT(uint32_t, uint32_t,  8, 8, 8,   8, 8, 8);
+-            } else {
+-                oops = 1;
+-            }
+-            break;
+-        case 32:
+-            if (bpp == 16) {
+-                BLT(uint32_t, uint16_t,  8, 8, 8,   5, 6, 5);
+-            } else if (bpp == 32) {
+-                for (line = y; line < (y+h); line++) {
+-                        memcpy (data + (line * linesize) + (x * bpp / 8), xenfb->pixels + xenfb->offset
+-                              + (line * xenfb->row_stride) + (x * xenfb->depth / 8), w * xenfb->depth / 8);
+-                }
+-            } else {
+-                oops = 1;
+-            }
+-            break;
+-        default:
+-            oops = 1;
+-	}
+-    }
+-    if (oops) /* should not happen */
+-        xen_be_printf(&xenfb->c.xendev, 0, "%s: oops: convert %d -> %d bpp?\n",
+-                      __FUNCTION__, xenfb->depth, bpp);
+-
+-    dpy_update(xenfb->c.ds, x, y, w, h);
+-}
+-
+ #ifdef XENFB_TYPE_REFRESH_PERIOD
+ static int xenfb_queue_full(struct XenFB *xenfb)
+ {
+@@ -739,104 +651,6 @@ static void xenfb_send_refresh_period(struct XenFB *xenfb, int period)
+ }
+ #endif
+ 
+-/*
+- * Periodic update of display.
+- * Also transmit the refresh interval to the frontend.
+- *
+- * Never ever do any qemu display operations
+- * (resize, screen update) outside this function.
+- * Our screen might be inactive.  When asked for
+- * an update we know it is active.
+- */
+-static void xenfb_update(void *opaque)
+-{
+-    struct XenFB *xenfb = opaque;
+-    struct DisplayChangeListener *l;
+-    int i;
+-
+-    if (xenfb->c.xendev.be_state != XenbusStateConnected)
+-        return;
+-
+-    if (xenfb->feature_update) {
+-#ifdef XENFB_TYPE_REFRESH_PERIOD
+-        int period = 99999999;
+-        int idle = 1;
+-
+-	if (xenfb_queue_full(xenfb))
+-	    return;
+-
+-        for (l = xenfb->c.ds->listeners; l != NULL; l = l->next) {
+-            if (l->idle)
+-                continue;
+-            idle = 0;
+-            if (!l->gui_timer_interval) {
+-                if (period > GUI_REFRESH_INTERVAL)
+-                    period = GUI_REFRESH_INTERVAL;
+-            } else {
+-                if (period > l->gui_timer_interval)
+-                    period = l->gui_timer_interval;
+-            }
+-        }
+-        if (idle)
+-	    period = XENFB_NO_REFRESH;
+-
+-	if (xenfb->refresh_period != period) {
+-	    xenfb_send_refresh_period(xenfb, period);
+-	    xenfb->refresh_period = period;
+-            xen_be_printf(&xenfb->c.xendev, 1, "refresh period: %d\n", period);
+-	}
+-#else
+-	; /* nothing */
+-#endif
+-    } else {
+-	/* we don't get update notifications, thus use the
+-	 * sledge hammer approach ... */
+-	xenfb->up_fullscreen = 1;
+-    }
+-
+-    /* resize if needed */
+-    if (xenfb->do_resize) {
+-        xenfb->do_resize = 0;
+-        switch (xenfb->depth) {
+-        case 16:
+-        case 32:
+-            /* console.c supported depth -> buffer can be used directly */
+-            qemu_free_displaysurface(xenfb->c.ds);
+-            xenfb->c.ds->surface = qemu_create_displaysurface_from
+-                (xenfb->width, xenfb->height, xenfb->depth,
+-                 xenfb->row_stride, xenfb->pixels + xenfb->offset);
+-            break;
+-        default:
+-            /* we must convert stuff */
+-            qemu_resize_displaysurface(xenfb->c.ds, xenfb->width, xenfb->height);
+-            break;
+-        }
+-        xen_be_printf(&xenfb->c.xendev, 1, "update: resizing: %dx%d @ %d bpp%s\n",
+-                      xenfb->width, xenfb->height, xenfb->depth,
+-                      is_buffer_shared(xenfb->c.ds->surface) ? " (shared)" : "");
+-        dpy_resize(xenfb->c.ds);
+-        xenfb->up_fullscreen = 1;
+-    }
+-
+-    /* run queued updates */
+-    if (xenfb->up_fullscreen) {
+-	xen_be_printf(&xenfb->c.xendev, 3, "update: fullscreen\n");
+-	xenfb_guest_copy(xenfb, 0, 0, xenfb->width, xenfb->height);
+-    } else if (xenfb->up_count) {
+-	xen_be_printf(&xenfb->c.xendev, 3, "update: %d rects\n", xenfb->up_count);
+-	for (i = 0; i < xenfb->up_count; i++)
+-	    xenfb_guest_copy(xenfb,
+-			     xenfb->up_rects[i].x,
+-			     xenfb->up_rects[i].y,
+-			     xenfb->up_rects[i].w,
+-			     xenfb->up_rects[i].h);
+-    } else {
+-	xen_be_printf(&xenfb->c.xendev, 3, "update: nothing\n");
+-    }
+-    xenfb->up_count = 0;
+-    xenfb->up_fullscreen = 0;
+-}
+-
+ /* QEMU display state changed, so refresh the framebuffer copy */
+ static void xenfb_invalidate(void *opaque)
+ {
+@@ -946,17 +760,6 @@ static int fb_initialise(struct XenDevice *xendev)
+     if (rc != 0)
+ 	return rc;
+ 
+-#if 0  /* handled in xen_init_display() for now */
+-    if (!fb->have_console) {
+-        fb->c.ds = graphic_console_init(xenfb_update,
+-                                        xenfb_invalidate,
+-                                        NULL,
+-                                        NULL,
+-                                        fb);
+-        fb->have_console = 1;
+-    }
+-#endif
+-
+     if (xenstore_read_fe_int(xendev, "feature-update", &fb->feature_update) == -1)
+ 	fb->feature_update = 0;
+     if (fb->feature_update)
+@@ -1029,44 +832,3 @@ struct XenDevOps xen_framebuffer_ops = {
+     .event      = fb_event,
+     .frontend_changed = fb_frontend_changed,
+ };
+-
+-/*
+- * FIXME/TODO: Kill this.
+- * Temporary needed while DisplayState reorganization is in flight.
+- */
+-void xen_init_display(int domid)
+-{
+-    struct XenDevice *xfb, *xin;
+-    struct XenFB *fb;
+-    struct XenInput *in;
+-    int i = 0;
+-
+-wait_more:
+-    i++;
+-    main_loop_wait(10); /* miliseconds */
+-    xfb = xen_be_find_xendev("vfb", domid, 0);
+-    xin = xen_be_find_xendev("vkbd", domid, 0);
+-    if (!xfb || !xin) {
+-        if (i < 256)
+-            goto wait_more;
+-        xen_be_printf(NULL, 1, "displaystate setup failed\n");
+-        return;
+-    }
+-
+-    /* vfb */
+-    fb = container_of(xfb, struct XenFB, c.xendev);
+-    fb->c.ds = graphic_console_init(xenfb_update,
+-                                    xenfb_invalidate,
+-                                    NULL,
+-                                    NULL,
+-                                    fb);
+-    fb->have_console = 1;
+-
+-    /* vkbd */
+-    in = container_of(xin, struct XenInput, c.xendev);
+-    in->c.ds = fb->c.ds;
+-
+-    /* retry ->init() */
+-    xen_be_check_state(xin);
+-    xen_be_check_state(xfb);
+-}
+diff --git a/vl.c b/vl.c
+index 143c711..3ec9dce 100644
+--- a/vl.c
++++ b/vl.c
+@@ -240,6 +240,8 @@ CharDriverState *virtcon_hds[MAX_VIRTIO_CONSOLES];
+ #ifdef TARGET_I386
+ int win2k_install_hack = 0;
+ int rtc_td_hack = 0;
++int vgpu_enabled = 0;
++int surfman = 0;
+ #endif
+ int usb_enabled = 0;
+ int smp_cpus = 1;
+@@ -4148,7 +4150,7 @@ static void help(int exitcode)
+            "-disable-opengl disable OpenGL rendering, using SDL"
+ #endif
+            "-portrait       rotate graphical output 90 deg left (only PXA LCD)\n"
+-           "-vga [std|cirrus|vmware|passthrough|none]\n"
++           "-vga [std|cirrus|vmware|passthrough|vgpu|none]\n"
+            "                select video card type\n"
+            "-full-screen    start in full screen\n"
+ #if defined(TARGET_PPC) || defined(TARGET_SPARC)
+@@ -4390,6 +4392,8 @@ enum {
+     QEMU_OPTION_acpi,
+     QEMU_OPTION_vcpus,
+     QEMU_OPTION_vcpu_avail,
++    QEMU_OPTION_vgpu,
++    QEMU_OPTION_surfman,
+ 
+     /* Debug/Expert options: */
+     QEMU_OPTION_serial,
+@@ -4568,6 +4572,8 @@ static const QEMUOption qemu_options[] = {
+     { "vncunused", 0, QEMU_OPTION_vncunused },
+     { "vcpus", HAS_ARG, QEMU_OPTION_vcpus },
+     { "vcpu_avail", HAS_ARG, QEMU_OPTION_vcpu_avail },
++    { "vgpu", 0, QEMU_OPTION_vgpu },
++    { "surfman", 0, QEMU_OPTION_surfman },
+ #if defined(CONFIG_XEN) && !defined(CONFIG_DM)
+     { "xen-domid", HAS_ARG, QEMU_OPTION_xen_domid },
+     { "xen-create", 0, QEMU_OPTION_xen_create },
+@@ -4756,6 +4762,8 @@ static void select_vgahw (const char *p)
+         std_vga_enabled = 0;
+         vmsvga_enabled = 0;
+         gfx_passthru = 1;
++    } else if (strstart(p, "vgpu", &opts)) {
++        vgpu_enabled = 1;
+     } else if (strstart(p, "none", &opts)) {
+         cirrus_vga_enabled = 0;
+         std_vga_enabled = 0;
+@@ -5608,6 +5616,12 @@ int main(int argc, char **argv, char **envp)
+             case QEMU_OPTION_disable_opengl:
+                 opengl_enabled = 0;
+                 break;
++            case QEMU_OPTION_surfman:
++                surfman = 1;
++                break;
++            case QEMU_OPTION_vgpu:
++                vgpu_enabled = 1;
++                break;
+             case QEMU_OPTION_direct_pci:
+                direct_pci = optarg;
+                 break;
+@@ -6225,6 +6239,8 @@ int main(int argc, char **argv, char **envp)
+             } else
+ #endif
+             {
++                if (surfman && !gfx_passthru)
++                    surfman_xenvesa_init(ds);
+                 if (vnc_display != NULL || vncunused != 0) {
+ 		    int vnc_display_port;
+ 		    char password[20];
+diff --git a/xen-hooks.mak b/xen-hooks.mak
+index 549e8dd..bf876ca 100644
+--- a/xen-hooks.mak
++++ b/xen-hooks.mak
+@@ -25,6 +25,7 @@ LDFLAGS := $(CFLAGS) $(LDFLAGS)
+ OBJS += piix4acpi.o
+ OBJS += xenstore.o
+ OBJS += xen_platform.o
++OBJS += surfman.o
+ OBJS += xen_machine_fv.o
+ OBJS += xen_machine_pv.o
+ OBJS += xen_backend.o

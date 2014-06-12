@@ -1,0 +1,78 @@
+diff --git a/switcher.c b/switcher.c
+index 25a93c8..6ceb1dd 100644
+--- a/switcher.c
++++ b/switcher.c
+@@ -212,31 +212,29 @@ static void switcher_event(struct input_event *e)
+     static int mouse_button_state = 0;
+     static int absolute_x=0, absolute_y=0, absolute_z=0, absolute=0;
+     static int relative_x=0, relative_y=0, relative_z=0, relative=0;
++    static int use_abs=0, mousekey=0;
+ 
+     if (e->type == EV_KEY)
+     {
+         if (e->code >= BTN_MOUSE)
+         {
+-            int         type = 0;
+-
+             switch (e->code)
+             {
+                 case BTN_LEFT:
+-                    type = MOUSE_EVENT_LBUTTON;
++                    mousekey = MOUSE_EVENT_LBUTTON;
+                     break;
+                 case BTN_RIGHT:
+-                    type = MOUSE_EVENT_RBUTTON;
++                    mousekey = MOUSE_EVENT_RBUTTON;
+                     break;
+                 case BTN_MIDDLE:
+-                    type = MOUSE_EVENT_MBUTTON;
++                    mousekey = MOUSE_EVENT_MBUTTON;
+                     break;
+             }
+ 
+             if (e->value)
+-                mouse_button_state |= type;
++                mouse_button_state |= mousekey;
+             else
+-                mouse_button_state &= ~type;
+-            kbd_mouse_event (0, 0, 0, mouse_button_state);
++                mouse_button_state &= ~mousekey;
+         }
+         else
+             switcher_key_inject(e->value, e->code);
+@@ -245,6 +243,7 @@ static void switcher_event(struct input_event *e)
+     /* Mouse motion */
+     if (e->type == EV_REL)
+     {
++	use_abs=0;
+         switch (e->code)
+         {
+             case REL_X:
+@@ -262,6 +261,7 @@ static void switcher_event(struct input_event *e)
+ 
+     if (e->type == EV_ABS)
+     {
++	use_abs = 1;
+         switch (e->code)
+         {
+             case ABS_X:
+@@ -280,16 +280,17 @@ static void switcher_event(struct input_event *e)
+ 
+     if (e->type == EV_SYN && e->code == SYN_REPORT)
+     {
+-        if (relative)
++        if ((relative) || (!absolute && !use_abs && mousekey))
+         {
+             kbd_mouse_event (relative_x, relative_y, relative_z, mouse_button_state);
+             relative = relative_x = relative_y = relative_z = 0;
+         }
+-        if (absolute)
++        if ((absolute) || (!relative && use_abs && mousekey))
+         {
+             kbd_mouse_event_absolute (absolute_x, absolute_y, absolute_z, mouse_button_state);
+             absolute = absolute_z = 0;
+         }
++	mousekey=0;
+     }
+ }
+ 

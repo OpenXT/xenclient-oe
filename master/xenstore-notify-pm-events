@@ -1,0 +1,67 @@
+diff --git a/hw/piix4acpi.c b/hw/piix4acpi.c
+index 03287a0..1a232fc 100644
+--- a/hw/piix4acpi.c
++++ b/hw/piix4acpi.c
+@@ -46,6 +46,10 @@
+ #include <pci/header.h>
+ #endif
+ 
++#define GUEST_STATE_SLEEP     3
++#define GUEST_STATE_HIBERNATE 4
++#define GUEST_STATE_SHUTDOWN  5
++
+ /* PM1a_CNT bits, as defined in the ACPI specification. */
+ #define SCI_EN            (1 <<  0)
+ #define GBL_RLS           (1 <<  2)
+@@ -217,11 +221,16 @@ static void acpi_shutdown(uint32_t val)
+         s3_shutdown_flag = 0;
+         cmos_set_s3_resume();
+         xc_set_hvm_param(xc_handle, domid, HVM_PARAM_ACPI_S_STATE, 3);
++        xenstore_guest_pm_notification(GUEST_STATE_SLEEP);
+         break;
+     case SLP_TYP_S4_V0:
++        qemu_system_shutdown_request();
++        xenstore_guest_pm_notification(GUEST_STATE_HIBERNATE);
++        break;
+     case SLP_TYP_S5_V0:
+     case SLP_TYP_S5_V1:
+         qemu_system_shutdown_request();
++        xenstore_guest_pm_notification(GUEST_STATE_SHUTDOWN);
+         break;
+     default:
+         break;
+diff --git a/qemu-xen.h b/qemu-xen.h
+index 1fc2126..c6f06c8 100644
+--- a/qemu-xen.h
++++ b/qemu-xen.h
+@@ -136,6 +136,7 @@ void xenstore_dm_finished_startup(void);
+ int xenstore_vm_write(int domid, const char *key, const char *val);
+ char *xenstore_vm_read(int domid, const char *key, unsigned int *len);
+ char *xenstore_device_model_read(int domid, const char *key, unsigned int *len);
++int xenstore_guest_pm_notification(int state);
+ int xenstore_extended_power_mgmt_read_int(const char *key, int default_value);
+ int xenstore_read_is_battery_present(void);
+ int xenstore_read_is_secondary_battery_present(void);
+diff --git a/xenstore.c b/xenstore.c
+index 486c8ac..de61a70 100644
+--- a/xenstore.c
++++ b/xenstore.c
+@@ -1727,6 +1727,18 @@ int xenstore_write(const char *path, const char *val)
+     return xs_write(xsh, XBT_NULL, path, val, strlen(val));
+ }
+ 
++int xenstore_guest_pm_notification(int state)
++{
++    int ret;
++    char *value = NULL;
++
++    if (pasprintf(&value, "%d", state) == -1)
++        return -1;
++
++    ret = xenstore_dom_write(domid, "power-state", value);
++    free(value);
++    return ret;
++}
+ 
+ /* Advertise through xenstore that the device model is up and the
+    domain can be started. */

@@ -1,0 +1,101 @@
+diff --git a/i386-dm/helper2.c b/i386-dm/helper2.c
+index 6d471c1..6b1dcbc 100644
+--- a/i386-dm/helper2.c
++++ b/i386-dm/helper2.c
+@@ -573,7 +573,7 @@ int main_loop(void)
+     qemu_set_fd_handler(xenstore_fd(), xenstore_process_event, NULL, NULL);
+ 
+     while (1) {
+-        while (!(vm_running && xen_pause_requested))
++        while (!(vm_running && (xen_pause_requested || suspend_requested)))
+ #ifdef CONFIG_STUBDOM
+             /* Wait up to 10 msec. */
+             main_loop_wait(10);
+@@ -594,6 +594,9 @@ int main_loop(void)
+         do_savevm(qemu_file);
+         free(qemu_file);
+ 
++        if (suspend_requested)
++            return 0;
++
+         xenstore_record_dm_state("paused");
+ 
+         /* Wait to be allowed to continue */
+diff --git a/qemu-xen.h b/qemu-xen.h
+index dce8731..8214385 100644
+--- a/qemu-xen.h
++++ b/qemu-xen.h
+@@ -34,6 +34,8 @@ void     qemu_invalidate_map_cache(void);
+ #define mapcache_lock()   ((void)0)
+ #define mapcache_unlock() ((void)0)
+ 
++extern int suspend_requested;
++
+ /* helper2.c */
+ extern long time_offset;
+ void timeoffset_get(void);
+diff --git a/vl.c b/vl.c
+index 2b12f92..6e3e022 100644
+--- a/vl.c
++++ b/vl.c
+@@ -190,6 +190,8 @@ int main(int argc, char **argv)
+ /* XXX: use a two level table to limit memory usage */
+ #define MAX_IOPORTS 65536
+ 
++void suspend(int sig);
++
+ const char *bios_dir = CONFIG_QEMU_SHAREDIR;
+ const char *bios_name = NULL;
+ static void *ioport_opaque[MAX_IOPORTS];
+@@ -3381,6 +3383,15 @@ static int ram_load(QEMUFile *f, void *opaque, int version_id)
+ 
+ #endif /* !CONFIG_DM */
+ 
++void suspend(int sig)
++{
++    fprintf(stderr, "suspend sig handler called with requested=%d!\n",
++            suspend_requested);
++    if (sig != SIGUSR1)
++        fprintf(stderr, "suspend signal dismatch, get sig=%d!\n", sig);
++    suspend_requested = 1;
++}
++
+ void qemu_service_io(void)
+ {
+     CPUState *env = cpu_single_env;
+@@ -3623,6 +3634,7 @@ static QEMUResetEntry *first_reset_entry;
+ static int reset_requested;
+ static int shutdown_requested;
+ static int powerdown_requested;
++int suspend_requested = 0;
+ 
+ int qemu_shutdown_requested(void)
+ {
+@@ -6163,6 +6175,27 @@ int main(int argc, char **argv, char **envp)
+ 
+     xenstore_dm_finished_startup();
+ 
++#ifndef CONFIG_STUBDOM
++    /* register signal for the suspend request when save */
++    {
++        struct sigaction act;
++        sigset_t set;
++        act.sa_handler = suspend;
++        act.sa_flags = SA_RESTART;
++        sigemptyset(&act.sa_mask);
++
++        sigaction(SIGUSR1, &act, NULL);
++
++        /* control panel mask some signals when spawn qemu, need unmask here*/
++        sigemptyset(&set);
++        sigaddset(&set, SIGUSR1);
++        sigaddset(&set, SIGTERM);
++        if (sigprocmask(SIG_UNBLOCK, &set, NULL) == -1)
++            fprintf(stderr, "unblock signal fail, possible issue for HVM save!\n");
++
++    }
++#endif
++
+     main_loop();
+     quit_timers();
+     net_cleanup();
