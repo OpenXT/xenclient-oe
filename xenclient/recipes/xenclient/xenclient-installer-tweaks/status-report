@@ -1,0 +1,226 @@
+#!/bin/sh
+#
+# Copyright (c) 2014 Citrix Systems, Inc.
+# 
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+# 
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+# 
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+#
+
+name="`basename $0`"
+d="`date "+%Y%m%d%H%M%S"`"
+
+saved_tarball="/tmp/$name/installer-$name-$d.tar.bz2"
+base_path="`dirname "$saved_tarball"`/`basename "$saved_tarball" .tar.bz2`"
+
+TIMEOUT=15
+
+files=""
+
+pw=$1
+
+welcome()
+{
+cat <<EOF
+XenClient $name
+
+This application will collate the Xen dmesg output, details of the
+hardware configuration of your machine, information about the build of
+Xen that you are using, plus, if you allow it, various logs.
+
+The collated information will be saved as a .tar.bz2 for archiving or
+sending to a Technical Support Representative.
+
+To copy the file away from the host a command like scp or ftpput could
+be used.
+        ifconfig eth0 up
+        udhcpc eth0
+
+        scp <local-file> <remote-user>@<remote-host>:<remote-file>
+        # or:
+        ftpput <remote-host> <remote-file> <local-file>
+
+The logs may contain private information, and if you are at all
+worried about that, you should exit now, or you should explicitly
+exclude those logs from the archive.
+
+EOF
+}
+
+archive()
+{
+        local out="$1"
+        local files="$2"
+        local exclude="$3"
+        local command="tar -cO $files"
+        for excl in $exclude ; do
+            command="${command} --exclude=${excl}"
+        done
+
+        ${command} | bzip2 -z -c > "$out"
+}
+
+save_file_exclude()
+{
+        local save_path="$1"
+        local save_file="$2"
+        local save_out="$3"
+        local save_exclude="$4"
+
+        cd "$save_path"
+        archive "${base_path}/${save_out}.tar.bz2" "${save_file}" "${save_exclude}" > ${base_path}/${name}.log 2>&1
+        files="$files ${save_out}.tar.bz2"
+        cd - > /dev/null
+}
+
+save_file()
+{
+        save_file_exclude "$1" "$2" "$3" ""
+}
+
+save_out()
+{
+        local save_out_cmd="$1"
+        local save_out_out="$2"
+
+        timeout $TIMEOUT $save_out_cmd > "${base_path}/${save_out_out}.log" 2>&1
+        files="$files ${save_out_out}.log"
+}
+
+main_file()
+{
+        cd "`dirname "${base_path}"`"
+        archive "${saved_tarball}" "`basename "${base_path}"`"
+        cd - > /dev/null
+        rm -rf "${base_path}"
+}
+
+save_from_existing_installation()
+{
+    # check to see if there is a local installation:
+    vgs xenclient | grep -q xenclient || return 0
+
+    MPATH="/mnt/part1/status"
+    if grep -q "storage" /proc/mounts; then
+        if [ -d "${MPATH}/storage/status-report" ] ; then
+            save_file "${MPATH}/storage" "status-report" "status-reports"
+        fi
+        save_out "ls -l ${MPATH}/storage/disks" "installation-disks"
+        save_out "ls -l ${MPATH}/storage/isos" "installation-isos"
+    fi
+    save_out "df -h" "installation-df-h"
+    save_out "vhd-util scan -pM ${MPATH}/storage/disks/*.vhd" "storage-disks-scan"
+    save_out 'eval for vhd in '"${MPATH}"'/storage/disks/*.vhd ; do vhd-util check -iItn $vhd ; done' "vhd-check"
+    # take the version information file from the root filesystem:
+    cp "${MPATH}/etc/xenclient.conf" "${MPATH}/"
+
+    save_file_exclude "`dirname ${MPATH}`" "`basename ${MPATH}`" "installation" 'certs device.key password.conf password.conf.DONE recovery-private-key.conf recovery-private-key.conf.DONE recovery-disk-key.ssl recovery-disk-key.ssl.DONE ssh_host_dsa_key ssh_host_rsa_key keys storage platform-crypto-keys'
+
+    local pcr_dir=$(pcr-data ${MPATH})
+    local pcr_archive=$(basename ${pcr_dir})
+    save_file "$(dirname ${pcr_dir})" "${pcr_archive}" "${pcr_archive}"
+
+    return 0
+}
+
+
+welcome
+
+mkdir -p "${base_path}"
+
+# dmesg before and after issuing the sysrq commands
+save_out "dmesg -s 65536" "dmesg"
+echo "w" >/proc/sysrq-trigger
+echo "m" >/proc/sysrq-trigger
+save_out "dmesg -s 65536" "dmesg-sysrq"
+save_file "/var/log" "messages*" "syslog"
+save_file "/install" "part1/data" "install-data-part1"
+save_file_exclude "/install" "part2/data" "install-data-part2" 'ca-bundle.crt recovery-private-key.conf recovery-disk-key.ssl backend-pin.conf'
+save_out "cat /var/log/installer" "installer"
+save_out "cat /etc/xenclient.conf" "xenclient.conf"
+save_out "cat /var/log/installer-status" "installer-status"
+save_out "xenops dmesg" "xen_dmesg"
+save_out "dmidecode" "dmidecode"
+save_out "ifconfig" "ifconfig"
+save_out "ifconfig -a" "ifconfig-a"
+save_out "df -h" "df-h"
+save_out "route -n" "route-n"
+save_out "cat /proc/acpi/thermal_zone/*/temperature" "temperature"
+save_out "cat /proc/cpuinfo" "cpuinfo"
+save_out "find / -size +1000k -exec ls -l {} ; " "large-files"
+save_out "lsmod" "lsmod"
+save_out "top -b -n1" "top"
+save_out "netstat -ln" "netstat-ln"
+save_out "netstat -tn" "netstat-tn"
+save_out "ps aux" "psaux"
+save_out "lvs" "lvs"
+save_out "pvs" "pvs"
+save_out "sfdisk -l" "sfdisk-l"
+save_out "lspci -vvv" "lspci-vvv"
+save_out "mount" "mount"
+save_out "uname -a" "uname-a"
+save_out "ls /sys/block" "ls-sys-block"
+save_out "cat /proc/acpi/ac_adapter/AC/state" "ac_adapter-state"
+save_out "hvm-info" "hvm-info"
+save_out "txt-stat" "txt-stat"
+
+TPM_DIR=/sys/class/misc/tpm0/device
+TPM_LOG=$(mktemp -p /tmp)
+if [ -d ${TPM_DIR} ]; then
+    {
+	echo -n "active: "
+	cat ${TPM_DIR}/active
+	echo -n "enabled: "
+	cat ${TPM_DIR}/enabled
+	echo -n "owned: "
+	cat ${TPM_DIR}/owned
+	echo -n "temp_deactivated: "
+	cat ${TPM_DIR}/temp_deactivated
+	echo "id:"
+	cat ${TPM_DIR}/id
+	echo "resources:"
+	cat ${TPM_DIR}/resources
+	echo "caps:"
+	cat ${TPM_DIR}/caps
+	echo "durations: "
+	cat ${TPM_DIR}/durations
+	echo "timeouts: "
+	cat ${TPM_DIR}/timeouts
+    } > ${TPM_LOG} 2>&1
+else
+    echo "TPM_DIR not present: ${TPM_DIR}" > ${TPM_LOG}
+fi
+save_out "cat ${TPM_LOG}" "tpm"
+rm -f ${TPM_LOG}
+
+EDID=$(mktemp -p /tmp)
+EDID_LOG=$(mktemp -p /tmp)
+timeout $TIMEOUT get-edid "${EDID}" 2>"${EDID_LOG}"
+echo -e "==============\nParse results:" >>"${EDID_LOG}"
+parse-edid <"${EDID}" >>"${EDID_LOG}" 2>&1
+save_out "cat ${EDID_LOG}" "edid"
+rm -f ${EDID} ${EDID_LOG}
+
+ETHTOOL_LOG=$(mktemp -p /tmp)
+for i in $(cd /sys/class/net && echo eth*)
+do
+    ethtool $i >> "${ETHTOOL_LOG}" 2>&1
+done
+save_out "cat ${ETHTOOL_LOG}" "ethtool"
+rm -f ${ETHTOOL_LOG}
+
+save_from_existing_installation
+main_file
+sync
+
+echo "Writing tarball ${saved_tarball} successful."

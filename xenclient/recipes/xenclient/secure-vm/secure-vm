@@ -1,0 +1,131 @@
+#! /bin/bash
+#
+# Copyright (c) 2010 Citrix Systems, Inc.
+# 
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+# 
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+# 
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+#
+
+secpath=/config/sec/s-
+keysuffix=,aes-xts-plain,256.key
+keysize=32
+
+error() {
+  echo >&2 $0: "$@"
+  exit 1
+}
+
+usage() {
+  cat >&2 <<EOF
+Usage: $0 [OPTION]...
+
+      --disk=DISK            disk to encrypt
+      --user=USER            crypto user name
+      --uuid=UUID            VM to operate on
+      --vm=NAME              VM to operate on
+EOF
+  exit 1
+}
+
+T=$(getopt -l disk:,user:,uuid:,vm: "" "$@")
+[ $? == 0 ] || usage
+eval set -- "$T"
+
+while true
+do
+  case $1 in
+  --disk)
+    disks="$disks $2"
+    shift 2
+    ;;
+  --user)
+    user=$2
+    shift 2
+    ;;
+  --uuid)
+    uuid=$2
+    shift 2
+    ;;
+  --vm)
+    uuid=$(xec-vm -n "$2" get uuid)
+    [ $? == 0 ] || error VM $2 not found by name
+    shift 2
+    ;;
+  --)
+    shift
+    break
+    ;;
+  *)
+    usage
+    ;;
+  esac
+done
+
+_user=$(xec-vm -u $uuid get crypto-user)
+: ${user:=$_user}
+
+[ -n "$uuid" ] || error VM name/uuid not specified.
+[ -n "$user" ] || error Crypto user not specified.
+
+grep -q $secpath$user /proc/mounts || error User key storage is not accessible.
+
+[ "$user" == "$_user" ] || \
+  echo Setting crypto user to $user.
+[ "$user" == "$_user" ] || xec-vm -u $uuid set crypto-user "$user"
+
+di=$(db-ls vm/$uuid/config/disk |
+     awk '/=$/ { disk = $1; next } { print disk $0 }' | sort |
+     awk '{ disk = $1 } /path = / { path = $4; gsub(/"/, "", path); next }
+          /device = / { device = $4; gsub(/"/, "", device); next }
+          /type = "vhd"/ { print disk " " device " " path }')
+
+[ -z "$disks" ] || for d in $disks
+do
+  echo "$di" | grep $d | while read disk dev path
+  do
+    id=$(basename $path .vhd)
+    ! [ -e $secpath$user/$id$keysuffix ] || {
+      echo Skipping disk $dev, key exists.
+      continue
+    }
+    def=yes
+    [ $(vhd-util read -n $path -a | cmp -l /dev/zero - 2>/dev/null | wc -l) -eq 0 ] || {
+      echo WARNING: disk $dev doesn\'t seem to be empty.
+      echo Existing data will not be accessible once encryption is enabled.
+      def=no
+    }
+    echo -n "Create encryption key for VM disk $dev? [$def] "
+    read ans </dev/tty
+    [ -n "$ans" ] || ans=$def
+    [ "$ans" == "yes" ] || continue
+    echo Creating key for disk $dev.
+    echo Note: this may take a while, move the mouse to add entropy.
+    dd if=/dev/random count=$keysize bs=1 of=$secpath$user/$id$keysuffix 2>/dev/null
+    if [ $? -eq 0 ]; then
+      [ -x /sbin/restorecon ] && /sbin/restorecon $secpath$user/$id$keysuffix
+    else
+      rm -f $secpath$user/$id$keysuffix 2>/dev/null
+      error Failed to create key $secpath$user/$id$keysuffix.
+    fi
+    [ $(stat -c %s $secpath$user/$id$keysuffix) -eq $keysize ] || {
+      rm -f $secpath$user/$id$keysuffix 2>/dev/null
+      error Aborting, key $id$keysuffix created short.
+    }
+    vhd-util key -n $path -s -k $secpath$user/$id$keysuffix || {
+      rm -f $secpath$user/$id$keysuffix 2>/dev/null
+      error Aborting, error setting vhd key.
+    }
+  done
+done
+

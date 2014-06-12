@@ -1,0 +1,106 @@
+#! /bin/bash
+#
+# Copyright (c) 2013 Citrix Systems, Inc.
+# 
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+# 
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+# 
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+#
+
+# (use /bin/sh when watchdog stuff is removed)
+
+# Provides:		xenmgr
+
+set -e
+
+test -x /usr/bin/xenmgr || exit 0
+
+export XENVM_DEBUG=syslog:xenvm
+
+XENMGR_OPTS=""
+if [ -n "$2" ]; then
+    XENMGR_OPTS="$XENMGR_OPTS $2"
+fi
+
+export PATH="${PATH:+$PATH:}/usr/sbin:/sbin"
+
+autostart=0
+
+for i in `cat /proc/cmdline`
+do
+	case "$i" in
+		autostart)
+			autostart=1
+			;;
+		rm_uivm_suspend_img)
+			rm -f /storage/uivm/uivm-suspend-image
+			;;
+	esac
+done
+
+case "$1" in
+start)
+	if grep -q no-xenmgr /proc/cmdline; then
+	    echo "Not starting XenMgr: no-xenmgr specified on command line"
+	    exit 0
+	fi
+	echo "Starting XenMgr server"
+
+	if [ "$autostart" -ne 1 ]
+	then
+		XENMGR_OPTS="$XENMGR_OPTS --no-autostart "
+		echo "XenMgr noautostart"
+	fi
+
+	if [ ! -f "/storage/isos/null.iso" ]; then
+	    mkdir -p "/storage/isos"
+	    [ -x /sbin/restorecon ] && /sbin/restorecon -r "/storage/isos"
+	    cp -f "/usr/share/null.iso" "/storage/isos/"
+	fi
+
+	start-stop-daemon --start --quiet --oknodo --pidfile /var/run/xenmgr.pid --exec /usr/bin/xenmgr -- $XENMGR_OPTS --writepid=/var/run/xenmgr.pid
+	;;
+  stop)
+	XENMGR_PID=`cat /var/run/xenmgr.pid 2> /dev/null || echo ""`
+	if [ -z "$XENMGR_PID" ] || ! kill -0 $XENMGR_PID 2> /dev/null; then
+	    echo "XenMgr not running"
+	    exit 1
+	fi
+	echo -n "Stopping XenMgr server"
+	kill -USR2 $XENMGR_PID
+	rm -f /var/run/xenmgr.pid
+        COUNT=0
+        while kill -0 $XENMGR_PID 2> /dev/null; do
+           COUNT=$(( $COUNT + 1 ))
+           if [ "$COUNT" -gt 600 ]; then
+               echo "timed out..."
+               break
+           fi
+            sleep 1
+           echo -n "."
+	done
+	echo "Done"
+	;;
+
+  restart)
+	echo "Restarting XenMgr server"
+	$0 stop
+	$0 start
+	;;
+
+  *)
+	echo "Usage: $0 {start|stop|restart}"
+	exit 1
+esac
+
+exit 0

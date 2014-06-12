@@ -1,0 +1,100 @@
+#! /bin/sh
+#
+# Copyright (c) 2010 Citrix Systems, Inc.
+# 
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+# 
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+# 
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+#
+
+user="$1"
+userpass="$2"
+serverpass="$3"
+
+exec 3>&2
+#[ -z "$V" ] && exec >/dev/null 2>&1
+exec >/tmp/sec-new-user.log 2>&1
+err () { echo >&3 "$@"; }
+quit () { logger -t sec-new-user < /tmp/sec-new-user.log; rm /tmp/sec-new-user.log; exit $1; }
+
+LVPREFIX=s-
+LVSIZE=4M
+VGNAME=xenclient
+DEVKEY=/config/sec/device.key
+RAMDIR=/mnt/secure
+UKEY="${RAMDIR}/s-${user}.key"
+TKEY="${RAMDIR}/s-t-${user}.key"
+SECDM="s-${user}"
+
+lvcreate -L "${LVSIZE}" -n "${LVPREFIX}${user}" "${VGNAME}" || {
+  err $0: lvcreate failed: $?
+  quit 2
+}
+
+( cat "${DEVKEY}"
+  echo "${user}"
+  cat "${userpass}" ) >"${UKEY}"
+
+cryptsetup -q -S 0 \
+  luksFormat "/dev/${VGNAME}/${LVPREFIX}${user}" "${UKEY}" || {
+  err $0: cryptsetup luksFormat failed: $?
+  rm "${UKEY}"
+  quit 3
+}
+
+[ -z "${serverpass}" ] || {
+
+  ( cat "${DEVKEY}"
+    echo "transmitter ${user}"
+    cat "${serverpass}" ) >"${TKEY}"
+ 
+  cryptsetup -q -S 1 -d "${UKEY}" \
+    luksAddKey "/dev/${VGNAME}/${LVPREFIX}${user}" "${TKEY}" || {
+      err $0: cryptsetup luksAddKey failed: $?
+      rm "${TKEY}" "${UKEY}"
+      quit 4
+    }
+
+  rm "${TKEY}"
+}
+
+cryptsetup -d "${UKEY}" \
+  luksOpen "/dev/${VGNAME}/${LVPREFIX}${user}" "${SECDM}" || {
+  err $0: cryptsetup luksOpen failed: $?
+  rm "${UKEY}"
+  quit 5
+}
+
+mkfs.ext3 "/dev/mapper/${SECDM}" || {
+  err $0: mkfs.ext3 failed: $?
+  cryptsetup luksClose "${SECDM}"
+  rm "${UKEY}"
+  quit 6
+}
+
+tune2fs -i 0 -c -1 -m 0 "/dev/mapper/${SECDM}" || {
+  err $0: tune2fs failed: $?
+  cryptsetup luksClose "${SECDM}"
+  rm "${UKEY}"
+  quit 6
+}
+
+cryptsetup luksClose "${SECDM}" || {
+  err $0: cryptsetup luksClose failed: $?
+  rm "${UKEY}"
+  quit 7
+}
+
+rm "${UKEY}"
+quit 0
+

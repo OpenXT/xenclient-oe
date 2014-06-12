@@ -1,0 +1,140 @@
+#! /bin/sh
+#
+# Copyright (c) 2012 Citrix Systems, Inc.
+# 
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+# 
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+# 
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+#
+
+# Script to install GRUB on the boot LV (xenclient-boot).
+#
+# Usage: install-bootloader [language]
+#
+# Set V=1 to enable verbose messages
+
+msg() {
+    [ "$V" == "1" ] && echo $*
+}
+
+v() {
+    [ "$V" == "1" ] && $*
+}
+
+if [ "$V" == "1" ]; then
+  verbose=-v
+else
+  verbose=
+fi
+
+if [ "$#" -eq 0 ]; then
+  lang=
+elif [ "$#" -eq 1 ] ; then
+  lang="$1"
+else
+  echo "Usage: install-bootloader [language]"
+  exit 1
+fi
+
+msg "Removing dmgrub if it exists"
+dmsetup remove dmgrub 2> /dev/null
+
+# Ensure that the boot partition is mounted
+msg "Mounting /boot/system"
+mount /dev/mapper/xenclient-boot /boot/system 2> /dev/null || msg "Couldn't mount, already mounted?"
+
+msg "Detecting PV partition with xenclient-boot"
+t=`dmsetup table xenclient-boot`
+p=`echo "$t" | awk '{print $5}'`
+major=`echo $p | cut -f1 -d:`
+minor=`echo $p | cut -f2 -d:`
+pv_part=`egrep "^ *$major +$minor +" /proc/partitions  |  awk '{ print $4; }'`
+pv_disk=`echo $pv_part | sed 's/[0-9]*$//'`
+pv_offset=`fdisk -l /dev/$pv_disk -u | grep $pv_part | awk '{print $3}'`
+lv_size=`echo $t | awk '{ print $3; }'`
+lv_reloffset=`echo $t | awk '{ print $6; }'`
+lv_absoffset=$(($pv_offset + $lv_reloffset))
+
+msg "PV partition: $pv_part"
+msg "Disk: $pv_disk"
+msg "Offset of xenclient-boot is $lv_reloffset (sector $lv_absoffset)."
+
+if [ ! -b "/dev/$pv_disk" ]; then
+  echo "Failed to detect PV disk"
+  exit 1
+fi
+
+if [ ! -b "/dev/$pv_part" ]; then
+  echo "Failed to detect PV partition"
+  exit 1
+fi
+
+msg "Creating dmgrub device table:"
+rm -f /tmp/table.dmgrub.tmp
+echo "0 1 linear /dev/$pv_part 0" > /tmp/table.dmgrub.tmp
+echo "1 $lv_size linear /dev/$pv_part $(($lv_reloffset + 1))" >> /tmp/table.dmgrub.tmp
+v cat /tmp/table.dmgrub.tmp
+
+msg "Create device map for GRUB:"
+rm -f /tmp/devicemap.tmp
+echo "(hdx) /tmp/dmgrub" > /tmp/devicemap.tmp
+v cat /tmp/devicemap.tmp
+
+msg "Populating /boot/system/grub"
+rm -rf /boot/system/grub
+
+# Clean up from old versions of this script
+[ -L "/boot/system/config" ] && rm -f /boot/system/config
+
+# Create extra symlink
+rm -rf /boot/system/boot
+ln -sf . /boot/system/boot
+
+# Create directory
+mkdir -p /boot/system/grub
+
+msg "Copying XenClient GRUB config and helper files"
+cp -f /usr/share/xenclient/bootloader/grub.cfg \
+      /usr/share/xenclient/bootloader/unifont.pf2 \
+      /usr/lib/grub/i386-pc/*.mod \
+      /usr/lib/grub/i386-pc/*.lst \
+      /usr/lib/grub/i386-pc/*.img /boot/system/grub
+
+msg "Copying XenClient bootloader images"
+/usr/share/xenclient/install-bootloader-images "$lang"
+
+msg "Creating core.img"
+grub-mkimage $verbose --output=/boot/system/grub/core.img --prefix="(xenclient-boot)/grub" ext2 part_msdos part_gpt biosdisk lvm
+
+msg "Mapping dmgrub"
+dmsetup create dmgrub /tmp/table.dmgrub.tmp
+cp -afL /dev/mapper/dmgrub /tmp/dmgrub
+
+msg "Clearing bootsector"
+dd if=/dev/zero of=/tmp/dmgrub bs=512 count=1
+
+msg "Running grub-setup"
+grub-setup --force $verbose -o $lv_absoffset -m /tmp/devicemap.tmp -r '(hdx)' -b boot.img -d /boot/system/grub '(hdx)'
+if [ "$?" != "0" ]; then
+    echo "grub-setup failed. This is a fatal error."
+    dmsetup remove dmgrub
+    exit 1
+fi
+
+sync
+
+msg "Removing dmgrub device"
+dmsetup remove dmgrub
+
+msg "Removing temporary files"
+rm -f $verbose /tmp/devicemap.tmp /tmp/table.dmgrub.tmp /tmp/dmgrub

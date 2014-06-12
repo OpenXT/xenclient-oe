@@ -1,0 +1,268 @@
+#! /bin/sh
+#
+# Copyright (c) 2014 Citrix Systems, Inc.
+# 
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
+# 
+# 1. Redistributions of source code must retain the above copyright notice, this
+#    list of conditions and the following disclaimer.
+# 
+# 2. Redistributions in binary form must reproduce the above copyright notice,
+#    this list of conditions and the following disclaimer in the documentation
+#    and/or other materials provided with the distribution.
+# 
+# 3. Neither the name of the <organization> nor the names of its contributors may
+#    be used to endorse or promote products derived from this software without
+#    specific prior written permission.
+# 
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+# ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+# WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+# DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR
+# ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+# (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+# LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+# ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+# SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+#
+
+tboot_dir=/usr/share/xenclient/tboot
+tboot_old_dir=/usr/share/xenclient/tboot_old
+vlp_file=/usr/share/xenclient/tboot/vlp.pol
+lcp_file=/usr/share/xenclient/tboot/lcp.pol
+lcp_data_file=/usr/share/xenclient/tboot/lcp_data.bin
+mle_hash_file=/usr/share/xenclient/tboot/mle_hash
+lcp_data_dest_file=/boot/lcp_data.bin
+
+grub_file=/boot/system/grub/grub.cfg
+tboot_file=/boot/tboot.gz
+xen_file=/boot/xen.gz
+dom0_file=/boot/vmlinuz
+initrd_file=/boot/initramfs.gz
+tpm_owner_pw=""
+
+let "counter=0"
+let "policy_only=0"
+
+usage()
+{
+	echo -e "Utility to create policies for TXT/tboot usage and TPM provisioning\n"
+	echo -e "Usage: tboot_polgen [-c] tpm_owner_password"
+	echo -e "  -c - optional, create policies only - do not update TPM"
+	echo -e "  tpm_owner_password - ownership password for TPM access\n"
+	echo -e "Also note, the TPM driver and Trouses stack must be running to provision"
+	echo -e "the TMP. Please do the following before running this script:"
+	echo -e "  $ modprobe tpm_tis"
+	echo -e "  $ tcsd\n"
+}
+
+# Check input and files
+if [ -z "$1" ] || [ "$1" == "--help" ] || [ "$1" == "-h" ]; then
+	usage
+	exit 1
+fi
+
+if [ "$1" == "-c" ]; then
+	if [ -z "$2" ]; then
+		usage
+		exit 1
+	fi
+	tpm_owner_pw="$2"
+	let "policy_only=1"
+else
+	tpm_owner_pw="$1"
+fi
+
+# Check the TPM driver and Trousers are already started
+item=$(ps -A)
+item=$(echo $item | grep tcsd)
+if [ -z "$item" ] && [ "$policy_only" = "0" ]; then
+	# Note: starting the trousers daemon in the script seems to be problematic. For
+	# now we can just have it started ahead of time.
+	# modprobe tpm_tis
+	# tcsd or exec tcsd -f &
+	usage
+	exit 4
+fi
+
+if [ ! -f $grub_file ]; then
+	echo "Cannot locate $grub_file, exiting"
+	exit 1
+fi
+
+if [ ! -r $grub_file ]; then
+	echo "Cannot read $grub_file, exiting"
+	exit 1
+fi
+
+# Make a copy of the tboot output directory
+if [ -d $tboot_old_dir ]; then
+	rm -rf $tboot_old_dir
+fi
+
+if [ -d $tboot_dir ]; then
+	mv $tboot_dir $tboot_old_dir
+fi
+
+mkdir $tboot_dir
+
+# Create a new empty VL policy
+tb_polgen --create --type nonfatal $vlp_file 
+
+# Save some values
+ifs_orig=$IFS
+IFS=$(echo -en "\n\b")
+
+# Process the grub.cfg file
+while read line
+do
+	item=$(echo $line | awk '{ print $1 }')
+	if [ "$item" != "menuentry" ]; then
+		continue
+	fi
+	
+	# In a new menu entry, process what should be there
+	read line
+	if [ -z "$line"  ]; then
+		echo "Invalid grub.cfg file, exiting."
+		exit 2
+	fi
+	
+	# Next should be tboot (note if commented, it  will not be in the 
+	# correct place either). Then xen, vmlinuz, and initramfs.
+	read line
+	item=$(echo $line | awk '{ print $2 }')
+	if [ "$item" != "$tboot_file" ]; then
+		continue
+	fi
+	tboot_cmdline=$(echo $line | awk '{print(substr($0,index($0,$3)))}')
+	
+	read line
+	item=$(echo $line | awk '{ print $2 }')
+	if [ "$item" != "$xen_file" ]; then
+		continue
+	fi
+	xen_cmdline=$(echo $line | awk '{print(substr($0,index($0,$3)))}')
+	
+	read line
+	item=$(echo $line | awk '{ print $2 }')
+	if [ "$item" != "$dom0_file" ]; then
+		continue
+	fi
+	dom0_cmdline=$(echo $line | awk '{print(substr($0,index($0,$3)))}')
+	
+	read line
+	item=$(echo $line | awk '{ print $2 }')
+	if [ "$item" != "$initrd_file" ]; then
+		continue
+	fi
+	# no cmd line for this one
+	
+	# Some feedback
+	echo "Located GRUB tboot entry to add to the policy."
+	echo "tboot cmdline: $tboot_cmdline"
+	echo "xen cmdline: $xen_cmdline"
+	echo "dom0 cmdline: $dom0_cmdline"
+	
+	# Now add a hash to the launch control policy
+	if [ -n "$tboot_cmdline" ]; then
+		lcp_mlehash -c "$tboot_cmdline" $tboot_file >> $mle_hash_file
+	else
+		lcp_mlehash $tboot_file >> $mle_hash_file
+	fi
+	echo "LCP hashes updated."
+	
+	if [ -n "$xen_cmdline" ]; then
+		tb_polgen --add --num 0 --pcr none --hash image --cmdline "$xen_cmdline" --image $xen_file $vlp_file
+	else
+		tb_polgen --add --num 0 --pcr none --hash image --image $xen_file $vlp_file
+	fi
+	
+	if [ -n "$dom0_cmdline" ]; then
+		tb_polgen --add --num 1 --pcr 19 --hash image --cmdline "$dom0_cmdline" --image $dom0_file $vlp_file
+	else
+		tb_polgen --add --num 1 --pcr 19 --hash image --image $dom0_file $vlp_file
+	fi
+	
+	tb_polgen --add --num 2 --pcr 19 --hash image --cmdline "" --image $initrd_file $vlp_file
+	echo "VL policy updated."
+	
+	let "counter+=1"
+done < $grub_file
+
+# Restore some values
+IFS=$ifs_orig
+
+echo "Processed boot file - added $counter entries."
+
+# Create the final LCP files
+lcp_crtpol -t unsigned -m $mle_hash_file -o $lcp_file -b $lcp_data_file
+
+# Note, for creating other types:
+# $ lcp_crtpol -t any -o lcp_any.pol  # no hashes, allows any access, no checks
+# $ lcp_crtpol -t hashonly -m mle_hash -o lcp_hash.pol  # single hash
+
+# Check that all the output files are present
+if [ ! -f $vlp_file ]; then
+	echo "Failed to create new VLP policy file: $vlp_file"
+	exit 3
+fi
+if [ ! -f $lcp_file ]; then
+	echo "Failed to create new LCP policy file: $lcp_file"
+	exit 3
+fi
+if [ ! -f $lcp_data_file ]; then
+	echo "Failed to create new LCP data file: $lcp_data_file"
+	exit 3
+fi
+
+# Exit here if only policy creation was requested
+if [ "$policy_only" = "1" ]; then
+	echo "Policy creation without TPM updates requested, exiting"
+	echo "Created: Verified Launch Policy $vlp_file"
+	echo "         Launch Control Policy $lcp_file"
+	echo "         Launch Control Data $lcp_data_file"
+	exit 0
+fi
+
+# Install the new LCP data file
+rm -rf $lcp_data_dest_file
+cp -f $lcp_data_file $lcp_data_dest_file
+
+# Check to see if we need to create the NV indices for TXT
+indices=$(tpmnv_getcap)
+item=$(echo $indices | grep "0x20000002")
+if [ -z "$item" ]; then
+	tpmnv_defindex -i 0x20000002 -s 8 -pv 0 -rl 0x07 -wl 0x07 -p $tpm_owner_pw
+	echo "Created tboot error index 0x20000002"
+else
+	echo "Skipping - tboot error index 0x20000002 already exists"
+fi
+item=$(echo $indices | grep "0x20000001")
+if [ -z "$item" ]; then
+	tpmnv_defindex -i 0x20000001 -s 256 -pv 0x02 -p $tpm_owner_pw
+	echo "Created tboot policy index 0x20000001"
+else
+	echo "Skipping - tboot policy index 0x20000001 already exists"
+fi
+item=$(echo $indices | grep "0x40000001")
+if [ -z "$item" ]; then
+	tpmnv_defindex -i owner -p $tpm_owner_pw
+	echo "Creating owner index 0x40000001"
+else
+	echo "Skipping - owner index 0x40000001 already exists"
+fi
+
+# Last step, load the policies into the TPM NV indices
+lcp_writepol -i owner -f $lcp_file -p $tpm_owner_pw
+lcp_writepol -i 0x20000001 -f $vlp_file -p $tpm_owner_pw
+
+# Done, print summary
+echo "Complete - TPM provisioned for TXT/tboot"
+echo "  Verified Launch Policy $vlp_file loaded to TPM NV"
+echo "  Launch Control Policy $lcp_file loaded to TPM NV"
+echo "  Launch Control Data $lcp_data_file copied to $lcp_data_dest_file"
+
+exit 0

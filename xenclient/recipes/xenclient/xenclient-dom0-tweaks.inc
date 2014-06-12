@@ -1,0 +1,134 @@
+DESCRIPTION = "Various XenClient tweaks"
+
+LICENSE = "GPLv2"
+LIC_FILES_CHKSUM = "file://${TOPDIR}/COPYING.GPLv2;md5=751419260aa954499f7abaabaa882bbe"
+
+# This should go away with everything put into the packages it really
+# belongs to. For now it's just a convenient place to stash certain things.
+
+SRC_URI = "file://enter-s3.sh \
+	   file://install-bootloader \
+	   file://install-bootloader-images \
+	   file://xenstore-init \
+	   file://netcon \
+	   file://grub.cfg \
+	   file://unifont.pf2 \
+	   file://firstboot.sh \
+	   file://firstboot.initscript \
+	   file://complete-boot.sh \
+	   file://dom0_add_vif.sh \
+	   file://blacklist-nvidiafb.conf \
+	   file://autorelabel.initscript \
+	   file://r8168.conf \
+	   file://create-ndvm \
+	   file://i915modprobe.sh \
+	   file://i915.conf \
+	   file://drm_graphics_option.sh \
+	   file://status-report \
+	   file://status-tool \
+	   file://status-server \
+	   file://status-upload \
+	   file://null.iso \
+	   file://set_platform_username \
+	   file://USB_fakenames.conf \
+	   file://usb-state \
+	   file://selinux-state \
+"
+
+PACKAGES = "${PN}"
+
+FILES_${PN} = "/"
+
+inherit update-rc.d
+
+PACKAGES =+ "${PN}-autorelabel"
+RDEPENDS_${PN} += "${PN}-autorelabel"
+
+INITSCRIPT_PACKAGES = "${PN} ${PN}-autorelabel"
+
+INITSCRIPT_NAME_${PN} = "firstboot"
+INITSCRIPT_PARAMS_${PN} = "start 70 S ."
+
+INITSCRIPT_NAME_${PN}-autorelabel = "autorelabel"
+INITSCRIPT_PARAMS_${PN}-autorelabel = "start 71 S ."
+
+FILES_${PN}-autorelabel += "/etc/init.d/autorelabel"
+
+do_install () {
+	install -d ${D}/etc
+	install -d ${D}/etc/modprobe.d
+	install -m 0644 ${WORKDIR}/blacklist-nvidiafb.conf \
+		${D}/etc/modprobe.d/blacklist-nvidiafb.conf
+	install -m 0644 ${WORKDIR}/r8168.conf \
+		${D}/etc/modprobe.d/r8168.conf
+	install -m 0644 ${WORKDIR}/i915.conf \
+		${D}/etc/modprobe.d/i915.conf
+
+	install -d ${D}/etc/init.d
+	install -m 0755 ${WORKDIR}/firstboot.initscript \
+		${D}/etc/init.d/firstboot
+
+	install -d ${D}/usr/share/xenclient
+	install -m 0755 ${WORKDIR}/enter-s3.sh \
+		${D}/usr/share/xenclient/enter-s3.sh
+	install -m 0755 ${WORKDIR}/install-bootloader \
+		${D}/usr/share/xenclient/install-bootloader
+	install -m 0755 ${WORKDIR}/install-bootloader-images \
+		${D}/usr/share/xenclient/install-bootloader-images
+	install -m 0755 ${WORKDIR}/xenstore-init \
+		${D}/usr/share/xenclient/xenstore-init
+	install -m 0755 ${WORKDIR}/complete-boot.sh \
+		${D}/usr/share/xenclient/complete-boot.sh
+	install -m 0755 ${WORKDIR}/dom0_add_vif.sh \
+		${D}/usr/share/xenclient/dom0_add_vif.sh
+	install -m 0755 ${WORKDIR}/firstboot.sh \
+		${D}/usr/share/xenclient/firstboot.sh
+	install -m 0755 ${WORKDIR}/i915modprobe.sh \
+		${D}/usr/share/xenclient/i915modprobe.sh
+	install -m 0755 ${WORKDIR}/drm_graphics_option.sh \
+		${D}/usr/share/xenclient/drm_graphics_option.sh
+
+	install -d ${D}/usr/bin
+	install -m 0755 ${WORKDIR}/create-ndvm \
+		${D}/usr/bin/create-ndvm
+
+	# Useless cruft should be in installer
+	install -d ${D}/usr/share/xenclient/bootloader
+	install -m 0644 ${WORKDIR}/grub.cfg \
+		${D}/usr/share/xenclient/bootloader
+	install -m 0644 ${WORKDIR}/unifont.pf2 \
+		${D}/usr/share/xenclient/bootloader
+
+	mkdir -p ${D}/opt/xensource
+	ln -sf /usr/bin ${D}/opt/xensource/libexec
+
+	install -m 0755 ${WORKDIR}/autorelabel.initscript ${D}${sysconfdir}/init.d/autorelabel
+
+        install -d ${D}/root/.ssh
+
+    install -m 0755 -d ${D}${localstatedir}/lib/ovf
+
+	install -d ${D}/config${sysconfdir}
+	install -m 0644 ${WORKDIR}/USB_fakenames.conf \
+		${D}/config${sysconfdir}/USB_fakenames.conf
+
+	install -d ${D}/usr/share
+	install -m 0644 ${WORKDIR}/null.iso \
+		${D}/usr/share/null.iso
+
+	install -d ${D}/usr/bin
+	install -m 0755 ${WORKDIR}/status-report \
+		${D}/usr/bin/status-report
+	install -m 0755 ${WORKDIR}/status-tool \
+		${D}/usr/bin/status-tool
+	install -m 0755 ${WORKDIR}/status-server \
+		${D}/usr/bin/status-server
+	install -m 0755 ${WORKDIR}/status-upload \
+		${D}/usr/bin/status-upload
+	install -m 0755 ${WORKDIR}/set_platform_username \
+		${D}/usr/bin/set_platform_username
+	install -m 0755 ${WORKDIR}/usb-state \
+		${D}/usr/bin/usb-state
+	install -m 0755 ${WORKDIR}/selinux-state \
+		${D}/usr/bin/selinux-state
+}

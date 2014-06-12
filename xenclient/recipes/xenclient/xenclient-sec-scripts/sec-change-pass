@@ -1,0 +1,67 @@
+#! /bin/sh
+#
+# Copyright (c) 2010 Citrix Systems, Inc.
+# 
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+# 
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+# 
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+#
+
+user="$1"
+userpass="$2"
+serverpass="$3"
+
+exec 3>&2
+[ -z "$V" ] && exec >/dev/null 2>&1
+err () { echo >&3 "$@"; }
+
+LVPREFIX=s-
+LVSIZE=12M
+VGNAME=xenclient
+DEVKEY=/config/sec/device.key
+RAMDIR=/mnt/secure
+UKEY="${RAMDIR}/s-${user}.key"
+TKEY="${RAMDIR}/s-t-${user}.key"
+SECDM="s-${user}"
+
+( cat "${DEVKEY}"
+  echo "${user}"
+  cat "${userpass}" ) >"${UKEY}"
+
+( cat "${DEVKEY}"
+  echo "transmitter ${user}"
+  cat "${serverpass}" ) >"${TKEY}"
+
+cryptsetup -q -d "${TKEY}" \
+  luksCheckKey "/dev/${VGNAME}/${LVPREFIX}${user}" || {
+    err $0: cryptsetup luksCheckKey failed: $?
+    rm "${TKEY}" "${UKEY}"
+    exit 2
+  }
+
+cryptsetup -q -d "${TKEY}" \
+  luksKillSlot "/dev/${VGNAME}/${LVPREFIX}${user}" 0 || {
+    err $0: cryptsetup luksKillSlot failed: $?
+    rm "${TKEY}" "${UKEY}"
+    exit 3
+  }                       
+
+cryptsetup -q -d "${TKEY}" -S 0 \
+  luksAddKey "/dev/${VGNAME}/${LVPREFIX}${user}" "${UKEY}" || {
+    err $0: cryptsetup luksAddKey failed: $?
+    rm "${TKEY}" "${UKEY}"
+    exit 4
+  }
+
+rm "${TKEY}" "${UKEY}"
+

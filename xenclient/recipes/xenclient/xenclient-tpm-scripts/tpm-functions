@@ -1,0 +1,428 @@
+#!/bin/sh
+#
+# Copyright (c) 2013 Citrix Systems, Inc.
+# 
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+# 
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+# 
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+#
+
+# attempt to start tcsd if it's not already running
+# return 0 if tcsd is running or successfully started
+#        1 otherwise
+# A return status of 1 indicates the TPM driver is not loaded.
+# In this state the TPM is disabled ... or the platform doesn't have one :)
+tcsd_start() {
+    local ret=1
+    /etc/init.d/trousers status > /dev/null
+    if [ $? -ne 0 ]; then
+        /etc/init.d/trousers start > /dev/null
+        sleep 1
+        /etc/init.d/trousers status > /dev/null
+        [ $? -ne 0 ] && return 1
+    fi
+    return 0
+}
+# Function to determin whether or not the TPM is active
+# returns 0 if active
+#         1 if inactive
+#         2 if indeterminant
+tpm_is_active() {
+    local ret=0
+    local msg=""
+
+    msg=$(tpm_setactive -z -s 2>&1)
+    if [ $? -ne 0 ]; then
+        case "$msg" in
+            *TPM\ is\ deactivated) ret=1 ;;
+            *TPM\ is\ disabled) ret=1 ;;
+            *Authentication\ failed) ;;
+            *No\ SRK) ;;
+            *) ret=2 ;;
+        esac
+    else
+        # If tpm is deactivated we currently don't get here because tcsd returns
+        # an error.  Putting this here for completeness for now.
+        echo "$msg" | while read LINE; do
+            case "$LINE" in
+                *true) ret=1; break ;;
+                *false) ;;
+                *) ret=2; break ;;
+            esac
+        done
+    fi
+    return $ret
+}
+# Function to determine whether or not the TPM is enabled
+# return 0 if TPM is enabled
+#        1 if TPM is disabled
+#        2 if indeterminant
+tpm_is_enabled() {
+    local ret=0
+    local msg=""
+
+    msg=$(tpm_setenable -z -s 2>&1)
+    if [ $? -ne 0 ]; then
+        case "$msg" in
+            *TPM\ is\ deactivated) ret=1 ;;
+            *TPM\ is\ disabled) ret=1 ;;
+            *Authentication\ failed) ;;
+            *No\ SRK) ;;
+            *) ret=2 ;;
+        esac
+    else
+        case "$msg" in
+            Disabled\ status:\ false) ;;
+            Disabled\ status:\ true) ret=1 ;;
+            *) ret=2
+        esac
+    fi
+    return $ret
+}
+# Function to determine whether or not the TPM is owned.
+# returns 0 if TPM is owned
+#         1 if TPM is not owned
+#         2 if indeterminant
+tpm_is_owned() {
+    local ret=0
+    local msg=""
+
+    # want to check tpm_setownable -z -s here but my Dell system always reports
+    #   that the TPM is ownable even when it's not :(
+    # Test is now based on the existance of an SRK which only seems to exist
+    #   when my TPMs are owned.
+    msg=$(echo "data" | tpm_sealdata -z 2>&1)
+    if [ $? -ne 0 ]; then
+        case "$msg" in
+            *TPM\ is\ deactivated) ret=2 ;;
+            *Authentication\ failed) ;;
+            *No\ SRK | *Handle\ is\ incorrect*) ret=1 ;;
+            *) ret=2 ;;
+        esac
+    fi
+    return $ret
+}
+# Function to determin whether or not the TPM owner password is the well known
+#   secret of 20 bytes of 0's
+# returns 0 if owner password is WKS
+#         1 if owner password is not WKS
+#         2 if indeterminant
+tpm_is_owner_wks() {
+    local ret=0
+    local msg=""
+
+    msg=$(tpm_setenable -z -s 2>&1)
+    if [ $? -ne 0 ]; then
+        case "$msg" in
+            *TPM\ is\ deactivated) ret=2 ;;
+            *TPM\ is\ disabled) ret=2 ;;
+            *Authentication\ failed) ret=1 ;;
+            *No\ SRK) ret=1 ;;
+            *) ret=2 ;;
+        esac
+    fi
+    return $ret
+}
+# Function to determine whether or not the TPM SRK pasword is the well known
+#   20 bytes of 0's.
+# returns 0 if TPM SRK passwd is WKS
+#         1 if TPM SRK passwd is not WKS
+#         2 if indeterminant
+tpm_is_srk_wks() {
+    local ret=0
+    local msg=""
+    msg=$(echo "data" | tpm_sealdata -z 2>&1)
+    if [ $? -ne 0 ]; then
+        case "$msg" in
+            *TPM\ is\ deactivated) ret=2 ;;
+            *TPM\ is\ disabled) ret=2 ;;
+            *Authentication\ failed) ret=1 ;;
+            *No\ SRK) ret=1 ;;
+            *No\ EK) ret=1 ;;
+            *) ret=2 ;;
+        esac
+    fi
+    return $ret
+}
+# Function to determine whether or not the TPM has an EK
+# NOTE: 99.99% of the platforms in this world ship with an EK from the factory.
+#       The only systems I've seen w/o EKs have been Intell branded boards.
+# returns 0 if TPM has an EK
+#         1 if TPM does not have an EK
+#         2 if indeterminant
+tpm_has_ek() {
+    local ret=0
+    local msg=""
+
+    msg=$(echo "data" | tpm_sealdata -z 2>&1)
+    if [ $? -ne 0 ]; then
+        case "$msg" in
+            *TPM\ is\ deactivated) ret=2 ;;
+            *TPM\ is\ disabled) ret=2 ;;
+            *No\ SRK | *Authentication\ failed | *Handle\ is\ incorrect) ;;
+            *No\ EK)  ret=1 ;;
+            *) ret=2 ;;
+        esac
+    fi
+    return $ret
+}
+# Function to determine whether or not tboot was able to setup an MLE
+# return 0 if tboot was successful
+#        1 if tboot was not successful
+#        2 if indeterminant
+mle_success() {
+    local ret=0
+    local msg=""
+
+    msg=$(txt-stat | grep 'TXT measured launch' | awk '{print $4}')
+    case "$msg" in
+        TRUE)  ;;
+        FALSE) ret=1 ;;
+        *)     ret=2 ;;
+    esac
+    return $ret
+}
+# Function to create password for use as TPM owner password.
+# parameter 0: path to public key used to encrypt password on disk
+#           1: path to output file for encrypted password storage
+#           2: password length (if omitted 15 characters are used)
+# return 0 on success
+#        1 on error
+# output stdout: passwd in plain text (don't write this to disk!)
+#        stderr: error text in the event of error
+tpm_create_passwd() {
+    local pub_key="$1"
+    local out_file="$2"
+    local paswd_len="${3:-15}"
+    local passwd=""
+
+    # generate random password, printable characters only w/o spaces
+    passwd=$(cat /dev/urandom | tr -cd "[[:graph:]]" | head -c ${passwd_len:-15})
+    if [ -z ${passwd} ]; then
+        echo "unable to generate random password" >&2
+        return 1
+    fi
+    # encrypt password with provided public key
+    err=$(echo -n "${passwd}" | openssl rsautl -encrypt -inkey "${pub_key}" -pubin -out "${out_file}" 2>&1)
+    if [ $? -ne 0 ] || [ ! -f "${out_file}" ]; then
+        echo "error encrypting TPM owner password: ${err}" >&2
+        [ -f "${out_file}" ] && rm "${out_file}"
+        return 1
+    fi
+    echo "${passwd}"
+    return 0
+}
+
+# Function to configure measured launch on platform.  The next boot will cause
+#   init-root.ro to perform first sealing operation.
+# parameter 0: mount point for rootfs
+# return 0 on success
+#        1 on error
+configure_measured_launch()
+{
+    local root="${1:-/}"
+    local key_file="${root}/config/keys/config.key"
+    local config_dev="/dev/mapper/xenclient-config"
+    local tpm_dir="${root}/boot/system/tpm"
+
+    # this will block w/o some IO to seen entropy
+    dd if=/dev/random bs=1 count=32 of="${key_file}" 2>/dev/null || return 1
+    get-config-key | cryptsetup -q -d - -S 0 luksKillSlot \
+        ${config_dev} 1 >/dev/null 2>&1
+    get-config-key | cryptsetup -q -d - -S 1 -i 1 luksAddKey \
+        ${config_dev} ${key_file} || {
+        echo "failed to add crypto key to config LUKS" >&2
+        rm -f ${key_file}
+        return 1
+    }
+    cat ${key_file} | cryptsetup -q -d - -S 1 luksCheckKey \
+        ${config_dev} >/dev/null 2>&1 || {
+        echo "failed to verify new crypto key in config LUKS" >&2
+        rm -f ${key_file}
+        return 1
+    }
+
+    echo "-p 0 -p 1 -p 2 -p 3 -p 15 -p 17 -p 18 -p 19" > ${root}/config/config.pcrs
+    mkdir -p ${tpm_dir}
+    touch ${tpm_dir}/clear-config-key
+    touch ${tpm_dir}/setup
+    touch ${tpm_dir}/enabled
+
+    return 0
+}
+# Function to take ownership of the TPM.  Wraps some common functionality to
+#   create an EK and check that we can seal with the well-known SRK.
+# parameter 0: password
+#           1: create EK (true|false)
+# return 0 on success
+#        1 on error
+tpm_configure_gen_passwd () {
+    local passwd=""
+    local err=""
+    local public_key="$1"
+    local passwd_ssl="$2"
+    local has_ek="${3:-false}"
+
+    # sanity
+    if [ ! -f "${public_key}" ]; then
+        echo "No recovery key available: ${public_key}" >&2
+        echo "Cannot encrypt generated TPM key." >&2
+        return 1
+    fi
+    if [ -f "${passwd_ssl}" ]; then
+        echo "Encrypted passwd file already exists: ${passwd_ssl}" >&2
+        echo "Refusing to overwrite" >&2
+        return 1
+    fi
+
+    # generate password & encrypt it
+    passwd=$(tpm_create_passwd "${public_key}" "${passwd_ssl}")
+    if [ $? -ne 0 ]; then
+        echo "tpm_create_passwd failed" >&2
+        return 1
+    fi
+    # create EK if necessary
+    case ${has_ek} in
+        true) ;;
+        false)
+            err=$(tpm_createek 2>&1)
+            if [ $? -ne 0 ]; then
+                echo "error creating EK for TPM: ${err}" >&2
+                return 1
+            fi
+            ;;
+        *)
+            echo "invalid parameter for EK: ${has_ek}" >&2
+            return 1
+    esac
+    # take ownership of TPM
+    err=$(echo -n "${passwd}" | tpm_takeownership --srk-well-known --stdin 2>&1)
+    if [ $? -ne 0 ]; then
+        echo "error taking ownership of TPM: ${err}" >&2
+        return 1
+    fi
+    # check to be sure we can seal data with the well-known-key
+    err=$(echo data | tpm_sealdata -z 2>&1 >/dev/null)
+    [ $? -ne 0 ] && {
+        echo "Test to seal data with well-known SRK failed with error: ${err}" >&2
+        return 1
+    }
+    return 0
+}
+
+QUIRK_D="/usr/lib/tpm-scripts/quirks.d"
+
+[ -d "${QUIRK_D}" ] || {
+    echo "no quirk.d directory: ${QUIRK_D}, fail" >&2
+    exit 1
+}
+
+# run *-detect.sh scripts from QUIRK_D directory
+# execute callbacks based on quirk script exit status
+# return status
+#   0 : either no quirks or only quirks with workarounds
+#   1 : platform has fatal quirks (quirks with no workarounds)
+#       or caller has chosen to make non-fatal quirks fatal
+#   2 : error condition: unexpected value returned from quirk detect script
+#   3 : missing / bad parameter
+quirk_detect () {
+    local fptr_info="$1"
+    local fptr_fatal="$2"
+    local msg=""
+    local ret=0
+
+    [ -z ${fptr_info} ] && {
+        echo "No quirk \"info\" callback provided."
+        return 3
+    }
+    [ -z ${fptr_fatal} ] && {
+        echo "No quirk \"fatal\" callback provided."
+        return 3
+    }
+
+    for detect in $(ls -1 "${QUIRK_D}"/*-detect.sh); do
+        msg=$(${detect} 2>&1)
+        case $? in
+            # no quirk
+            0)  ;;
+            # quirk: work around exists, call 'info' function
+            # exit if 'info' function returns anything but 0
+            #   this is a way for calling script to reject quirk work around
+            1)  ${fptr_info} "${msg}"
+                ret=$?
+                [ ${ret} -ne 0 ] && return "${ret}"
+                ;;
+            # quirk: no work around
+            2)  ${fptr_fatal} "${msg}"
+                ret=$?
+                [ ${ret} -eq 0 ] && return 1
+                echo "ignoring fatal quirk, this is a bad idea ..."
+                ;;
+            # error condition, bad quirk script
+            *)  echo "unexpected return value from quirk detect script: ${detect}" >&2
+                return 2
+                ;;
+        esac
+    done
+    return 0
+}
+
+# run *-fix.sh scripts from QUIRK_D directory
+# return status
+#   0 : all fixes successful
+#   1 : fix script returned non-zero status, error message is sent to stderr
+#   2 : internal error
+quirk_fix () {
+    local root="${1:-/}"
+    local ignore_errs="${2:-false}"
+    local detect=""
+    local fix=""
+    local quirk_name=""
+    local msg=""
+
+    [ -d "${root}" ] || {
+        echo "quirk_fix root param is not a directory: ${root}" >&2
+        return 2
+    }
+
+    for fix in $(ls -1 "${QUIRK_D}"/*-fix.sh); do
+        # run detect script
+        quirk_name=$(echo "${fix}" | sed -e "s&${QUIRK_D}/\(.*\)-fix.sh&\1&")
+        detect="${QUIRK_D}/${quirk_name}-detect.sh"
+        [ -x "${detect}" ] || {
+            echo "Quirk ${quirk_name} has no detect script, abort." >&2
+            return 0
+        }
+        msg=$(${detect} 2>&1)
+        case $? in
+            0)  break ;; # quirk doesn't apply, break
+            1)  ;;       # quirk does apply, NOOP
+            2)  echo "Quirk deetct script ${detect} reports quirk is fatal but a fix script exists.  Not applying fix.  Consult quirk documentation."
+                break
+                ;;
+            *)  echo "Error code returned from quirk detect script: ${detect}."
+                break
+                ;;
+        esac
+        # run fix script
+        msg=$(${fix} "${root}" 2>&1)
+        case $? in
+            0)  ;;
+            *)  [ "${ignore_errs}" != "true" ] && {
+                    echo "Error returned by ML Quirk fix script: ${fix}.  Error message: ${msg}" >&2
+                    return 1
+                }
+                ;;
+        esac
+    done
+}

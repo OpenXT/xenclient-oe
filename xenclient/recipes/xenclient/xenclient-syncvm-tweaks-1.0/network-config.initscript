@@ -1,0 +1,55 @@
+#!/bin/sh
+#
+# Copyright (c) 2012 Citrix Systems, Inc.
+# 
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+# 
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+# 
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+#
+
+domstore_read()
+{
+    LD_PRELOAD=/usr/lib/libv4v-1.0.so.0 \
+        DBUS_SYSTEM_BUS_ADDRESS=tcp:family=v4v,host=1.0.0.0,port=5556 \
+        db-read "$@"
+}
+
+if [ "$(domstore_read network/mode)" = "static" ] ; then
+
+    cat <<EOF > /var/volatile/etc/network/interfaces
+auto lo
+iface lo inet loopback
+
+auto eth0
+iface eth0 inet static
+address $(domstore_read network/address)
+netmask $(domstore_read network/netmask)
+gateway $(domstore_read network/gateway)
+EOF
+
+    cat <<EOF > /var/volatile/etc/resolv.conf
+nameserver $(domstore_read network/dns)
+EOF
+
+else
+
+    cat <<EOF > /var/volatile/etc/network/interfaces
+auto lo
+iface lo inet loopback
+
+auto eth0
+iface eth0 inet dhcp
+udhcpc_opts -b
+EOF
+
+fi

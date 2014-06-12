@@ -1,0 +1,125 @@
+#! /bin/bash
+#
+# Copyright (c) 2013 Citrix Systems, Inc.
+# 
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+# 
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+# 
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+#
+
+error() {
+  echo >&2 $0: "$@"
+  exit 1
+}
+
+usage() {
+  cat >&2 <<EOF
+Usage: $0 [OPTION]...
+
+      --src=DISK
+      --srckeydir=KEYDIR
+      --dest=DISK
+      --destkeydir=KEYDIR
+
+Omit --srckeydir/--destkeydir for an unencrypted source/destination vhd.
+EOF
+  exit 1
+}
+
+T=$(getopt -l src:,srckeydir:,dest:,destkeydir: "" "$@")
+[ $? == 0 ] || usage
+eval set -- "$T"
+
+unset srcvhd srckeydir srctap destvhd destkeydir desttap
+
+while true
+do
+  case $1 in
+  --src)
+    srcvhd=$(readlink -e "$2")
+    [ $? -eq 0 ] || error src $2 doesn\'t exist
+    shift 2
+    ;;
+  --srckeydir)
+    srckeydir=$(readlink -e "$2")
+    [ $? -eq 0 ] || error srckeydir $2 doesn\'t exist
+    shift 2
+    ;;
+  --dest)
+    destvhd=$(readlink -f "$2")
+    [ $? -eq 0 ] || error path to dest $2 doesn\'t exist
+    ! [ -e $destvhd ] || error dest $destvhd already exists
+    shift 2
+    ;;
+  --destkeydir)
+    destkeydir=$(readlink -e "$2")
+    [ $? -eq 0 ] || error destkeydir $2 doesn\'t exist
+    shift 2
+    ;;
+  --)
+    shift
+    break
+    ;;
+  *)
+    usage
+    ;;
+  esac
+done
+
+atexit() {
+  [ -z "$desttap" ] || tap-ctl destroy -d $desttap
+  [ -z "$srctap" ] || tap-ctl destroy -d $srctap
+}
+trap atexit EXIT
+
+size=$(vhd-util query -n $srcvhd -v)
+[ $? -eq 0 ] || error couldn\'t query size of src $srcvhd
+srctap=$(TAPDISK2_CRYPTO_KEYDIR="$srckeydir" tap-ctl create -a "vhd:$srcvhd")
+[ $? -eq 0 ] || error couldn\'t open src $srcvhd
+vhd-util create -n $destvhd -s $size
+[ $? -eq 0 ] || error couldn\'t create dest $destvhd
+
+if [ "$destkeydir" ]
+then
+  for i in "$destkeydir"/$(basename "$destvhd" .vhd),aes-xts-plain,{512,256}.key
+  do
+    if [ -e "$i" ]
+    then
+      destkey="$i"
+      vhd-util key -s -n "$destvhd" -k "$destkey"
+      [ $? -eq 0 ] || error couldn\'t set key hash for $destvhd from $destkey
+      break
+    fi
+  done
+
+  [ "$destkey" ] || error couldn\'t find key for $destvhd in $destkeydir
+fi
+
+desttap=$(TAPDISK2_CRYPTO_KEYDIR="$destkeydir" tap-ctl create -a "vhd:$destvhd")
+[ $? -eq 0 ] || error couldn\'t open dest $destvhd
+
+vhd-util read -n $srcvhd -e 0 -c $(($size*1024*2)) | while read s c
+do
+  #echo $s $c
+  while [ $c -gt 0 ]
+  do
+    _c=$c
+    [ $_c -gt 65536 ] && _c=65536
+    printf "\\r%d.%02d%% complete" $((100*$s/($size*1024*2))) $(((10000*$s/($size*1024*2)) % 100))
+    #echo $s $_c
+    dd-buffered -s $srctap -d $desttap -o $s -c $_c -b 2048
+    s=$(($s + $_c))
+    c=$(($c - $_c))
+  done
+done
+printf "\\r100.00%% complete\\n"

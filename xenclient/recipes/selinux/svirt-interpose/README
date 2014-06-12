@@ -1,0 +1,25 @@
+Purpose:
+The standard SELinux policy implements separation through object labeling.
+Interactions between each label and object type must be explicitly defined.
+There is a distinct shortcoming in this model which is evident in the XenClient system.
+When multiple instances of supporting processes are run on XenClient each instances executed from the same binary will have the same label (i.e. all qemu-dm processes will be labeled qemu_t).
+This would allow a compromised qemu-dm process supporting VM_A to access the hard disk belonging to VM_B.
+Obviously this is not desirable.
+
+This prototype introduces a small binary (selinux-interpose) that is run in place of qemu-dm.
+Upon execution this program does X things:
+1) Generates a unique integer between 0 and 1023.
+   This integer represents an SELinux MCS category that is assigned to each running VM.
+2) Enumerates each writable storage device assigned to the VM and relabels them with the generated category.
+3) Sets the execution context for subsequent exec calls such that qemu-dm when started is labeled with the appropriate category.
+   This allows qemu to access the storage resources belonging to the appropriate VM and no other.
+This implementation works for both service VMs and client VMs alike.
+
+This code is derived from the SELinux Virtualization Prototype approved for public release, case number 88ABW-2011-2106.
+See the README from this project for additional details.
+The prototype code was itself written after a careful reading of the sVirt requirements and SELinux libvirt security module code.
+An analysis for the requirements behind sVirt and the basic design can be found here:
+http://selinuxproject.org/page/Svirt_requirements_v1.0
+
+Requirements:
+SELinux MCS policy for XenClient.

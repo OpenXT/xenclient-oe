@@ -1,0 +1,267 @@
+#!/bin/bash
+#
+# Copyright (c) 2014 Citrix Systems, Inc.
+# 
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+# 
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+# 
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+#
+
+#
+# This is the interactive front end to: status-tool
+#
+# This is the command that users will be directed to run by the documentation.
+#
+
+REPORT_VERSION="1.0"
+
+USER_REPORT="/tmp/user-report.xml"
+rm -f "${USER_REPORT}"
+
+remove_user_report()
+{
+    rm -f "${USER_REPORT}"
+    exit 1
+}
+trap "remove_user_report" SIGINT SIGTERM
+
+
+RED="[01;31m"
+GREEN="[01;32m"
+YELLOW="[01;33m"
+BLUE="[01;34m"
+PURPLE="[01;35m"
+END="[0m"
+
+welcome()
+{
+cat <<EOF
+${BLUE}**********************************************************************${END}
+Generate a ${BLUE}XenClient Status Report${END}.
+
+This will collate diagnostic information from this system.
+
+* This application will collate system log files, details of the hardware
+  configuration of your machine, software version information and data on
+  the current system state.
+
+* The collated information will be saved as a .tar.bz2 for archiving or
+  sending to a Technical Support Representative.
+
+${BLUE}The logs may contain private information${END}, and if you are at all
+worried about that, you should exit now, or you should explicitly
+exclude those logs from the archive.
+EOF
+}
+
+yes_or_no()
+{
+    USER_INPUT=""
+    while [ "x${USER_INPUT}" != "xyes" ] && [ "x${USER_INPUT}" != "xno" ] ; do
+        echo -n "Choice: "
+        read USER_INPUT
+        if [ "x${USER_INPUT}" != "xyes" ] && [ "x${USER_INPUT}" != "xno" ]
+        then
+            echo "Please answer either: ${GREEN}yes${END}"
+            echo "                  or: ${RED}no${END}"
+        fi
+    done
+    [ "x${USER_INPUT}" = "xyes" ] || return 1
+    return 0
+}
+
+ask_about_screenshots_and_vm_diagnostics()
+{
+    cat <<EOF
+
+This tool can optionally acquire ${GREEN}diagnostic information from VMs${END},
+including ${GREEN}logs and screenshots${END} of the currently running
+VMs. These can prove to be ${GREEN}extremely helpful with diagnosis${END} of
+technical issues. You may, however, opt to exclude them.
+
+Do you wish to allow this information from the VMs in this report? (${GREEN}yes${END}/no)
+EOF
+    SCREENSHOT_FLAG=""
+    DIAGNOSTIC_FLAG="--full-vm-diagnostics"
+    if ! yes_or_no ; then
+    cat <<EOF
+
+${RED}Warning:${END} Opting to exclude this information from the report
+         may prevent diagnosis of your issue. ${RED}Are you sure?${END}
+
+EOF
+        sleep 4
+        ask_about_screenshots
+        ask_about_diagnostics
+    fi
+}
+
+ask_about_diagnostics()
+{
+    cat <<EOF
+Do you wish to include other diagnostic data from VMs in this report? (${GREEN}yes${END}/no)
+EOF
+    DIAGNOSTIC_FLAG=""
+    if yes_or_no ; then
+        cat <<EOF
+Do you want to include ${GREEN}full diagnostic data${END}? (if so, say ${GREEN}yes${END})
+Or do you prefer to only include ${BLUE}quick diagnostic data${END}? (if so, say ${BLUE}no${END})
+EOF
+        if yes_or_no ; then
+            DIAGNOSTIC_FLAG="--full-vm-diagnostics"
+        else
+            DIAGNOSTIC_FLAG=""
+        fi
+    else
+        DIAGNOSTIC_FLAG="--no-vm-diagnostics"
+    fi
+}
+
+ask_about_screenshots()
+{
+    cat <<EOF
+Do you wish to allow screenshots in this report? (${GREEN}yes${END}/no)
+EOF
+    SCREENSHOT_FLAG=""
+    yes_or_no || SCREENSHOT_FLAG="--no-screenshots"
+}
+
+get_techsupport_ticket()
+{
+    cat <<EOF
+
+Do you have a ${BLUE}technical support case number${END} or ${BLUE}ticket number${END}?
+If so, please enter it here.
+EOF
+    read -p "Support ticket: " SUPPORT_TICKET
+    echo "<support-ticket>"  >>"${USER_REPORT}"
+    echo "${SUPPORT_TICKET}" >>"${USER_REPORT}"
+    echo "</support-ticket>" >>"${USER_REPORT}"
+}
+
+say_running()
+{
+    cat <<EOF
+
+${BLUE}Generating report...${END}
+EOF
+}
+
+get_summary()
+{
+    cat <<EOF
+Please enter a ${BLUE}summary of the issue${END} in eight words or less.
+EOF
+    read -p "Summary: " SUMMARY
+    echo "<summary>"  >>"${USER_REPORT}"
+    echo "${SUMMARY}" >>"${USER_REPORT}"
+    echo "</summary>" >>"${USER_REPORT}"
+    cat <<EOF
+
+Please enter ${BLUE}details of the issue${END}.
+Include any relevant information about the behaviour, symptoms or environment.
+Enter a blank line, using [Enter], to end the description.
+
+EOF
+    echo -n "Details"
+    DESCRIPTION_LINE="."
+    echo "<description>"  >>"${USER_REPORT}"
+    while [ ! -z "${DESCRIPTION_LINE}" ] ; do
+        read -p ": " DESCRIPTION_LINE
+        echo "${DESCRIPTION_LINE}" >>"${USER_REPORT}"
+    done
+    echo "</description>" >>"${USER_REPORT}"
+}
+
+get_steps()
+{
+    cat <<EOF
+
+Please describe, if possible, ${BLUE}specific steps to reproduce issue${END}.
+Enter a blank step, using [Enter], to end the sequence.
+
+EOF
+    STEP_NUM=1
+    STEP="."
+    echo "<repro-steps>"  >>"${USER_REPORT}"
+    while [ ! -z "${STEP}" ] ; do
+        read -p "${GREEN}Step ${STEP_NUM}${END}: " STEP
+        if [ ! -z "${STEP}" ] ; then
+            echo "<step index="${STEP_NUM}">"  >>"${USER_REPORT}"
+            echo "${STEP}" >>"${USER_REPORT}"
+            echo "</step>" >>"${USER_REPORT}"
+        fi
+        STEP_NUM=$((STEP_NUM + 1))
+    done
+    echo "</repro-steps>"  >>"${USER_REPORT}"
+}
+
+say_about_status_server()
+{
+    cat <<EOF
+
+To make it simple to copy this status report file, you can now enter
+the ${BLUE}status-server${END} command at the command prompt.
+
+* ${BLUE}status-server${END} will make the most recent status report available for download
+  by running a temporary dedicated web server on this machine.
+
+* You can then enter the URL that it announces into your web browser.
+
+Important: You should only run the ${BLUE}status-server${END} command if your
+computer network is secure and your administrator allows you to do so.
+
+EOF
+}
+
+start_user_report()
+{
+    echo "<user-report>"  >"${USER_REPORT}"
+    echo -e "<report-version>\n${REPORT_VERSION}\n</report-version>"  >>"${USER_REPORT}"
+}
+
+end_user_report()
+{
+    echo "</user-report>"  >>"${USER_REPORT}"
+}
+
+tell_user_steps_to_follow()
+{
+    cat <<EOF
+
+A sequence of questions will follow. You will be asked for:
+
+  1. A ${BLUE}summary of the issue${END} in eight words or less.
+  2. The ${BLUE}details of the issue${END}.
+  3. A list of ${BLUE}steps to reproduce the issue${END}.
+  4. A ${BLUE}technical support case number${END} if you already have one.
+
+EOF
+}
+
+welcome
+start_user_report
+ask_about_screenshots_and_vm_diagnostics
+tell_user_steps_to_follow
+get_summary
+get_steps
+get_techsupport_ticket
+end_user_report
+say_running
+trap - SIGINT SIGTERM
+
+status-tool ${SCREENSHOT_FLAG} ${DIAGNOSTIC_FLAG}
+
+rm -f "${USER_REPORT}"
+
+say_about_status_server

@@ -1,0 +1,64 @@
+#!/bin/bash
+#
+# Copyright (c) 2013 Citrix Systems, Inc.
+# 
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+# 
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+# 
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+#
+
+#
+# Starts rpc-proxy daemon.
+#
+PIDFILE=/var/run/rpc-proxy.pid
+PIDFILE_GUEST=/var/run/rpc-proxy-guest.pid
+PIDFILE_WEBSOCKETS=/var/run/rpc-proxy-websockets.pid
+
+# Make sure the progam exists
+[ -f /usr/bin/rpc-proxy ] || exit 0
+
+start() {
+	echo "Starting rpc-proxy"    
+	start-stop-daemon --start --quiet --oknodo --background --make-pidfile --pidfile $PIDFILE --exec /usr/bin/rpc-proxy -- -s
+	start-stop-daemon --start --quiet --oknodo --background --make-pidfile --pidfile $PIDFILE_GUEST --exec /usr/bin/rpc-proxy -- -i v4v:5556 -n com.citrix.xenclient.guest.uuid_\$UUID --translate-anonymous-dests
+	start-stop-daemon --start --quiet --oknodo --background --make-pidfile --pidfile $PIDFILE_WEBSOCKETS --exec /usr/bin/rpc-proxy -- -i v4v:8080 --json-in --websockets-in -n com.citrix.xenclient.guest.uuid_\$UUID --auto-auth
+}
+stop() {
+	echo "Stopping rpc-proxy"
+	start-stop-daemon --stop --quiet --oknodo --pidfile $PIDFILE_WEBSOCKETS
+	start-stop-daemon --stop --quiet --oknodo --pidfile $PIDFILE_GUEST
+	start-stop-daemon --stop --quiet --oknodo --pidfile $PIDFILE
+}
+
+restart() {
+	stop
+	start
+}
+
+case "$1" in
+  start)
+	start
+	;;
+  stop)
+	stop
+	;;
+  restart|reload)
+	echo "Restarting rpc-proxy"
+	restart
+	;;
+  *)
+	echo $"Usage: $0 {start|stop|restart}"
+	exit 1
+esac
+
+exit $?

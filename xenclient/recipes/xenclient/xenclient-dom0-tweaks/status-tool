@@ -1,0 +1,463 @@
+#!/bin/bash
+#
+# Copyright (c) 2014 Citrix Systems, Inc.
+# 
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+# 
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+# 
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+#
+
+#
+
+PATH=/usr/bin:$PATH
+TCS_EXEC="sh /etc/init.d/trousers"
+
+cd /tmp
+
+# XC-2064: Optional argument: --no-screenshots
+SCREENSHOTS=0
+VM_DIAGNOSTICS=0
+QUIET=0
+PRINT_TARBALL=0
+XCDIAG_QUICK="quick"
+XCDIAG_TIMEOUT=190
+######################################################################
+while [[ $1 = -* ]]; do
+  case "$1" in
+    -S|--no-screenshots)
+      SCREENSHOTS=1
+      shift
+      ;;
+    -s|--screenshots)
+      SCREENSHOTS=0
+      shift
+      ;;
+    -V|--no-vm-diagnostics)
+      VM_DIAGNOSTICS=1
+      shift
+      ;;
+    -v|--vm-diagnostics)
+      VM_DIAGNOSTICS=0
+      XCDIAG_QUICK="quick"
+      XCDIAG_TIMEOUT=190
+      shift
+      ;;
+    -q|--quiet)
+      QUIET=1
+      shift
+      ;;
+    -f|--full-vm-diagnostics)
+      VM_DIAGNOSTICS=0
+      XCDIAG_QUICK=""
+      XCDIAG_TIMEOUT=900
+      shift
+      ;;
+    -t|--print-tarball)
+      PRINT_TARBALL=1
+      shift
+      ;;
+    *)
+      echo "Error: Unknown option: $1" >&2
+      exit 1
+      ;;
+  esac
+done
+
+progress()
+{
+    local PERCENT="$1"
+    dbus-send --system --type=signal / com.citrix.xenclient.status_tool.progress int32:${PERCENT}
+}
+
+######################################################################
+name="status-report"
+d="`date "+%Y%m%d%H%M%S"`"
+
+USER_REPORT="/tmp/user-report.xml"
+if [ -r "$USER_REPORT" ] ; then
+    # XC-2611: include user summary in the filename, if sane
+    summary="SR-`sed -ne '/^<summary>$/ { n ; s/ /-/g ; y/ABCDEFGHIJKLMNOPQRSTUVWXYZ/abcdefghijklmnopqrstuvwxyz/ ; s,</summary>,, ; s/[^a-z0-9-]//g ; s/--*/-/g ; s/\(\([^-]\+-\)\{7\}[^-]\+\)-.*$/\1/ ; p }' <$USER_REPORT`"
+    [ ! -z "$summary" ] || summary="$name"
+else
+    summary="$name"
+fi
+
+saved_tarball="/storage/$name/$summary-$d.tar.bz2"
+base_path="`dirname "$saved_tarball"`/`basename "$saved_tarball" .tar.bz2`"
+tmp_path="/tmp/$name"
+
+logger "Generating status report: $saved_tarball"
+
+TIMEOUT=15
+
+files=""
+
+archive()
+{
+        local out="$1"
+        local files="$2"
+        local exclude="$3"
+        local command="tar -cO $files"
+        for excl in $exclude ; do
+            command="${command} --exclude=${excl}"
+        done
+        ${command} | bzip2 -z -c > "$out"
+}
+
+save_file()
+{
+        local save_path="$1"
+        local save_file="$2"
+        local save_out="$3"
+
+        cd "$save_path" || return 1
+        archive "${base_path}/${save_out}.tar.bz2" "${save_file}" "" > ${base_path}/${name}.log 2>&1
+        files="$files ${save_out}.tar.bz2"
+        cd - > /dev/null
+}
+
+save_install_data()
+{
+        local save_path="$1"
+        local save_file="$2"
+        local save_out="$3"
+        local exclude='password.conf password.conf.DONE recovery-private-key.conf recovery-private-key.conf.DONE recovery-disk-key.ssl recovery-disk-key.ssl.DONE backend-pin.conf'
+
+        if [ -e "$save_path" ] ; then
+                cd "$save_path"
+                archive "${base_path}/${save_out}.tar.bz2" "${save_file}" "${exclude}"> ${base_path}/${name}.log 2>&1
+                files="$files ${save_out}.tar.bz2"
+                cd - > /dev/null
+        fi
+}
+
+save_out()
+{
+        local save_out_cmd="$1"
+        local save_out_out="$2"
+
+        timeout $TIMEOUT $save_out_cmd > "${base_path}/${save_out_out}.log" 2>&1
+        if [ $? -eq 143 ] ; then
+            [ ${QUIET} -eq 1 ] || echo "Terminated. Command exceeded ${TIMEOUT} seconds: $save_out_cmd" >> "${base_path}/${save_out_out}.log"
+        fi
+        files="$files ${save_out_out}.log"
+}
+
+vm_save_out()
+{
+        local save_out_cmd="$1"
+        local save_out_out="$2"
+        local vm="$3"
+        local vm_save_out_out="${vm}-${save_out_out}"
+
+        timeout $TIMEOUT sshv4v -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR $vm $save_out_cmd > "${base_path}/${vm_save_out_out}.log" 2>&1
+        if [ $? -eq 143 ] ; then
+            [ ${QUIET} -eq 1 ] || echo "Terminated. Command exceeded ${TIMEOUT} seconds: $save_out_cmd" >> "${base_path}/${vm_save_out_out}.log"
+        fi
+        files="$files ${vm_save_out_out}.log"
+}
+
+main_file()
+{
+        cd "`dirname "${base_path}"`"
+        archive "${saved_tarball}" "`basename "${base_path}"`"
+        cd - > /dev/null
+        rm -rf "${base_path}"
+        rm -rf "${tmp_path}"
+}
+
+setup_tpm()
+{
+        modprobe tpm_tis
+        # make sure tcsd is running
+	${TCS_EXEC} status > /dev/null
+	if [ $? -eq 1 ]; then
+    	echo "Trousers daemon is not running: make sure TPM is enabled and tcsd is running."
+	fi
+}
+
+get_screenshots()
+{
+	local dir=$(mktemp -p "$tmp_path" -dt sr-screenshots-XXXXX)
+	screenshot "$dir"
+   	echo ${dir}
+}
+
+get_xcdiag()
+{
+        local dir=$(timeout $XCDIAG_TIMEOUT xec -s com.citrix.xenclient.xenmgr -o / -i com.citrix.xenclient.xenmgr.diag save "${XCDIAG_QUICK}")
+        echo ${dir}
+}
+
+get_acpi_info()
+{
+        local dir=$(mktemp -dt sr-acpi-XXXXX)
+        local adir="${dir}/acpi-info"
+        local xcount=0
+
+        mkdir -p "${adir}"
+        cd "$adir" || return 1
+
+        pmutil -d > DMAR.log 2>/dev/null
+        pmutil -w > WMI.log 2>/dev/null
+
+        acpidump > ACPI.log 2>/dev/null
+        acpidump -t DSDT --binary > DSDT.bin 2>/dev/null
+
+        while [ $xcount -lt 8 ]; do
+                acpidump -t SSDT -s $xcount --binary > SSDT$xcount.bin 2>/dev/null
+                xcount=$(( $xcount+1 ))
+        done
+
+        cat > aml_to_asl.sh <<END
+#!/bin/sh
+# Script to disassemble the binary ACPI table data
+AFILES=./*.bin
+
+for AFILE in \$AFILES
+do
+    echo "Disassembling: \$AFILE"
+    iasl -d \$AFILE
+done
+END
+
+        chmod a+x aml_to_asl.sh
+
+        # copy the sysfs version of the ACPI tables too
+        mkdir acpi-sysfs
+        cp -rP /sys/firmware/acpi/tables/ ./acpi-sysfs 2>/dev/null
+
+        cd - > /dev/null
+        echo ${dir}
+}
+
+get_usb_pm_info()
+{
+        rm -f "$tmp_path/usb_pm_info.log"
+
+        for f in `ls /sys/bus/usb/devices/*/power/level`
+        do
+                dev=`echo $f | sed s_/sys/bus/usb/devices/__ | sed s_/power/level__`
+                if [ -e /sys/bus/usb/devices/$dev/product ]; then
+                        product=`cat /sys/bus/usb/devices/$dev/product`
+                else                                             
+                        product="Product not specified"          
+                fi                                               
+                level=`cat /sys/bus/usb/devices/$dev/power/level`
+                echo -e "$dev\t$level\t$product \t" >> "$tmp_path/usb_pm_info.log"
+        done
+
+        files="$files $tmp_path/usb_pm_info.log"
+}
+
+get_dbus_names()
+{
+    rm -f "$tmp_path/dbus-names"
+    for x in `xec -s org.freedesktop.DBus -o /org/freedesktop/DBus ListNames`
+    do
+	owner=`xec -s org.freedesktop.DBus -o /org/freedesktop/DBus GetNameOwner $x 2>/dev/null`
+	echo $x \(owner $owner\) >> "$tmp_path/dbus-names"
+    done
+}
+
+ndvm_snapshot()
+{
+    vm=$1
+    vm_save_out "dmesg -s 65536" "dmesg" "${vm}" 
+    vm_save_out "brctl show" "brctl_show" "${vm}" 
+    vm_save_out "ifconfig" "ifconfig" "${vm}" 
+    vm_save_out "ifconfig -a" "ifconfig-a" "${vm}" 
+    vm_save_out "lsmod" "lsmod" "${vm}" 
+    vm_save_out "route -n" "route-n" "${vm}" 
+    vm_save_out "find /sys/class/ -name rfkill[0-9]* -print -exec cat {}/state \; -exec cat {}/type \;" "rfkill" "${vm}" 
+    vm_save_out "iwlist scan" "iwlist-scan" "${vm}" 
+    vm_save_out "nmcli con" "nmcli-con" "${vm}" 
+    vm_save_out "nmcli dev" "nmcli-dev" "${vm}" 
+    vm_save_out "dbus-send --system --print-reply --dest=com.citrix.xenclient.networkslave /  com.citrix.xenclient.networkslave.list_networks" "nws-networks" "${vm}" 
+    vm_save_out "cat /var/lib/NetworkManager/NetworkManager.state" "nm-state" "${vm}" 
+    vm_save_out "ls -ltr /etc/NetworkManager/system-connections" "nm-connections" "${vm}" 
+}
+
+progress 10
+
+setup_tpm
+
+mkdir -p "${base_path}"
+mkdir -p "${tmp_path}"
+mkdir -p /storage/disks
+save_install_data "/boot/system" "install" "install-data"
+save_install_data "/boot/system" "upgrade" "upgrade-data"
+save_install_data "/boot/system" "config" "config-data"
+save_out "dmesg -s 65536" "dmesg"
+echo "w" >/proc/sysrq-trigger
+echo "m" >/proc/sysrq-trigger
+save_out "dmesg -s 65536" "dmesg-sysrq"
+save_file "/var/log" "messages*" "syslog"
+save_file "/config" "db" "db"
+save_file "/config/vms" "*.db" "vms"
+save_file "/var/log" "xenstored-access*" "xenstored-access"
+save_file "/tmp" "xenmgr-xenvm*" "xenmgr-xenvm"
+save_file "/var/log" "Xorg.0.log*" "Xorg.0.log"
+save_file "/storage/disks" "*.customizations" "vm-customizations"
+save_file "/etc" "fstab" "fstab"
+save_out "cat /tmp/user-report.xml" "user-report.xml"
+save_out "cat /etc/xenclient.conf" "xenclient.conf"
+save_out "cat /boot/system/install/log/installer.log.bz2" "host-installer.log.bz2"
+save_out "xenops dmesg" "xen_dmesg"
+save_out "hvm-info" "hvm-info"
+save_out "dmidecode" "dmidecode"
+save_out "xenops list" "xenops_list"
+save_out "brctl show" "brctl_show"
+save_out "ifconfig" "ifconfig"
+save_out "ifconfig -a" "ifconfig-a"
+save_out "guest-process-stats" "guest-process-stats"
+save_out "df -h" "df-h"
+save_out "route -n" "route-n"
+save_out "cat /proc/acpi/thermal_zone/*/temperature" "temperature"
+save_out "cat /proc/cpuinfo" "cpuinfo"
+save_out "find / ! -regex \"^/sys.*\" -size +1000k -exec ls -l {} ; " "large-files"
+save_out "lsmod" "lsmod"
+save_out "lsusb" "lsusb"
+save_out "lsusb -v" "lsusb-v"
+save_out "lsusb -t" "lsusb-t"
+get_usb_pm_info
+save_out "tpm_version" "tpm_version"
+
+# acpi information
+acpi_dir=$(get_acpi_info)
+save_file "${acpi_dir}" "./acpi-info" "acpi-info"
+rm -rf "${acpi_dir}"
+
+progress 20
+
+save_out "xentop -i 1 -b" "xentop"
+save_out "top -b -n1" "top"
+save_out "netstat -ln" "netstat-ln"
+save_out "netstat -tn" "netstat-tn"
+save_out "ps auxZ" "psauxZ"
+save_out "ps axfl" "ps-axfl"
+save_out "cat /proc/swaps" "swaps"
+save_out "lvs" "lvs"
+save_out "pvs" "pvs"
+save_out "fdisk -l" "fdisk-l"
+save_out "lspci -vvv" "lspci-vvv"
+save_out "lspci -mmnn" "lspci-mmnn"
+save_out "lspci -mmnnv" "lspci-mmnnv"
+save_out "lspci -xxx" "lspci-xxx"
+save_out "uname -a" "uname-a"
+save_out "ping -c1 -w 5 uivm" "ping-uivm"
+save_out "vhd-util scan -pM /storage/disks/*.vhd" "storage-disks-scan"
+save_out "ls /sys/block" "ls-sys-block"
+save_out "cat /sys/class/blktap2/devices" "blktap2-devices"
+save_out "cat /sys/class/net/eth0/carrier" "eth0-link-state"
+save_out "cat /sys/class/net/eth0/operstate" "eth0-oper-state"
+save_out "cat /sys/class/net/wlan0/carrier" "wlan0-link-state"
+save_out "cat /sys/class/net/wlan0/operstate" "wlan0-oper-state"
+save_out "cat /etc/USB_fakenames.conf" "USB_fakenames.conf"
+save_out "/usr/bin/usb-state" "ctxusb-daemon-state"
+save_out "mount -l" "mount-l"
+save_out "txt-stat" "txt-stat"
+save_out "find /sys/class/ -name rfkill[0-9]* -print -exec cat {}/state \; -exec cat {}/type \;" "rfkill"
+save_out "xenops physinfo" "xenops_physinfo"
+get_dbus_names
+save_file "$tmp_path" "./dbus-names" "dbus-names"
+
+progress 30
+
+VHD_CHECK_LOG=$(mktemp --tmpdir="$tmp_path" vhd-check-log.XXXX)
+for vhd in /storage/disks/*.vhd ; do
+    vhd-util check -iItn $vhd >> ${VHD_CHECK_LOG} 2>&1
+done
+save_out "cat ${VHD_CHECK_LOG}" "vhd-check"
+rm -f ${VHD_CHECK_LOG}
+
+progress 40
+
+EDID=$(mktemp --tmpdir="$tmp_path" edid.XXXX)
+EDID_LOG=$(mktemp --tmpdir="$tmp_path" edid-log.XXXX)
+get-edid "${EDID}" 2>"${EDID_LOG}"
+echo -e "==============\nParse results:" >>"${EDID_LOG}"
+parse-edid <"${EDID}" >>"${EDID_LOG}" 2>&1
+save_out "cat ${EDID_LOG}" "edid-parsed"
+rm -f ${EDID} ${EDID_LOG}
+
+alsactl -f "$tmp_path/alsactl.dump" store &>/dev/null
+save_out "cat $tmp_path/alsactl.dump" "sound-alsactl-store"
+save_out "amixer" "sound-amixer"
+
+progress 50
+
+ETHTOOL_LOG=$(mktemp --tmpdir="$tmp_path" ethtool-log.XXXX)
+for i in $(cd /sys/class/net && echo eth*)
+do
+    ethtool $i >> "${ETHTOOL_LOG}" 2>&1
+done
+save_out "cat ${ETHTOOL_LOG}" "ethtool"
+rm -f ${ETHTOOL_LOG}
+
+progress 60
+
+if [ ${SCREENSHOTS} -eq 0 ] ; then
+    [ ${QUIET} -eq 1 ] || echo "Collecting screenshots from VMs..."
+    screenshot_dir=$(get_screenshots)
+    save_file "${screenshot_dir}" "*.png" "screenshots"
+    rm -rf "${screenshot_dir}"
+fi
+
+progress 70
+
+if pgrep xenstored > /dev/null 2>&1; then
+        save_out selinux-state selinux-state
+else
+        save_out "echo xenstored not running" selinux-state
+fi
+
+progress 75
+
+for i in $(xec list-vms) ; do 
+    state=$(xec-vm -o $i get state)
+    is_ndvm=$(xec-vm -o $i get provides-network-backend)
+    if [ "$state" = "running" -a "$is_ndvm" = "true" ] ; then 
+        name=$(xec-vm -o $i get name)
+         ndvm_snapshot $name
+    fi
+done
+
+progress 85
+
+# xc-diag information
+if [ ${VM_DIAGNOSTICS} -eq 0 ] ; then
+    xcdiag_dir=$(get_xcdiag)
+    save_file "${xcdiag_dir}" "*" "xc-diag"
+    rm -rf "${xcdiag_dir}"
+fi
+
+# Note that xenstore-ls can block without xenstored,
+# so verify xenstored is running first:
+if ps aux | grep -q xenstored ; then
+    save_out "xenstore-ls" "xenstore-ls"
+else
+    save_out "echo xenstored not running" "xenstore-ls"
+fi
+
+progress 95
+
+save_out "iwlist scan" "iwlist-scan"
+save_out "cat /proc/acpi/ac_adapter/AC/state" "ac_adapter-state"
+main_file
+sync
+
+[ ${QUIET} -eq 1 ] || echo "Writing tarball ${saved_tarball} successful."
+[ ${PRINT_TARBALL} -eq 1 ] && {
+    echo ${saved_tarball}
+}

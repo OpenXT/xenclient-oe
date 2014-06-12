@@ -1,0 +1,61 @@
+#! /bin/sh
+#
+# Copyright (c) 2013 Citrix Systems, Inc.
+# 
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+# 
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+# 
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+#
+
+#
+# urandom	This script saves the random seed between reboots.
+#		It is called from the boot, halt and reboot scripts.
+#
+# Version:	@(#)urandom  1.33  22-Jun-1998  miquels@cistron.nl
+#
+
+test -c /dev/urandom || exit 0
+. /etc/default/rcS
+
+SEED_FILE=/config/random-seed
+POOL_SIZE=`cat /proc/sys/kernel/random/poolsize` || POOL_SIZE=4096
+
+case "$1" in
+	start|"")
+		test "$VERBOSE" != no && echo "Initializing random number generator..."
+		# Carry a random seed from start-up to start-up.
+		# Load and then save the whole entropy pool.
+		if [ -f $SEED_FILE ]; then
+			cat $SEED_FILE > /dev/urandom
+		else
+			touch $SEED_FILE
+		fi
+		chmod 600 $SEED_FILE
+		dd if=/dev/urandom of=$SEED_FILE count=1 bs=$POOL_SIZE
+		;;
+	stop)
+		# Carry a random seed from shut-down to start-up;
+		# see documentation in linux/drivers/char/random.c
+		test "$VERBOSE" != no && echo "Saving random seed..."
+		echo "Saving random seed..."
+		touch $SEED_FILE
+		chmod 600 $SEED_FILE
+		dd if=/dev/urandom of=$SEED_FILE count=1 bs=$POOL_SIZE
+		;;
+	*)
+		echo "Usage: urandom {start|stop}" >&2
+		exit 1
+		;;
+esac
+
+exit 0

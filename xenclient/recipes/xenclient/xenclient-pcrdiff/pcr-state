@@ -1,0 +1,106 @@
+#!/bin/sh
+#
+# Copyright (c) 2013 Citrix Systems, Inc.
+# 
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+# 
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+# 
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+#
+
+ROOT="${1}"
+PCRS_BAD_FILE="bad.pcrs"
+PCRS_BAD_SRC="${ROOT}/storage/${PCRS_BAD_FILE}"
+PCRS_CFG="${ROOT}/config/config.pcrs"
+PCRS_GOOD_FILE="good.pcrs"
+PCRS_GOOD_SRC="${ROOT}/config/${PCRS_GOOD_FILE}"
+
+PCR_00_MSG="PCR[0]: CRTM, BIOS, and Host Platform Extensions PCR has changed."
+PCR_01_MSG="PCR[1]: Host Platform Configuration has changed.  This includes host hardware configuration, CPU microcode etc."
+PCR_02_MSG="PCR[2]: Option ROM code has changed."
+PCR_03_MSG="PCR[3]: Option ROM configuration and data has changed."
+PCR_15_MSG="PCR[15]: The root filesystem has changed."
+PCR_17_MSG="PCR[17]: The TXT PCR on this system has changed."
+PCR_18_MSG="PCR[18]: The MLE and / or Xen on this system have changed."
+PCR_19_MSG="PCR[19]: The boot modules on this system have changed."
+PCR_XX_MSG="Unexpected PCR changed: Manual inspection of PCR logs required."
+NO_FILE_MSG="Unable to determine status of measured launch.  Missing required file:"
+NO_PCR_BAD_MSG="There is no PCR quote present indicating platform measurements have changed."
+
+required_file () {
+    if [ ! -f ${1} ]; then
+        echo "${NO_FILE_MSG} ${PCRS_CFG}"
+        exit 1
+    fi
+}
+
+cat <<EOF
++-----------------------------------------------------+
+|                  PCR Change Report                  |
++-----------------------------------------------------+
+
+EOF
+
+required_file ${PCRS_GOOD_SRC}
+required_file ${PCRS_CFG}
+PCRS_SEALED=$(sed 's&[[:space:]]\?-p[[:space:]]\+\([0-9]\{1,2\}\)&\1 &g' ${PCRS_CFG})
+
+if [ ! -f "${PCRS_BAD_SRC}" ]; then
+    echo "${NO_PCR_BAD_MSG}"
+    exit 1
+fi
+
+    diff -u "${PCRS_GOOD_SRC}" "${PCRS_BAD_SRC}" | sed -n 's&^-PCR-\([0-9]\+\):\( [0-9A-F]\{2\}\)\+&\1&p' | while read PCR_CHANGED; do
+        echo "${PCRS_SEALED}" | grep -q "${PCR_CHANGED}"
+        if [ $? -eq 1 ]; then
+            continue
+        fi
+        case "${PCR_CHANGED}" in
+            0)  echo "${PCR_00_MSG}" ;;
+            1)  echo "${PCR_01_MSG}" ;;
+            2)  echo "${PCR_02_MSG}" ;;
+            3)  echo "${PCR_03_MSG}" ;;
+            15) echo "${PCR_15_MSG}" ;;
+            17) echo "${PCR_17_MSG}" ;;
+            18) echo "${PCR_18_MSG}" ;;
+            19) echo "${PCR_19_MSG}" ;;
+            *)  echo -n "PCR[${PCR_CHANGED}]: "
+                echo "${PCR_XX_MSG}"
+                ;;
+        esac
+    done
+    cat <<EOF
+
+======================================================
+
+NOTE:
+Change messages for PCRs 0-3  are derrived from section
+3.2.3 of the document titled "TCG PC Client Specific
+Implementation Specification For Conventional BIOS".
+A copy of this document can be obtained from the TCG
+website.
+
+Change messages for PCRs 17-19 are derrived from the
+documentation provided in the tboot source tree and
+the document titled "Intel® Trusted Execution Technology
+(Intel® TXT) Measured Launched Environment Developer’s
+Guide".  A copy of this document can be obtained from
+the Intel website.
+
+Please consult these documents for details on the
+contents of each PCR and the impact a change in these
+values may have on your system.
+EOF

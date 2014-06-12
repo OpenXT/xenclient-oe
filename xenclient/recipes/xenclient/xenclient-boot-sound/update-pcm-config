@@ -1,0 +1,120 @@
+#!/bin/sh
+#
+# Copyright (c) 2014 Citrix Systems, Inc.
+# 
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+# 
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+# 
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+#
+
+# PLAYBACK ----------------------------------------------------
+
+CARD=`db-read /audio/playback-pcm | cut -d- -f1`
+DEVICE=`db-read /audio/playback-pcm | cut -d- -f2`
+
+if [ "$CARD" = "" ]; then
+    # No playback pcm was saved in the db: we need to find default playback card
+    CARD=`cat /proc/asound/pcm | grep playback | grep -m 1 Analog | cut -d: -f1 | cut -d- -f1`
+    DEVICE=`cat /proc/asound/pcm | grep playback | grep -m 1 Analog | cut -d: -f1 | cut -d- -f2` 
+fi
+
+if [ "$CARD" = "" ]; then
+    # no Analog playback pcm, let's try without Analog constraint (HDMI)
+    CARD=`cat /proc/asound/pcm | grep -m 1 playback | cut -d: -f1 | cut -d- -f1`
+    DEVICE=`cat /proc/asound/pcm | grep -m 1 playback | cut -d: -f1 | cut -d- -f2`
+fi 
+
+if [ "$CARD" != "" ]; then
+    db-write /audio/playback-pcm $CARD-$DEVICE
+    echo PLAY PCM: $(( 10#$CARD ))-$(( 10#$DEVICE ))
+else
+    echo "No Playback PCM found in this system, fake 0,0"
+    CARD="0"
+    DEVICE="0"
+fi
+
+
+# CAPTURE ----------------------------------------------------
+
+CAPTURE_CARD=`db-read /audio/capture-pcm | cut -d- -f1`
+CAPTURE_DEVICE=`db-read /audio/capture-pcm | cut -d- -f2`
+
+if [ "$CAPTURE_CARD" = "" ]; then
+    CAPTURE_CARD=`cat /proc/asound/pcm | grep -m 1 capture | cut -d: -f1 | cut -d- -f1`
+    CAPTURE_DEVICE=`cat /proc/asound/pcm | grep -m 1 capture | cut -d: -f1 | cut -d- -f2`
+fi
+
+if [ "$CAPTURE_CARD" != "" ]; then
+    db-write /audio/capture-pcm $CAPTURE_CARD-$CAPTURE_DEVICE
+    echo CAPT PCM: $(( 10#$CAPTURE_CARD ))-$(( 10#$CAPTURE_DEVICE))
+else
+    echo "No Capture PCM found in this system, fake 0,0"
+    CAPTURE_CARD="0"
+    CAPTURE_DEVICE="0" 
+fi
+
+
+# Generate Config file now -------------------------------------
+
+cat <<EOF > /etc/asound/asound.conf
+ctl.!default {
+	type hw           
+	card $(( 10#$CARD ))
+}
+
+pcm.asym0 {
+    type asym
+    playback.pcm "dmix0"
+    capture.pcm "dsnoop0"
+}
+
+pcm.dmix0 {
+    type dmix
+    ipc_key 1024
+    ipc_perm 0666
+    slave {
+        pcm {
+            type hw
+            card $(( 10#$CARD )) 
+            device $(( 10#$DEVICE ))
+            subdevice 0
+        }
+        period_size 1024
+        buffer_size 8192
+        format "S16_LE"
+        periods 8
+        rate 44100
+        channels 2
+    }
+}
+
+pcm.dsnoop0 {
+    type dsnoop
+    ipc_key 1025
+    ipc_perm 0666
+    slave {
+        pcm {
+            type hw
+            card $(( 10#$CAPTURE_CARD ))
+            device $(( 10#$CAPTURE_DEVICE ))
+            subdevice 0
+        }
+        period_size 1024
+        buffer_size 8192
+        format "S16_LE"
+        periods 8
+        rate 44100
+        channels 2
+    }
+}
+EOF

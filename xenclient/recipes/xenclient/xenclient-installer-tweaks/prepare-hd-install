@@ -1,0 +1,292 @@
+#!/bin/ash
+#
+# Copyright (c) 2010 Citrix Systems, Inc.
+# 
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+# 
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+# 
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+#
+
+#------------------------------------------------------------------------------
+
+SOURCE_MOUNT="/mnt/source"
+TARGET_MOUNT="/mnt/target"
+PACKAGES_DIR="packages.main"
+ISOLINUX_DIR="isolinux"
+ISOLINUX_CFG_FILE="isolinux.cfg"
+ISOLINUX_ONLY_FILES="boot.cat isolinux.bin"
+SYSLINUX_DIR="syslinux"
+SYSLINUX_CFG_FILE="syslinux.cfg"
+LDLINUX_FILE="ldlinux.sys"
+TARGET_ANSWER_FILE="custom.ans"
+
+#------------------------------------------------------------------------------
+
+read_arguments()
+{
+    SOURCE_ANSWER_FILE=
+    ERASE_TARGET=
+    FORCE=
+    INSTALL_BOOTLOADER=true
+
+    while getopts a:ef OPT
+    do
+        case ${OPT} in
+            a) SOURCE_ANSWER_FILE=${OPTARG} ;;
+            e) ERASE_TARGET=true ;;
+            f) FORCE=true ;;
+            n) INSTALL_BOOTLOADER= ;;
+            *) usage ;;
+        esac
+    done
+
+    shift $((OPTIND - 1))
+
+    [ $# -eq 2 ] || usage
+
+    SOURCE_DEV="$1"
+    TARGET_DEV="$2"
+
+    [ -b "${SOURCE_DEV}" -o -f "${SOURCE_DEV}" ] ||
+        fail "Error: CD-ROM device '${SOURCE_DEV}' does not exist."
+
+    [ -b "${TARGET_DEV}" ] ||
+        fail "Error: Target device '${TARGET_DEV}' does not exist."
+}
+
+usage()
+{
+    SCRIPT_NAME=$(basename $0)
+
+    cat <<EOF >&2
+Usage: ${SCRIPT_NAME} [-a answerfile] [-e] [-f] [-n] cdrom_dev target_dev
+
+Prepares a bootable hard disk partition containing the XenClient installer.
+
+Options:
+
+  -a          use specified answerfile (will be copied to target partition)
+  -e          erase target partition (if not, must be formatted as FAT32)
+  -f          don't prompt for confirmation before erasing target partition
+  -n          don't install bootloader on target partition
+
+Arguments:
+
+  cdrom_dev   CD-ROM device or ISO image containing XenClient installation CD,
+              e.g. /dev/sr0
+  target_dev  target partition, e.g. /dev/sda1
+
+Example:
+
+  ${SCRIPT_NAME} -e /dev/sr0 /dev/sda1
+
+EOF
+
+    exit 1
+}
+
+check_mounts()
+{
+    mount | grep -q "^${SOURCE_DEV} " &&
+        fail "Error: CD-ROM device '${SOURCE_DEV}' is currently mounted." \
+             "Please unmount it first."
+
+    mount | grep -q "^${TARGET_DEV} " &&
+        fail "Error: Target device '${TARGET_DEV}' is currently mounted." \
+             "Please unmount it first."
+}
+
+confirm_erase()
+{
+    tty > /dev/null || return 0
+
+    echo "Warning: All data on target partition '${TARGET_DEV}' will be erased."
+    echo -n "Continue (y/n)? "
+    read INPUT
+
+    case "${INPUT}" in y*)
+        echo
+        return 0
+    esac
+
+    fail "Aborted."
+}
+
+mount_source()
+{
+    echo "Mounting CD-ROM device..."
+
+    mkdir -p "${SOURCE_MOUNT}"
+
+    MOUNT_OPTIONS="-t iso9660"
+
+    [ -f "${SOURCE_DEV}" ] && MOUNT_OPTIONS="${MOUNT_OPTIONS} -o loop"
+
+    mount ${MOUNT_OPTIONS} "${SOURCE_DEV}" "${SOURCE_MOUNT}" ||
+        fail "Error: Failed to mount CD-ROM device '${SOURCE_DEV}'."
+
+    [ -r "${SOURCE_MOUNT}/${PACKAGES_DIR}" -a \
+      -r "${SOURCE_MOUNT}/${ISOLINUX_DIR}" ] ||
+        fail "Error: CD-ROM device '${SOURCE_DEV}' does not contain a" \
+             "XenClient installation CD."
+}
+
+unmount_source()
+{
+    echo "Unmounting CD-ROM device..."
+
+    umount "${SOURCE_MOUNT}" ||
+        fail "Error: Failed to unmount CD-ROM device '${SOURCE_DEV}'."
+}
+
+erase_target()
+{
+    echo "Formatting target device..."
+
+    mkfs.vfat -F32 -n XC_INSTALL "${TARGET_DEV}" > /dev/null ||
+        fail "Error: Failed to format target device '${TARGET_DEV}'."
+}
+
+mount_target()
+{
+    echo "Mounting target device..."
+
+    mkdir -p "${TARGET_MOUNT}"
+
+    mount -t vfat "${TARGET_DEV}" "${TARGET_MOUNT}" ||
+        fail "Error: Failed to mount target device '${TARGET_DEV}'." \
+             "Please check that it contains a FAT32 filesystem."
+}
+
+unmount_target()
+{
+    echo "Unmounting target device..."
+
+    umount "${TARGET_MOUNT}" ||
+        fail "Error: Failed to unmount target device '${TARGET_DEV}'."
+}
+
+copy_installer()
+{
+    echo "Copying XenClient installer to target device..."
+
+    rm -rf "${TARGET_MOUNT}/${SYSLINUX_DIR}" "${TARGET_MOUNT}/${LDLINUX_FILE}"
+
+    cp -r "${SOURCE_MOUNT}/${ISOLINUX_DIR}" "${TARGET_MOUNT}/${SYSLINUX_DIR}" ||
+        fail "Error: Failed to copy XenClient installer to target device."
+
+    for FILE in ${ISOLINUX_ONLY_FILES} ; do
+        rm -f "${TARGET_MOUNT}/${SYSLINUX_DIR}/${FILE}"
+    done
+
+    mv "${TARGET_MOUNT}/${SYSLINUX_DIR}/${ISOLINUX_CFG_FILE}" \
+       "${TARGET_MOUNT}/${SYSLINUX_DIR}/${SYSLINUX_CFG_FILE}"
+
+    TARGET_DEV_NAME=${TARGET_DEV#/dev/}
+
+    sed -i \
+        -e "s|eject_cdrom=[^ ]* ||" \
+        -e "s|\(--- .* \)\(---\)|\1source_dev=${TARGET_DEV_NAME} \2|" \
+        "${TARGET_MOUNT}/${SYSLINUX_DIR}/${SYSLINUX_CFG_FILE}"
+
+    if [ "${SOURCE_ANSWER_FILE}" ] ; then
+        ANSWER_FILE_OPTION="dev://${TARGET_DEV#/dev/}/${TARGET_ANSWER_FILE}"
+
+        sed -i "s|answerfile=[^ ]* |answerfile=${ANSWER_FILE_OPTION} |g" \
+            "${TARGET_MOUNT}/${SYSLINUX_DIR}/${SYSLINUX_CFG_FILE}"
+
+        cp "${SOURCE_ANSWER_FILE}" "${TARGET_MOUNT}/${TARGET_ANSWER_FILE}" ||
+            fail "Error: Failed to copy answerfile '${SOURCE_ANSWER_FILE}'" \
+                 "to target device."
+    else
+        sed -i \
+            -e "s/cd-only.ans/hard-disk-only.ans/" \
+            -e "s/auto-cd.ans/auto-hard-disk.ans/" \
+            "${TARGET_MOUNT}/${SYSLINUX_DIR}/${SYSLINUX_CFG_FILE}"
+    fi
+}
+
+copy_packages()
+{
+    echo "Copying XenClient packages to target device..."
+
+    rm -rf "${TARGET_MOUNT}/${PACKAGES_DIR}"
+
+    cp -r "${SOURCE_MOUNT}/${PACKAGES_DIR}" "${TARGET_MOUNT}" ||
+        fail "Error: Failed to copy XenClient packages."
+}
+
+install_bootloader()
+{
+    echo "Installing SYSLINUX bootloader on target device..."
+
+    syslinux -f "${TARGET_DEV}" ||
+        fail "Error: Failed to install SYSLINUX bootloader."
+
+    echo "Marking target device bootable..."
+
+    DISK_DEV=$(echo "${TARGET_DEV}" | sed 's/[0-9]*$//')
+    PARTITION_NUM=$(echo "${TARGET_DEV}" | sed 's/^.*[a-z]//')
+
+    run_sfdisk -A"${PARTITION_NUM}" "${DISK_DEV}" ||
+        fail "Error: Failed to mark target device bootable."
+}
+
+run_sfdisk()
+{
+    TEMP_FILE=$(mktemp)
+
+    sfdisk "$@" > /dev/null 2> ${TEMP_FILE}
+    STATUS=$?
+
+    grep -v -e "^$\|^Done$" ${TEMP_FILE} >&2
+    rm -f ${TEMP_FILE}
+
+    return ${STATUS}
+}
+
+fail()
+{
+    echo "$@" >&2
+
+    umount "${SOURCE_MOUNT}" 2>/dev/null
+    umount "${TARGET_MOUNT}" 2>/dev/null
+
+    exit 1
+}
+
+#------------------------------------------------------------------------------
+
+read_arguments "$@"
+
+check_mounts
+
+[ "${ERASE_TARGET}" -a -z "${FORCE}" ] && confirm_erase
+
+mount_source
+
+[ "${ERASE_TARGET}" ] && erase_target
+
+mount_target
+
+copy_installer
+
+copy_packages
+
+unmount_target
+
+unmount_source
+
+[ "${INSTALL_BOOTLOADER}" ] && install_bootloader
+
+echo "Finished."

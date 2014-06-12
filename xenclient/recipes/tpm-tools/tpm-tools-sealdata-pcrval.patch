@@ -1,0 +1,60 @@
+Index: tpm-tools-1.3.1/src/cmds/tpm_sealdata.c
+===================================================================
+--- tpm-tools-1.3.1.orig/src/cmds/tpm_sealdata.c	2007-11-21 19:47:20.000000000 +0000
++++ tpm-tools-1.3.1/src/cmds/tpm_sealdata.c	2010-11-08 07:53:33.000000000 +0000
+@@ -44,6 +44,7 @@
+ static char in_filename[PATH_MAX] = "", out_filename[PATH_MAX] = "";
+ static TSS_HPCRS hPcrs = NULL_HPCRS;
+ static TSS_HTPM hTpm;
++static BYTE *selectedPcrsValue[24] = { NULL, };
+ static UINT32 selectedPcrs[24];
+ static UINT32 selectedPcrsLen = 0;
+ static BOOL passUnicode = FALSE;
+@@ -69,8 +70,35 @@
+ 		break;
+ 	case 'p':
+ 		if (aArg) {
+-			selectedPcrs[selectedPcrsLen++] = atoi(aArg);
++			char *pcr_val;
++			BYTE *content;
++			int i, skip;
+ 			rc = 0;
++			pcr_val = strchr(aArg, ':');
++			if (pcr_val) {
++				pcr_val++;
++				if (strlen(pcr_val) == 40) {
++					skip = 2;
++					goto parse;
++				} else if (strlen(pcr_val) == 59) {
++					skip = 3;
++				parse:
++					content = malloc(20);
++					if (content == NULL)
++						goto p_fail;
++					selectedPcrsValue[selectedPcrsLen] =
++						content;
++					for (i = 0; i < 20; i++) {
++						unsigned int v;
++						sscanf(&pcr_val[i * skip], "%2X", &v);
++						content[i] = v;
++					}
++				} else {
++				p_fail:
++					rc = -1;
++				}
++			}
++			selectedPcrs[selectedPcrsLen++] = atoi(aArg);
+ 		}
+ 		break;
+ 	case 'u':
+@@ -177,6 +205,10 @@
+ 			goto out_close;
+ 
+ 		for (i = 0; i < selectedPcrsLen; i++) {
++			if (selectedPcrsValue[i]) {
++				pcrValue = selectedPcrsValue[i];
++				pcrSize = 20;
++			} else
+ 			if (tpmPcrRead(hTpm, selectedPcrs[i], &pcrSize, &pcrValue) != TSS_SUCCESS)
+ 				goto out_close;
+ 

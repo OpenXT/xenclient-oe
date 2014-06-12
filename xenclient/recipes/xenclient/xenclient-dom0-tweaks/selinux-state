@@ -1,0 +1,67 @@
+#!/bin/sh
+#
+# Copyright (c) 2014 Citrix Systems, Inc.
+# 
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+# 
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+# 
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+#
+
+# get labels for OS objects backing vbds assigned to VM
+devlabel_print () {
+	local domid=$1
+	for vbd_number in $(xenstore-list /local/domain/$domid/device/vbd); do
+		local backend=$(xenstore-read /local/domain/$domid/device/vbd/$vbd_number/backend)
+		local device=$(xenstore-read $backend/loop-device 2> /dev/null)
+		if [ -z $device ]; then
+			device=$(xenstore-read $backend/params)
+		fi
+		printf "  %-25s : %s\n" "$(stat --format=%n ${device})" "$(stat --format=%C ${device})"
+	done
+}
+echo "--------------------SELinux Status--------------------"
+echo -e "\n Config:"
+cat /etc/selinux/config
+echo -e "\n sestatus:"
+sestatus
+echo -e "\n------------------------------------------------------"
+echo -e "\n------------------sVirt SELinux Info------------------\n"
+for domid in $(xec list-domids | sort); do
+	stubdom=$(xec-vm --domid $domid get stubdom)
+	category=$(xenstore-read /local/domain/$domid/selinux-mcs 2> /dev/null)
+	name=$(xec-vm --domid $domid get name)
+	uuid=$(xec-vm --domid $domid get uuid)
+	if [ ! -z $category ]; then
+		pid=$(pgrep -f "^/usr/lib/xen/bin/qemu-dm.*\-d $domid.*$")
+		label=$(ps -wwp $pid -o label=)
+	else
+		category="N/A"
+		pid="N/A"
+		label="N/A"
+	fi
+
+	printf "%-27s : %s\n" "VM data for UUID" "$uuid"
+	printf " %-26s : %s\n" "VM Name" "$name"
+	printf " %-26s : %s\n" "Domain ID" "$domid"
+	printf " %-26s : %s\n" "Stubdom" "$stubdom"
+	printf " %-26s : %s\n" "SELinux Category" "$category"
+	printf " %-26s : %s\n" "QEMU Context" "$label"
+	if [ "$stubdom" = "false" ]; then
+		printf " %-26s\n" "Block device labels"
+		devlabel_print $domid
+	else
+		printf " %-26s : %s\n" "Block device labels" "N/A"
+	fi
+	echo ""
+done
+echo "------------------------------------------------------"

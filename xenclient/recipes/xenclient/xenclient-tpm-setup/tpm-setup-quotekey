@@ -1,0 +1,32 @@
+#! /bin/sh
+#
+# Copyright (c) 2010 Citrix Systems, Inc.
+# 
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+# 
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+# 
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+#
+
+cd /boot/system/tpm
+
+pidof tcsd >/dev/null && tcsd_running=yes
+
+[ -e quotekey ] && { echo $0: quotekey already exists; exit 1; }
+
+[ -n "$tcsd_running" ] || tcsd
+
+tpm_createsignkey -z -o quotekey
+openssl asn1parse -genconf quotekey.conf -noout -out quotekey-pub.der
+openssl rsa -in quotekey-pub.der -pubin -inform DER -out quotekey-pub.pem 2>/dev/null
+
+[ -n "$tcsd_running" ] || killall tcsd 2>/dev/null

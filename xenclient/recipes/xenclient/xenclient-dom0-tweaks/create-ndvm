@@ -1,0 +1,88 @@
+#!/bin/sh
+#
+# Copyright (c) 2013 Citrix Systems, Inc.
+# 
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+# 
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+# 
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+#
+
+usage()
+{
+    cat <<EOF >&2
+Usage: $(basename $0) NEW_VM_NAME
+
+Creates a new NDVM. Please refer to the XenClient XT documentation for details
+on how to configure which network devices are passed through to this NDVM.
+
+EOF
+
+    exit 1
+}
+
+die()
+{
+    echo "$(basename $0): $*" >&2
+    exit 1
+}
+
+[ $# -eq 1 ] || usage
+
+NAME="$1"
+
+case "$NAME" in
+    */*|.|..) die "name '$NAME' is not valid" ;;
+esac
+
+xec-vm -n "$NAME" > /dev/null 2>&1 &&
+    die "VM '$NAME' already exists"
+
+VM=$(xec create-vm-with-template new-vm-ndvm) ||
+    die "failed to create VM"
+
+xec -o "$VM" -i com.citrix.xenclient.xenmgr.vm.unrestricted \
+    set policy-modify-vm-settings true ||
+    die "failed to set policy-modify-vm-settings"
+
+xec -o "$VM" set name "$NAME" ||
+    die "failed to set VM name"
+
+xec -o "$VM" set icbinn-path "/config/certs/$NAME" ||
+    die "failed to set icbinn-path"
+
+VHD=$(xec create-vhd 256) ||
+    die "failed to create swap VHD"
+
+DEV=$(tap-ctl create -a "vhd:$VHD") ||
+    die "failed to open swap VHD"
+
+mkswap "$DEV" > /dev/null ||
+    die "failed to format swap VHD"
+
+tap-ctl destroy -d "$DEV" ||
+    die "failed to close swap VHD"
+
+DISK=$(xec -o "$VM" add-disk) ||
+    die "failed to add disk"
+
+xec -o "$DISK" set virt-path xvda2 ||
+    die "failed to update disk virt-path"
+
+xec -o "$DISK" attach-vhd "$VHD" ||
+    die "failed to attach swap VHD"
+
+xec -o "$VM" -i com.citrix.xenclient.xenmgr.vm.unrestricted \
+    set policy-modify-vm-settings false ||
+    die "failed to set policy-modify-vm-settings"
+
+echo "$VM"

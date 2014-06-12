@@ -1,0 +1,241 @@
+#!/bin/bash
+#
+# Copyright (c) 2014 Citrix Systems, Inc.
+# 
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+# 
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+# 
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+#
+
+description="Script for uploading status reports to Citrix Tools as a Service"
+
+taasUrl='https://taas.citrix.com'
+operation='interactive'
+username=''
+password=''
+filepath=''
+caseid=''
+debug=false
+
+RED="[01;31m"
+GREEN="[01;32m"
+YELLOW="[01;33m"
+BLUE="[01;34m"
+PURPLE="[01;35m"
+END="[0m"
+
+if [ "$#" -eq "0" ]; then
+	echo "${description}"
+	echo "Usage: `basename $0` [options...] [file]"
+	echo "Options:"
+	echo "-o <operation> (interactive* | getlegal | agreelegal | resetlegal | upload)"
+	echo "-u <username>"
+	echo "-p <password>"
+	echo "-c <caseid>"
+	echo "-d[ebug]"
+	exit 85
+fi  
+
+while getopts ":o:u:p:c:d" Option; do
+  	case "$Option" in
+		o ) operation="${OPTARG}";;
+		u ) username="${OPTARG}";;
+		p ) password="${OPTARG}";;
+		c ) caseid="${OPTARG}";;
+		d ) debug=true;;
+	esac
+done
+
+shift $[${OPTIND} - 1]
+filepath="${1}"
+
+if [ "${operation}" = "upload" -o "${operation}" = "interactive" ]; then
+	if [ -z "${filepath}" ]; then
+		echo "Please supply a file"
+		exit 1
+	fi
+	if [ ! -f "${filepath}" ]; then
+		echo "Supplied file does not exist"
+		exit 1
+	fi
+fi
+
+if [ -z "${username}" -a "${operation}" = "interactive" ]; then
+	read -p "Enter your My Citrix username: " username
+fi
+if [ -z "${username}" ]; then
+	echo "Please supply a My Citrix username"
+	exit 1
+fi
+
+if [ -z "${password}" -a "${operation}" = "interactive" ]; then
+	read -s -p "Enter your My Citrix password: " password
+	echo
+fi
+if [ -z "${password}" ]; then
+	echo "Please supply a My Citrix password"
+	exit 1
+fi
+
+if [ "${operation}" = "interactive" ]; then
+	if [ -z "${caseid}" ]; then
+		read -p "Enter your case ID: " caseid
+	fi
+	if ! [[ "${caseid}" =~ ^[0-9]{8}$ ]] ; then
+		echo "Please supply a case ID with 8 digits"
+		exit 1
+	fi
+fi
+
+cookieSet=false
+cookieName=$(mktemp)
+responseName=$(mktemp)
+chunkName=$(mktemp)
+
+cleanup() {
+	rm -f "${cookieName}"
+	rm -f "${responseName}"
+	rm -f "${chunkName}"
+}
+trap cleanup EXIT
+
+sendData() {
+	local url="${taasUrl}/${1}"
+	local data=${2}
+	local error=""
+
+	if [ "${debug}" = "true" ]; then
+		echo "${GREEN}Request:${END} ${url}"
+	fi
+
+	if [ "${cookieSet}" = "false" ]; then
+		url="${url}&taasCitrixUser=${username}&taasCitrixPassword=${password}"
+		cookieSet=true
+		local status=$(curl -k -s -X POST -c "${cookieName}" -H "Content-Length: 0" -o "${responseName}" -w %{http_code} "${url}")
+	elif [ -z "${data}" ]; then
+		local status=$(curl -k -s -X POST -b "${cookieName}" -H "Content-Length: 0" -o "${responseName}" -w %{http_code} "${url}")
+	else
+		local status=$(curl -k -s -X POST -b "${cookieName}" --data-binary "@${data}" -o "${responseName}" -w %{http_code} "${url}")
+	fi
+
+	urlResult=$(cat "${responseName}")
+
+	case "${status}" in
+		200|202 ) error="";;
+		000|289 ) error="Network issue detected, please check your internet connection.";;
+		299|400 ) error="A generic error occurred, please check your case ID.";;
+		401|403 ) error="User unauthorized, please check your My Citrix credentials.";;
+	esac
+
+	if [ -z "${error}" ]; then
+		if [ "${debug}" = "true" ]; then
+			echo "${BLUE}Response:${END} [${status}] ${urlResult}"
+		fi	
+	else
+		echo "${error}"
+		echo "Error returned: [${status}] ${urlResult}"
+		exit 1
+	fi
+}
+
+agreeLegal() {
+	local legalVersion=${1}
+
+	cookieSet=false
+	sendData "legal/setagree?format=text&version=${legalVersion}&agree=yes"
+	echo "Legal terms agreed (version: ${legalVersion})" 
+}
+
+upload() {
+	local filepath=${1}
+	local caseid=${2}
+
+	local md5=""
+    local filesize=$(stat -c%s "${filepath}")
+	local readablesize=$(du -h "${filepath}" | grep -o '^\S*')
+    local chunksize=$[256*1024]
+    local chunks=$[(${filesize}-1)/${chunksize}+1]
+    local filename=${filepath##*/}
+    filename=${filename// /_}
+
+	sendData "upload?cid=${caseid}&fn=${filename}&bytes=${filesize}&tz=UTC"
+	local transaction=${urlResult#"Ok tid="}
+
+	echo "Uploading ${filename} (${readablesize})"
+
+	for ((i=0; i < ${chunks} ; i++)); do
+	    dd count=1 skip=${i} ibs=${chunksize} if="${filepath}" of="${chunkName}" 2> /dev/null
+	    md5=$(md5sum -b "${chunkName}" | grep -o '^\S*')
+
+	    echo -n "Chunk $[${i}+1] of ${chunks}..."
+	    sendData "upload?tid=${transaction}&idx=${i}&v=${md5}" "${chunkName}"
+	    echo "Done"
+	done
+
+	md5=$(md5sum -b "${filepath}" | grep -o '^\S*')
+
+	echo -n "Completing upload..."
+	sendData "upload?tid=${transaction}&v=${md5}"
+	echo "Done"
+}
+
+sendData "legal?format=text"
+legalHtml=$(echo "${urlResult}" | sed '/version=/d')
+legalVersion=$(echo "${urlResult}" | grep -o -m1 '[0-9]*$')
+
+if [ "${operation}" = "resetlegal" ]; then
+	sendData "legal/setagree?format=text&version=${legalVersion}&agree=no"
+	echo "Legal terms reset"
+	exit 0
+fi
+
+sendData "legal/getagree?format=text"
+agreedVersion=$(echo "${urlResult}" | grep -o -m1 '[0-9]*$')
+
+if [ "${operation}" = "getlegal" ]; then
+	echo "Terms: ${legalHtml}"
+	echo "Version: ${legalVersion}"
+	echo "Agreed: ${agreedVersion}"
+	exit 0
+fi
+
+if [ "${operation}" = "agreelegal" ]; then
+	agreeLegal "${legalVersion}"
+	exit 0
+fi
+
+if [ "${agreedVersion}" -lt "${legalVersion}" ]; then
+	echo "You must agree to the latest version of the legal terms"
+
+	if [ "${operation}" = "upload" ]; then
+		exit 1
+	fi
+
+	echo "${legalHtml}"
+	echo -n "Do you agree? [y/n]: "
+
+	read -n 1 agree
+	echo
+
+	if [ "${agree}" = "y" ]; then
+		agreeLegal "${legalVersion}"
+	else
+		echo "Legal terms declined"
+		exit 1
+	fi
+fi
+
+upload "${filepath}" "${caseid}"
+
+cleanup
+exit 0

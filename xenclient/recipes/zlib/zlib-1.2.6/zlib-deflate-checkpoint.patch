@@ -1,0 +1,143 @@
+diff --git a/deflate.c b/deflate.c
+index 8bd480e..108a805 100644
+--- a/deflate.c
++++ b/deflate.c
+@@ -1963,3 +1963,98 @@ local block_state deflate_huff(s, flush)
+         FLUSH_BLOCK(s, 0);
+     return block_done;
+ }
++
++#define FWRITE(p,s,f)					\
++	do {						\
++		if (fwrite((p), (s), 1, (f)) != 1)	\
++			return (-1);			\
++	} while (0)
++
++int
++save_deflate_checkpoint(FILE *f, z_streamp strm)
++{
++	deflate_state *ds;
++	ptrdiff_t offset;
++
++	FWRITE(strm, sizeof (*strm), f);
++
++	ds = (deflate_state *)strm->state;
++	FWRITE(ds, sizeof (*ds), f);
++
++	FWRITE(ds->window, ds->w_size * 2 * sizeof(Byte), f);
++	FWRITE(ds->prev, ds->w_size * sizeof(Pos), f);
++	FWRITE(ds->head, ds->hash_size * sizeof(Pos), f);
++	FWRITE(ds->pending_buf, ds->pending_buf_size, f);
++
++	offset = (ptrdiff_t)((char *)ds->pending_out - (char *)ds->pending_buf);
++	FWRITE(&offset, sizeof (offset), f);
++
++	return (0);
++}
++
++#define FREAD(p,s,f)					\
++	do {						\
++		if (fread((p), (s), 1, (f)) != 1)	\
++			goto fail;			\
++	} while (0)
++
++extern void _tr_load_deflate_checkpoint(deflate_state *ds);
++
++int
++load_deflate_checkpoint(FILE *f, z_streamp *zs)
++{
++	z_streamp strm;
++	deflate_state *ds = NULL;
++	ptrdiff_t offset;
++	ssize_t sz;
++
++	if ((strm = malloc(sizeof (*strm))) == NULL)
++		goto fail;
++	FREAD(strm, sizeof (*strm), f);
++	strm->zalloc = zcalloc;
++	strm->zfree = zcfree;
++	strm->msg = NULL;
++
++	if ((ds = calloc(1, sizeof (*ds))) == NULL)
++		goto fail;
++	strm->state = ds;
++	FREAD(ds, sizeof (*ds), f);
++	ds->strm = strm;
++
++	sz = ds->w_size * 2 * sizeof(Byte);
++	ds->window = malloc(sz);
++	FREAD(ds->window, sz, f);
++
++	sz = ds->w_size * sizeof(Pos);
++	ds->prev = malloc(sz);
++	FREAD(ds->prev, sz, f);
++
++	sz = ds->hash_size * sizeof(Pos);
++	ds->head = malloc(sz);
++	FREAD(ds->head, sz, f);
++
++	sz = ds->lit_bufsize * (sizeof (ush) + 2);
++	ds->pending_buf = malloc(sz);
++	FREAD(ds->pending_buf, ds->pending_buf_size, f);
++
++	FREAD(&offset, sizeof (offset), f);
++	ds->pending_out = (void *)((char *)ds->pending_buf + offset);
++
++	ds->d_buf = (ushf *)ds->pending_buf + ds->lit_bufsize/sizeof(ush);
++	ds->l_buf = ds->pending_buf + (1+sizeof(ush))*ds->lit_bufsize;
++
++	_tr_load_deflate_checkpoint(ds);
++
++	*zs = strm;
++	return (0);
++fail:
++	free(strm);
++	if (ds != NULL) {
++		free(ds->window);
++		free(ds->prev);
++		free(ds->head);
++		free(ds->pending_buf);
++		free(ds);
++	}
++	return (-1);
++}
+diff --git a/trees.c b/trees.c
+index 8c32b21..72e8426 100644
+--- a/trees.c
++++ b/trees.c
+@@ -375,6 +375,21 @@ void gen_trees_header()
+ }
+ #endif /* GEN_TREES_H */
+ 
++void _tr_load_deflate_checkpoint(s)
++    deflate_state *s;
++{
++    tr_static_init();
++
++    s->l_desc.dyn_tree = s->dyn_ltree;
++    s->l_desc.stat_desc = &static_l_desc;
++
++    s->d_desc.dyn_tree = s->dyn_dtree;
++    s->d_desc.stat_desc = &static_d_desc;
++
++    s->bl_desc.dyn_tree = s->bl_tree;
++    s->bl_desc.stat_desc = &static_bl_desc;
++}
++
+ /* ===========================================================================
+  * Initialize the tree data structures for a new zlib stream.
+  */
+diff --git a/zlib.h b/zlib.h
+index 79142d1..2dbd4f6 100644
+--- a/zlib.h
++++ b/zlib.h
+@@ -1725,6 +1725,9 @@ ZEXTERN int            ZEXPORT deflateResetKeep OF((z_streamp));
+   ZEXTERN unsigned long  ZEXPORT gzflags          OF((void));
+ #endif
+ 
++ZEXTERN int	ZEXPORT save_deflate_checkpoint OF((FILE *, z_streamp));
++ZEXTERN int	ZEXPORT load_deflate_checkpoint OF((FILE *, z_streamp *));
++
+ #ifdef __cplusplus
+ }
+ #endif

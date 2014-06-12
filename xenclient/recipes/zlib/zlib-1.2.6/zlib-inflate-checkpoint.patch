@@ -1,0 +1,134 @@
+diff -r 8ef9d0e1491b inflate.c
+--- a/inflate.c
++++ b/inflate.c
+@@ -80,6 +80,8 @@
+  * The history for versions after 1.2.0 are in ChangeLog in zlib distribution.
+  */
+ 
++#include <stdio.h>
++
+ #include "zutil.h"
+ #include "inftrees.h"
+ #include "inflate.h"
+@@ -1468,6 +1470,100 @@
+ #endif
+ }
+ 
++#define FWRITE(p,s,f)					\
++	do {						\
++		if (fwrite((p), (s), 1, (f)) != 1)	\
++			return (-1);			\
++	} while (0)
++
++int
++save_inflate_checkpoint(FILE *f, z_streamp strm)
++{
++	struct inflate_state *state;
++	ptrdiff_t offset;
++	int winsize;
++
++	FWRITE(strm, sizeof (*strm), f);
++
++	state = (struct inflate_state *)strm->state;
++	FWRITE(state, sizeof (*state), f);
++
++	/* 
++	 * The lencode, distcode and next fields are pointers into the 
++	 * codes array contained within state. Save their offsets from codes
++	 * so that the pointers can be reconstructed on load.
++	 */
++	offset = (ptrdiff_t)((char *)state->lencode - (char *)state->codes);
++	FWRITE(&offset, sizeof (offset), f);
++
++	offset = (ptrdiff_t)((char *)state->distcode - (char *)state->codes);
++	FWRITE(&offset, sizeof (offset), f);
++
++	offset = (ptrdiff_t)((char *)state->next - (char *)state->codes);
++	FWRITE(&offset, sizeof (offset), f);
++
++	winsize = (state->window != NULL) ? 1 << state->wbits : 0;
++	FWRITE(&winsize, sizeof (winsize), f);
++	if (winsize)
++		FWRITE(state->window, winsize, f);
++
++	return (0);
++}
++
++#define FREAD(p,s,f)					\
++	do {						\
++		if (fread((p), (s), 1, (f)) != 1)	\
++			goto fail;			\
++	} while (0)
++
++int
++load_inflate_checkpoint(FILE *f, z_streamp *zs)
++{
++	z_streamp strm;
++	struct inflate_state *state = NULL;
++	ptrdiff_t offset;
++	int winsize;
++
++	if ((strm = malloc(sizeof (*strm))) == NULL)
++		goto fail;
++	FREAD(strm, sizeof (*strm), f);
++	strm->zalloc = zcalloc;
++	strm->zfree = zcfree;
++	strm->msg = NULL;
++
++	if ((state = malloc(sizeof (*state))) == NULL)
++		goto fail;
++	state->window = NULL;
++	strm->state = (struct internal_state *)state;
++	FREAD(state, sizeof (*state), f);
++
++	FREAD(&offset, sizeof (offset), f);
++	state->lencode = (void *)((char *)state->codes + offset);
++
++	FREAD(&offset, sizeof (offset), f);
++	state->distcode = (void *)((char *)state->codes + offset);
++
++	FREAD(&offset, sizeof (offset), f);
++	state->next = (void *)((char *)state->codes + offset);
++
++	FREAD(&winsize, sizeof (winsize), f);
++	if (winsize) {
++		if ((state->window = malloc(winsize)) == NULL)
++			goto fail;
++		FREAD(state->window, winsize, f);
++	}
++
++	*zs = strm;
++	return (0);
++fail:
++	free(strm);
++	if (state != NULL) {
++		free(state->window);
++		free(state);
++	}
++	return (-1);
++}
++
+ long ZEXPORT inflateMark(strm)
+ z_streamp strm;
+ {
+diff -r 8ef9d0e1491b zlib.h
+--- a/zlib.h
++++ b/zlib.h
+@@ -31,6 +31,7 @@
+ #ifndef ZLIB_H
+ #define ZLIB_H
+ 
++#include <stdio.h>
+ #include "zconf.h"
+ 
+ #ifdef __cplusplus
+@@ -1473,6 +1474,9 @@
+ ZEXTERN const uLongf * ZEXPORT get_crc_table    OF((void));
+ ZEXTERN int            ZEXPORT inflateUndermine OF((z_streamp, int));
+ 
++ZEXTERN int	ZEXPORT save_inflate_checkpoint OF((FILE *, z_streamp));
++ZEXTERN int	ZEXPORT load_inflate_checkpoint OF((FILE *, z_streamp *));
++
+ #ifdef __cplusplus
+ }
+ #endif

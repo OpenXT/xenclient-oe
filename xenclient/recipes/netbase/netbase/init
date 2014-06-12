@@ -1,0 +1,115 @@
+#!/bin/sh
+#
+# Copyright (c) 2012 Citrix Systems, Inc.
+# 
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+# 
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+# 
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+#
+
+#
+# manage network interfaces and configure some networking options
+
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+
+if ! [ -x /sbin/ifup ]; then
+    exit 0
+fi
+
+spoofprotect_rp_filter () {
+    # This is the best method: turn on Source Address Verification and get
+    # spoof protection on all current and future interfaces.
+    
+    if [ -e /proc/sys/net/ipv4/conf/all/rp_filter ]; then
+        for f in /proc/sys/net/ipv4/conf/*; do
+	    [ -e $f/rp_filter ] && echo 1 > $f/rp_filter
+        done
+        return 0
+    else
+        return 1
+    fi
+}
+
+spoofprotect () {
+    echo -n "Setting up IP spoofing protection: "
+    if spoofprotect_rp_filter; then
+        echo "rp_filter."
+    else
+        echo "FAILED."
+    fi
+}
+
+ip_forward () {
+    if [ -e /proc/sys/net/ipv4/ip_forward ]; then
+        echo -n "Enabling packet forwarding... "
+        echo 1 > /proc/sys/net/ipv4/ip_forward
+        echo "done."
+    fi
+}
+
+syncookies () {
+    if [ -e /proc/sys/net/ipv4/tcp_syncookies ]; then
+        echo -n "Enabling TCP/IP SYN cookies... "
+        echo 1 > /proc/sys/net/ipv4/tcp_syncookies
+        echo "done."
+    fi
+}
+
+doopt () {
+    optname=$1
+    default=$2
+    opt=`grep "^$optname=" /etc/network/options`
+    if [ -z "$opt" ]; then
+        opt="$optname=$default"
+    fi
+    optval=${opt#$optname=}
+    if [ "$optval" = "yes" ]; then
+        eval $optname
+    fi
+}
+
+case "$1" in
+    start)
+        echo -n "Configuring network interfaces... "
+        ifup -a
+        echo "done."
+        # /etc/sysctl.conf is preferred
+        if [ ! -f /etc/sysctl.conf ]; then
+          doopt spoofprotect yes
+          doopt syncookies no
+          doopt ip_forward no
+        fi
+        ;;
+    stop)
+        echo -n "Deconfiguring network interfaces... "
+        ifdown -a
+        echo "done."
+        ;;
+    force-reload|restart)
+        echo -n "Reconfiguring network interfaces... "
+        ifdown -a
+        ifup -a
+        echo "done."
+        ;;
+    *)
+        echo "Usage: /etc/init.d/networking {start|stop|restart|force-reload}"
+        exit 1
+        ;;
+esac
+
+exit 0
+

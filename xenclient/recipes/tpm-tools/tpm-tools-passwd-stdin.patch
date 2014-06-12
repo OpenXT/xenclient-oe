@@ -1,0 +1,263 @@
+Index: tpm-tools-1.3.1/include/tpm_utils.h
+===================================================================
+--- tpm-tools-1.3.1.orig/include/tpm_utils.h	2007-11-21 14:47:19.000000000 -0500
++++ tpm-tools-1.3.1/include/tpm_utils.h	2012-12-04 18:02:46.623256533 -0500
+@@ -81,13 +81,25 @@
+ 
+ #define _GETPASSWD	_getPasswd12
+ #define GETPASSWD	getPasswd12
++
++char *_getPasswdStdin12( int *a_iLen, BOOL a_uUseUnicode );
++char *getPasswdStdin12( int *a_iLen );
++
++#define _GETPASSWD_STDIN	_getPasswdStdin12
++#define GETPASSWD_STDIN		getPasswdStdin12
+ #else
+ char *getPasswd( const char *a_pszPrompt, int *a_iLen, BOOL a_bConfirm );
+ 
+ #define _GETPASSWD	_getPasswd
+ #define GETPASSWD	getPasswd
++
++char *getPasswdStdin( int *a_iLen );
++
++#define _GETPASSWD_STDIN	_getPasswdStdin
++#define GETPASSWD_STDIN		getPasswdStdin
+ #endif
+ char *_getPasswd( const char *a_pszPrompt, int *a_iLen, BOOL a_bConfirm, BOOL a_bUseUnicode);
++char *_getPasswdStdin( int *a_iLen, BOOL a_bUseUnicode );
+ void  shredPasswd( char *a_pszPasswd );
+ char *getReply( const char *a_pszPrompt, int a_iMaxLen );
+ 
+Index: tpm-tools-1.3.1/src/tpm_mgmt/tpm_takeownership.c
+===================================================================
+--- tpm-tools-1.3.1.orig/src/tpm_mgmt/tpm_takeownership.c	2007-11-21 14:47:21.000000000 -0500
++++ tpm-tools-1.3.1/src/tpm_mgmt/tpm_takeownership.c	2012-12-04 18:16:20.955168012 -0500
+@@ -26,12 +26,14 @@
+ {
+ 	logCmdHelp(aCmd);
+ 	logUnicodeCmdOption();
++	logCmdOption("-s, --stdin", _("Accept a single password for EK and SRK on stdin (use carefully)."));
+ 	logCmdOption("-y, --owner-well-known", _("Set the owner secret to all zeros (20 bytes of zeros)."));
+ 	logCmdOption("-z, --srk-well-known", _("Set the SRK secret to all zeros (20 bytes of zeros)."));
+ }
+ 
+ static BOOL ownerWellKnown = FALSE;
+ static BOOL srkWellKnown = FALSE;
++static BOOL stdinPasswd = FALSE;
+ TSS_HCONTEXT hContext = 0;
+ 
+ static int parse(const int aOpt, const char *aArg)
+@@ -44,6 +46,9 @@
+ 	case 'z':
+ 		srkWellKnown = TRUE;
+ 		break;
++	case 's':
++		stdinPasswd = TRUE;
++		break;
+ 	default:
+ 		return -1;
+ 	}
+@@ -65,7 +70,8 @@
+ 
+ 	char *szTpmPasswd = NULL;
+ 	char *szSrkPasswd = NULL;
+-	int tpm_len, srk_len;
++	char *szTmpPasswd = NULL;
++	int tpm_len, srk_len, tmp_len;
+ 	TSS_HTPM hTpm;
+ 	TSS_HKEY hSrk;
+ 	TSS_FLAG fSrkAttrs;
+@@ -73,6 +79,7 @@
+ 	int iRc = -1;
+ 	BYTE well_known_secret[] = TSS_WELL_KNOWN_SECRET;
+ 	struct option opts[] = {
++	{"stdin-passwd", no_argument, NULL, 's'},
+ 	{"owner-well-known", no_argument, NULL, 'y'},
+ 	{"srk-well-known", no_argument, NULL, 'z'},
+ 	};
+@@ -80,21 +87,46 @@
+ 	initIntlSys();
+ 
+ 	if (genericOptHandler
+-	    (argc, argv, "yz", opts, sizeof(opts) / sizeof(struct option),
++	    (argc, argv, "syz", opts, sizeof(opts) / sizeof(struct option),
+ 	     parse, help) != 0)
+ 		goto out;
+ 
+ 	if (contextCreate(&hContext) != TSS_SUCCESS)
+ 		goto out;
+ 
+-	if (!ownerWellKnown) {
++	if (stdinPasswd && (!ownerWellKnown || !srkWellKnown)) {
++		// Get password from stdin, no verification
++		szTmpPasswd = GETPASSWD_STDIN (&tmp_len);
++		if (!szTmpPasswd || tmp_len <= 0)
++			goto out;
++		if (!ownerWellKnown) {
++			szTpmPasswd = calloc (tmp_len + 1, sizeof (BYTE));
++			if (szTpmPasswd == NULL)
++				goto out;
++			szTpmPasswd = strcpy (szTpmPasswd, szTmpPasswd);
++			if (szTmpPasswd == NULL)
++				goto out;
++			tpm_len = tmp_len;
++		}
++		if (!srkWellKnown) {
++			szSrkPasswd = calloc (tpm_len + 1, sizeof (BYTE));
++			if (szSrkPasswd == NULL)
++				goto out;
++			szSrkPasswd = strcpy (szSrkPasswd, szTmpPasswd);
++			if (szSrkPasswd == NULL)
++				goto out;
++			srk_len = tmp_len;
++		}
++	}
++
++	if (!ownerWellKnown && !stdinPasswd) {
+ 		// Prompt for owner password
+ 		szTpmPasswd = GETPASSWD(_("Enter owner password: "), &tpm_len, TRUE);
+ 		if (!szTpmPasswd)
+ 			goto out;
+ 	}
+ 
+-	if (!srkWellKnown) {
++	if (!srkWellKnown && !stdinPasswd) {
+ 		// Prompt for srk password
+ 		szSrkPasswd = GETPASSWD(_("Enter SRK password: "), &srk_len, TRUE);
+ 		if (!szSrkPasswd)
+@@ -151,6 +183,9 @@
+ 		contextClose(hContext);
+ 
+ 	out:
++		if (szTmpPasswd)
++			shredPasswd(szTmpPasswd);
++
+ 		if (szTpmPasswd)
+ 			shredPasswd(szTpmPasswd);
+ 
+Index: tpm-tools-1.3.1/lib/tpm_utils.c
+===================================================================
+--- tpm-tools-1.3.1.orig/lib/tpm_utils.c	2007-11-21 14:47:20.000000000 -0500
++++ tpm-tools-1.3.1/lib/tpm_utils.c	2012-12-04 18:02:46.623256533 -0500
+@@ -27,6 +27,8 @@
+ #include "tpm_tspi.h"
+ #include "tpm_utils.h"
+ 
++#define STDIN_PWD_ALLOC 256
++
+ BOOL useUnicode = FALSE;
+ 
+ static const struct option sGenLongOpts[] = {
+@@ -155,11 +157,20 @@
+ 	return _getPasswd(a_pszPrompt, &len, a_bConfirm, FALSE);
+ }
+ 
++char *getPlainPasswdStdin(void) {
++	int len;
++	return _getPasswdStdin(&len, FALSE);
++}
++
+ #ifndef TSS_LIB_IS_12
+ char *getPasswd(const char *a_pszPrompt, int* a_iLen, 
+ 		BOOL a_bConfirm) {
+ 	return _getPasswd( a_pszPrompt, a_iLen, a_bConfirm, useUnicode);
+ }
++
++char *getPasswdStdin( int *a_iLen) {
++	return _getPasswdStdin( a_iLen, useUnicode);
++}
+ #endif
+ char *_getPasswd(const char *a_pszPrompt, int* a_iLen, 
+ 		BOOL a_bConfirm, BOOL a_bUseUnicode) {
+@@ -218,6 +229,51 @@
+ }
+ 
+ /*
++ * You must free the memory passed back to you when you are finished.
++ */
++char *_getPasswdStdin( int *a_iLen, BOOL a_bUseUnicode ) {
++	char *buf = NULL, *tmp = NULL;
++	int ret = 0, total = 0;
++
++	if (a_bUseUnicode) {
++		fprintf (stderr, "Unicode not supported on stdin.\n");
++		return NULL;
++    }
++
++	do {
++		tmp = realloc (buf, STDIN_PWD_ALLOC + total);
++		if (tmp != NULL) {
++			buf = tmp;
++		} else {
++			perror ("realloc");
++			goto out;
++		}
++		ret = fread (buf + total, sizeof (char), STDIN_PWD_ALLOC, stdin);
++		if (!ferror (stdin)) {
++			total += ret;
++		} else {
++			perror ("fread");
++			goto freeout;
++		}
++	} while (!feof(stdin));
++	/*  kill trailing newline if present  */
++	if (buf [total - 1] == '\n') {
++		buf [total - 1] = '\0';
++		total -= 1;
++	}
++	*a_iLen = total;
++    goto out;
++
++ freeout:
++	if (buf != NULL) {
++		free (buf);
++		buf = NULL;
++    }
++ out:
++	return buf;
++}
++
++/*
+  * You must free the memory passed back to you when you are finished.
+  */
+ char *getReply( const char *a_pszPrompt, int a_iMaxLen ) {
+Index: tpm-tools-1.3.1/lib/tpm_tspi.c
+===================================================================
+--- tpm-tools-1.3.1.orig/lib/tpm_tspi.c	2012-12-04 18:02:46.455256753 -0500
++++ tpm-tools-1.3.1/lib/tpm_tspi.c	2012-12-04 18:02:46.623256533 -0500
+@@ -701,6 +701,35 @@
+ 	return passwd;
+ }
+ 
++char *getPasswdStdin12( int *a_iLen )
++{
++	return _getPasswdStdin12( a_iLen, useUnicode );
++}
++
++char *_getPasswdStdin12( int *a_iLen, BOOL a_bUseUnicode )
++{
++	UINT32 status;
++	char *passwd;
++
++	passwd = _getPasswdStdin( a_iLen, a_bUseUnicode);
++
++	if (passwd && a_bUseUnicode) {
++		/* If we're running against a 1.2 TSS, it will include the null terminating
++		 * characters based on the TSS_TSPATTRIB_SECRET_HASH_MODE attribute of the
++		 * context. If this is set to TSS_TSPATTRIB_HASH_MODE_NOT_NULL, we need to
++		 * trim the two zeros off the end of the unicode string returned by
++		 * Trspi_Native_To_UNICODE. */
++		if (getAttribUint32(hContext, TSS_TSPATTRIB_SECRET_HASH_MODE,
++				    TSS_TSPATTRIB_SECRET_HASH_MODE_POPUP, &status))
++			goto out;
++
++		if (status == TSS_TSPATTRIB_HASH_MODE_NOT_NULL)
++			*a_iLen -= sizeof(TSS_UNICODE);
++	}
++out:
++	return passwd;
++}
++
+ TSS_RESULT
+ unloadVersionInfo(UINT64 *offset, BYTE *blob, TPM_CAP_VERSION_INFO *v)
+ {

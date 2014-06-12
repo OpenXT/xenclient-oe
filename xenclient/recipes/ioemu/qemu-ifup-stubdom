@@ -1,0 +1,57 @@
+#!/bin/sh
+#
+# Copyright (c) 2013 Citrix Systems, Inc.
+# 
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+# 
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+# 
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+#
+
+echo 'config qemu network with xen bridge for ' $*
+
+#bridge=$2
+
+# we ignore the bridge passed to the script and set an identity mapping:
+# tapX.0 <-> stubdombr0 <-> eth0
+# ...
+# tapX.n <-> stubdombrn <-> ethn
+#
+# maybe it's not the best place to handle this, but it looks simpler and
+# nicer than handling it on toolstack level
+
+ifnumber=${1##*.}
+bridgename="stubdombr${ifnumber}"
+
+if [ -e "/sys/class/net/${bridgename}" ];then
+    echo "Bridge $bridgename already exists, strange (invoked for $1)"
+else
+    echo "creating bridge $bridgename"
+    brctl addbr "$bridgename"
+    brctl setfd "$bridgename" 0
+    # packets passing the bridge because of this setting will be filtered
+    # in NDVM if break_8021d disabled in NDVM
+    echo 1 > /sys/class/net/$bridgename/bridge/break_8021d
+fi
+
+ethname="eth${ifnumber}"
+
+if [ ! -e "/sys/class/net/$ethname" ]; then
+    echo "$ethname does not exist, strange (invoked for $1)"
+else
+    echo "Adding $ethname and $1 to $bridgename"
+    brctl addif $bridgename $ethname
+    ifconfig $ethname 0.0.0.0
+    brctl addif $bridgename $1
+    ifconfig $1 0.0.0.0
+    ifconfig $bridgename up
+fi

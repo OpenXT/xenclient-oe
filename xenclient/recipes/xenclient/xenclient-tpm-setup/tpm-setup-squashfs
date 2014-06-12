@@ -1,0 +1,63 @@
+#! /bin/sh
+#
+# Copyright (c) 2010 Citrix Systems, Inc.
+# 
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+# 
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+# 
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+#
+
+VG=xenclient
+ROOTLV=root
+
+rootsize=$(lvs | awk '($1 ~ /^'$ROOTLV'$/) { print $4 }')
+
+lvremove -f /dev/$VG/$ROOTLV.sn >/dev/null 2>&1
+err=$(lvcreate -L $rootsize -n $ROOTLV.sn $VG 2>&1) || {
+  echo $err
+  echo $0: lvcreate failed
+  exit 1
+}
+
+mkdir /tmp/root.$$
+mount --bind / /tmp/root.$$
+
+mksquashfs /tmp/root.$$ /dev/$VG/$ROOTLV.sn -noappend | \
+  sed -n '/^TIOCGWINZ/ d; /^Exportable Little endian filesystem/,$ d; p'
+
+umount /tmp/root.$$
+rmdir /tmp/root.$$
+
+lvsize=$(unsquashfs -s /dev/xenclient/root.sn | \
+  awk '/^Filesystem size/ {sub(/\(/,"",$5); sub(/\..*/,"",$5); print $5 + 1}')
+[ -z "$lvsize" -o "$lvsize" -lt 4 ] && {
+  echo $0: lv unexpectedly small, aborting...
+  exit 1
+}
+
+err=$(lvresize -f -L ${lvsize}M /dev/$VG/$ROOTLV.sn 2>&1) || {
+  echo $err
+  echo $0: lvresize -L ${lvsize}M failed
+  exit 1
+}
+
+lvremove -f /dev/$VG/$ROOTLV.s >/dev/null 2>&1
+
+err=$(lvrename xenclient $ROOTLV.sn $ROOTLV.s 2>&1) || {
+  echo $err
+  echo $0: lvrename failed
+  exit 1
+}
+
+echo $0: squashfs created successfully
+

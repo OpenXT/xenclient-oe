@@ -1,0 +1,59 @@
+#! /bin/sh
+#
+# Copyright (c) 2010 Citrix Systems, Inc.
+# 
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+# 
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+# 
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+#
+
+user="$1"
+userpass="$2"
+
+exec 3>&2
+[ -z "$V" ] && exec >/dev/null 2>&1
+err () { echo >&3 "$@"; }
+
+LVPREFIX=s-
+VGNAME=xenclient
+DEVKEY=/config/sec/device.key
+RAMDIR=/mnt/secure
+UKEY="${RAMDIR}/s-${user}.key"
+SECDIR=/config/sec
+SECDM="s-${user}"
+SECPATH="${SECDIR}/s-${user}"
+
+grep -q "${SECPATH}" /proc/mounts && \
+  exec $(dirname $0)/sec-check-pass "${user}" "${userpass}"
+
+( cat "${DEVKEY}"
+  echo "${user}"
+  cat "${userpass}" ) >"${UKEY}"
+
+cryptsetup -d "${UKEY}" \
+  luksOpen "/dev/${VGNAME}/${LVPREFIX}${user}" "${SECDM}" || {
+  err $0: cryptsetup luksOpen failed: $?
+  rm "${UKEY}"
+  exit 2
+}
+
+mkdir -p "${SECPATH}"
+mount "/dev/mapper/${SECDM}" "${SECPATH}" || {
+  err $0: mount failed: $?
+  cryptsetup luksClose "${SECDM}"
+  rm "${UKEY}"
+  exit 3
+}
+
+rm "${UKEY}"
+

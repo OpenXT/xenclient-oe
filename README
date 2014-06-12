@@ -1,0 +1,217 @@
+
+XenClient build HOWTO
+=====================
+
+
+0. Requirements
+---------------
+
+A 32-bit Debian Lenny is the recommended build environment. In
+addition to the default installation, the following packages should be
+installed:
+
+    make, gcc, automake, git-core, bcc, ruby, mkisofs, libglib2.0-dev,
+    libdbus-glib-1-dev, libc6-dev, initramfs-tools, gzip, bzip2, g++,
+    file, flex, bison, bin86, gawk, rsync, iasl, ccache, gettext,
+    libxml-parser-perl, libpci-dev, smbclient, unzip, help2man,
+    diffstat, texi2html, texinfo, cvs, subversion, python2.5-dev,
+    sun-java6-jdk, python-flup, python-setuptools, python-routes,
+    makeself, wget, build-essential, coreutils, libsdl1.2-dev,
+    docbook-utils, python-pysqlite2, diffstat, x11-xserver-utils,
+    quilt, x11proto-core-dev, xsltproc, xutils-dev, expect, lib64gcc1,
+    libc6-dev-amd64, genext2fs, python-simplejson, python-psycopg2,
+    xenclient-guilt, debootstrap, ghc, gfortran
+
+There are known problems building certain packages on 64-bit
+distributions and building on other systems is untested and likely to
+break.
+
+A chroot environment with a 32-bit Debian Lenny can be used instead,
+but if the host platform is 64-bit all bitbake invokations should be
+prefixed with "linux32" to ensure a 32-bit host architecture is
+correctly detected.
+
+
+1. Getting started
+------------------
+
+XCI is built on top of OpenEmbedded. The OpenEmbedded documentation
+can be found here:
+
+http://docs.openembedded.org/usermanual/usermanual.html
+
+Use ./setup_build to pull the BitBake and OpenEmbedded repositories
+and setup the build environment.
+
+The location and version of the repositories to use can be overridden
+by creating a file called local.settings. This will be sourced before
+the repos are pulled.
+
+All settings are optional and have sane defaults (see setup_build for
+values).
+
+Settings supported in local.settings:
+
+BITBAKE_REPO
+
+	URI of BitBake git repository.
+
+BITBAKE_TAG
+
+	Tag to use for checking out, branch/commitid/tags can be used
+
+OE_REPO
+OE_TAG
+
+	As above but for OpenEmbedded. The OE_TAG specified in the
+	shipped setup_build script corresponds to the version of the
+	upstream OE tree that is known to work with the current
+	XenClient overlays. If it is modified to use a more recent OE
+	tree, things are likely to break.
+
+EXTRA_REPO
+EXTRA_TAG
+EXTRA_DIR
+
+	An optional, extra repository to check out and use as an
+	overlay (highest priority). Can be used to customize/tweak the
+	build. No default, and not needed for normal builds.
+
+	EXTRA_DIR can be set to the directory name where the checkout
+	is done (relative to repos).
+
+To re-generate the environment settings without checkout out anything,
+run "./setup_build env" (useful if the directory has been moved).
+
+After running setup_build, you can source oeenv and run bitbake. oeenv
+sets up the required environment for running bitbake. Alternatively
+you can just run ./bb which will set the environment for you and
+invoke bitbake with any arguments specified.
+
+
+2. Directories
+--------------
+
+repos:
+
+	Checked out copies of the OpenEmbedded and BitBake repos (and
+	optionally EXTRA_REPO).
+
+xenclient: 
+
+	OpenEmbedded overlay for XenClient specific packages and
+	configuration files. Highest priority (first in search path).
+
+	local.conf is shipped as local.conf-dist. If local.conf
+	doesn't already exist, setup_build symlinks it to local.conf.
+	To override, place your local.conf in xenclient/conf before
+	running setup_build.
+
+oe-addons:
+
+	Overlay for recipes and classes that should be pushed upstream
+	to OpenEmbedded but have not yet made it there. Lowest
+	priority (after OE repository).
+
+sources:
+
+	This is where source packages are downloaded to.
+
+build:
+
+	This is the main OpenEmbedded build dir, also referred to as
+	"TMPDIR" in OpenEmbedded terminology. To clean out everything
+	and start from scratch, rm -rf build.
+
+
+3. Building XCI
+---------------
+
+3.1 xenclient/conf/local.conf:
+
+You may wish to edit xenclient/conf/local.conf before starting the
+build. For faster builds on a multiprocessor host increase
+BB_NUMBER_THREADS and PARALLEL_MAKE.
+
+The following directories are by default located inside the build
+directory. They can be moved elsewhere by specifying them in
+local.conf so they can be re-used between builds:
+
+    DL_DIR:            tarballs downloaded from the Internet are
+	               stored here.
+
+    DEPLOY_DIR_IPK:    installation packages for the target system are
+                       stored here.
+
+    DEPLOY_DIR_PSTAGE: can be added to specify where the staging
+                       packages should be placed. Staging packages are
+                       used to regenerate the staging area without
+                       rebuilding all packages, so can be used to
+                       speed up subsequent builds.
+
+    OPENXT_GIT_MIRROR,
+    XENCLIENT_GIT_TAG: Specifies where the XenClient git repositories
+		       should be cloned from and which tag or branch
+		       to use.
+
+Once you are satisfied with the settings in local.conf you need to
+build the images. To build an image and all its dependencies run:
+
+    $ MACHINE=MACHSPEC ./bb TARGETIMAGE
+
+For MACHSPEC use xenclient-dom0 or xenclient-iovm for the Dom0 and the
+IOVM images, respectively. xenclient-dom0 is also used for the
+initramfs and installer image. For more details about architectures
+and subarchitectures, refer to the OpenEmbedded documentation.
+
+TARGETIMAGE is one of the following:
+
++-------------------------+----------------------------------+--------------+
+|TARGETNAME               |Description                       |MACHSPEC      |
++-------------------------+----------------------------------+--------------+
+|xenclient-initramfs-image|Initramfs needed to boot with LVM |xenclient-dom0|
++-------------------------+----------------------------------+--------------+
+|xenclinet-dom0-image (*) |Dom0 filesystem image             |xenclient-dom0|
++-------------------------+----------------------------------+--------------+
+|xenclient-iovm-image (**)|IOVM (UI VM) filesystem image     |xenclient-iovm|
++-------------------------+----------------------------------+--------------+
+|xenclient-installer-image|Installer filesystem image        |xenclient-dom0|
++-------------------------+----------------------------------+--------------+
+
+(*) xenclient-dom0-image embeds the initramfs, so you need to build
+xenclient-initramfs-image before xenclient-dom0-image can be
+succesfully built.
+
+(**) xenclient-iovm-image is not required, it can be used to provide a
+user interface VM and is meant as an example and should be customized
+if used.
+
+To build the entire XCI package and generate an installer ISO, run the
+following commands in sequence:
+
+    $ MACHINE=xenclient-dom0 ./bb xenclient-initramfs-image
+    $ MACHINE=xenclient-dom0 ./bb xenclient-dom0-image
+    $ MACHINE=xenclient-dom0 ./bb xenclient-installer-image
+    $ ./generate_iso
+
+This will take a number of hours to complete. Subsequent builds will
+be much faster if the download and staging package archive from a
+previous build is available.
+
+Please note that due to the way packaged staging works, some staging
+packages can only be used if the build directory is in the same
+location as the previous build.
+
+The resulting bootable ISO image can be burned to a CD-ROM and used to
+install XCI on a target machine.
+
+
+4. Running XCI
+--------------
+
+PLEASE NOTE: As no VMs are started by default the only ways to access
+dom0 and start VMs is via ssh or serial console.
+
+By pressing Escape when the bootloader screen is shown it is possible
+to select "Console Access" whereby dom0 will allow console login.
+

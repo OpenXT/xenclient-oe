@@ -1,0 +1,929 @@
+Index: tpm-tools-1.3.1/include/tpm_tspi.h
+===================================================================
+--- tpm-tools-1.3.1.orig/include/tpm_tspi.h	2010-08-01 04:52:44.000000000 +0000
++++ tpm-tools-1.3.1/include/tpm_tspi.h	2010-08-01 04:52:45.000000000 +0000
+@@ -121,6 +121,16 @@
+ 			UINT32 a_DataSize, BYTE *a_Data,
+ 			TSS_PCR_EVENT *a_Event,
+ 			UINT32 *a_PcrSize, BYTE **a_PcrValue);
++TSS_RESULT tpmQuote(TSS_HTPM a_hTpm, TSS_HKEY a_hKey,
++		    TSS_HPCRS a_hPcrs, TSS_VALIDATION *a_pValidationData);
++TSS_RESULT tpmQuote2(TSS_HTPM a_hTpm, TSS_HKEY a_hKey, TSS_BOOL a_fAddVersion,
++		     TSS_HPCRS a_hPcrs, TSS_VALIDATION *a_pValidationData,
++		     UINT32 *a_versionInfoSize, BYTE **a_versionInfo);
++TSS_RESULT pcrcompositeSelectPcrIndex(TSS_HPCRS a_hPcrs, UINT32 a_Idx);
++TSS_RESULT pcrcompositeSelectPcrIndexEx(TSS_HPCRS a_hPcrs, UINT32 a_Idx,
++					UINT32 a_Direction);
++TSS_RESULT pcrcompositeGetCompositeHash(TSS_HPCRS a_hPcrs, UINT32 *a_pLen,
++					BYTE **a_ppbHashData);
+ #ifdef TSS_LIB_IS_12
+ TSS_RESULT unloadVersionInfo(UINT64 *offset, BYTE *blob, TPM_CAP_VERSION_INFO *v);
+ TSS_RESULT pcrcompositeSetPcrLocality(TSS_HPCRS a_hPcrs, UINT32 localityValue);
+Index: tpm-tools-1.3.1/lib/tpm_tspi.c
+===================================================================
+--- tpm-tools-1.3.1.orig/lib/tpm_tspi.c	2010-08-01 04:52:44.000000000 +0000
++++ tpm-tools-1.3.1/lib/tpm_tspi.c	2010-08-01 04:52:45.000000000 +0000
+@@ -608,6 +608,63 @@
+ 	return result;
+ }
+ 
++TSS_RESULT
++tpmQuote(TSS_HTPM a_hTpm, TSS_HKEY a_hKey,
++	 TSS_HPCRS a_hPcrs, TSS_VALIDATION *a_pValidationData)
++{
++	TSS_RESULT result =
++	  Tspi_TPM_Quote(a_hTpm, a_hKey, a_hPcrs, a_pValidationData);
++	tspiResult("Tspi_TPM_Quote", result);
++
++	return result;
++}
++
++TSS_RESULT
++tpmQuote2(TSS_HTPM a_hTpm, TSS_HKEY a_hKey, TSS_BOOL a_fAddVersion,
++	  TSS_HPCRS a_hPcrs, TSS_VALIDATION *a_pValidationData,
++	  UINT32 *a_versionInfoSize, BYTE **a_versionInfo)
++{
++	TSS_RESULT result =
++	  Tspi_TPM_Quote2(a_hTpm, a_hKey, a_fAddVersion, a_hPcrs,
++			  a_pValidationData,
++			  a_versionInfoSize, a_versionInfo);
++	tspiResult("Tspi_TPM_Quote2", result);
++
++	return result;
++}
++
++TSS_RESULT
++pcrcompositeSelectPcrIndex(TSS_HPCRS a_hPcrs, UINT32 a_Idx)
++{
++	TSS_RESULT result =
++		Tspi_PcrComposite_SelectPcrIndex(a_hPcrs, a_Idx);
++	tspiResult("Tspi_PcrComposite_SelectPcrIndex", result);
++
++	return result;
++}
++
++TSS_RESULT
++pcrcompositeSelectPcrIndexEx(TSS_HPCRS a_hPcrs, UINT32 a_Idx,
++			     UINT32 a_Direction)
++{
++	TSS_RESULT result =
++	  Tspi_PcrComposite_SelectPcrIndexEx(a_hPcrs, a_Idx, a_Direction);
++	tspiResult("Tspi_PcrComposite_SelectPcrIndexEx", result);
++
++	return result;
++}
++
++TSS_RESULT
++pcrcompositeGetCompositeHash(TSS_HPCRS a_hPcrs, UINT32 *a_pLen,
++				   BYTE **a_ppbHashData)
++{
++	TSS_RESULT result =
++	  Tspi_PcrComposite_GetCompositeHash(a_hPcrs, a_pLen, a_ppbHashData);
++	tspiResult("Tspi_PcrComposite_GetCompositeHash", result);
++
++	return result;
++}
++
+ #ifdef TSS_LIB_IS_12
+ /*
+  * These getPasswd functions will wrap calls to the other functions and check to see if the TSS
+Index: tpm-tools-1.3.1/src/cmds/Makefile.am
+===================================================================
+--- tpm-tools-1.3.1.orig/src/cmds/Makefile.am	2010-08-01 04:52:45.000000000 +0000
++++ tpm-tools-1.3.1/src/cmds/Makefile.am	2010-08-01 04:52:45.000000000 +0000
+@@ -21,7 +21,7 @@
+ #       http://www.opensource.org/licenses/cpl1.0.php.
+ #
+ 
+-bin_PROGRAMS 	=	tpm_sealdata tpm_unsealdata tpm_extendpcr
++bin_PROGRAMS 	=	tpm_sealdata tpm_unsealdata tpm_extendpcr tpm_quote tpm_createsignkey
+ 
+ if TSS_LIB_IS_12
+ AM_CPPFLAGS	=	-I$(top_builddir)/include -D_LINUX -DTSS_LIB_IS_12
+@@ -35,3 +35,5 @@
+ tpm_unsealdata_SOURCES = tpm_unsealdata.c
+ tpm_unsealdata_LDADD = $(LDADD) $(top_builddir)/lib/libtpm_unseal.la
+ tpm_extendpcr_SOURCES = tpm_extendpcr.c
++tpm_quote_SOURCES = tpm_quote.c
++tpm_createsignkey_SOURCES = tpm_createsignkey.c
+Index: tpm-tools-1.3.1/src/cmds/tpm_createsignkey.c
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ tpm-tools-1.3.1/src/cmds/tpm_createsignkey.c	2010-08-01 05:03:31.000000000 +0000
+@@ -0,0 +1,277 @@
++/*
++ * The Initial Developer of the Original Code is International
++ * Business Machines Corporation. Portions created by IBM
++ * Corporation are Copyright (C) 2005, 2006 International Business
++ * Machines Corporation. All Rights Reserved.
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the Common Public License as published by
++ * IBM Corporation; either version 1 of the License, or (at your option)
++ * any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * Common Public License for more details.
++ *
++ * You should have received a copy of the Common Public License
++ * along with this program; if not, a copy can be viewed at
++ * http://www.opensource.org/licenses/cpl1.0.php.
++ */
++#include <openssl/evp.h>
++#include <limits.h>
++#include "tpm_tspi.h"
++#include "tpm_utils.h"
++#include "tpm_quote.h"
++
++static void help(const char *aCmd)
++{
++	logCmdHelp(aCmd);
++	logCmdOption("-o, --outfile FILE",
++		     _
++		     ("Filename to write key to.  Default is STDOUT."));
++	logCmdOption("-z, --well-known", _("Use TSS_WELL_KNOWN_SECRET as the SRK secret."));
++	logCmdOption("-u, --unicode", _("Use TSS UNICODE encoding for the SRK password to comply with applications using TSS popup boxes"));
++
++}
++
++static char out_filename[PATH_MAX] = "";
++static TSS_HTPM hTpm;
++static BOOL passUnicode = FALSE;
++static BOOL isWellKnown = FALSE;
++TSS_HCONTEXT hContext = 0;
++
++static int parse(const int aOpt, const char *aArg)
++{
++	int rc = -1;
++
++	switch (aOpt) {
++	case 'o':
++		if (aArg) {
++			strncpy(out_filename, aArg, PATH_MAX);
++			rc = 0;
++		}
++		break;
++	case 'u':
++		passUnicode = TRUE;
++		rc = 0;
++		break;
++	case 'z':
++		isWellKnown = TRUE;
++		rc = 0;
++		break;
++	default:
++		break;
++	}
++	return rc;
++
++}
++
++int main(int argc, char **argv)
++{
++
++	TSS_HKEY hSrk, hKey;
++	TSS_HPOLICY hPolicy;
++	int iRc = -1;
++	struct option opts[] = {
++	{"outfile", required_argument, NULL, 'o'},
++	{"unicode", no_argument, NULL, 'u'},
++	{"well-known", no_argument, NULL, 'z'}
++	};
++	UINT32 sealKeyLen;
++	BYTE *sealKey;
++	UINT32 pubKeyLength;
++	BYTE *pubKey;
++	TSS_FLAG keyFlags = TSS_KEY_TYPE_SIGNING | TSS_KEY_SIZE_2048 |
++	    TSS_KEY_VOLATILE | TSS_KEY_AUTHORIZATION |
++	    TSS_KEY_NOT_MIGRATABLE;
++	TSS_HPOLICY hSrkPolicy;
++	char *passwd = NULL;
++	int pswd_len;
++	BYTE wellKnown[TCPA_SHA1_160_HASH_LEN] = TSS_WELL_KNOWN_SECRET;
++	unsigned int i;
++	int rc;
++	char hextmp[3];
++
++	BIO *bin = NULL, *bdata=NULL, *b64=NULL;
++
++	initIntlSys();
++
++	if (genericOptHandler(argc, argv, "i:o:p:uz", opts,
++			      sizeof(opts) / sizeof(struct option), parse,
++			      help) != 0)
++		goto out;
++
++	if (contextCreate(&hContext) != TSS_SUCCESS)
++		goto out;
++
++	if (contextConnect(hContext) != TSS_SUCCESS)
++		goto out_close;
++
++	if (contextGetTpm(hContext, &hTpm) != TSS_SUCCESS)
++		goto out_close;
++
++	/* Load the SRK and set the SRK policy (no password) */
++	if (keyLoadKeyByUUID(hContext, TSS_PS_TYPE_SYSTEM, SRK_UUID, &hSrk)
++	    != TSS_SUCCESS)
++		goto out_close;
++
++	/* Use the context's default policy for the SRK secret */
++	if (policyGet(hSrk, &hSrkPolicy) != TSS_SUCCESS)
++		goto out_close;
++
++	/* Prompt for SRK password */
++	if (!isWellKnown) {
++		passwd = _GETPASSWD(_("Enter SRK password: "), (int *)&pswd_len, FALSE,
++				    passUnicode);
++		if (!passwd) {
++			logError(_("Failed to get SRK password\n"));
++			goto out_close;
++		}
++	} else {
++		passwd = (char *)wellKnown;
++		pswd_len = sizeof(wellKnown);
++	}
++
++	if (policySetSecret(hSrkPolicy, (UINT32)pswd_len, (BYTE *)passwd) != TSS_SUCCESS)
++		goto out_close;
++
++	if (!isWellKnown)
++		shredPasswd(passwd);
++	passwd = NULL;
++
++	/* Build an RSA key object that will be created by the TPM */
++	if (contextCreateObject
++	    (hContext, TSS_OBJECT_TYPE_RSAKEY, keyFlags,
++	     &hKey) != TSS_SUCCESS)
++		goto out_close;
++
++	if (contextCreateObject
++	    (hContext, TSS_OBJECT_TYPE_POLICY, TSS_POLICY_USAGE,
++	     &hPolicy) != TSS_SUCCESS)
++		goto out_close;
++
++	if (policySetSecret(hPolicy, strlen(TPMQUOTE_SECRET), (BYTE *)TPMQUOTE_SECRET)
++	    != TSS_SUCCESS)
++		goto out_close;
++
++	if (policyAssign(hPolicy, hKey) != TSS_SUCCESS)
++		goto out_close;
++
++	/* Create the RSA key (under the SRK) */
++	if (keyCreateKey(hKey, hSrk, NULL_HPCRS) != TSS_SUCCESS)
++		goto out_close;
++
++	if (getAttribData
++	    (hKey, TSS_TSPATTRIB_KEY_BLOB, TSS_TSPATTRIB_KEYBLOB_BLOB,
++	     &sealKeyLen, &sealKey) != TSS_SUCCESS)
++		goto out_close;
++
++	if ((rc = getAttribData
++	    (hKey, TSS_TSPATTRIB_KEY_BLOB, TSS_TSPATTRIB_KEYBLOB_PUBLIC_KEY,
++	     &pubKeyLength, &pubKey)) != TSS_SUCCESS) {
++		logError(_("Can't get pubkey\n"));
++		goto out_close;
++	}
++
++	/* Create a BIO to perform base64 encoding */
++	if ((b64 = BIO_new(BIO_f_null())) == NULL) {
++		logError(_("Unable to open null BIO\n"));
++		goto out_close;
++	}
++
++	/* Create a BIO for the output file */
++	if ((bdata = BIO_new(BIO_s_file())) == NULL) {
++		logError(_("Unable to open output BIO\n"));
++		goto out_close;
++	}
++
++	/* Assign the output file to the BIO */
++	if (strlen(out_filename) == 0)
++		BIO_set_fp(bdata, stdout, BIO_NOCLOSE);
++	else {
++		char out_filename_conf[PATH_MAX];
++		sprintf(out_filename_conf, "%s.conf", out_filename);
++		if (BIO_write_filename(bdata, out_filename_conf) <= 0) {
++			logError(_("Unable to open output file: %s\n"),
++				 out_filename_conf);
++			goto out_close;
++		}
++	}
++
++	BIO_puts(bdata,
++		 "asn1=SEQUENCE:pubkeyinfo\n"
++		 "[pubkeyinfo]\n"
++		 "algorithm=SEQUENCE:rsa_alg\n"
++		 "pubkey=BITWRAP,SEQUENCE:rsapubkey\n"
++		 "[rsa_alg]\n"
++		 "algorithm=OID:rsaEncryption\n"
++		 "parameter=NULL\n"
++		 "[rsapubkey]\n");
++	BIO_puts(bdata, "n=INTEGER:0x");
++	for (i = pubKeyLength - 2048/8; i < pubKeyLength; i++) {
++		sprintf(hextmp, "%02X", pubKey[i]);
++		BIO_puts(bdata, hextmp);
++	}
++	BIO_puts(bdata, "\n");
++
++	BIO_puts(bdata, "e=INTEGER:0x");
++	for (i = 0; i < 6; i++) {
++		sprintf(hextmp, "%02X", pubKey[i]);
++		BIO_puts(bdata, hextmp);
++	}
++	BIO_puts(bdata, "\n");
++	BIO_free(bdata);
++	bdata = NULL;
++
++	/* Create a BIO to perform base64 encoding */
++	if ((b64 = BIO_new(BIO_f_base64())) == NULL) {
++		logError(_("Unable to open base64 BIO\n"));
++		goto out_close;
++	}
++
++	/* Create a BIO for the output file */
++	if ((bdata = BIO_new(BIO_s_file())) == NULL) {
++		logError(_("Unable to open output BIO\n"));
++		goto out_close;
++	}
++
++	/* Assign the output file to the BIO */
++	if (strlen(out_filename) == 0)
++		BIO_set_fp(bdata, stdout, BIO_NOCLOSE);
++	else if (BIO_write_filename(bdata, out_filename) <= 0) {
++		logError(_("Unable to open output file: %s\n"),
++			 out_filename);
++		goto out_close;
++	}
++
++	/* Output the sealed data header string */
++	BIO_puts(bdata, TPMTSS_HDR_STRING);
++
++	/* Sealing key used on the TPM */
++	BIO_puts(bdata, TPMTSS_TSS_STRING);
++	bdata = BIO_push(b64, bdata);
++	BIO_write(bdata, sealKey, sealKeyLen);
++	if (BIO_flush(bdata) != 1) {
++		logError(_("Unable to flush output\n"));
++		goto out_close;
++	}
++	bdata = BIO_pop(b64);
++
++	BIO_puts( bdata, TPMTSS_FTR_STRING);
++
++	iRc = 0;
++	logSuccess(argv[0]);
++
++out_close:
++	contextClose(hContext);
++
++out:
++	if (bin)
++		BIO_free(bin);
++	if (bdata)
++		BIO_free(bdata);
++	if (b64)
++		BIO_free(b64);
++	return iRc;
++}
+Index: tpm-tools-1.3.1/src/cmds/tpm_quote.c
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ tpm-tools-1.3.1/src/cmds/tpm_quote.c	2010-08-01 04:52:45.000000000 +0000
+@@ -0,0 +1,482 @@
++/*
++ * The Initial Developer of the Original Code is International
++ * Business Machines Corporation. Portions created by IBM
++ * Corporation are Copyright (C) 2005, 2006 International Business
++ * Machines Corporation. All Rights Reserved.
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the Common Public License as published by
++ * IBM Corporation; either version 1 of the License, or (at your option)
++ * any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * Common Public License for more details.
++ *
++ * You should have received a copy of the Common Public License
++ * along with this program; if not, a copy can be viewed at
++ * http://www.opensource.org/licenses/cpl1.0.php.
++ */
++#include <openssl/evp.h>
++#include <limits.h>
++#include <errno.h>
++#include <sys/stat.h>
++#include "tpm_tspi.h"
++#include "tpm_utils.h"
++#include "tpm_quote.h"
++
++static void help(const char *aCmd)
++{
++	logCmdHelp(aCmd);
++	logCmdOption("-i, --infile FILE",
++		     _
++		     ("Filename containing key to seal. Default is STDIN."));
++	logCmdOption("-o, --outfile FILE",
++		     _
++		     ("Filename to write sealed key to.  Default is STDOUT."));
++	logCmdOption("-p, --pcr NUMBER",
++		     _
++		     ("PCR to seal data to.  Default is none.  This option can be specified multiple times to choose more than one PCR."));
++	logCmdOption("-z, --well-known", _("Use TSS_WELL_KNOWN_SECRET as the SRK secret."));
++	logCmdOption("-u, --unicode", _("Use TSS UNICODE encoding for the SRK password to comply with applications using TSS popup boxes"));
++	logCmdOption("-n, --nonce", _("Nonce to use with Quote operation"));
++
++}
++
++static char in_filename[PATH_MAX] = "", out_filename[PATH_MAX] = "";
++static TSS_HPCRS hPcrs = NULL_HPCRS;
++static TSS_HTPM hTpm;
++static UINT32 selectedPcrs[24];
++static UINT32 selectedPcrsLen = 0;
++static BYTE *selectedPcrsValue[24];
++static UINT32 selectedPcrsSize[24];
++static BOOL passUnicode = FALSE;
++static BOOL isWellKnown = FALSE;
++TSS_HCONTEXT hContext = 0;
++static TCPA_NONCE antiReplay;
++
++static int parse(const int aOpt, const char *aArg)
++{
++	int rc = -1;
++	unsigned int i;
++
++	switch (aOpt) {
++	case 'i':
++		if (aArg) {
++			strncpy(in_filename, aArg, PATH_MAX);
++			rc = 0;
++		}
++		break;
++	case 'o':
++		if (aArg) {
++			strncpy(out_filename, aArg, PATH_MAX);
++			rc = 0;
++		}
++		break;
++	case 'p':
++		if (aArg) {
++			selectedPcrs[selectedPcrsLen++] = atoi(aArg);
++			rc = 0;
++		}
++		break;
++	case 'u':
++		passUnicode = TRUE;
++		rc = 0;
++		break;
++	case 'z':
++		isWellKnown = TRUE;
++		rc = 0;
++		break;
++	case 'n':
++		if (strlen(aArg) != 2 * sizeof(TCPA_NONCE)) {
++			logError(_("Invalid size for nonce\n"));
++			break;
++		}
++		for (i = 0; i < sizeof(TCPA_NONCE); i++) {
++			int v;
++			rc = sscanf(&aArg[2 * i], "%02X", &v);
++			if (rc != 1) {
++				logError(_("Could not parse nonce\n"));
++				rc = -1;
++				goto out_n;
++			}
++			antiReplay.nonce[i] = v;
++		}
++		rc = 0;
++	out_n:
++		break;
++	default:
++		break;
++	}
++	return rc;
++
++}
++
++#define TSSKEY_DEFAULT_SIZE 768
++
++int tpm_errno;
++
++static int
++readTssKey(char* fname, unsigned char **tss_data, int *tss_size) {
++	int rc, rcLen=0, tssLen=0;
++	BYTE* rcPtr;
++	char data[EVP_CIPHER_block_size(EVP_aes_256_cbc()) * 16];
++	BYTE *tssKeyData = NULL;
++	int tssKeyDataSize = 0;
++	struct stat stats;
++
++	BIO *bdata = NULL, *b64 = NULL, *bmem = NULL;
++	int bioRc;
++
++	if ( tss_data == NULL || tss_size == NULL ) {
++		rc = TPMQUOTE_STD_ERROR;
++		tpm_errno = EINVAL;
++		goto out;
++	}
++
++	*tss_data = NULL;
++	*tss_size = 0;
++
++	/* Test for file existence */
++	if ((rc = stat(fname, &stats))) {
++		tpm_errno = errno;
++		goto out;
++	}
++
++	/* Create an input file BIO */
++	if((bdata = BIO_new_file(fname, "r")) == NULL ) {
++		tpm_errno = errno;
++		rc = TPMQUOTE_STD_ERROR;
++		goto out;
++	}
++
++	/* Test file header for TSS */
++	BIO_gets(bdata, data, sizeof(data));
++	if (strncmp(data, TPMTSS_HDR_STRING,
++			strlen(TPMTSS_HDR_STRING)) != 0) {
++		rc = TPMQUOTE_FILE_ERROR;
++		tpm_errno = ENOTSSHDR;
++		goto out;
++	}
++
++	/* Looking for TSS Key Header */
++	BIO_gets(bdata, data, sizeof(data));
++	if (strncmp(data, TPMTSS_TSS_STRING,
++			strlen(TPMTSS_TSS_STRING)) != 0) {
++		rc = TPMQUOTE_FILE_ERROR;
++		tpm_errno = EWRONGTSSTAG;
++		goto out;
++	}
++
++	/* Create a memory BIO to hold the base64 TSS key */
++	if ((bmem = BIO_new(BIO_s_mem())) == NULL) {
++		tpm_errno = EAGAIN;
++		rc = TPMQUOTE_STD_ERROR;
++		goto out;
++	}
++	BIO_set_mem_eof_return(bmem, 0);
++
++	/* Read the base64 TSS key into the memory BIO */
++	while ((rcLen = BIO_gets(bdata, data, sizeof(data))) > 0) {
++		/* Look for Footer (end of key) */
++		if (strncmp(data, TPMTSS_FTR_STRING,
++				strlen(TPMTSS_FTR_STRING)) == 0)
++			break;
++
++		if (BIO_write(bmem, data, rcLen) <= 0) {
++			tpm_errno = EIO;
++			rc = TPMQUOTE_STD_ERROR;
++			goto out;
++		}
++	}
++	if (strncmp(data, TPMTSS_FTR_STRING,
++			strlen(TPMTSS_FTR_STRING)) != 0 ) {
++		tpm_errno = ENOTSSFTR;
++		rc = TPMQUOTE_FILE_ERROR;
++		goto out;
++	}
++
++	/* Create a base64 BIO to decode the TSS key */
++	if ((b64 = BIO_new(BIO_f_base64())) == NULL) {
++		tpm_errno = EAGAIN;
++		rc = TPMQUOTE_STD_ERROR;
++		goto out;
++	}
++
++	/* Decode the TSS key */
++	bmem = BIO_push( b64, bmem );
++	while ((rcLen = BIO_read(bmem, data, sizeof(data))) > 0) {
++		if ((tssLen + rcLen) > tssKeyDataSize) {
++			tssKeyDataSize += TSSKEY_DEFAULT_SIZE;
++			rcPtr = realloc( tssKeyData, tssKeyDataSize);
++			if ( rcPtr == NULL ) {
++				tpm_errno = ENOMEM;
++				rc = TPMQUOTE_STD_ERROR;
++				goto out;
++			}
++			tssKeyData = rcPtr;
++		}
++		memcpy(tssKeyData + tssLen, data, rcLen);
++		tssLen += rcLen;
++	}
++	bmem = BIO_pop(b64);
++	BIO_free(b64);
++	b64 = NULL;
++	bioRc = BIO_reset(bmem);
++
++out:
++	if (bmem) {
++		bioRc = BIO_set_close(bmem, BIO_CLOSE);
++		BIO_free(bmem);
++	}
++	if (rc == 0) {
++		*tss_data = tssKeyData;
++		*tss_size = tssLen;
++	}
++	return rc;
++}
++
++int main(int argc, char **argv)
++{
++
++	TSS_HKEY hSrk, hKey;
++	TSS_HPOLICY hPolicy;
++	int rc, iRc = -1;
++	struct option opts[] =
++	    { {"infile", required_argument, NULL, 'i'},
++	      {"outfile", required_argument, NULL, 'o'},
++	      {"pcr", required_argument, NULL, 'p'},
++	      {"unicode", no_argument, NULL, 'u'},
++	      {"well-known", no_argument, NULL, 'z'},
++	      {"nonce", required_argument, NULL, 'n'}
++	};
++	UINT32 i;
++	BYTE *tssKeyData = NULL;
++	int tssKeyLen = 0;
++	TSS_HPOLICY hSrkPolicy;
++	char *passwd = NULL;
++	int pswd_len;
++	BYTE wellKnown[TCPA_SHA1_160_HASH_LEN] = TSS_WELL_KNOWN_SECRET;
++	TSS_VALIDATION ValidationData;
++	UINT32 versionInfoSize;
++	BYTE *versionInfo;
++
++	BIO *bin = NULL, *bdata=NULL, *b64=NULL;
++
++	memset(antiReplay.nonce, 0, sizeof(antiReplay.nonce));
++
++	initIntlSys();
++
++	if (genericOptHandler(argc, argv, "i:o:p:uzn:", opts,
++			      sizeof(opts) / sizeof(struct option), parse,
++			      help) != 0)
++		goto out;
++
++	if (contextCreate(&hContext) != TSS_SUCCESS)
++		goto out;
++
++	if (contextConnect(hContext) != TSS_SUCCESS)
++		goto out_close;
++
++	if (contextGetTpm(hContext, &hTpm) != TSS_SUCCESS)
++		goto out_close;
++
++	rc = readTssKey(in_filename, &tssKeyData, &tssKeyLen);
++	if (rc != 0) {
++		logError(_("Unable to read key\n"));
++		goto out_close;
++	}
++
++	/* Create the PCRs object. If any PCRs above 15 are selected, this will need to be
++	 * a 1.2 TSS/TPM */
++	if (selectedPcrsLen) {
++		TSS_FLAG initFlag = 0;
++
++		for (i = 0; i < selectedPcrsLen; i++) {
++			if (selectedPcrs[i] > 15) {
++#ifdef TSS_LIB_IS_12
++				initFlag |= TSS_PCRS_STRUCT_INFO_LONG;
++#else
++				logError(_("This version of %s was compiled for a v1.1 TSS, which "
++					 "can only seal\n data to PCRs 0-15. PCR %u is out of range"
++					 "\n"), argv[0], selectedPcrs[i]);
++				goto out_close;
++#endif
++			}
++		}
++
++		if (contextCreateObject(hContext, TSS_OBJECT_TYPE_PCRS, initFlag,
++					&hPcrs) != TSS_SUCCESS)
++			goto out_close;
++
++		for (i = 0; i < selectedPcrsLen; i++) {
++			if (tpmPcrRead(hTpm, selectedPcrs[i],
++				       &selectedPcrsSize[i],
++				       &selectedPcrsValue[i]) != TSS_SUCCESS)
++				goto out_close;
++			if (pcrcompositeSelectPcrIndexEx(hPcrs, selectedPcrs[i],
++							 TSS_PCRS_DIRECTION_CREATION)
++					!= TSS_SUCCESS)
++				goto out_close;
++		}
++#ifdef TSS_LIB_IS_12
++		if (initFlag) {
++			UINT32 localityValue =
++				TPM_LOC_ZERO | TPM_LOC_ONE | TPM_LOC_TWO | TPM_LOC_THREE |
++				TPM_LOC_FOUR;
++
++			if (pcrcompositeSetPcrLocality(hPcrs, localityValue) != TSS_SUCCESS)
++				goto out_close;
++		}
++#endif
++	}
++
++	/* Load the SRK and set the SRK policy (no password) */
++	if (keyLoadKeyByUUID(hContext, TSS_PS_TYPE_SYSTEM, SRK_UUID, &hSrk)
++	    != TSS_SUCCESS)
++		goto out_close;
++
++	/* Use the context's default policy for the SRK secret */
++	if (policyGet(hSrk, &hSrkPolicy) != TSS_SUCCESS)
++		goto out_close;
++
++	/* Prompt for SRK password */
++	if (!isWellKnown) {
++		passwd = _GETPASSWD(_("Enter SRK password: "), (int *)&pswd_len, FALSE,
++				    passUnicode);
++		if (!passwd) {
++			logError(_("Failed to get SRK password\n"));
++			goto out_close;
++		}
++	} else {
++		passwd = (char *)wellKnown;
++		pswd_len = sizeof(wellKnown);
++	}
++
++	if (policySetSecret(hSrkPolicy, (UINT32)pswd_len, (BYTE *)passwd) != TSS_SUCCESS)
++		goto out_close;
++
++	if (!isWellKnown)
++		shredPasswd(passwd);
++	passwd = NULL;
++
++	/* Failure point if trying to unseal data on a differnt TPM */
++	if (Tspi_Context_LoadKeyByBlob(hContext, hSrk, tssKeyLen,
++				       tssKeyData, &hKey) != TSS_SUCCESS) {
++		logError(_("Failed to load sign key\n"));
++		goto out_close;
++	}
++
++	if (contextCreateObject
++	    (hContext, TSS_OBJECT_TYPE_POLICY, TSS_POLICY_USAGE,
++	     &hPolicy) != TSS_SUCCESS)
++		goto out_close;
++
++	if (policySetSecret(hPolicy, strlen(TPMQUOTE_SECRET), (BYTE *)TPMQUOTE_SECRET)
++	    != TSS_SUCCESS)
++		goto out_close;
++
++	if (policyAssign(hPolicy, hKey) != TSS_SUCCESS)
++		goto out_close;
++
++	ValidationData.rgbExternalData = antiReplay.nonce;
++	ValidationData.ulExternalDataLength = sizeof(antiReplay);
++
++	/* Encrypt and seal the symmetric key */
++#if 1
++	versionInfo = NULL;
++	versionInfoSize = 0;
++	if (tpmQuote2
++	    (hTpm, hKey, FALSE, hPcrs, &ValidationData,
++	     &versionInfoSize, &versionInfo) !=
++	    TSS_SUCCESS)
++#else
++	if (tpmQuote
++	    (hTpm, hKey, hPcrs, &ValidationData) !=
++	    TSS_SUCCESS)
++#endif
++		goto out_close;
++
++	/* Create a BIO to perform base64 encoding */
++	if ((b64 = BIO_new(BIO_f_base64())) == NULL) {
++		logError(_("Unable to open base64 BIO\n"));
++		goto out_close;
++	}
++
++	/* Create a BIO for the output file */
++	if ((bdata = BIO_new(BIO_s_file())) == NULL) {
++		logError(_("Unable to open output BIO\n"));
++		goto out_close;
++	}
++
++	/* Assign the output file to the BIO */
++	if (strlen(out_filename) == 0)
++		BIO_set_fp(bdata, stdout, BIO_NOCLOSE);
++	else if (BIO_write_filename(bdata, out_filename) <= 0) {
++		logError(_("Unable to open output file: %s\n"),
++			 out_filename);
++		goto out_close;
++	}
++
++	/* Output the sealed data header string */
++	BIO_puts(bdata, TPMQUOTE_HDR_STRING);
++
++	/* Quote output */
++	BIO_puts(bdata, TPMQUOTE_SIGNATURE_STRING);
++	bdata = BIO_push(b64, bdata);
++	BIO_write(bdata, ValidationData.rgbValidationData,
++		  ValidationData.ulValidationDataLength);
++	if (BIO_flush(bdata) != 1) {
++		logError(_("Unable to flush output\n"));
++		goto out_close;
++	}
++	bdata = BIO_pop(b64);
++
++	BIO_puts(bdata, TPMQUOTE_QUOTE_INFO_STRING);
++	bdata = BIO_push(b64, bdata);
++	BIO_write(bdata, ValidationData.rgbData,
++		  ValidationData.ulDataLength);
++	if (BIO_flush(bdata) != 1) {
++		logError(_("Unable to flush output\n"));
++		goto out_close;
++	}
++	bdata = BIO_pop(b64);
++
++	BIO_puts( bdata, TPMQUOTE_PCRS_STRING);
++	for (i = 0; i < selectedPcrsLen; i++) {
++		char pbuf[4+(selectedPcrsSize[i]*2)+1+1];
++		char *p = pbuf;
++		int n;
++		unsigned int j;
++		n = sprintf(p, "%02d: ", selectedPcrs[i]);
++		if (n < 0)
++			goto out_close;
++		p += n;
++		for (j = 0; j < selectedPcrsSize[i]; j++) {
++			n = sprintf(p, "%02X", selectedPcrsValue[i][j]);
++			if (n < 0)
++				goto out_close;
++			p += n;
++		}
++		sprintf(p, "\n");
++		BIO_puts(bdata, pbuf);
++	}
++
++	BIO_puts( bdata, TPMQUOTE_FTR_STRING);
++
++	iRc = 0;
++	logSuccess(argv[0]);
++
++out_close:
++	contextClose(hContext);
++
++out:
++	if (bin)
++		BIO_free(bin);
++	if (bdata)
++		BIO_free(bdata);
++	if (b64)
++		BIO_free(b64);
++	return iRc;
++}
+Index: tpm-tools-1.3.1/include/tpm_quote.h
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ tpm-tools-1.3.1/include/tpm_quote.h	2010-08-01 04:52:45.000000000 +0000
+@@ -0,0 +1,47 @@
++/*
++ * The Initial Developer of the Original Code is International
++ * Business Machines Corporation. Portions created by IBM
++ * Corporation are Copyright (C) 2005, 2006 International Business
++ * Machines Corporation. All Rights Reserved.
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the Common Public License as published by
++ * IBM Corporation; either version 1 of the License, or (at your option)
++ * any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * Common Public License for more details.
++ *
++ * You should have received a copy of the Common Public License
++ * along with this program; if not, a copy can be viewed at
++ * http://www.opensource.org/licenses/cpl1.0.php.
++ */
++
++#ifndef __TPM_QUOTE_H
++#define __TPM_QUOTE_H
++
++#define TPMQUOTE_FILE_ERROR -2
++#define TPMQUOTE_STD_ERROR -1
++
++enum tpm_errors {
++	ENOTSSHDR = 0,
++	ENOTSSFTR,
++	EWRONGTSSTAG,
++	EBADSEEK,
++};
++
++#define TPMTSS_HDR_STRING "-----BEGIN TSS-----\n"
++#define TPMTSS_FTR_STRING "-----END TSS-----\n"
++#define TPMTSS_TSS_STRING "-----TSS KEY-----\n"
++
++#define TPMQUOTE_HDR_STRING "-----BEGIN QUOTE-----\n"
++#define TPMQUOTE_FTR_STRING "-----END QUOTE-----\n"
++#define TPMQUOTE_SIGNATURE_STRING "-----SIGNATURE-----\n"
++#define TPMQUOTE_QUOTE_INFO_STRING "-----QUOTE INFO-----\n"
++#define TPMQUOTE_PCRS_STRING "-----PCR VALUESS-----\n"
++
++#define TPMQUOTE_SECRET "password"
++#define TPMQUOTE_IV "IBM QUOTIBM QUOT"
++#endif

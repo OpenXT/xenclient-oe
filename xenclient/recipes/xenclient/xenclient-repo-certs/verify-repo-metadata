@@ -1,0 +1,126 @@
+#!/bin/sh
+#
+# Verifies the integrity of the metadata files in a XenClient repository.
+
+PROD_CERT_FILE="/usr/share/xenclient/repo-certs/prod/cert.pem"
+DEV_CERT_FILE="/usr/share/xenclient/repo-certs/dev/cert.pem"
+
+parse_args()
+{
+    ALLOW_DEV_KEY=0
+
+    if [ "$1" = "-d" ] ; then
+        ALLOW_DEV_KEY=1
+        shift
+    fi
+
+    if [ $# -ne 1 ] ; then
+        usage
+        exit 2
+    fi
+
+    REPOSITORY_DIR="$1"
+
+    REPOSITORY_FILE="${REPOSITORY_DIR}/XC-REPOSITORY"
+    PACKAGES_FILE="${REPOSITORY_DIR}/XC-PACKAGES"
+    SIGNATURE_FILE="${REPOSITORY_DIR}/XC-SIGNATURE"
+}
+
+usage()
+{
+    cat <<EOF
+Usage: $(basename $0) [-d] REPOSITORY_DIR
+
+Verifies the integrity of the metadata files (XC-REPOSITORY, XC-PACKAGES and
+XC-SIGNATURE) in a XenClient repository:
+
+  - Checks that XC-PACKAGES matches the checksum listed in XC-REPOSITORY.
+  - Checks that XC-REPOSITORY matches the signature in XC-SIGNATURE.
+
+Note that this only verifies the integrity of the metadata files: it does not
+verify that the packages in the repository match the checksums listed in
+XC-PACKAGES.
+
+The -d option should only be used for testing purposes. It allows signatures
+created with the XenClient development signing certificate in addition to
+signatures created with the XenClient production signing certificate.
+
+Exit status:
+
+    0  metadata is valid
+    1  metadata is valid except for invalid signature
+    2  metadata is not valid or another error occurred
+
+EOF
+}
+
+verify_xc_packages()
+{
+    local PACKAGES_CHECKSUM=$(sed -n 's/^packages://p' "${REPOSITORY_FILE}") ||
+        die "error reading '${REPOSITORY_FILE}'"
+
+    [ -n "${PACKAGES_CHECKSUM}" ] ||
+        die "XC-PACKAGES checksum MISSING"
+
+    local FILE_CHECKSUM=$(sha256sum "${PACKAGES_FILE}" | cut -f1 -d' ') ||
+        die "error calculating checksum of '${PACKAGES_FILE}'"
+
+    [ -n "${FILE_CHECKSUM}" ] ||
+        die "error calculating checksum of '${PACKAGES_FILE}'"
+
+    [ "${FILE_CHECKSUM}" = "${PACKAGES_CHECKSUM}" ] ||
+        die "XC-PACKAGES checksum NOT VALID"
+}
+
+verify_xc_repository()
+{
+    local TEMP_FILE=$(mktemp -t) ||
+        die "error creating temporary file"
+
+    local VALID=0
+
+    if verify_signature "${PROD_CERT_FILE}" 2> "${TEMP_FILE}" ; then
+        VALID=1
+    elif [ "${ALLOW_DEV_KEY}" -eq 1 ] ; then
+        if verify_signature "${DEV_CERT_FILE}" 2> "${TEMP_FILE}" ; then
+            VALID=1
+        fi
+    fi
+
+    if [ "${VALID}" -eq 0 ] ; then
+        cat "${TEMP_FILE}" >&2
+        rm -f "${TEMP_FILE}"
+        echo "$(basename $0): signature NOT VALID" >&2
+        exit 1
+    fi
+
+    rm -f "${TEMP_FILE}"
+}
+
+verify_signature()
+{
+    local CERT_FILE="$1"
+
+    openssl smime -verify \
+                  -in "${SIGNATURE_FILE}" \
+                  -inform PEM \
+                  -content "${REPOSITORY_FILE}" \
+                  -CAfile "${CERT_FILE}" > /dev/null
+}
+
+die()
+{
+    echo "$(basename $0): $*" >&2
+    exit 2
+}
+
+parse_args "$@"
+
+# Verify XC-PACKAGES against checksum in XC-REPOSITORY.
+verify_xc_packages
+
+# Verify XC-REPOSITORY against signature in XC-SIGNATURE. Must be done last,
+# so we only exit with status 1 if metadata is valid except for signature.
+verify_xc_repository
+
+exit 0

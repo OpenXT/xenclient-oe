@@ -1,0 +1,199 @@
+#!/bin/bash
+#
+# Copyright (c) 2010 Citrix Systems, Inc.
+# 
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+# 
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+# 
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+#
+
+set -x
+CMD="$0"
+usage()
+{
+cat >&2 <<EOF
+${CMD}: requires arguments:
+  --dom0              <path-to-dom0.ext3.gz>
+  --iovm              <path-to-iovm: .ext3.gz | .ext2.bz2>
+  --installer         <path-to-installer-rootfs.cpio.gz>
+  --isolinux.bin      <path-to-isolinux.bin>
+  --mboot.c32         <path-to-mboot.c32>
+  --xen               <path-to-xen.gz>
+  --vmlinuz           <path-to-vmlinuz>
+  --product-version   <product version number>
+  --build-id          <build identifier>
+  --output-filename   <output iso filename>
+EOF
+}
+
+# DEFAULTS:
+DOM0_ROOTFS_EXT3_GZ="build/deploy/glibc/images/xenclient-dom0/xenclient-dom0-image-xenclient-dom0.ext3.gz"
+IOVM_ROOTFS=""
+INSTALLER_ROOTFS_GZ="build/deploy/glibc/images/xenclient-dom0/xenclient-installer-image-xenclient-dom0.cpio.gz"
+ISOLINUX_BIN="build/deploy/glibc/images/xenclient-dom0/xenclient-installer-image-xenclient-dom0/iso/isolinux.bin"
+MBOOT_C32="build/deploy/glibc/images/xenclient-dom0/xenclient-installer-image-xenclient-dom0/iso/mboot.c32"
+XEN_GZ="build/deploy/glibc/images/xenclient-dom0/xen.gz"
+VMLINUZ="build/deploy/glibc/images/xenclient-dom0/vmlinuz-xenclient-dom0.bin"
+XC_VERSION="custom-`whoami`@`hostname`"
+XC_BUILD_ID="0"
+OUTPUT="xci.iso"
+
+while [ "$#" -ne 0 ]; do
+        case "$1" in
+                --dom0)             DOM0_ROOTFS_EXT3_GZ="$2"; shift 2 ;;
+                --iovm)             IOVM_ROOTFS="$2"; shift 2 ;;
+                --installer)        INSTALLER_ROOTFS_GZ="$2"; shift 2 ;;
+                --isolinux.bin)     ISOLINUX_BIN="$2"; shift 2 ;;
+                --mboot.c32)        MBOOT_C32="$2"; shift 2 ;;
+                --xen)              XEN_GZ="$2"; shift 2 ;;
+                --vmlinuz)          VMLINUZ="$2"; shift 2 ;;
+                --product-version)  XC_VERSION="$2"; shift 2 ;;
+                --build-id)         XC_BUILD_ID="$2"; shift 2 ;;
+                --output-filename)  OUTPUT="$2"; shift 2 ;;
+                *)
+                    echo "Error - unknown arg: $1"
+                    usage
+                    exit 1 ;;
+        esac
+done
+
+if  [ -z "${DOM0_ROOTFS_EXT3_GZ}" ] ||
+    [ -z "${INSTALLER_ROOTFS_GZ}" ] || [ -z "${ISOLINUX_BIN}" ] ||
+    [ -z "${MBOOT_C32}" ] || [ -z "${XEN_GZ}" ] ||
+    [ -z "${VMLINUZ}" ] || [ -z "${XC_VERSION}" ] ||
+    [ -z "${XC_BUILD_ID}" ] ||
+    [ -z "${OUTPUT}" ] ; then
+    usage
+    exit 2
+fi
+
+if  [ ! -r "${DOM0_ROOTFS_EXT3_GZ}" ] ||
+    [ ! -r "${INSTALLER_ROOTFS_GZ}" ] || [ ! -r "${MBOOT_C32}" ] ||
+    [ ! -r "${ISOLINUX_BIN}" ] ||
+    [ ! -r "${XEN_GZ}" ] || [ ! -r "${VMLINUZ}" ]; then
+    "Error: missing input file">&2
+    exit 3
+fi
+
+determine_iovm_format()
+{
+    CHECK="$1"
+    # check the the IOVM is either: *.ext2.bz2 or *.ext3.gz
+    if [ "${CHECK}" != "${CHECK%.ext2.bz2}" ] ; then
+        IOVM_FORMAT="ext2bz2"
+        IOVM_SUFFIX=".ext2.bz2"
+    elif [ "${CHECK}" != "${CHECK%.ext3.gz}" ] ; then
+        IOVM_FORMAT="ext3gz"
+        IOVM_SUFFIX=".ext3.gz"
+    elif [ "${CHECK}" == "" ]; then
+	IOVM_FORMAT="none"
+    else
+        echo "Cannot recognise IOVM format from filename: ${CHECK}">&2
+        exit 4
+    fi
+}
+
+die () {
+    echo "Fatal error">&2
+    exit 5
+}
+
+
+init_root () {
+    WORKDIR="$(mktemp -d)"
+    PACKAGE_DIR="${WORKDIR}/packages.main"
+	ISOLINUX_DIR="${WORKDIR}"/isolinux
+}
+
+import_binaries () {
+	mkdir "${ISOLINUX_DIR}"
+	cp "${MBOOT_C32}" "${ISOLINUX_DIR}/mboot.c32" || die
+    cp "${XEN_GZ}" "${ISOLINUX_DIR}/xen.gz" || die
+    cp "${VMLINUZ}" "${ISOLINUX_DIR}/vmlinuz" || die
+	cp "${INSTALLER_ROOTFS_GZ}" "${ISOLINUX_DIR}/rootfs.gz" || die
+	cp "${ISOLINUX_BIN}" "${ISOLINUX_DIR}/" || die
+}
+
+import_dom0_and_iovm () {
+    DOM0_ROOTFS_NAME="dom0-rootfs.i686.ext2.bz2"
+    IOVM_ROOTFS_NAME="iovm-rootfs.i686${IOVM_SUFFIX}"
+    mkdir -p "${PACKAGE_DIR}"
+    cp "${DOM0_ROOTFS_EXT3_GZ}" "${PACKAGE_DIR}/${DOM0_ROOTFS_NAME}" || die
+    if [ "${IOVM_ROOTFS}" != "" ]; then
+	cp "${IOVM_ROOTFS}" "${PACKAGE_DIR}/${IOVM_ROOTFS_NAME}" || die
+    fi
+
+    for FILE in "${PACKAGE_DIR}"/* ; do
+        FILE_SIZE="$(ls -l ${FILE} | sed -ne 's/^\(\S\+\s\+\)\{4\}\(\S\+\)\s\+.*$/\2/p')"
+        FILE_MD5SUM="$(md5sum ${FILE} | cut -f1 -d' ')"
+        NAME=$(basename "${FILE}")
+        SHORTNAME=$(echo "${NAME}" | cut -c1-4)
+
+        UNPACK_DIR="/"
+        FORMAT="ext3gz"
+        if [ "${SHORTNAME}" = "iovm" ] ; then
+	    UNPACK_DIR="/storage/iovm"
+	    FORMAT="${IOVM_FORMAT}"
+        fi
+	if [ "$FORMAT" != "none" ]; then
+            echo "${SHORTNAME} ${FILE_SIZE} ${FILE_MD5SUM} ${FORMAT} required ${NAME} ${UNPACK_DIR}" >>"${PACKAGE_DIR}/XC-PACKAGES" || die
+	fi
+    done
+    echo -e "xc:main\nBase Pack\nXenClient\n${XC_VERSION}-${XC_BUILD_ID}" >"${PACKAGE_DIR}/XC-REPOSITORY" || die
+}
+
+write_bootmsg() {
+cat > "${WORKDIR}/isolinux/bootmsg.txt" <<EOF
+
+0fXCI installation media
+07Version: ${XC_VERSION}
+EOF
+}
+
+create_isolinuxcfg () {
+	cat > "${WORKDIR}"/isolinux/isolinux.cfg << EOF 
+DEFAULT xci
+DISPLAY bootmsg.txt
+PROMPT 1
+TIMEOUT 20
+LABEL xci
+  kernel mboot.c32
+  append xen.gz max_cstate=0 iommu=1 iommu_inclusive_mapping=1 console=/dev/null --- vmlinuz quiet root=/dev/ram rw start_install=new eject_cdrom=0 answerfile=/install/answers/cd-only.ans console=/dev/tty2 --- rootfs.gz
+LABEL verbose
+  kernel mboot.c32
+  append xen.gz max_cstate=0 iommu=1 iommu_inclusive_mapping=1 --- vmlinuz quiet root=/dev/ram rw start_install=new eject_cdrom=0 answerfile=/install/answers/cd-only.ans --- rootfs.gz
+LABEL automatic
+  kernel mboot.c32
+  append xen.gz max_cstate=0 iommu=1 iommu_inclusive_mapping=1 console=/dev/null --- vmlinuz quiet root=/dev/ram rw start_install=new eject_cdrom=0 answerfile=/install/answers/cd-only.ans console=/dev/tty2 --- rootfs.gz
+EOF
+}
+
+make_iso () {
+	mkisofs -o "${OUTPUT}" \
+		-b isolinux/isolinux.bin -c isolinux/boot.cat \
+		-no-emul-boot -boot-load-size 4 -boot-info-table \
+		-R -J "${WORKDIR}"
+}
+
+tidy_up() {
+    rm -rf "${WORKDIR}"
+}
+
+determine_iovm_format "${IOVM_ROOTFS}"
+init_root
+import_binaries
+import_dom0_and_iovm
+write_bootmsg
+create_isolinuxcfg
+make_iso
+tidy_up

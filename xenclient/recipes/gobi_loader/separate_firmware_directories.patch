@@ -1,0 +1,116 @@
+Index: gobi_loader-0.7/gobi_loader.c
+===================================================================
+--- gobi_loader-0.7.orig/gobi_loader.c	2010-06-24 18:13:46.000000000 +0100
++++ gobi_loader-0.7/gobi_loader.c	2012-04-23 12:53:16.000000000 +0100
+@@ -28,6 +28,8 @@
+ #include <termios.h>
+ #include <unistd.h>
+ #include <malloc.h>
++#include <sys/param.h>
++#include <dirent.h>
+ 
+ char magic1[] = {0x01, 0x51, 0x43, 0x4f, 0x4d, 0x20, 0x68, 0x69,
+ 		 0x67, 0x68, 0x20, 0x73, 0x70, 0x65, 0x65, 0x64, 0x20, 
+@@ -121,12 +123,60 @@
+ 	printf ("usage: %s [-2000] serial_device firmware_dir\n", argv[0]);
+ }
+ 
++static int
++gobi_search_dir (const char *dir, const char *leaf)
++{
++        int fd = -1;
++        struct dirent *ent;
++        char fn[PATH_MAX];
++        DIR *dirp = opendir (dir);
++
++        if (!dirp)
++                  return -1;
++
++        while ((ent = readdir (dirp)))
++          {
++
++                  if (!strcasecmp (ent->d_name, leaf))
++                    {
++                            snprintf (fn, sizeof (fn) - 1, "%s/%s", dir,
++                                      ent->d_name);
++                            fn[sizeof (fn) - 1] = 0;
++
++                            fd = open (fn, O_RDONLY);
++                            if (fd >= 0)
++                                    break;
++                    }
++          }
++
++        closedir (dirp);
++
++        return fd;
++}
++
++static int
++gobi_open (const char *leaf, int gobi_ver)
++{
++        int fd;
++        char dir[PATH_MAX];
++
++        snprintf (dir, sizeof (dir) - 1, "gobi%d", gobi_ver);
++        dir[sizeof (dir) - 1] = 0;
++
++        fd = gobi_search_dir (dir, leaf);
++
++        if (fd >= 0)
++                return fd;
++
++        return gobi_search_dir (".", leaf);
++}
++
+ int main(int argc, char **argv) {	
+ 	int serialfd;
+ 	int fwfd;
+ 	int len;
+ 	int err;
+-	int gobi2000 = 0;
++	int gobi_ver= 1000;
+ 	struct termios terminal_data;
+ 	struct stat file_data;
+ 	char *fwdata = malloc(1024*1024);
+@@ -143,7 +193,7 @@
+ 
+ 	if (argc == 4) {
+ 		if (!strcmp(argv[1], "-2000")) {
+-			gobi2000=1;
++			gobi_ver=2000;
+ 			magic1[33]++;
+ 			magic1[34]++;
+ 		} else {
+@@ -166,7 +216,7 @@
+ 		return -1;
+ 	}
+ 
+-	fwfd = open("amss.mbn", O_RDONLY);
++	fwfd = gobi_open("amss.mbn", gobi_ver);
+ 
+ 	if (fwfd == -1) {
+ 		perror("Failed to open firmware: ");
+@@ -209,7 +259,7 @@
+ 		write (serialfd, fwdata, 0);
+ 	}
+ 
+-	fwfd = open("apps.mbn", O_RDONLY);
++	fwfd = gobi_open("apps.mbn", gobi_ver);
+ 
+ 	if (fwfd == -1) {
+ 		perror("Failed to open secondary firmware: ");
+@@ -243,11 +293,8 @@
+ 		write (serialfd, fwdata, 0);
+ 	}
+ 
+-	if (gobi2000) {
+-		fwfd = open("UQCN.mbn", O_RDONLY);
+-
+-		if (fwfd == -1)
+-			fwfd = open("uqcn.mbn", O_RDONLY);
++	if (gobi_ver==2000) {
++		fwfd = gobi_open("uqcn.mbn", gobi_ver);
+ 
+ 		if (fwfd == -1) {
+ 			perror("Failed to open tertiary firmware: ");

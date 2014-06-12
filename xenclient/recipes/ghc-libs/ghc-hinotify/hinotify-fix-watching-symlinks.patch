@@ -1,0 +1,64 @@
+From dd2718805413ad027d46f6a46a0cdf466c55588a Mon Sep 17 00:00:00 2001
+From: Matthias Goergens <matthias.goergens@citrix.com>
+Date: Tue, 25 Sep 2012 11:33:33 +0100
+Subject: [PATCH] Allow watching of symlinks
+
+---
+ src/System/INotify.hsc | 20 +++++++++-----------
+ 1 file changed, 9 insertions(+), 11 deletions(-)
+
+diff --git a/src/System/INotify.hsc b/src/System/INotify.hsc
+index ff81247..b10d322 100644
+--- a/src/System/INotify.hsc
++++ b/src/System/INotify.hsc
+@@ -36,6 +36,7 @@ module System.INotify
+ 
+ import Prelude hiding (init)
+ import Control.Monad
++import Control.Applicative
+ import Control.Concurrent
+ import Control.Concurrent.MVar
+ import Control.Exception (bracket)
+@@ -43,7 +44,7 @@ import Data.Maybe
+ import Data.Map (Map)
+ import qualified Data.Map as Map
+ import Foreign.C
+-import Foreign.Marshal
++import Foreign.Marshal hiding (void)
+ import Foreign.Ptr
+ import Foreign.Storable
+ import System.Directory
+@@ -56,6 +57,7 @@ import GHC.IO.Device (IODeviceType(Stream))
+ import GHC.Handle
+ import System.Posix.Internals
+ #endif
++import System.Posix.Files
+ 
+ import System.INotify.Masks
+ 
+@@ -187,16 +189,12 @@ initINotify = do
+ 
+ addWatch :: INotify -> [EventVariety] -> FilePath -> (Event -> IO ()) -> IO WatchDescriptor
+ addWatch inotify@(INotify _ fd em _ _) masks fp cb = do
+-    is_dir <- doesDirectoryExist fp
+-    when (not is_dir) $ do
+-        file_exist <- doesFileExist fp
+-        when (not file_exist) $ do
+-            -- it's not a directory, and not a file...
+-            -- it doesn't exist
+-            ioError $ mkIOError doesNotExistErrorType
+-                                "can't watch what isn't there"
+-                                Nothing 
+-                                (Just fp)
++    catch ((if (NoSymlink `elem` masks) then getSymbolicLinkStatus else getFileStatus)
++           fp) $ \_ ->
++        ioError $ mkIOError doesNotExistErrorType
++             "can't watch what isn't there!"
++             Nothing
++             (Just fp)
+     let mask = joinMasks (map eventVarietyToMask masks)
+     wd <- withCString fp $ \fp_c ->
+             throwErrnoIfMinus1 "addWatch" $
+-- 
+1.7.12
+

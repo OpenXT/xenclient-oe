@@ -1,0 +1,183 @@
+#! /bin/sh
+#
+# Copyright (c) 2013 Citrix Systems, Inc.
+# 
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+# 
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+# 
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+#
+
+TPM_FUNCS=/usr/lib/tpm-scripts/tpm-functions
+if [ ! -f ${TPM_FUNCS} ]; then
+    echo "No tpm-function library found at ${TPM_FUNCS}.  ABORT" >&2
+    exit 1
+else
+    . ${TPM_FUNCS}
+fi
+
+RECOVERY_PUBLIC_KEY=/boot/system/config/recovery-public-key.conf
+TPM_OWNER_PASSWD_SSL=/boot/system/config/tpm-owner-passwd.ssl
+if [ ! -r "${RECOVERY_PUBLIC_KEY}" ]; then
+    echo "No recovery key set."
+    echo "Cannot configure Measured Launch."
+    exit 1
+fi
+
+SR_MSG="Please collect a status report and report this bug."
+
+quirk_callback () {
+    echo -e "${1}"
+    read -p "Press a key to acknowledge quirk, Ctrl+c to reject and quit ... "
+}
+
+quirk_fatal_callback () {
+    echo -e "${1}"
+}
+
+# detect quirks
+quirk_detect "quirk_callback" "quirk_fatal_callback"
+[ $? -ne 0 ] && {
+    echo "Platform has known a fatal quirk, exiting."
+    exit 1
+}
+
+tcsd_start || {
+    echo "Unable to start the TSS daemon."
+    echo "It is likely that your TPM is disabled."
+    echo "Please enable your TPM through your system BIOS config."
+    exit 1
+}
+
+tpm_is_enabled
+case $? in
+    0)  ;;
+    1)  echo "The TPM on this platform is disabled."
+        echo "Please enable your TPM through your system BIOS config."
+        exit 1
+        ;;
+    2)  echo "Unable to determin TPM enabled/disabled state."
+        echo "${SR_MSG}"
+        exit 1
+        ;;
+    *)  echo "Unanticipated result from tpm_is_enabled.  This is a bug."
+        echo "${SR_MSG}"
+        exit 1
+        ;;
+esac
+
+tpm_is_active
+case $? in
+    0)  ;;
+    1)  echo "The TPM on this platform is inactive."
+        echo "Please activate your TPM through your system BIOS config."
+        exit 1
+        ;;
+    2)  echo "Unable to determine TPM active/inactive state."
+        echo "${SR_MSG}"
+        exit 1
+        ;;
+    *)  echo "Unanticipated result from tpm_is_enabled.  This is a bug."
+        echo "${SR_MSG}"
+        exit 1
+        ;;
+esac
+
+tpm_has_ek
+case $? in
+    0)  TPM_EK="true" ;;
+    1)  TPM_EK="false" ;;
+    2)  echo "Unable to determin TPM EK status."
+        echo "${SR_MSG}"
+        exit 1
+        ;;
+    *)  echo "Unanticipated result from tpm_has_ek."
+        echo "${SR_MSG}"
+        exit 1
+        ;;
+esac
+
+tpm_is_owned
+case $? in
+    0)  echo "The TPM is already owned."
+        echo "XenClient Measured Launch requires sole ownership of the platform TPM."
+        echo "You must Reboot and clear your TPM in the BIOS configuration"
+        exit 1
+        ;;
+    1)  ;;
+    2)  echo "Unable to determin TPM owned status."
+        echo "${SR_MSG}"
+        exit 1
+        ;;
+    *)  echo "Unanticipated result from tpm_is_owned: This is a bug."
+        echo "${SR_MSG}"
+        exit 1
+        ;;
+esac
+
+mle_success || {
+    echo "Warning: TXT is not in a working state."
+    echo "It could be because it is disabled in the BIOS."
+    echo "Please reboot your system, enter your BIOS config menu and enable TXT."
+    exit 1
+}
+
+echo "Taking ownership of the TPM.  Move mouse to increase entropy."
+tpm_configure_gen_passwd "${RECOVERY_PUBLIC_KEY}" "${TPM_OWNER_PASSWD_SSL}"  "${TPM_EK}"
+if [ $? -ne 0 ]; then
+    echo "Attempt to configure TPM failed."
+    echo "${SR_MSG}"
+    [ -f "${TPM_OWNER_PASSWD_SSL}" ] && rm "${TPM_OWNER_PASSWD_SSL}"
+    exit 1
+fi
+
+[ -e /config/keys/config.key ] || {
+  cryptsetup luksDump /dev/xenclient/config | {
+    ! grep -q '^Key Slot 7: DISABLED$' || {
+      echo System recovery password was not set during install.
+      while true
+      do
+        echo -n Enter new system recovery password:\ 
+        read -s pass1 </dev/tty
+        echo
+        echo -n Verify system recovery password:\ 
+        read -s pass2 </dev/tty
+        echo
+        [ "$pass1" != "$pass2" ] || break
+        echo Entered passwords do not match!
+      done
+      echo "$pass1" >/mnt/secure/system-password
+      get-config-key | cryptsetup -q -d - -S 7 \
+        -i 100 luksAddKey /dev/xenclient/config \
+          /mnt/secure/system-password >/dev/null 2>&1 || {
+          echo TPM setup couldn\'t set system recovery password
+        }
+      rm -f /mnt/secure/system-password
+    }
+    echo "Generating cryptographic key.  Move mouse to increase entropy."
+    configure_measured_launch || {
+        echo TPM setup failed -- please retry...
+        exit 1
+    }
+  }
+}
+
+[ -x /sbin/restorecon ] && /sbin/restorecon -r /boot/system/tpm
+
+quirk_fix
+[ $? -ne 0 ] && {
+    echo "failed to work around a quirk" >&2
+    echo "${SR_MSG}"
+    exit 1
+}
+
+echo TPM setup successful -- please shutdown!

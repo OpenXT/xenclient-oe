@@ -1,0 +1,433 @@
+Index: trousers-0.3.2-1/configure.in
+===================================================================
+--- trousers-0.3.2-1.orig/configure.in	2009-08-18 19:24:30.000000000 +0000
++++ trousers-0.3.2-1/configure.in	2010-08-01 18:14:13.000000000 +0000
+@@ -377,6 +377,7 @@
+ 	  src/tcs/Makefile \
+ 	  src/tddl/Makefile \
+ 	  src/tspi/Makefile \
++	  src/tspi_sa/Makefile \
+ 	  src/trspi/Makefile \
+ 	  src/tcsd/Makefile \
+ 	  tools/Makefile \
+Index: trousers-0.3.2-1/src/tspi/rpc/tcstp/rpc.c
+===================================================================
+--- trousers-0.3.2-1.orig/src/tspi/rpc/tcstp/rpc.c	2009-08-06 13:17:21.000000000 +0000
++++ trousers-0.3.2-1/src/tspi/rpc/tcstp/rpc.c	2010-08-01 18:14:13.000000000 +0000
+@@ -32,6 +32,26 @@
+ #include "obj.h"
+ #include "rpc_tcstp_tsp.h"
+ 
++#ifdef TSS_LIB_SA
++#define loadData tspi_loadData
++#include "rpc_tcstp_tcs.h"
++#include "req_mgr.h"
++#include "tcsps.h"
++/* tcs_utils.h */
++struct tpm_properties
++{
++        UINT32 num_pcrs;
++        UINT32 num_dirs;
++        UINT32 num_keys;
++        UINT32 num_auths;
++        TSS_BOOL authctx_swap;
++        TSS_BOOL keyctx_swap;
++        TPM_VERSION version;
++        BYTE manufacturer[16];
++};
++TSS_RESULT get_tpm_metrics(struct tpm_properties *);
++TSS_RESULT auth_mgr_init();
++#endif
+ 
+ void
+ initData(struct tcsd_comm_data *comm, int parm_count)
+@@ -337,6 +357,7 @@
+ 	return send_total;
+ }
+ 
++#ifndef TSS_LIB_SA
+ TSS_RESULT
+ send_init(struct host_table_entry *hte)
+ {
+@@ -511,4 +532,92 @@
+ 
+ 	return (short)port;
+ }
++#else
++struct tcsd_config tcsd_options;
++struct tpm_properties tpm_metrics;
++
++TSS_RESULT
++sendit(struct host_table_entry *hte)
++{
++	struct tcsd_thread_data _data, *data;
++	TSS_RESULT result;
++	UINT64 offset;
++	static int init = 1;
++
++	if (init) {
++		if ((result = conf_file_init(&tcsd_options)))
++			return result;
++		if ((result = req_mgr_init())) {
++			conf_file_final(&tcsd_options);
++			return result;
++		}
++		if ((result = ps_dirs_init())) {
++			conf_file_final(&tcsd_options);
++			(void)req_mgr_final();
++			return result;
++		}
++		result = PS_init_disk_cache();
++		if (result != TSS_SUCCESS) {
++			conf_file_final(&tcsd_options);
++			(void)req_mgr_final();
++			return result;
++		}
++		if ((result = get_tpm_metrics(&tpm_metrics))) {
++			conf_file_final(&tcsd_options);
++			PS_close_disk_cache();
++			(void)req_mgr_final();
++			return result;
++		}
++		/* must happen after get_tpm_metrics() */
++		if ((result = auth_mgr_init())) {
++			conf_file_final(&tcsd_options);
++			PS_close_disk_cache();
++			(void)req_mgr_final();
++			return result;
++		}
++		init = 0;
++	}
++
++	data = &_data;
++	memset(data, 0, sizeof(*data));
++	data->context = hte->tspContext;
++	data->hostname = (void *)hte->hostname;
++	memcpy(&data->comm, &hte->comm, sizeof(data->comm));
++
++	/* create a platform version of the tcsd header */
++	offset = 0;
++	Trspi_UnloadBlob_UINT32(&offset, &data->comm.hdr.packet_size, data->comm.buf);
++	Trspi_UnloadBlob_UINT32(&offset, &data->comm.hdr.u.result, data->comm.buf);
++	Trspi_UnloadBlob_UINT32(&offset, &data->comm.hdr.num_parms, data->comm.buf);
++	Trspi_UnloadBlob_UINT32(&offset, &data->comm.hdr.type_size, data->comm.buf);
++	Trspi_UnloadBlob_UINT32(&offset, &data->comm.hdr.type_offset, data->comm.buf);
++	Trspi_UnloadBlob_UINT32(&offset, &data->comm.hdr.parm_size, data->comm.buf);
++	Trspi_UnloadBlob_UINT32(&offset, &data->comm.hdr.parm_offset, data->comm.buf);
++
++	if ((result = getTCSDPacket(data)) != TSS_SUCCESS) {
++		/* something internal to the TCSD went wrong in preparing the packet
++		 * to return to the TSP.  Use our already allocated buffer to return a
++		 * TSS_E_INTERNAL_ERROR return code to the TSP. In the non-error path,
++		 * these LoadBlob's are done in getTCSDPacket().
++		 */
++		/* set everything to zero, fill in what is non-zero */
++		memset(data->comm.buf, 0, data->comm.buf_size);
++		offset = 0;
++		/* load packet size */
++		Trspi_LoadBlob_UINT32(&offset, sizeof(struct tcsd_packet_hdr), data->comm.buf);
++		/* load result */
++		Trspi_LoadBlob_UINT32(&offset, result, data->comm.buf);
++	}
++
++	memcpy(&hte->comm, &data->comm, sizeof(hte->comm));
++	return result;
++}
++
++TSS_RESULT
++send_init(struct host_table_entry *hte)
++{
++
++	return sendit(hte);
++}
++#endif
+ 
+Index: trousers-0.3.2-1/src/tspi_sa/Makefile.am
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ trousers-0.3.2-1/src/tspi_sa/Makefile.am	2010-08-01 18:16:03.000000000 +0000
+@@ -0,0 +1,237 @@
++lib_LTLIBRARIES=libtspi_sa.la
++
++libtspi_sa_la_LIBADD=../trspi/libtrousers.la
++
++# On setting -version-info, from the libtool manual:
++#
++# -version-info current:revision:age
++#
++# 1. Start with version information of 0:0:0 for each libtool library.
++# 2. Update the version information only immediately before a public release of your software.
++#    More frequent updates are unnecessary, and only guarantee that the current interface
++#    number gets larger faster.
++# 3. If the library source code has changed at all since the last update, then increment
++#    revision (c:r:a becomes c:r+1:a).
++# 4. If any interfaces have been added, removed, or changed since the last update, increment
++#    current, and set revision to 0.
++# 5. If any interfaces have been added since the last public release, then increment age.
++# 6. If any interfaces have been removed since the last public release, then set age to 0.
++
++libtspi_sa_la_LDFLAGS=-version-info 2:3:1 @CRYPTOLIB@
++
++libtspi_sa_la_CFLAGS=-I../include -DAPPID=\"TSPI\" -DVAR_PREFIX=\"@localstatedir@\" -DETC_PREFIX=\"@sysconfdir@\" -DTSS_LIB_SA
++
++libtspi_sa_la_SOURCES=../tspi/log.c \
++                   ../tspi/spi_utils.c \
++                   ../tspi/obj.c \
++                   ../tspi/obj_policy.c \
++                   ../tspi/tsp_policy.c \
++                   ../tspi/obj_tpm.c \
++                   ../tspi/obj_context.c \
++                   ../tspi/tsp_context_mem.c \
++                   ../tspi/tspi_context.c \
++                   ../tspi/rpc/@RPC@/rpc_context.c \
++                   ../tspi/rpc/tcs_api.c \
++                   ../tspi/rpc/hosttable.c \
++                   ../tspi/rpc/@RPC@/rpc.c \
++                   ../tcsd/platform.c \
++                   ../tcsd/tcsd_conf.c
++
++if TSS_BUILD_ASYM_CRYPTO
++libtspi_sa_la_SOURCES+=../tspi/tsp_asym.c
++endif
++if TSS_BUILD_TSS12
++## This is for individual APIs that exist outside TSS 1.2, but may have some TSS 1.2 internal
++## features/options such as Tspi_TPM_SetStatus
++libtspi_sa_la_SOURCES+=../tspi/tspi_oper.c ../tspi/tsp_oper.c ../tspi/rpc/@RPC@/rpc_oper.c
++libtspi_sa_la_CFLAGS+=-DTSS_BUILD_TSS12
++endif
++#if TSS_BUILD_TRANSPORT
++#libtspi_la_SOURCES+=tspi_transport.c rpc/@RPC@/rpc_transport.c
++#libtspi_la_CFLAGS+=-DTSS_BUILD_TRANSPORT
++#endif
++#if TSS_BUILD_TICK
++#libtspi_la_SOURCES+=tspi_tick.c tsp_tick.c rpc/@RPC@/rpc_tick.c
++#libtspi_la_CFLAGS+=-DTSS_BUILD_TICK
++#endif
++#if TSS_BUILD_COUNTER
++#libtspi_la_SOURCES+=tspi_counter.c tsp_counter.c rpc/@RPC@/rpc_counter.c
++#libtspi_la_CFLAGS+=-DTSS_BUILD_COUNTER
++#endif
++if TSS_BUILD_PCR_COMP12
++libtspi_sa_la_SOURCES+=../tspi/tspi_pcr_comp12.c
++endif
++if TSS_BUILD_AUTH
++libtspi_sa_la_SOURCES+=../tspi/tsp_auth.c ../tspi/rpc/@RPC@/rpc_auth.c
++libtspi_sa_la_CFLAGS+=-DTSS_BUILD_AUTH
++endif
++if TSS_BUILD_GETSET
++libtspi_sa_la_SOURCES+=../tspi/tspi_getset.c
++libtspi_sa_la_CFLAGS+=-DTSS_BUILD_GETSET
++endif
++if TSS_BUILD_RANDOM
++libtspi_sa_la_SOURCES+=../tspi/tspi_random.c ../tspi/tsp_random.c ../tspi/rpc/@RPC@/rpc_random.c
++libtspi_sa_la_CFLAGS+=-DTSS_BUILD_RANDOM
++endif
++#if TSS_BUILD_CAPS
++#libtspi_la_SOURCES+=tspi_caps.c tsp_caps.c rpc/@RPC@/rpc_caps.c
++#libtspi_la_CFLAGS+=-DTSS_BUILD_CAPS
++#endif
++if TSS_BUILD_CAPS_TPM
++libtspi_sa_la_SOURCES+=../tspi/tspi_caps_tpm.c ../tspi/tsp_caps_tpm.c ../tspi/rpc/@RPC@/rpc_caps_tpm.c
++libtspi_sa_la_CFLAGS+=-DTSS_BUILD_CAPS_TPM
++endif
++if TSS_BUILD_POLICY
++libtspi_sa_la_SOURCES+=../tspi/tspi_policy.c
++libtspi_sa_la_CFLAGS+=-DTSS_BUILD_POLICY
++endif
++#if TSS_BUILD_DIR
++#libtspi_la_SOURCES+=tspi_dir.c tsp_dir.c rpc/@RPC@/rpc_dir.c
++#libtspi_la_CFLAGS+=-DTSS_BUILD_DIR
++#endif
++#if TSS_BUILD_PCR_EVENTS
++#libtspi_la_SOURCES+=tspi_pcr_events.c rpc/@RPC@/rpc_evlog.c
++#libtspi_la_CFLAGS+=-DTSS_BUILD_PCR_EVENTS
++#endif
++#if TSS_BUILD_HASH
++#libtspi_la_SOURCES+=tspi_hash.c
++#libtspi_la_CFLAGS+=-DTSS_BUILD_HASH
++#endif
++#if TSS_BUILD_SIGN
++#libtspi_la_SOURCES+=tspi_sign.c tsp_sign.c rpc/@RPC@/rpc_sign.c
++#libtspi_la_CFLAGS+=-DTSS_BUILD_SIGN
++#endif
++if TSS_BUILD_QUOTE
++libtspi_sa_la_SOURCES+=../tspi/tspi_quote.c ../tspi/tsp_quote.c ../tspi/rpc/@RPC@/rpc_quote.c
++libtspi_sa_la_CFLAGS+=-DTSS_BUILD_QUOTE
++endif
++if TSS_BUILD_PCR_COMP
++libtspi_sa_la_SOURCES+=../tspi/tspi_pcr_comp.c
++libtspi_sa_la_CFLAGS+=-DTSS_BUILD_PCR_COMP
++endif
++if TSS_BUILD_SEAL
++libtspi_sa_la_SOURCES+=../tspi/tspi_seal.c ../tspi/rpc/@RPC@/rpc_seal.c
++libtspi_sa_la_CFLAGS+=-DTSS_BUILD_SEAL
++endif
++#if TSS_BUILD_CHANGEAUTH
++#libtspi_la_SOURCES+=tspi_changeauth.c tsp_changeauth.c rpc/@RPC@/rpc_changeauth.c
++#libtspi_la_CFLAGS+=-DTSS_BUILD_CHANGEAUTH
++#endif
++#if TSS_BUILD_BIND
++#libtspi_la_SOURCES+=tspi_bind.c tsp_bind.c rpc/@RPC@/rpc_bind.c
++#libtspi_la_CFLAGS+=-DTSS_BUILD_BIND
++#endif
++#if TSS_BUILD_OWN
++#libtspi_la_SOURCES+=tsp_own.c tspi_own.c rpc/@RPC@/rpc_own.c
++#libtspi_la_CFLAGS+=-DTSS_BUILD_OWN
++#endif
++if TSS_BUILD_PS
++libtspi_sa_la_SOURCES+=../tspi/ps/ps_utils.c ../tspi/ps/tspps.c ../tspi/tspi_ps.c ../tspi/rpc/@RPC@/rpc_ps.c ../tspi/tsp_ps.c
++libtspi_sa_la_CFLAGS+=-DTSS_BUILD_PS
++endif
++if TSS_BUILD_ADMIN
++libtspi_sa_la_SOURCES+=../tspi/tspi_admin.c ../tspi/tsp_admin.c ../tspi/rpc/@RPC@/rpc_admin.c
++libtspi_sa_la_CFLAGS+=-DTSS_BUILD_ADMIN
++endif
++#if TSS_BUILD_AIK
++#libtspi_la_SOURCES+=tspi_aik.c tsp_aik.c rpc/@RPC@/rpc_aik.c
++#libtspi_la_CFLAGS+=-DTSS_BUILD_AIK
++#endif
++#if TSS_BUILD_EK
++#libtspi_la_SOURCES+=tspi_ek.c tsp_ek.c rpc/@RPC@/rpc_ek.c
++#libtspi_la_CFLAGS+=-DTSS_BUILD_EK
++#endif
++#if TSS_BUILD_CERTIFY
++#libtspi_la_SOURCES+=tspi_certify.c tsp_certify.c rpc/@RPC@/rpc_certify.c
++#libtspi_la_CFLAGS+=-DTSS_BUILD_CERTIFY
++#endif
++if TSS_BUILD_KEY
++libtspi_sa_la_SOURCES+=../tspi/tspi_key.c ../tspi/rpc/@RPC@/rpc_key.c
++libtspi_sa_la_CFLAGS+=-DTSS_BUILD_KEY
++endif
++if TSS_BUILD_MAINT
++libtspi_sa_la_SOURCES+=../tspi/tspi_maint.c ../tspi/tsp_maint.c ../tspi/rpc/@RPC@/rpc_maint.c
++libtspi_sa_la_CFLAGS+=-DTSS_BUILD_MAINT
++endif
++#if TSS_BUILD_MIGRATION
++#libtspi_la_SOURCES+=tspi_migration.c tsp_migration.c rpc/@RPC@/rpc_migration.c
++#libtspi_la_CFLAGS+=-DTSS_BUILD_MIGRATION
++#endif
++if TSS_BUILD_PCR_EXTEND
++libtspi_sa_la_SOURCES+=../tspi/tspi_pcr_extend.c ../tspi/tsp_pcr_extend.c ../tspi/rpc/@RPC@/rpc_pcr_extend.c
++libtspi_sa_la_CFLAGS+=-DTSS_BUILD_PCR_EXTEND
++endif
++#if TSS_BUILD_SELFTEST
++#libtspi_la_SOURCES+=tspi_selftest.c tsp_selftest.c rpc/@RPC@/rpc_selftest.c
++#libtspi_la_CFLAGS+=-DTSS_BUILD_SELFTEST
++#endif
++#if TSS_BUILD_DAA
++#libtspi_la_SOURCES+=tspi_daa.c tsp_daa.c obj_daacred.c obj_daaarakey.c obj_daaissuerkey.c \
++#		    rpc/@RPC@/rpc_daa.c \
++#		    daa/daa_issuer/keypair_generator.c daa/daa_issuer/prime_gen.c \
++#		    daa/daa_issuer/key_correctness_proof.c daa/daa_platform/platform.c \
++#		    daa/daa_issuer/issuer_init.c daa/daa_issuer/issue_credential.c \
++#		    daa/daa_verifier/verifier_transaction.c daa/daa_verifier/verifier.c \
++#		    daa/daa_structs.c daa/daa_parameter.c daa/big_integer/bi_gmp.c \
++#		    daa/big_integer/bi_openssl.c daa/daa_anonymityrevocation/csencryption_result.c \
++#		    daa/daa_anonymityrevocation/authority.c daa/big_integer/bi.c daa/utils/list.c
++#libtspi_la_CFLAGS+=-DTSS_BUILD_DAA
++#endif
++if TSS_BUILD_GET_FLAGS
++libtspi_sa_la_SOURCES+=../tspi/tsp_get_flags.c
++endif
++if TSS_BUILD_PCRS_LIST
++libtspi_sa_la_SOURCES+=../tspi/obj_pcrs.c ../tspi/tsp_pcr.c
++libtspi_sa_la_CFLAGS+=-DTSS_BUILD_PCRS_LIST
++endif
++#if TSS_BUILD_HASH_LIST
++#libtspi_la_SOURCES+=obj_hash.c
++#libtspi_la_CFLAGS+=-DTSS_BUILD_HASH_LIST
++#endif
++if TSS_BUILD_ENCDATA_LIST
++libtspi_sa_la_SOURCES+=../tspi/obj_encdata.c
++libtspi_sa_la_CFLAGS+=-DTSS_BUILD_ENCDATA_LIST
++endif
++if TSS_BUILD_RSAKEY_LIST
++libtspi_sa_la_SOURCES+=../tspi/obj_rsakey.c ../tspi/tsp_key.c
++libtspi_sa_la_CFLAGS+=-DTSS_BUILD_RSAKEY_LIST
++endif
++#if TSS_BUILD_ASN1
++#libtspi_la_SOURCES+=tspi_asn1.c
++#libtspi_la_CFLAGS+=-DTSS_BUILD_ASN1
++#endif
++#if TSS_BUILD_AUDIT
++#libtspi_la_SOURCES+=tspi_audit.c tsp_audit.c rpc/@RPC@/rpc_audit.c
++#libtspi_la_CFLAGS+=-DTSS_BUILD_AUDIT
++#endif
++#if TSS_BUILD_SEALX
++#libtspi_la_SOURCES+=tsp_seal.c
++#libtspi_la_CFLAGS+=-DTSS_BUILD_SEALX
++#endif
++if TSS_BUILD_QUOTE2
++libtspi_sa_la_SOURCES+=../tspi/tspi_quote2.c ../tspi/tsp_quote2.c ../tspi/rpc/@RPC@/rpc_quote2.c
++libtspi_sa_la_CFLAGS+=-DTSS_BUILD_QUOTE2
++endif
++#
++#if HAVE_GTK
++#libtspi_la_CFLAGS+=@GTK_CFLAGS@
++#libtspi_la_LDFLAGS+=@GTK_LIBS@
++#libtspi_la_SOURCES+=gtk/main.c gtk/support.c gtk/interface.c gtk/callbacks.c
++#endif
++if OPENSSL_UI
++libtspi_sa_la_LDFLAGS+=-lssl
++libtspi_sa_la_SOURCES+=../tspi/ssl_ui.c
++endif
++#
++#if TSS_BUILD_NV
++#libtspi_la_SOURCES+=tspi_nv.c obj_nv.c tsp_nv.c rpc/@RPC@/rpc_nv.c
++#libtspi_la_CFLAGS+=-DTSS_BUILD_NV
++#endif
++#if TSS_BUILD_DELEGATION
++#libtspi_la_SOURCES+=tspi_delegate.c tsp_delegate.c obj_delfamily.c rpc/@RPC@/rpc_delegate.c
++#libtspi_la_CFLAGS+=-DTSS_BUILD_DELEGATION
++#endif
++#if TSS_BUILD_CMK
++#libtspi_la_SOURCES+=tspi_cmk.c obj_migdata.c rpc/@RPC@/rpc_cmk.c
++#libtspi_la_CFLAGS+=-DTSS_BUILD_CMK
++#endif
+Index: trousers-0.3.2-1/src/tcs/log.c
+===================================================================
+--- trousers-0.3.2-1.orig/src/tcs/log.c	2009-08-06 13:17:21.000000000 +0000
++++ trousers-0.3.2-1/src/tcs/log.c	2010-08-01 18:14:13.000000000 +0000
+@@ -36,6 +36,8 @@
+ 	unsigned int i;
+ 
+ 
++	if (getenv("TCSD_LOG_OFF"))
++		return;
+ 	if (getenv("TCSD_FOREGROUND") == NULL)
+ 		openlog(szDescriptor, LOG_NDELAY|LOG_PID, TSS_SYSLOG_LVL);
+ 	memset(temp, 0, sizeof(temp));
+Index: trousers-0.3.2-1/src/Makefile.am
+===================================================================
+--- trousers-0.3.2-1.orig/src/Makefile.am	2009-08-06 13:17:20.000000000 +0000
++++ trousers-0.3.2-1/src/Makefile.am	2010-08-01 18:14:13.000000000 +0000
+@@ -1 +1 @@
+-SUBDIRS = trspi tddl tcs tspi tcsd include
++SUBDIRS = trspi tddl tcs tspi tcsd include tspi_sa
+Index: trousers-0.3.2-1/src/tcs/Makefile.am
+===================================================================
+--- trousers-0.3.2-1.orig/src/tcs/Makefile.am	2009-08-06 13:17:21.000000000 +0000
++++ trousers-0.3.2-1/src/tcs/Makefile.am	2010-08-01 18:14:13.000000000 +0000
+@@ -1,4 +1,4 @@
+-noinst_LIBRARIES=libtcs.a
++lib_LIBRARIES=libtcs.a
+ 
+ libtcs_a_LIBADD=../tddl/libtddl.a
+ libtcs_a_CFLAGS=-DAPPID=\"TCSD\ TCS\" -DVAR_PREFIX=\"@localstatedir@\" -DETC_PREFIX=\"@sysconfdir@\"
+Index: trousers-0.3.2-1/src/include/rpc_tcstp_tsp.h
+===================================================================
+--- trousers-0.3.2-1.orig/src/include/rpc_tcstp_tsp.h	2009-08-06 13:17:21.000000000 +0000
++++ trousers-0.3.2-1/src/include/rpc_tcstp_tsp.h	2010-08-01 18:14:13.000000000 +0000
+@@ -16,6 +16,12 @@
+ #include "tcsd_wrap.h"
+ #include "tcsd.h"
+ 
++#ifdef TSS_LIB_SA
++#define setData tspi_setData
++#define getData tspi_getData
++#define initData tspi_initData
++#endif
++
+ int setData(TCSD_PACKET_TYPE,int,void *,int,struct tcsd_comm_data *);
+ UINT32 getData(TCSD_PACKET_TYPE,int,void *,int,struct tcsd_comm_data *);
+ void initData(struct tcsd_comm_data *, int);
