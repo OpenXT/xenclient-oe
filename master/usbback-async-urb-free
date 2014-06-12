@@ -1,0 +1,92 @@
+diff --git a/drivers/usb/xen-usbback/common.h b/drivers/usb/xen-usbback/common.h
+index 43c51e6..2188ab2 100644
+--- a/drivers/usb/xen-usbback/common.h
++++ b/drivers/usb/xen-usbback/common.h
+@@ -240,6 +240,7 @@ typedef struct {
+ 	int                      nr_pages;
+ 	int                      nr_packets;
+ 	struct list_head         free_list;
++	struct list_head         to_free_list, tmp_to_free_list;
+ 	struct urb               *urb;
+ #ifdef USBBK_TIMEOUT
+ 	struct timer_list        timer;
+diff --git a/drivers/usb/xen-usbback/usbback.c b/drivers/usb/xen-usbback/usbback.c
+index 89d10cc..7893da2 100644
+--- a/drivers/usb/xen-usbback/usbback.c
++++ b/drivers/usb/xen-usbback/usbback.c
+@@ -76,6 +76,11 @@ static pending_segment_t *pending_segments;
+ static struct list_head pending_segments_free;
+ static int pending_segments_free_cnt;
+ 
++static DEFINE_SPINLOCK(pending_to_free_lock);
++static struct list_head pending_to_free;
++static void free_reqs(unsigned long);
++static DECLARE_TASKLET(free_reqs_task, free_reqs, 0);
++
+ static int do_usb_io_op(usbif_t *usbif);
+ static void dispatch_usb_io(usbif_t *usbif,
+ 				 usbif_request_t *req,
+@@ -274,6 +279,31 @@ static void free_req(pending_req_t *req)
+ 		wake_up(&pending_free_wq);
+ }
+ 
++static void free_reqs(unsigned long data)
++{
++	struct list_head tmp;
++	pending_req_t *req;
++	unsigned long flags;
++
++	INIT_LIST_HEAD(&tmp);
++
++	/* copy to temp list */
++	spin_lock_irqsave(&pending_to_free_lock, flags);
++	while (!list_empty(&pending_to_free)) {
++		req = list_entry(pending_to_free.next, pending_req_t, to_free_list);
++		list_del(&req->to_free_list);
++		list_add(&req->tmp_to_free_list, &tmp);
++	}
++	spin_unlock_irqrestore(&pending_to_free_lock, flags);
++
++	/* run actual free outside of interrupt context */
++	while (!list_empty(&tmp)) {
++		req = list_entry(tmp.next, pending_req_t, tmp_to_free_list);
++		list_del(&req->tmp_to_free_list);
++		free_req(req);
++	}
++}
++
+ #ifdef INDIRECT_SEGMENTS
+ static void fast_flush_area_indirect(pending_req_t *req)
+ {
+@@ -548,6 +578,7 @@ static void end_usb_io_op(struct urb *urb)
+ 	usbif_t *usbif = pending_req->usbif;
+ 	int status = vusb_canceling_requests(&usbif->vusb) ?
+ 		-ECONNRESET : urb->status;
++	unsigned long flags;
+ 
+ 	debug_print(LOG_LVL_INFO, "end id %llu len %d status %d %s\n",
+ 		pending_req->id, urb->actual_length, status,
+@@ -575,7 +606,13 @@ static void end_usb_io_op(struct urb *urb)
+ 	make_response(usbif, pending_req->id, urb->actual_length,
+ 		urb->start_frame, get_usb_status(status));
+ 	usbif_put(pending_req->usbif);
+-	free_req(pending_req);
++
++	/* schedule async free as it craps out on 32bit kernel doing dma frees in
++	 * interrupt context */
++	spin_lock_irqsave(&pending_to_free_lock, flags);
++	list_add_tail(&pending_req->to_free_list, &pending_to_free);
++	spin_unlock_irqrestore(&pending_to_free_lock, flags);
++	tasklet_schedule(&free_reqs_task);
+ }
+ 
+ /******************************************************************************
+@@ -1142,6 +1179,8 @@ static int __init usbif_init(void)
+ 		list_add_tail(&pending_reqs[i].free_list, &pending_free);
+ 	}
+ 
++	INIT_LIST_HEAD(&pending_to_free);
++
+ 	usbif_xenbus_init();
+ 
+ 	printk("USB backend driver intialized!\n");

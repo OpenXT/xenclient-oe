@@ -1,0 +1,95 @@
+diff --git a/drivers/xen/privcmd.c b/drivers/xen/privcmd.c
+index ca2b00e..59e0ca1 100644
+--- a/drivers/xen/privcmd.c
++++ b/drivers/xen/privcmd.c
+@@ -468,6 +468,47 @@ out:
+ 	return ret;
+ }
+ 
++static long privcmd_ioctl_mmap_cache_attr(void __user *udata)
++{
++	struct privcmd_mmapcacheattr m;
++	struct mm_struct *mm = current->mm;
++	struct vm_area_struct *vma;
++	unsigned long prot;
++
++	if (copy_from_user(&m, udata, sizeof(m)))
++		return -EFAULT;
++
++	vma = find_vma(mm, m.addr);
++	if (vma == NULL)
++		return -EINVAL;
++
++	switch (m.type) {
++		case XEN_DOMCTL_MEM_CACHEATTR_UC:
++			prot = _PAGE_CACHE_UC;
++			break;
++		case XEN_DOMCTL_MEM_CACHEATTR_WC:
++			prot = _PAGE_CACHE_WC;
++			break;
++		case XEN_DOMCTL_MEM_CACHEATTR_WT:
++			prot = _PAGE_PWT; /* _PAGE_CACHE_PWT */
++			break;
++		case XEN_DOMCTL_MEM_CACHEATTR_WP:
++			prot = _PAGE_PAT | _PAGE_PWT; /* PAGE_CACHE_WP */
++			break;
++		case XEN_DOMCTL_MEM_CACHEATTR_WB:
++			prot = _PAGE_CACHE_WB;
++			break;
++		case XEN_DOMCTL_MEM_CACHEATTR_UCM:
++			prot = _PAGE_CACHE_UC_MINUS;
++			break;
++		default:
++			return -EINVAL;
++	}
++
++	vma->vm_page_prot = __pgprot(pgprot_val(vma->vm_page_prot) | prot);
++	return 0;
++}
++
+ static long privcmd_ioctl(struct file *file,
+ 			  unsigned int cmd, unsigned long data)
+ {
+@@ -491,6 +532,10 @@ static long privcmd_ioctl(struct file *file,
+ 		ret = privcmd_ioctl_mmap_batch(udata, 2);
+ 		break;
+ 
++	case IOCTL_PRIVCMD_MMAPCACHEATTR:
++		ret = privcmd_ioctl_mmap_cache_attr(udata);
++		break;
++
+ 	default:
+ 		ret = -EINVAL;
+ 		break;
+diff --git a/include/uapi/xen/privcmd.h b/include/uapi/xen/privcmd.h
+index a853168..be2371a 100644
+--- a/include/uapi/xen/privcmd.h
++++ b/include/uapi/xen/privcmd.h
+@@ -73,6 +73,19 @@ struct privcmd_mmapbatch_v2 {
+ 	int __user *err;  /* array of error codes */
+ };
+ 
++#define XEN_DOMCTL_MEM_CACHEATTR_UC  0
++#define XEN_DOMCTL_MEM_CACHEATTR_WC  1
++#define XEN_DOMCTL_MEM_CACHEATTR_WT  4
++#define XEN_DOMCTL_MEM_CACHEATTR_WP  5
++#define XEN_DOMCTL_MEM_CACHEATTR_WB  6
++#define XEN_DOMCTL_MEM_CACHEATTR_UCM 7
++
++struct privcmd_mmapcacheattr {
++       __u64 addr;
++       int type;
++};
++
++
+ /*
+  * @cmd: IOCTL_PRIVCMD_HYPERCALL
+  * @arg: &privcmd_hypercall_t
+@@ -94,5 +107,7 @@ struct privcmd_mmapbatch_v2 {
+ 	_IOC(_IOC_NONE, 'P', 3, sizeof(struct privcmd_mmapbatch))
+ #define IOCTL_PRIVCMD_MMAPBATCH_V2				\
+ 	_IOC(_IOC_NONE, 'P', 4, sizeof(struct privcmd_mmapbatch_v2))
++#define IOCTL_PRIVCMD_MMAPCACHEATTR                            \
++       _IOC(_IOC_NONE, 'P', 200, sizeof(struct privcmd_mmapcacheattr))
+ 
+ #endif /* __LINUX_PUBLIC_PRIVCMD_H__ */
