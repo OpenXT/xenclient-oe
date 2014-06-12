@@ -1,0 +1,172 @@
+diff --git a/tools/libxc/xc_domain.c b/tools/libxc/xc_domain.c
+index cf640b9..9f3edbb 100644
+--- a/tools/libxc/xc_domain.c
++++ b/tools/libxc/xc_domain.c
+@@ -1560,6 +1560,16 @@ int xc_domain_ioport_mapping(
+     return do_domctl(xch, &domctl);
+ }
+ 
++int xc_domain_set_xci_service(xc_interface *xch, uint32_t domid, int enabled)
++{
++    DECLARE_DOMCTL;
++
++    domctl.cmd = XEN_DOMCTL_set_xcisrv;
++    domctl.domain = (domid_t)domid;
++    domctl.u.set_xcisrv.enabled = enabled;
++    return do_domctl(xch, &domctl);
++}
++
+ int xc_domain_set_target(
+     xc_interface *xch,
+     uint32_t domid,
+diff --git a/tools/libxc/xenctrl.h b/tools/libxc/xenctrl.h
+index 6f275ba..465c053 100644
+--- a/tools/libxc/xenctrl.h
++++ b/tools/libxc/xenctrl.h
+@@ -1838,6 +1838,10 @@ int xc_domain_get_machine_address_size(xc_interface *xch,
+ int xc_domain_suppress_spurious_page_faults(xc_interface *xch,
+ 					  uint32_t domid);
+ 
++int xc_domain_set_xci_service(xc_interface *xch,
++                               uint32_t domid,
++                               int enabled);
++
+ /* Set the target domain */
+ int xc_domain_set_target(xc_interface *xch,
+                          uint32_t domid,
+diff --git a/xen/common/domctl.c b/xen/common/domctl.c
+index a55fe30..d89c2c0 100644
+--- a/xen/common/domctl.c
++++ b/xen/common/domctl.c
+@@ -854,6 +854,19 @@ long do_domctl(XEN_GUEST_HANDLE_PARAM(xen_domctl_t) u_domctl)
+     }
+     break;
+ 
++    case XEN_DOMCTL_set_xcisrv:
++    {
++        struct domain *d;
++        ret = -ESRCH;
++        d = rcu_lock_domain_by_id(op->domain);
++        if ( d != NULL ) {
++            d->is_xci_service = !!op->u.set_xcisrv.enabled;
++            rcu_unlock_domain(d);
++            ret = 0;
++        }
++    }
++    break;
++
+     case XEN_DOMCTL_subscribe:
+     {
+         d->suspend_evtchn = op->u.subscribe.port;
+diff --git a/xen/include/public/domctl.h b/xen/include/public/domctl.h
+index 202e876..271207d 100644
+--- a/xen/include/public/domctl.h
++++ b/xen/include/public/domctl.h
+@@ -595,6 +595,16 @@ typedef struct xen_domctl_ext_vcpucontext xen_domctl_ext_vcpucontext_t;
+ DEFINE_XEN_GUEST_HANDLE(xen_domctl_ext_vcpucontext_t);
+ 
+ /*
++ * Set domain as a XCI Service VM.
++ */
++/* XEN_DOMCTL_set_xcisrv */
++struct xen_domctl_set_xcisrv {
++    int enabled;
++};
++typedef struct xen_domctl_set_xcisrv xen_domctl_set_xcisrv_t;
++DEFINE_XEN_GUEST_HANDLE(xen_domctl_set_xcisrv_t);
++
++/*
+  * Set the target domain for a domain
+  */
+ /* XEN_DOMCTL_set_target */
+@@ -932,6 +942,7 @@ struct xen_domctl {
+ #define XEN_DOMCTL_setnodeaffinity               68
+ #define XEN_DOMCTL_getnodeaffinity               69
+ #define XEN_DOMCTL_setbiosuuid                   90
++#define XEN_DOMCTL_set_xcisrv                    91
+ 
+ #define XEN_DOMCTL_gdbsx_guestmemio            1000
+ #define XEN_DOMCTL_gdbsx_pausevcpu             1001
+@@ -977,6 +988,7 @@ struct xen_domctl {
+         struct xen_domctl_ioport_mapping    ioport_mapping;
+         struct xen_domctl_pin_mem_cacheattr pin_mem_cacheattr;
+         struct xen_domctl_ext_vcpucontext   ext_vcpucontext;
++        struct xen_domctl_set_xcisrv        set_xcisrv;
+         struct xen_domctl_set_target        set_target;
+         struct xen_domctl_subscribe         subscribe;
+         struct xen_domctl_debug_op          debug_op;
+diff --git a/xen/include/xen/sched.h b/xen/include/xen/sched.h
+index 2909210..69ba3e8 100644
+--- a/xen/include/xen/sched.h
++++ b/xen/include/xen/sched.h
+@@ -295,6 +295,8 @@ struct domain
+     bool_t           auto_node_affinity;
+     /* Is this guest fully privileged (aka dom0)? */
+     bool_t           is_privileged;
++    /* Is this guest a XCI service VM? */
++    bool_t           is_xci_service;
+     /* Which guest this guest has privileges on */
+     struct domain   *target;
+     /* Is this guest being debugged by dom0? */
+diff --git a/xen/include/xsm/dummy.h b/xen/include/xsm/dummy.h
+index cc0a5a8..903ddf5 100644
+--- a/xen/include/xsm/dummy.h
++++ b/xen/include/xsm/dummy.h
+@@ -64,6 +64,8 @@ static always_inline int xsm_default_action(
+             return 0;
+         if ( target && src->target == target )
+             return 0;
++        if ( src->is_xci_service )
++            return 0;
+         return -EPERM;
+     case XSM_TARGET:
+         if ( src == target )
+@@ -72,6 +74,8 @@ static always_inline int xsm_default_action(
+             return 0;
+         if ( target && src->target == target )
+             return 0;
++        if ( src->is_xci_service )
++            return 0;
+         return -EPERM;
+     case XSM_PRIV:
+         if ( src->is_privileged )
+@@ -124,6 +128,12 @@ static XSM_INLINE int xsm_domctl(XSM_DEFAULT_ARG struct domain *d, int cmd)
+     XSM_ASSERT_ACTION(XSM_OTHER);
+     switch ( cmd )
+     {
++    /* XCP-1036: Allow these DOMCTLs for Service VMs. */
++    case XEN_DOMCTL_getdomaininfo:
++    case XEN_DOMCTL_pausedomain:
++    case XEN_DOMCTL_unpausedomain:
++    case XEN_DOMCTL_gethvmcontext:
++    case XEN_DOMCTL_getvcpucontext:
+     case XEN_DOMCTL_ioport_mapping:
+     case XEN_DOMCTL_memory_mapping:
+     case XEN_DOMCTL_bind_pt_irq:
+diff --git a/xen/xsm/flask/hooks.c b/xen/xsm/flask/hooks.c
+index 3a565a1..fdf5b70 100644
+--- a/xen/xsm/flask/hooks.c
++++ b/xen/xsm/flask/hooks.c
+@@ -638,6 +638,9 @@ static int flask_domctl(struct domain *d, int cmd)
+     case XEN_DOMCTL_setbiosuuid:
+         return current_has_perm(d, SECCLASS_DOMAIN2, DOMAIN2__SETBIOSUUID);
+ 
++    case XEN_DOMCTL_set_xcisrv:
++        return current_has_perm(d, SECCLASS_DOMAIN2, DOMAIN2__SET_XCISRV);
++
+     case XEN_DOMCTL_setvcpucontext:
+         return current_has_perm(d, SECCLASS_DOMAIN, DOMAIN__SETVCPUCONTEXT);
+ 
+diff --git a/xen/xsm/flask/policy/access_vectors b/xen/xsm/flask/policy/access_vectors
+index 60256d0..565ee1c 100644
+--- a/xen/xsm/flask/policy/access_vectors
++++ b/xen/xsm/flask/policy/access_vectors
+@@ -196,6 +196,8 @@ class domain2
+     setclaim
+ # XEN_DOMCTL_setbiosuuid
+     setbiosuuid
++# XEN_DOMCTL_set_xcisrv
++    set_xcisrv
+ }
+ 
+ # Similar to class domain, but primarily contains domctls related to HVM domains

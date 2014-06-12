@@ -1,0 +1,322 @@
+# HG changeset patch
+# Parent 3f63a3263de08d5c172d3a581f0ec047ce2b2039
+
+diff -r 3f63a3263de0 tools/firmware/hvmloader/acpi/build.c
+--- a/tools/firmware/hvmloader/acpi/build.c
++++ b/tools/firmware/hvmloader/acpi/build.c
+@@ -65,7 +65,7 @@
+ 
+ static uint8_t battery_port_exists(void)
+ {
+-    return (inb(0x88) == 0x1F);
++    return (inb(0x88) != 0xff);
+ }
+ 
+ static int construct_madt(struct acpi_20_madt *madt)
+diff -r 3f63a3263de0 tools/firmware/hvmloader/acpi/ssdt_pm.asl
+--- a/tools/firmware/hvmloader/acpi/ssdt_pm.asl
++++ b/tools/firmware/hvmloader/acpi/ssdt_pm.asl
+@@ -37,7 +37,7 @@
+  * Following are the battery ports read/written to in order to implement
+  * battery support:
+  * Battery command port - 0xb2
+- * Batter data port     - 0x86
++ * Battery data port    - 0x86
+  * Battery commands (written to port 0xb2) -
+  * 0x7b - Battery operation init
+  * 0x7c - Type of battery operation
+@@ -342,22 +342,25 @@
+             Return (BIFP)
+         }
+ 
+-	/* Helper routine to get status and notify on BIF changes */
+-	Method (STA, 0, NotSerialized)
+-	{
+-	    Store (\_SB.P88, Local0)
+-	    /* Check for battery changed indication */
+-	    And (Local0, 0x80, Local1)
+-	    And (Local0, 0x7f, Local0)
+-	    If (LEqual(Local1, 0x80))
+-	    {
++        /* Helper routine to get status and notify on changes */
++        Method (STA, 1, NotSerialized)
++        {
++            Store (Arg0, \_SB.P88)
++            Store (\_SB.P88, Local0)
++            /* Check for battery changed indication */
++            And (Local0, 0x80, Local1)
++            And (Local0, 0x7f, Local0)
++            If (LEqual(Local1, 0x80))
++            {
++                /* Generate event for all batteries */
+                 Store (0x81, \_SB.DBG1)
+-	        Notify (\_SB.BAT0, 0x81)
+-	    }
++                Notify (\_SB.BAT0, 0x81)
++                Notify (\_SB.BAT1, 0x81)
++            }
+             Return ( Local0 )
+-	}
++        }
+ 
+-        /* Battery object 0 - Always exposed as present. */
++        /* Battery object 0 */
+         Device (BAT0)
+         {
+             Name (_HID, EisaId ("PNP0C0A"))
+@@ -369,7 +372,7 @@
+ 
+             Method (_STA, 0, NotSerialized)
+             {
+-	        Store ( STA (), Local0 )
++	        Store ( STA (0x01), Local0 )
+ 	        Return ( Local0 )
+ 	    }
+ 
+@@ -386,7 +389,7 @@
+             Method (_BST, 0, NotSerialized)
+             {
+ 	        /* Check for BIF change */
+-		STA ()
++		STA (0x01)
+ 		/* Report current status */
+                 Store (1, \_SB.DBG1)
+                 ACQR ()
+@@ -404,7 +407,7 @@
+             }
+         }
+ 
+-        /* Battery object 1 - Always exposed as not present. */
++        /* Battery object 1 */
+         Device (BAT1)
+         {
+             Name (_HID, EisaId ("PNP0C0A"))
+@@ -415,7 +418,8 @@
+             })
+             Method (_STA, 0, NotSerialized)
+             {
+-                Return (0x0F)
++		Store ( STA(0x02) , Local0 )
++                Return ( Local0 )
+             }
+ 
+             Method (_BIF, 0, NotSerialized)
+@@ -426,6 +430,8 @@
+ 
+             Method (_BST, 0, NotSerialized)
+             {
++	        /* Check for BIF changes */
++                STA (0x02)
+                 ACQR ()
+                 INIT (0x02)
+                 INIT (0x02)
+diff -r 3f63a3263de0 tools/xenpmd/xenpmd.c
+--- a/tools/xenpmd/xenpmd.c
++++ b/tools/xenpmd/xenpmd.c
+@@ -46,6 +46,8 @@
+ /* #define RUN_STANDALONE */
+ /* #define RUN_IN_SIMULATE_MODE */
+ 
++#define MAX_BATTERIES 4
++
+ enum BATTERY_INFO_TYPE {
+     BIF, 
+     BST 
+@@ -66,6 +68,12 @@
+     MILLI_AMP_HOURS = 1
+ };
+ 
++enum BATTERY_STATE {
++    BATTERY_DISCHARGING = 0x01,
++    BATTERY_CHARGING = 0x02,
++    BATTERY_CRITICAL = 0x04,
++};
++
+ struct battery_info {
+     enum BATTERY_PRESENT    present;
+     enum BATTERY_UNITS      units;
+@@ -254,16 +262,26 @@
+                                   char *attrib_value,
+                                   struct battery_status *status)
+ {
++    if ( strstr(attrib_name, "capacity state") )
++    {
++        if ( strstr(attrib_value, "critical") )
++            status->state = BATTERY_CRITICAL;
++        else
++            status->state = 0;
++        return;
++    }
++
+     if ( strstr(attrib_name, "charging state") ) 
+     {
+-        /* Check this, below is half baked */
+-        if ( strstr(attrib_value, "charged") ) 
+-            status->state = 0;
+-	else if ( strstr(attrib_value, "discharging") )
+-            status->state = 1;
+-        else 
+-            status->state = 2;
+-        return;
++       /*
++        * NOTE: procfs can report "charging/discharging" however this
++        * is invalid by the ACPI spec so just report it as charging 
++        */
++       if ( strstr(attrib_value, "charging") == attrib_value)
++           status->state |= BATTERY_CHARGING;
++       else if ( strstr(attrib_value, "discharging") == attrib_value)
++           status->state |= BATTERY_DISCHARGING;
++       return;
+     }
+ 
+     if ( strstr(attrib_name, "present rate") ) 
+@@ -376,6 +394,15 @@
+ }
+ #endif /*RUN_STANDALONE*/
+ 
++void remove_battery_leaf_from_xenstore(int index, char *leaf)
++{
++    char key[16];
++
++    snprintf(key, sizeof(key), "/pm/%s%d", leaf, index);
++
++    xs_rm(xs, XBT_NULL, key);
++}
++
+ void write_ulong_lsb_first(char *temp_val, unsigned long val)
+ {
+     snprintf(temp_val, 9, "%02x%02x%02x%02x", (unsigned int)val & 0xff, 
+@@ -383,10 +410,14 @@
+     (unsigned int)(val & 0xff000000) >> 24);
+ }
+ 
+-void write_battery_info_to_xenstore(struct battery_info *info)
++void write_battery_info_to_xenstore(struct battery_info *info, int index)
+ {
+     static struct battery_info cur_info;
+     char val[1024];
++    char key[16];
++
++    if (index >= MAX_BATTERIES)
++	    return;
+ 
+     if (bcmp(&cur_info, info, sizeof(cur_info))) {
+ #ifdef RUN_STANDALONE
+@@ -417,7 +448,8 @@
+ 		 (unsigned int)strlen(info->oem_info), info->oem_info);
+ 
+ 	xs_mkdir(xs, XBT_NULL, "/pm");
+-	xs_write(xs, XBT_NULL, "/pm/bif", val, strlen(val)+1);
++	snprintf(key, sizeof(key), "/pm/bif%d", index);
++	xs_write(xs, XBT_NULL, key, val, strlen(val)+1);
+ 
+ 	/* Save new battery info */
+ 	memcpy(&cur_info, info, sizeof(cur_info));
+@@ -436,12 +468,16 @@
+ }
+ #endif /*RUN_STANDALONE*/
+ 
+-void write_battery_status_to_xenstore(struct battery_status *status)
++void write_battery_status_to_xenstore(struct battery_status *status, int index)
+ {
+-    static struct battery_status cur_status;
++    static struct battery_status cur_status[MAX_BATTERIES];
+     char val[35];
++    char key[16];
+ 
+-    if (bcmp(&cur_status, status, sizeof(cur_status))) {
++    if (index >= MAX_BATTERIES)
++	    return;
++
++    if (bcmp(&cur_status[index], status, sizeof(cur_status[index]))) {
+ #ifdef RUN_STANDALONE
+ 	print_battery_status(status);
+ #endif
+@@ -453,10 +489,11 @@
+ 	write_ulong_lsb_first(val+26, status->present_voltage);
+ 
+ 	xs_mkdir(xs, XBT_NULL, "/pm");
+-	xs_write(xs, XBT_NULL, "/pm/bst", val, sizeof(val));
++	snprintf(key, sizeof(key), "/pm/bst%d", index);
++	xs_write(xs, XBT_NULL, key, val, sizeof(val));
+ 
+ 	/* Save new status */
+-	memcpy(&cur_status, status, sizeof(cur_status));
++	memcpy(&cur_status[index], status, sizeof(cur_status));
+     }
+ }
+ 
+@@ -491,10 +528,11 @@
+ void wait_for_and_update_battery_status_request(void)
+ {
+     DIR *dir;
+-    unsigned int psr_status;
++    unsigned int psr_status = -1, new_psr;
+     struct battery_status status;
+     struct battery_info info;
+     char val[4];
++    int index;
+ 
+     while ( true )
+     {
+@@ -505,35 +543,38 @@
+         if ( !dir )
+             return;
+ 
+-        while ( get_next_battery_info_or_status(dir, BIF, (void *)&info) ) 
+-        {
+-            if ( info.present == YES ) 
+-            {
+-                write_battery_info_to_xenstore(&info);
+-                break; /* rethink this... maybe there is >1 battery... */
+-            }
++	index = 0;
++	while ( get_next_battery_info_or_status(dir, BIF, (void *)&info) )
++	{
++	    if ( info.present == YES )
++		write_battery_info_to_xenstore(&info, index);
++	    else
++		remove_battery_leaf_from_xenstore(index, "bif");
++
++	    index++;
+         }
+ 
+         rewinddir(dir);
+ 
+-        while ( get_next_battery_info_or_status(dir, BST, (void *)&status) ) 
+-        {
+-            if ( status.present == YES ) 
+-            {
+-                write_battery_status_to_xenstore(&status);
+-                /* rethink this; though I have never seen, there might be
+-                 * systems out there with more than one battery device 
+-                 * present
+-                 */
+-                break;
+-            }
++	index = 0;
++        while ( get_next_battery_info_or_status(dir, BST, (void *)&status) )
++	{
++	    if ( status.present == YES ) 
++		write_battery_status_to_xenstore(&status, index);
++	    else
++		remove_battery_leaf_from_xenstore(index, "bst");
++
++	    index++;
+         }
+-
++ 
+ 	closedir(dir);
+ 
+-        psr_status = get_psr_status();
+-        snprintf(val, 2, "%1d", psr_status);
+-        xs_write(xs, XBT_NULL, "/pm/psr", val, 2);
++        new_psr = get_psr_status();
++        if (new_psr != psr_status) {
++		psr_status = new_psr;
++		snprintf(val, 2, "%1d", psr_status);
++		xs_write(xs, XBT_NULL, "/pm/psr", val, 2);
++	}
+ 
+ 	/* Update xenstore every 10 seconds */
+ 	sleep(10);

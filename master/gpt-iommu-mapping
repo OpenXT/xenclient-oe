@@ -1,0 +1,405 @@
+diff --git a/tools/hvm-info/Makefile b/tools/hvm-info/Makefile
+index 22bc3a0..633455e 100644
+--- a/tools/hvm-info/Makefile
++++ b/tools/hvm-info/Makefile
+@@ -1,4 +1,4 @@
+-XEN_ROOT=../..
++XEN_ROOT?=../..
+ include $(XEN_ROOT)/tools/Rules.mk
+ 
+ HVM_INFO_SRC = main.c
+diff --git a/tools/libxc/xc_domain.c b/tools/libxc/xc_domain.c
+index 05b04b5..089b538 100644
+--- a/tools/libxc/xc_domain.c
++++ b/tools/libxc/xc_domain.c
+@@ -1540,6 +1540,55 @@ int xc_domain_memory_mapping(
+     return do_domctl(xch, &domctl);
+ }
+ 
++int xc_domain_iommu_x_mapping(
++    xc_interface *xch,
++    uint32_t domid_to,
++    uint32_t domid_from,
++    unsigned long gfn_to,
++    unsigned long gfn_from,
++    unsigned long nr_gfns,
++    uint32_t add_mapping)
++{
++    DECLARE_DOMCTL;
++
++    domctl.cmd = XEN_DOMCTL_iommu_x_mapping;
++    domctl.domain = domid_to;
++    domctl.u.iommu_x_mapping.gfn_to = gfn_to;
++    domctl.u.iommu_x_mapping.gfn_from = gfn_from;
++    domctl.u.iommu_x_mapping.domid_from = domid_from;
++    domctl.u.iommu_x_mapping.nr_gfns = nr_gfns;
++    domctl.u.iommu_x_mapping.add_mapping = add_mapping;
++
++    return do_domctl(xch, &domctl);
++}
++
++int xc_domain_iommu_map_batch(
++    xc_interface *xch,
++    uint32_t domid,
++    unsigned long gfn,
++    unsigned long nr,
++    uint64_t *mfns)
++{
++    DECLARE_DOMCTL;
++    DECLARE_HYPERCALL_BOUNCE(mfns, nr * sizeof (*mfns),
++                             XC_HYPERCALL_BUFFER_BOUNCE_IN);
++    int rc;
++
++    domctl.cmd = XEN_DOMCTL_iommu_map_batch;
++    domctl.domain = domid;
++    domctl.u.iommu_map_batch.gfn = gfn;
++    domctl.u.iommu_map_batch.nr= nr;
++
++    if (xc_hypercall_bounce_pre(xch, mfns))
++        return -1;
++
++    set_xen_guest_handle(domctl.u.iommu_map_batch.mfns, mfns);
++    rc = do_domctl(xch, &domctl);
++
++    xc_hypercall_bounce_post(xch, mfns);
++    return rc;
++}
++
+ int xc_domain_ioport_mapping(
+     xc_interface *xch,
+     uint32_t domid,
+diff --git a/tools/libxc/xenctrl.h b/tools/libxc/xenctrl.h
+index 020883d..255d4c4 100644
+--- a/tools/libxc/xenctrl.h
++++ b/tools/libxc/xenctrl.h
+@@ -1821,6 +1821,20 @@ int xc_domain_memory_mapping(xc_interface *xch,
+                              unsigned long nr_mfns,
+                              uint32_t add_mapping);
+ 
++int xc_domain_iommu_map_batch(xc_interface *xch,
++                              uint32_t domid,
++                              unsigned long gfn,
++                              unsigned long nr,
++                              uint64_t *mfn);
++
++int xc_domain_iommu_x_mapping(xc_interface *xch,
++                              uint32_t domid_to,
++                              uint32_t domid_from,
++                              unsigned long gfn_to,
++                              unsigned long gfn_from,
++                              unsigned long nr_gfns,
++                              uint32_t add_mapping);
++
+ int xc_domain_ioport_mapping(xc_interface *xch,
+                              uint32_t domid,
+                              uint32_t first_gport,
+diff --git a/xen/arch/x86/domctl.c b/xen/arch/x86/domctl.c
+index fccea6d..5e850de 100644
+--- a/xen/arch/x86/domctl.c
++++ b/xen/arch/x86/domctl.c
+@@ -619,6 +619,107 @@ long arch_do_domctl(
+     }
+     break;
+ 
++    case XEN_DOMCTL_iommu_map_batch:
++    {
++        struct domain *d;
++        unsigned long gfn = domctl->u.iommu_map_batch.gfn;
++        unsigned long nr = domctl->u.iommu_map_batch.nr;
++        unsigned long mfn;
++        int i = 0;
++
++        printk("iommu_map_batch: domid_to:%d gfn:0x%lx size:0x%lx\n",
++                domctl->domain, gfn, nr);
++
++        ret = -EINVAL;
++        if ( (gfn + nr - 1) < gfn) /* wrap? */
++            break;
++
++        ret = -ESRCH;
++        if ( unlikely((d = rcu_lock_domain_by_id(domctl->domain)) == NULL) )
++            break;
++
++        if (d != current->domain)
++            domain_pause(d);
++        for ( i = 0; i < nr; i++)
++        {
++            ret = -EFAULT;
++            if (copy_from_guest_offset(&mfn, domctl->u.iommu_map_batch.mfns, i, 1))
++                break;
++            if ((ret = iommu_set_table(d, gfn + i, mfn, 1)) != 0)
++                break;
++        }
++        if (i)
++            iommu_iotlb_flush(d, gfn, nr - ( nr - i));
++        if (d != current->domain)
++            domain_unpause(d);
++
++        rcu_unlock_domain(d);
++    }
++    break;
++
++    case XEN_DOMCTL_iommu_x_mapping:
++    {
++        struct domain *d_to, *d_from;
++        unsigned int domid_from = domctl->u.iommu_x_mapping.domid_from;
++        unsigned long gfn_to = domctl->u.iommu_x_mapping.gfn_to;
++        unsigned long gfn_from = domctl->u.iommu_x_mapping.gfn_from;
++        unsigned long nr_gfns = domctl->u.iommu_x_mapping.nr_gfns;
++        struct page_info *page = NULL;
++        mfn_t mfn;
++        int i = 0;
++        int map = domctl->u.iommu_x_mapping.add_mapping;
++
++        printk("iommu_x_mapping: domid_to:%d domid_from:%d gfn_to:0x%lx gfn_from:0x%lx size:0x%lx map:%d\n",
++                domctl->domain, domid_from, gfn_to, gfn_from, nr_gfns, map);
++
++        ret = -EINVAL;
++        if ( (gfn_to + nr_gfns - 1) < gfn_to) /* wrap? */
++            break;
++
++        ret = -ESRCH;
++        if ( unlikely((d_to = rcu_lock_domain_by_id(domctl->domain)) == NULL) )
++            break;
++        if ( unlikely((d_from = rcu_lock_domain_by_id(domid_from)) == NULL) )
++        {
++            rcu_unlock_domain(d_to);
++            break;
++        }
++
++        if (d_to != current->domain)
++            domain_pause(d_to);
++        for ( i = 0; i < nr_gfns; i++)
++        {
++            ret = -EINVAL;
++            page = get_page_from_gfn(d_from, gfn_from + i, NULL, P2M_ALLOC);
++            if (!page) {
++               continue;
++            }
++            mfn = _mfn(page_to_mfn(page));
++            if (mfn_x(mfn) == -1)
++            {
++                put_page(page);
++                break;
++            }
++            if ((ret = iommu_set_table(d_to, gfn_to + i, mfn_x(mfn), map) != 0))
++            {
++                put_page(page);
++                break;
++            }
++            put_page(page);
++        }
++        if (i)
++        {
++            iommu_iotlb_flush(d_to, gfn_to, nr_gfns - ( nr_gfns - i));
++            ret = 0;
++        }
++
++        if (d_to != current->domain)
++            domain_unpause(d_to);
++        rcu_unlock_domain(d_from);
++        rcu_unlock_domain(d_to);
++    }
++    break;
++
+     case XEN_DOMCTL_memory_mapping:
+     {
+         unsigned long gfn = domctl->u.memory_mapping.first_gfn;
+diff --git a/xen/drivers/passthrough/iommu.c b/xen/drivers/passthrough/iommu.c
+index 93ad122..6f5ad78 100644
+--- a/xen/drivers/passthrough/iommu.c
++++ b/xen/drivers/passthrough/iommu.c
+@@ -750,6 +750,14 @@ static void iommu_dump_p2m_table(unsigned char key)
+     }
+ }
+ 
++int iommu_set_table(struct domain *d, unsigned long gfn, unsigned long mfn, int map)
++{
++    const struct iommu_ops *ops = iommu_get_ops();
++    if ( iommu_enabled )
++        return ops->set_table(d, gfn, mfn, map);
++    return -1;
++}
++
+ /*
+  * Local variables:
+  * mode: C
+diff --git a/xen/drivers/passthrough/vtd/iommu.c b/xen/drivers/passthrough/vtd/iommu.c
+index f4e39dc..6e87084 100644
+--- a/xen/drivers/passthrough/vtd/iommu.c
++++ b/xen/drivers/passthrough/vtd/iommu.c
+@@ -22,6 +22,8 @@
+ #include <xen/irq.h>
+ #include <xen/sched.h>
+ #include <xen/xmalloc.h>
++#include <xen/mm.h>
++#include <xen/paging.h>
+ #include <xen/domain_page.h>
+ #include <xen/iommu.h>
+ #include <asm/hvm/iommu.h>
+@@ -615,7 +617,7 @@ static void intel_iommu_iotlb_flush_all(struct domain *d)
+ }
+ 
+ /* clear one page's page table */
+-static void dma_pte_clear_one(struct domain *domain, u64 addr)
++static void dma_pte_clear_one(struct domain *domain, u64 addr, int flush)
+ {
+     struct hvm_iommu *hd = domain_hvm_iommu(domain);
+     struct dma_pte *page = NULL, *pte = NULL;
+@@ -1760,7 +1762,7 @@ static int intel_iommu_unmap_page(struct domain *d, unsigned long gfn)
+     if ( iommu_passthrough && (d->domain_id == 0) )
+         return 0;
+ 
+-    dma_pte_clear_one(d, (paddr_t)gfn << PAGE_SHIFT_4K);
++    dma_pte_clear_one(d, (paddr_t)gfn << PAGE_SHIFT_4K, 1);
+ 
+     return 0;
+ }
+@@ -2425,6 +2427,40 @@ static void vtd_dump_p2m_table(struct domain *d)
+     vtd_dump_p2m_table_level(hd->pgd_maddr, agaw_to_level(hd->agaw), 0, 0);
+ }
+ 
++int intel_iommu_set_table(struct domain *d, unsigned long gfn, unsigned long mfn, int map)
++{
++    struct hvm_iommu *hd = domain_hvm_iommu(d);
++    u64 pg_maddr;
++    struct dma_pte *page = NULL, *pte = NULL;
++
++    spin_lock(&hd->mapping_lock);
++
++    pg_maddr = addr_to_dma_page_maddr(d, (paddr_t)gfn << PAGE_SHIFT_4K, map);
++    if ( pg_maddr == 0 )
++    {
++        spin_unlock(&hd->mapping_lock);
++        return -ENOMEM;
++    }
++    page = (struct dma_pte *)map_vtd_domain_page(pg_maddr);
++    pte = page + (gfn & LEVEL_MASK);
++    dma_clear_pte(*pte);
++    iommu_flush_cache_entry(pte, sizeof(struct dma_pte));
++
++    if ( map )
++    {
++        dma_set_pte_addr(*pte, (paddr_t)mfn << PAGE_SHIFT_4K);
++        dma_set_pte_prot(*pte, DMA_PTE_READ | DMA_PTE_WRITE);
++        /* Set the SNP on leaf page table if Snoop Control available */
++        if ( iommu_snoop )
++            dma_set_pte_snp(*pte);
++        iommu_flush_cache_entry(pte, sizeof(struct dma_pte));
++    }
++
++    spin_unlock(&hd->mapping_lock);
++    unmap_vtd_domain_page(page);
++    return 0;
++}
++
+ const struct iommu_ops intel_iommu_ops = {
+     .init = intel_iommu_domain_init,
+     .dom0_init = intel_iommu_dom0_init,
+@@ -2449,6 +2485,7 @@ const struct iommu_ops intel_iommu_ops = {
+     .iotlb_flush = intel_iommu_iotlb_flush,
+     .iotlb_flush_all = intel_iommu_iotlb_flush_all,
+     .dump_p2m_table = vtd_dump_p2m_table,
++    .set_table = intel_iommu_set_table,
+ };
+ 
+ /*
+diff --git a/xen/include/public/domctl.h b/xen/include/public/domctl.h
+index 7352b97..9e4105f 100644
+--- a/xen/include/public/domctl.h
++++ b/xen/include/public/domctl.h
+@@ -530,6 +530,23 @@ struct xen_domctl_memory_mapping {
+ typedef struct xen_domctl_memory_mapping xen_domctl_memory_mapping_t;
+ DEFINE_XEN_GUEST_HANDLE(xen_domctl_memory_mapping_t);
+ 
++struct xen_domctl_iommu_x_mapping{
++    uint64_aligned_t gfn_to;
++    uint64_aligned_t gfn_from;
++    uint64_aligned_t nr_gfns;
++    uint32_t domid_from;
++    uint32_t add_mapping;
++};
++typedef struct xen_domctl_iommu_x_mapping xen_domctl_iommu_x_mapping_t;
++DEFINE_XEN_GUEST_HANDLE(xen_domctl_iommu_x_mapping_t);
++
++struct xen_domctl_iommu_map_batch {
++    uint64_aligned_t gfn;
++    uint64_aligned_t nr;
++    XEN_GUEST_HANDLE_64(uint64) mfns;
++};
++typedef struct xen_domctl_iommu_map_batch xen_domctl_iommu_map_batch_t;
++DEFINE_XEN_GUEST_HANDLE(xen_domctl_iommu_map_batch_t);
+ 
+ /* Bind machine I/O port range -> HVM I/O port range. */
+ /* XEN_DOMCTL_ioport_mapping */
+@@ -955,6 +972,8 @@ struct xen_domctl {
+ #define XEN_DOMCTL_setbiosuuid                   90
+ #define XEN_DOMCTL_set_xcisrv                    91
+ #define XEN_DOMCTL_aperture_map                  92
++#define XEN_DOMCTL_iommu_x_mapping               93
++#define XEN_DOMCTL_iommu_map_batch               94
+ 
+ #define XEN_DOMCTL_gdbsx_guestmemio            1000
+ #define XEN_DOMCTL_gdbsx_pausevcpu             1001
+@@ -997,6 +1016,8 @@ struct xen_domctl {
+         struct xen_domctl_assign_device     assign_device;
+         struct xen_domctl_bind_pt_irq       bind_pt_irq;
+         struct xen_domctl_memory_mapping    memory_mapping;
++        struct xen_domctl_iommu_x_mapping   iommu_x_mapping;
++        struct xen_domctl_iommu_map_batch   iommu_map_batch;
+         struct xen_domctl_ioport_mapping    ioport_mapping;
+         struct xen_domctl_pin_mem_cacheattr pin_mem_cacheattr;
+         struct xen_domctl_ext_vcpucontext   ext_vcpucontext;
+diff --git a/xen/include/xen/iommu.h b/xen/include/xen/iommu.h
+index 6f0ff9d..637b569 100644
+--- a/xen/include/xen/iommu.h
++++ b/xen/include/xen/iommu.h
+@@ -70,7 +70,7 @@ int iommu_unmap_page(struct domain *d, unsigned long gfn);
+ void iommu_pte_flush(struct domain *d, u64 gfn, u64 *pte, int order, int present);
+ void iommu_set_pgd(struct domain *d);
+ void iommu_domain_teardown(struct domain *d);
+-
++int iommu_set_table(struct domain *d, unsigned long gfn, unsigned long mfn, int map);
+ void pt_pci_init(void);
+ 
+ struct pirq;
+@@ -115,6 +115,7 @@ struct iommu_ops {
+     void (*iotlb_flush)(struct domain *d, unsigned long gfn, unsigned int page_count);
+     void (*iotlb_flush_all)(struct domain *d);
+     void (*dump_p2m_table)(struct domain *d);
++    int (*set_table)(struct domain *d, unsigned long gfn, unsigned long mfn, int map);
+ };
+ 
+ void iommu_update_ire_from_apic(unsigned int apic, unsigned int reg, unsigned int value);
+diff --git a/xen/xsm/flask/hooks.c b/xen/xsm/flask/hooks.c
+index b238ef7..3342852 100644
+--- a/xen/xsm/flask/hooks.c
++++ b/xen/xsm/flask/hooks.c
+@@ -736,6 +736,12 @@ static int flask_domctl(struct domain *d, int cmd)
+     case XEN_DOMCTL_aperture_map:
+         return current_has_perm(d, SECCLASS_DOMAIN2, DOMAIN2__APERTURE_MAP);
+ 
++    case XEN_DOMCTL_iommu_x_mapping:
++        return current_has_perm(d, SECCLASS_DOMAIN2, DOMAIN2__IOMMU_X_MAPPING);
++
++    case XEN_DOMCTL_iommu_map_batch:
++        return current_has_perm(d, SECCLASS_DOMAIN2, DOMAIN2__IOMMU_MAP_BATCH);
++
+     default:
+         printk("flask_domctl: Unknown op %d\n", cmd);
+         return -EPERM;
+diff --git a/xen/xsm/flask/policy/access_vectors b/xen/xsm/flask/policy/access_vectors
+index 88c16c5..0084547 100644
+--- a/xen/xsm/flask/policy/access_vectors
++++ b/xen/xsm/flask/policy/access_vectors
+@@ -200,6 +200,10 @@ class domain2
+     set_xcisrv
+ # XEN_DOMCTL_aperture_map
+     aperture_map
++# XEN_DOMCTL_iommu_x_mapping
++    iommu_x_mapping
++# XEN_DOMCTL_iommu_map_batch
++    iommu_map_batch
+ }
+ 
+ # Similar to class domain, but primarily contains domctls related to HVM domains

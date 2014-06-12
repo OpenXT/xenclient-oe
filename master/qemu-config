@@ -1,0 +1,101 @@
+diff --git a/Config.mk b/Config.mk
+index f270b36..2e19ec0 100644
+--- a/Config.mk
++++ b/Config.mk
+@@ -222,7 +222,8 @@ ETHERBOOT_NICS ?= rtl8139 8086100e
+ # Specify which qemu-dm to use. This may be `ioemu' to use the old
+ # Mercurial in-tree version, or a local directory, or a git URL.
+ # CONFIG_QEMU ?= `pwd`/$(XEN_ROOT)/../qemu-xen.git
+-CONFIG_QEMU ?= $(QEMU_REMOTE)
++# CONFIG_QEMU ?= $(QEMU_REMOTE)
++CONFIG_QEMU ?= ../../qemu
+ 
+ QEMU_TAG ?= xen-4.3.0-rc1
+ # Fri Mar 15 18:25:15 2013 +0000
+diff --git a/tools/Makefile b/tools/Makefile
+index e44a3e9..a9f4363 100644
+--- a/tools/Makefile
++++ b/tools/Makefile
+@@ -34,7 +34,6 @@ SUBDIRS-$(CONFIG_Linux) += libvchan
+ 
+ # do not recurse in to a dir we are about to delete
+ ifneq "$(MAKECMDGOALS)" "distclean"
+-SUBDIRS-$(CONFIG_IOEMU) += qemu-xen-traditional-dir
+ SUBDIRS-$(CONFIG_IOEMU) += qemu-xen-dir
+ endif
+ 
+@@ -136,6 +135,8 @@ qemu-xen-traditional-dir-find:
+ qemu-xen-dir-find:
+ 	if test -d $(QEMU_UPSTREAM_URL) ; then \
+ 		mkdir -p qemu-xen-dir; \
++	elif test -d $(QEMU_ROOT) ; then \
++		ln -sf $(QEMU_ROOT) qemu-xen-dir; \
+ 	else \
+ 		export GIT=$(GIT); \
+ 		$(XEN_ROOT)/scripts/git-checkout.sh $(QEMU_UPSTREAM_URL) $(QEMU_UPSTREAM_REVISION) qemu-xen-dir ; \
+@@ -180,33 +181,38 @@ qemu-xen-dir-force-update:
+ 		$(GIT) reset --hard $(QEMU_UPSTREAM_REVISION); \
+ 	fi
+ 
+-subdir-all-qemu-xen-dir: qemu-xen-dir-find
+-	if test -d $(QEMU_UPSTREAM_URL) ; then \
+-		source=$(QEMU_UPSTREAM_URL); \
+-	else \
+-		source=.; \
+-	fi; \
+-	cd qemu-xen-dir; \
+-	$$source/configure --enable-xen --target-list=i386-softmmu \
+-		--prefix=$(PREFIX) \
+-		--source-path=$$source \
+-		--extra-cflags="-I$(XEN_ROOT)/tools/include \
+-		-I$(XEN_ROOT)/tools/libxc \
+-		-I$(XEN_ROOT)/tools/xenstore \
+-		-I$(XEN_ROOT)/tools/xenstore/compat \
+-		$(EXTRA_CFLAGS_QEMU_XEN)" \
+-		--extra-ldflags="-L$(XEN_ROOT)/tools/libxc \
+-		-L$(XEN_ROOT)/tools/xenstore" \
+-		--bindir=$(LIBEXEC) \
+-		--datadir=$(SHAREDIR)/qemu-xen \
+-		--disable-kvm \
+-		--disable-docs \
+-		--python=$(PYTHON) \
+-		$(IOEMU_CONFIGURE_CROSS); \
+-	$(MAKE) all
+-
+-subdir-install-qemu-xen-dir: subdir-all-qemu-xen-dir
+-	cd qemu-xen-dir; \
++XEN_LIBXC_CANONICAL = $(shell readlink -f $(XEN_LIBXC))
++XEN_XENSTORE_CANONICAL = $(shell readlink -f $(XEN_XENSTORE))
++XEN_INCLUDE_CANONICAL = $(shell readlink -f $(XEN_INCLUDE))
++ORC_INCLUDE_CANONICAL = $(shell readlink -f $(XEN_ROOT)/../orc-client/dist/install/usr/include)
++ORC_LIB_CANONICAL = $(shell readlink -f $(XEN_ROOT)/../orc-client/dist/install/usr/lib)
++QEMU_CONFIGURE_OPTIONS ?= \
++			--disable-spice \
++			--disable-vhost-net \
++			--disable-docs \
++			--disable-bsd-user \
++			--disable-linux-user \
++			--disable-pie \
++			--disable-kvm \
++			--disable-bluez \
++			--disable-curl \
++			--disable-curses \
++			--enable-xen \
++			--disable-sdl \
++			--disable-smartcard-nss \
++			--audio-drv-list=alsa,pa \
++			--disable-strip \
++			--disable-slirp \
++			--enable-debug \
++			--disable-vnc-jpeg \
++			--disable-open-by-handle \
++			--target-list=x86_64-softmmu,x86_64-linux-user \
++			--extra-cflags="-O3 `pkg-config gdk-2.0 --cflags --libs` -I $(XEN_INCLUDE_CANONICAL) -L $(XEN_LIBXC_CANONICAL) -I $(XEN_LIBXC_CANONICAL) -L $(XEN_XENSTORE_CANONICAL) -I $(XEN_XENSTORE_CANONICAL) -I $(XEN_XENSTORE_CANONICAL)/compat -I $(ORC_INCLUDE_CANONICAL) -L $(ORC_LIB_CANONICAL)"
++
++subdir-all-qemu-xen-dir subdir-install-qemu-xen-dir: subdir-all-libxc subdir-all-xenstore qemu-xen-dir-find
++	cd qemu-xen-dir && XEN_TARGET_ARCH=$(XEN_TARGET_ARCH) sh configure \
++		--prefix=$(PREFIX) $(IOEMU_CONFIGURE_CROSS) \
++		$(QEMU_CONFIGURE_OPTIONS); \
+ 	$(MAKE) install
+ 
+ subdir-clean-qemu-xen-dir:

@@ -1,0 +1,47 @@
+diff --git a/xen/drivers/char/console.c b/xen/drivers/char/console.c
+index 79d8402..d479bc8 100644
+--- a/xen/drivers/char/console.c
++++ b/xen/drivers/char/console.c
+@@ -59,6 +59,10 @@ boolean_param("console_to_ring", opt_console_to_ring);
+ static int __read_mostly opt_console_timestamps;
+ boolean_param("console_timestamps", opt_console_timestamps);
+ 
++/* console_us_timestamps: include a microsecond (us) timestamp prefix on every Xen console line. */
++static int __read_mostly opt_console_us_timestamps;
++boolean_param("console_us_timestamps", opt_console_us_timestamps);
++
+ /* conring_size: allows a large console ring than default (16kB). */
+ static uint32_t __initdata opt_conring_size;
+ size_param("conring_size", opt_conring_size);
+@@ -476,9 +480,31 @@ static void printk_start_of_line(void)
+ {
+     struct tm tm;
+     char tstr[32];
++    static unsigned long long now; /* ns */
++    static unsigned long long prev; /* ns */
++    unsigned long long delta; /* ns */
+ 
+     __putstr("(XEN) ");
+ 
++    if ( opt_console_us_timestamps )
++    {
++        prev = now;
++        now = NOW(); /* nanoseconds */
++        do_div(now, 1000); /* microseconds */
++
++        if ( (now < prev) || !prev )
++            delta = 0;
++        else
++            delta = now - prev;
++
++        if (now)
++        {
++            snprintf(tstr, sizeof(tstr), "[%09llu, %03llu] ", now, delta);
++            __putstr(tstr);
++        }
++    }
++            
++    
+     if ( !opt_console_timestamps )
+         return;
+ 

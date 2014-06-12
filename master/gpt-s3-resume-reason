@@ -1,0 +1,55 @@
+diff --git a/xen/arch/x86/hvm/hvm.c b/xen/arch/x86/hvm/hvm.c
+index 0488a2b..fc83a60 100644
+--- a/xen/arch/x86/hvm/hvm.c
++++ b/xen/arch/x86/hvm/hvm.c
+@@ -3795,6 +3795,9 @@ static void hvm_s3_suspend(struct domain *d)
+     domain_unlock(d);
+ }
+ 
++extern void hvm_acpi_power_button_set_sts(struct domain *d);
++extern void hvm_acpi_set_wak_sts(struct domain *d);
++
+ static void hvm_s3_resume(struct domain *d)
+ {
+     if ( test_and_clear_bool(d->arch.hvm_domain.is_s3_suspended) )
+@@ -3803,6 +3806,10 @@ static void hvm_s3_resume(struct domain *d)
+ 
+         for_each_vcpu( d, v )
+             hvm_set_guest_tsc(v, 0);
++        /* Set the power button status bit in pm1 status register */
++        hvm_acpi_power_button_set_sts(d);
++        /* WAK_STS as well */
++        hvm_acpi_set_wak_sts(d);
+         domain_unpause(d);
+     }
+ }
+diff --git a/xen/arch/x86/hvm/pmtimer.c b/xen/arch/x86/hvm/pmtimer.c
+index 7197ff6..d9e5699 100644
+--- a/xen/arch/x86/hvm/pmtimer.c
++++ b/xen/arch/x86/hvm/pmtimer.c
+@@ -90,6 +90,25 @@ void hvm_acpi_sleep_button(struct domain *d)
+     spin_unlock(&s->lock);
+ }
+ 
++/* Set power button status (necessary for proper win32 resume) */
++void hvm_acpi_power_button_set_sts(struct domain *d)
++{
++    PMTState *s = &d->arch.hvm_domain.pl_time.vpmt;
++    spin_lock(&s->lock);
++    s->pm.pm1a_sts |= PWRBTN_STS;
++    spin_unlock(&s->lock);
++}
++
++/* Set rsm/wak_sts bit */
++void hvm_acpi_set_wak_sts(struct domain *d)
++{
++    PMTState *s = &d->arch.hvm_domain.pl_time.vpmt;
++    spin_lock(&s->lock);
++    s->pm.pm1a_sts |= RSM_STS;
++    spin_unlock(&s->lock);
++}
++
++
+ /* Set the correct value in the timer, accounting for time elapsed
+  * since the last time we did that. */
+ static void pmt_update_time(PMTState *s)

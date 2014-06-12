@@ -1,0 +1,41 @@
+diff --git a/xen/drivers/char/ns16550.c b/xen/drivers/char/ns16550.c
+index e0c87bb..822ec24 100644
+--- a/xen/drivers/char/ns16550.c
++++ b/xen/drivers/char/ns16550.c
+@@ -142,6 +142,11 @@ static void ns_write_reg(struct ns16550 *uart, int reg, char c)
+     writeb(c, uart->remapped_io_base + reg);
+ }
+ 
++static int ns16550_ioport_invalid(struct ns16550 *uart)
++{
++    return (unsigned char)ns_read_reg(uart, IER) == 0xff;
++}
++
+ static void ns16550_interrupt(
+     int irq, void *dev_id, struct cpu_user_regs *regs)
+ {
+@@ -171,7 +176,7 @@ static void __ns16550_poll(struct cpu_user_regs *regs)
+     if ( uart->intr_works )
+         return; /* Interrupts work - no more polling */
+ 
+-    while ( ns_read_reg(uart, LSR) & LSR_DR )
++    while ( !ns16550_ioport_invalid(uart) && ns_read_reg(uart, LSR) & LSR_DR )
+         serial_rx_interrupt(port, regs);
+ 
+     if ( ns_read_reg(uart, LSR) & LSR_THRE )
+@@ -372,15 +377,6 @@ static void _ns16550_resume(struct serial_port *port)
+     ns16550_setup_postirq(port->uart);
+ }
+ 
+-static int ns16550_ioport_invalid(struct ns16550 *uart)
+-{
+-    return ((((unsigned char)ns_read_reg(uart, LSR)) == 0xff) &&
+-            (((unsigned char)ns_read_reg(uart, MCR)) == 0xff) &&
+-            (((unsigned char)ns_read_reg(uart, IER)) == 0xff) &&
+-            (((unsigned char)ns_read_reg(uart, IIR)) == 0xff) &&
+-            (((unsigned char)ns_read_reg(uart, LCR)) == 0xff));
+-}
+-
+ static int delayed_resume_tries;
+ static void ns16550_delayed_resume(void *data)
+ {

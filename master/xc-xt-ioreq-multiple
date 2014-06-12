@@ -1,0 +1,1834 @@
+diff --git a/tools/libxc/xc_domain.c b/tools/libxc/xc_domain.c
+index 37a29c3..05b04b5 100644
+--- a/tools/libxc/xc_domain.c
++++ b/tools/libxc/xc_domain.c
+@@ -1783,6 +1783,161 @@ int xc_domain_aperture_map(
+     return ret ? -1 : 0;
+ }
+ 
++ioservid_or_error_t xc_hvm_register_ioreq_server(xc_interface *xch,
++                                                 domid_t dom)
++{
++    DECLARE_HYPERCALL;
++    DECLARE_HYPERCALL_BUFFER(xen_hvm_register_ioreq_server_t, arg);
++    ioservid_or_error_t rc = -1;
++
++    arg = xc_hypercall_buffer_alloc(xch, arg, sizeof (*arg));
++    if ( !arg )
++    {
++        PERROR("Could not allocate memory for xc_hvm_register_ioreq_server hypercall");
++        goto out;
++    }
++
++    hypercall.op        = __HYPERVISOR_hvm_op;
++    hypercall.arg[0]    = HVMOP_register_ioreq_server;
++    hypercall.arg[1]    = HYPERCALL_BUFFER_AS_ARG(arg);
++
++    arg->domid = dom;
++    rc = do_xen_hypercall(xch, &hypercall);
++    if ( !rc )
++        rc = arg->id;
++
++    xc_hypercall_buffer_free(xch, arg);
++out:
++    return rc;
++}
++
++evtchn_port_or_error_t xc_hvm_get_ioreq_server_buf_channel(xc_interface *xch,
++                                                           domid_t dom,
++                                                           ioservid_t id)
++{
++    DECLARE_HYPERCALL;
++    DECLARE_HYPERCALL_BUFFER(xen_hvm_get_ioreq_server_buf_channel_t, arg);
++    evtchn_port_or_error_t rc = -1;
++
++    arg = xc_hypercall_buffer_alloc(xch, arg, sizeof (*arg));
++    if ( !arg )
++    {
++        PERROR("Could not allocate memory for xc_hvm_get_ioreq_servr_buf_channel");
++        goto out;
++    }
++
++    hypercall.op        = __HYPERVISOR_hvm_op;
++    hypercall.arg[0]    = HVMOP_get_ioreq_server_buf_channel;
++    hypercall.arg[1]    = HYPERCALL_BUFFER_AS_ARG(arg);
++
++    arg->domid = dom;
++    arg->id = id;
++    rc = do_xen_hypercall(xch, &hypercall);
++
++    if ( !rc )
++        rc = arg->channel;
++
++    xc_hypercall_buffer_free(xch, arg);
++
++out:
++    return rc;
++}
++
++int xc_hvm_map_io_range_to_ioreq_server(xc_interface *xch, domid_t dom,
++                                        ioservid_t id, int is_mmio,
++                                        uint64_t start, uint64_t end)
++{
++    DECLARE_HYPERCALL;
++    DECLARE_HYPERCALL_BUFFER(xen_hvm_map_io_range_to_ioreq_server_t, arg);
++    int rc = -1;
++
++    arg = xc_hypercall_buffer_alloc(xch, arg, sizeof (*arg));
++    if ( !arg )
++    {
++        PERROR("Could not allocate memory for xc_hvm_map_io_range_to_ioreq_server hypercall");
++        goto out;
++    }
++
++    hypercall.op        = __HYPERVISOR_hvm_op;
++    hypercall.arg[0]    = HVMOP_map_io_range_to_ioreq_server;
++    hypercall.arg[1]    = HYPERCALL_BUFFER_AS_ARG(arg);
++
++    arg->domid = dom;
++    arg->id = id;
++    arg->is_mmio = is_mmio;
++    arg->s = start;
++    arg->e = end;
++
++    rc = do_xen_hypercall(xch, &hypercall);
++
++    xc_hypercall_buffer_free(xch, arg);
++out:
++    return rc;
++}
++
++int xc_hvm_unmap_io_range_from_ioreq_server(xc_interface *xch, domid_t dom,
++                                            ioservid_t id, int is_mmio,
++                                            uint64_t addr)
++{
++    DECLARE_HYPERCALL;
++    DECLARE_HYPERCALL_BUFFER(xen_hvm_unmap_io_range_from_ioreq_server_t, arg);
++    int rc = -1;
++
++    arg = xc_hypercall_buffer_alloc(xch, arg, sizeof (*arg));
++    if ( !arg )
++    {
++        PERROR("Could not allocate memory for xc_hvm_unmap_io_range_from_ioreq_server hypercall");
++        goto out;
++    }
++
++    hypercall.op        = __HYPERVISOR_hvm_op;
++    hypercall.arg[0]    = HVMOP_unmap_io_range_from_ioreq_server;
++    hypercall.arg[1]    = HYPERCALL_BUFFER_AS_ARG(arg);
++
++    arg->domid = dom;
++    arg->id = id;
++    arg->is_mmio = is_mmio;
++    arg->addr = addr;
++    rc = do_xen_hypercall(xch, &hypercall);
++
++    xc_hypercall_buffer_free(xch, arg);
++out:
++    return rc;
++}
++
++int xc_hvm_register_pcidev(xc_interface *xch, domid_t dom, ioservid_t id,
++                           uint16_t domain, uint8_t bus, uint8_t device,
++                           uint8_t function)
++{
++    DECLARE_HYPERCALL;
++    DECLARE_HYPERCALL_BUFFER(xen_hvm_register_pcidev_t, arg);
++    int rc = -1;
++
++    arg = xc_hypercall_buffer_alloc(xch, arg, sizeof (*arg));
++    if ( !arg )
++    {
++        PERROR("Could not allocate memory for xc_hvm_create_pci hypercall");
++        goto out;
++    }
++
++    hypercall.op        = __HYPERVISOR_hvm_op;
++    hypercall.arg[0]    = HVMOP_register_pcidev;
++    hypercall.arg[1]    = HYPERCALL_BUFFER_AS_ARG(arg);
++
++    arg->domid = dom;
++    arg->id = id;
++    arg->domain = domain;
++    arg->bus = bus;
++    arg->device = device;
++    arg->function = function;
++    rc = do_xen_hypercall(xch, &hypercall);
++
++    xc_hypercall_buffer_free(xch, arg);
++out:
++    return rc;
++}
++
++
+ /*
+  * Local variables:
+  * mode: C
+diff --git a/tools/libxc/xc_hvm_build_x86.c b/tools/libxc/xc_hvm_build_x86.c
+index 8bb0178..efa507e 100644
+--- a/tools/libxc/xc_hvm_build_x86.c
++++ b/tools/libxc/xc_hvm_build_x86.c
+@@ -38,16 +38,17 @@
+ #define SUPERPAGE_1GB_SHIFT   18
+ #define SUPERPAGE_1GB_NR_PFNS (1UL << SUPERPAGE_1GB_SHIFT)
+ 
+-#define SPECIALPAGE_PAGING   0
+-#define SPECIALPAGE_ACCESS   1
+-#define SPECIALPAGE_SHARING  2
+-#define SPECIALPAGE_BUFIOREQ 3
+-#define SPECIALPAGE_XENSTORE 4
+-#define SPECIALPAGE_IOREQ    5
+-#define SPECIALPAGE_IDENT_PT 6
+-#define SPECIALPAGE_CONSOLE  7
+-#define NR_SPECIAL_PAGES     8
+-#define special_pfn(x) (0xff000u - NR_SPECIAL_PAGES + (x))
++#define SPECIALPAGE_PAGING          0
++#define SPECIALPAGE_ACCESS          1
++#define SPECIALPAGE_SHARING         2
++#define SPECIALPAGE_BUFIOREQ        3
++#define SPECIALPAGE_XENSTORE        4
++#define SPECIALPAGE_IOREQ           5
++#define SPECIALPAGE_IDENT_PT        6
++#define SPECIALPAGE_CONSOLE         7
++#define NR_STATIC_SPECIAL_PAGES     8
++#define MAX_SPECIAL_PAGES          32
++#define special_pfn(x) (0xff000u - MAX_SPECIAL_PAGES + (x))
+ 
+ static int modules_init(struct xc_hvm_build_args *args,
+                         uint64_t vend, struct elf_binary *elf,
+@@ -463,7 +464,7 @@ static int setup_guest(xc_interface *xch,
+     munmap(hvm_info_page, PAGE_SIZE);
+ 
+     /* Allocate and clear special pages. */
+-    for ( i = 0; i < NR_SPECIAL_PAGES; i++ )
++    for ( i = 0; i < MAX_SPECIAL_PAGES; i++ )
+     {
+         xen_pfn_t pfn = special_pfn(i);
+         rc = xc_domain_populate_physmap_exact(xch, dom, 1, 0, 0, &pfn);
+@@ -490,6 +491,10 @@ static int setup_guest(xc_interface *xch,
+                      special_pfn(SPECIALPAGE_ACCESS));
+     xc_set_hvm_param(xch, dom, HVM_PARAM_SHARING_RING_PFN,
+                      special_pfn(SPECIALPAGE_SHARING));
++    xc_set_hvm_param(xch, dom, HVM_PARAM_IO_PFN_FIRST,
++                     special_pfn(NR_STATIC_SPECIAL_PAGES));
++    xc_set_hvm_param(xch, dom, HVM_PARAM_IO_PFN_LAST,
++                     special_pfn(MAX_SPECIAL_PAGES - 1));
+ 
+     /*
+      * Identity-map page table is required for running with CR0.PG=0 when
+diff --git a/tools/libxc/xenctrl.h b/tools/libxc/xenctrl.h
+index d44cec3..020883d 100644
+--- a/tools/libxc/xenctrl.h
++++ b/tools/libxc/xenctrl.h
+@@ -1770,6 +1770,28 @@ void xc_clear_last_error(xc_interface *xch);
+ int xc_set_hvm_param(xc_interface *handle, domid_t dom, int param, unsigned long value);
+ int xc_get_hvm_param(xc_interface *handle, domid_t dom, int param, unsigned long *value);
+ 
++/* A IO server identifier is guaranteed to fit in 31 bits. */
++typedef int ioservid_or_error_t;
++
++ioservid_or_error_t xc_hvm_register_ioreq_server(xc_interface *xch,
++                                                 domid_t dom);
++evtchn_port_or_error_t xc_hvm_get_ioreq_server_buf_channel(xc_interface *xch,
++                                                           domid_t dom,
++                                                           ioservid_t id);
++int xc_hvm_map_io_range_to_ioreq_server(xc_interface *xch, domid_t dom,
++                                        ioservid_t id, int is_mmio,
++                                        uint64_t start, uint64_t end);
++int xc_hvm_unmap_io_range_from_ioreq_server(xc_interface *xch, domid_t dom,
++                                            ioservid_t id, int is_mmio,
++                                            uint64_t addr);
++/*
++ * Register a PCI device
++ */
++int xc_hvm_register_pcidev(xc_interface *xch, domid_t dom, unsigned int id,
++                           uint16_t domain, uint8_t bus, uint8_t device,
++                           uint8_t function);
++
++
+ int xc_set_hvm_pio(xc_interface *handle, domid_t dom, uint32_t port, unsigned long value);
+ 
+ /* HVM guest pass-through */
+diff --git a/xen/arch/x86/hvm/Makefile b/xen/arch/x86/hvm/Makefile
+index eea5555..b4f6796 100644
+--- a/xen/arch/x86/hvm/Makefile
++++ b/xen/arch/x86/hvm/Makefile
+@@ -11,6 +11,7 @@ obj-y += io.o
+ obj-y += irq.o
+ obj-y += mtrr.o
+ obj-y += nestedhvm.o
++obj-y += pci_emul.o
+ obj-y += pmtimer.o
+ obj-y += quirks.o
+ obj-y += rtc.o
+@@ -22,4 +23,5 @@ obj-y += vlapic.o
+ obj-y += vmsi.o
+ obj-y += vpic.o
+ obj-y += vpt.o
+-obj-y += vpmu.o
+\ No newline at end of file
++obj-y += vpmu.o
++obj-y += xen_platform.o
+diff --git a/xen/arch/x86/hvm/emulate.c b/xen/arch/x86/hvm/emulate.c
+index 9bfba48..9268c04 100644
+--- a/xen/arch/x86/hvm/emulate.c
++++ b/xen/arch/x86/hvm/emulate.c
+@@ -49,6 +49,56 @@ static void hvmtrace_io_assist(int is_mmio, ioreq_t *p)
+     trace_var(event, 0/*!cycles*/, size, buffer);
+ }
+ 
++static int hvmemul_prepare_assist(ioreq_t *p)
++{
++    struct vcpu *v = current;
++    struct hvm_ioreq_server *s;
++    int i;
++    int sign;
++    uint32_t data = ~0;
++
++    /* Only search in range list for pio and mmio request */
++    if ( p->type != IOREQ_TYPE_COPY && p->type != IOREQ_TYPE_PIO )
++        return X86EMUL_UNHANDLEABLE;
++
++    spin_lock(&v->domain->arch.hvm_domain.ioreq_server_lock);
++    for ( s = v->domain->arch.hvm_domain.ioreq_server_list; s; s = s->next )
++    {
++        struct hvm_io_range *x = (p->type == IOREQ_TYPE_COPY)
++            ? s->mmio_range_list : s->portio_range_list;
++
++        for ( ; x; x = x->next )
++        {
++            if ( (p->addr >= x->s) && (p->addr <= x->e) )
++                goto done_server_scan;
++        }
++    }
++
++    spin_unlock(&v->domain->arch.hvm_domain.ioreq_server_lock);
++
++    sign = p->df ? -1 : 1;
++
++    if ( p->dir == IOREQ_READ )
++    {
++        if ( !p->data_is_ptr )
++            p->data = ~0;
++        else
++        {
++            for ( i = 0; i < p->count; i++ )
++                hvm_copy_to_guest_phys(p->data + sign * i * p->size, &data,
++                                       p->size);
++        }
++    }
++
++    return X86EMUL_OKAY;
++
++  done_server_scan:
++    set_ioreq(v, &s->ioreq, p);
++    spin_unlock(&v->domain->arch.hvm_domain.ioreq_server_lock);
++
++    return X86EMUL_UNHANDLEABLE;
++}
++
+ static int hvmemul_do_io(
+     int is_mmio, paddr_t addr, unsigned long *reps, int size,
+     paddr_t ram_gpa, int dir, int df, void *p_data)
+@@ -173,6 +223,10 @@ static int hvmemul_do_io(
+         (p_data == NULL) ? HVMIO_dispatched : HVMIO_awaiting_completion;
+     vio->io_size = size;
+ 
++    /* Use the default shared page */
++    current->arch.hvm_vcpu.ioreq = &curr->domain->arch.hvm_domain.ioreq;
++    p = get_ioreq(current);
++
+     p->dir = dir;
+     p->data_is_ptr = value_is_ptr;
+     p->type = is_mmio ? IOREQ_TYPE_COPY : IOREQ_TYPE_PIO;
+@@ -196,6 +250,9 @@ static int hvmemul_do_io(
+         rc = hvm_portio_intercept(p);
+     }
+ 
++    if ( rc == X86EMUL_UNHANDLEABLE && curr->domain->arch.hvm_domain.ioreq_mode == IOREQ_MULTIPLE )
++        rc = hvmemul_prepare_assist(p);
++
+     switch ( rc )
+     {
+     case X86EMUL_OKAY:
+@@ -207,7 +264,9 @@ static int hvmemul_do_io(
+         break;
+     case X86EMUL_UNHANDLEABLE:
+         rc = X86EMUL_RETRY;
+-        if ( !hvm_send_assist_req(curr) )
++        /* In case of event, we send the ioreq to all servers */
++        if ( !hvm_send_assist_req(curr,
++                                  get_ioreq(curr)->type == IOREQ_TYPE_EVENT) )
+             vio->io_state = HVMIO_none;
+         else if ( p_data == NULL )
+             rc = X86EMUL_OKAY;
+diff --git a/xen/arch/x86/hvm/hvm.c b/xen/arch/x86/hvm/hvm.c
+index ad55921..7b200e3 100644
+--- a/xen/arch/x86/hvm/hvm.c
++++ b/xen/arch/x86/hvm/hvm.c
+@@ -66,6 +66,7 @@
+ #include <asm/mem_event.h>
+ #include <asm/mem_access.h>
+ #include <public/mem_event.h>
++#include <xen/hvm/xen_platform.h>
+ 
+ bool_t __read_mostly hvm_enabled;
+ 
+@@ -338,16 +339,9 @@ void hvm_migrate_pirqs(struct vcpu *v)
+     spin_unlock(&d->event_lock);
+ }
+ 
+-void hvm_do_resume(struct vcpu *v)
++static void hvm_wait_on_io(struct vcpu *v, ioreq_t *p)
+ {
+-    ioreq_t *p;
+-
+-    pt_restore_timer(v);
+-
+-    check_wakeup_from_wait();
+-
+     /* NB. Optimised for common case (p->state == STATE_IOREQ_NONE). */
+-    p = get_ioreq(v);
+     while ( p->state != STATE_IOREQ_NONE )
+     {
+         switch ( p->state )
+@@ -357,7 +351,7 @@ void hvm_do_resume(struct vcpu *v)
+             break;
+         case STATE_IOREQ_READY:  /* IOREQ_{READY,INPROCESS} -> IORESP_READY */
+         case STATE_IOREQ_INPROCESS:
+-            wait_on_xen_event_channel(v->arch.hvm_vcpu.xen_port,
++            wait_on_xen_event_channel(p->vp_eport,
+                                       (p->state != STATE_IOREQ_READY) &&
+                                       (p->state != STATE_IOREQ_INPROCESS));
+             break;
+@@ -367,6 +361,41 @@ void hvm_do_resume(struct vcpu *v)
+             return; /* bail */
+         }
+     }
++}
++
++void hvm_do_resume(struct vcpu *v)
++{
++    ioreq_t *p;
++    struct hvm_ioreq_server *s;
++    shared_iopage_t *page;
++
++    pt_restore_timer(v);
++
++    check_wakeup_from_wait();
++
++    p = get_ioreq(v);
++
++    if ( v->arch.hvm_vcpu.ioreq_multiple )
++    {
++        spin_lock(&v->domain->arch.hvm_domain.ioreq_server_lock);
++        /* Wait servers */
++        for ( s = v->domain->arch.hvm_domain.ioreq_server_list; s; s = s->next )
++        {
++            page = s->ioreq.va;
++            ASSERT((v == current) || spin_is_locked(&s->ioreq.lock));
++            ASSERT(s->ioreq.va != NULL);
++            v->arch.hvm_vcpu.ioreq = &s->ioreq;
++            /* FIXME: not sure it's a good solution to unlock but the
++             * below function could reschedule the vcpu */
++            spin_unlock(&v->domain->arch.hvm_domain.ioreq_server_lock);
++            hvm_wait_on_io(v, &page->vcpu_ioreq[v->vcpu_id]);
++            spin_lock(&v->domain->arch.hvm_domain.ioreq_server_lock);
++        }
++        spin_unlock(&v->domain->arch.hvm_domain.ioreq_server_lock);
++        v->arch.hvm_vcpu.ioreq_multiple = 0;
++    }
++    else
++        hvm_wait_on_io(v, p);
+ 
+     /* Inject pending hw/sw trap */
+     if ( v->arch.hvm_vcpu.inject_trap.vector != -1 ) 
+@@ -376,6 +405,37 @@ void hvm_do_resume(struct vcpu *v)
+     }
+ }
+ 
++static void hvm_init_ioreq_servers(struct domain *d)
++{
++    spin_lock_init(&d->arch.hvm_domain.ioreq_server_lock);
++    d->arch.hvm_domain.nr_ioreq_server = 0;
++}
++
++static int hvm_ioreq_servers_new_vcpu(struct vcpu *v)
++{
++    struct hvm_ioreq_server *s;
++    struct domain *d = v->domain;
++    shared_iopage_t *p;
++    int rc = 0;
++
++    spin_lock(&d->arch.hvm_domain.ioreq_server_lock);
++
++    for ( s = d->arch.hvm_domain.ioreq_server_list; s != NULL; s = s->next )
++    {
++        p = s->ioreq.va;
++        ASSERT(p != NULL);
++
++        rc = alloc_unbound_xen_event_channel(v, s->domid, NULL);
++        if ( rc < 0 )
++            break;
++        p->vcpu_ioreq[v->vcpu_id].vp_eport = rc;
++    }
++
++    spin_unlock(&d->arch.hvm_domain.ioreq_server_lock);
++
++    return (rc < 0) ? rc : 0;
++}
++
+ static void hvm_init_ioreq_page(
+     struct domain *d, struct hvm_ioreq_page *iorp)
+ {
+@@ -528,6 +588,8 @@ int hvm_domain_initialise(struct domain *d)
+     INIT_LIST_HEAD(&d->arch.hvm_domain.msixtbl_list);
+     spin_lock_init(&d->arch.hvm_domain.msixtbl_list_lock);
+ 
++    spin_lock_init(&d->arch.hvm_domain.pci_root.pci_lock);
++
+     d->arch.hvm_domain.pbuf = xzalloc_array(char, HVM_PBUF_SIZE);
+     d->arch.hvm_domain.params = xzalloc_array(uint64_t, HVM_NR_PARAMS);
+     d->arch.hvm_domain.io_handler = xmalloc(struct hvm_io_handler);
+@@ -558,8 +620,10 @@ int hvm_domain_initialise(struct domain *d)
+ 
+     rtc_init(d);
+ 
++    d->arch.hvm_domain.ioreq_mode = IOREQ_SINGLE;
+     hvm_init_ioreq_page(d, &d->arch.hvm_domain.ioreq);
+     hvm_init_ioreq_page(d, &d->arch.hvm_domain.buf_ioreq);
++    hvm_init_ioreq_servers(d);
+ 
+     register_portio_handler(d, 0xe9, 1, hvm_print_line);
+ 
+@@ -582,11 +646,66 @@ int hvm_domain_initialise(struct domain *d)
+     return rc;
+ }
+ 
++static void hvm_destroy_ioreq_server(struct domain *d,
++                                     struct hvm_ioreq_server *s)
++{
++    struct hvm_io_range *x;
++    shared_iopage_t *p;
++    int i;
++
++    while ( (x = s->mmio_range_list) != NULL )
++    {
++        s->mmio_range_list = x->next;
++        xfree(x);
++    }
++    while ( (x = s->portio_range_list) != NULL )
++    {
++        s->portio_range_list = x->next;
++        xfree(x);
++    }
++
++    p = s->ioreq.va;
++
++    for ( i = 0; i < MAX_HVM_VCPUS; i++ )
++    {
++        if ( p->vcpu_ioreq[i].vp_eport )
++        {
++            free_xen_event_channel(d->vcpu[i], p->vcpu_ioreq[i].vp_eport);
++        }
++    }
++
++    free_xen_event_channel(d->vcpu[0], s->buf_ioreq_evtchn);
++
++    hvm_destroy_ioreq_page(d, &s->ioreq);
++    hvm_destroy_ioreq_page(d, &s->buf_ioreq);
++
++    xfree(s);
++}
++
++static void hvm_destroy_ioreq_servers(struct domain *d)
++{
++    struct hvm_ioreq_server *s;
++
++    spin_lock(&d->arch.hvm_domain.ioreq_server_lock);
++
++    ASSERT(d->is_dying);
++
++    while ( (s = d->arch.hvm_domain.ioreq_server_list) != NULL )
++    {
++        d->arch.hvm_domain.ioreq_server_list = s->next;
++        hvm_destroy_ioreq_server(d, s);
++    }
++
++    spin_unlock(&d->arch.hvm_domain.ioreq_server_lock);
++}
++
+ void hvm_domain_relinquish_resources(struct domain *d)
+ {
+     if ( hvm_funcs.nhvm_domain_relinquish_resources )
+         hvm_funcs.nhvm_domain_relinquish_resources(d);
+ 
++    hvm_destroy_ioreq_servers(d);
++    hvm_destroy_pci_emul(d);
+     hvm_destroy_ioreq_page(d, &d->arch.hvm_domain.ioreq);
+     hvm_destroy_ioreq_page(d, &d->arch.hvm_domain.buf_ioreq);
+ 
+@@ -1092,6 +1211,10 @@ int hvm_vcpu_initialise(struct vcpu *v)
+     /* Register ioreq event channel. */
+     v->arch.hvm_vcpu.xen_port = rc;
+ 
++    rc = hvm_ioreq_servers_new_vcpu(v);
++    if ( rc != 0 )
++        goto fail4;
++
+     if ( v->vcpu_id == 0 )
+     {
+         /* Create bufioreq event channel. */
+@@ -1102,8 +1225,11 @@ int hvm_vcpu_initialise(struct vcpu *v)
+     }
+ 
+     spin_lock(&d->arch.hvm_domain.ioreq.lock);
++    v->arch.hvm_vcpu.ioreq = &d->arch.hvm_domain.ioreq;
+     if ( d->arch.hvm_domain.ioreq.va != NULL )
+         get_ioreq(v)->vp_eport = v->arch.hvm_vcpu.xen_port;
++    /* By default we send an ioreq to only one ioreq server */
++    v->arch.hvm_vcpu.ioreq_multiple = 0;
+     spin_unlock(&d->arch.hvm_domain.ioreq.lock);
+ 
+     spin_lock_init(&v->arch.hvm_vcpu.tm_lock);
+@@ -1194,14 +1320,8 @@ void hvm_vcpu_down(struct vcpu *v)
+     }
+ }
+ 
+-bool_t hvm_send_assist_req(struct vcpu *v)
++static bool_t hvm_send_req_to_server(struct vcpu *v, ioreq_t *p)
+ {
+-    ioreq_t *p;
+-
+-    if ( unlikely(!vcpu_start_shutdown_deferral(v)) )
+-        return 0; /* implicitly bins the i/o operation */
+-
+-    p = get_ioreq(v);
+     if ( unlikely(p->state != STATE_IOREQ_NONE) )
+     {
+         /* This indicates a bug in the device model. Crash the domain. */
+@@ -1210,16 +1330,55 @@ bool_t hvm_send_assist_req(struct vcpu *v)
+         return 0;
+     }
+ 
+-    prepare_wait_on_xen_event_channel(v->arch.hvm_vcpu.xen_port);
++    prepare_wait_on_xen_event_channel(p->vp_eport);
+ 
+     /*
+      * Following happens /after/ blocking and setting up ioreq contents.
+      * prepare_wait_on_xen_event_channel() is an implicit barrier.
+      */
+     p->state = STATE_IOREQ_READY;
+-    notify_via_xen_event_channel(v->domain, v->arch.hvm_vcpu.xen_port);
++
++    notify_via_xen_event_channel(v->domain, p->vp_eport);
+ 
+     return 1;
++
++}
++
++bool_t hvm_send_assist_req(struct vcpu *v, bool_t all)
++{
++    ioreq_t *p;
++    bool_t ret = 0;
++    struct hvm_ioreq_server *s;
++
++    if ( unlikely(!vcpu_start_shutdown_deferral(v)) )
++        return 0; /* implicitly bins the i/o operation */
++
++    p = get_ioreq(v);
++
++    if ( v->domain->arch.hvm_domain.ioreq_mode == IOREQ_MULTIPLE )
++    {
++        v->arch.hvm_vcpu.ioreq_multiple = all;
++        if ( all )
++        {
++            spin_lock(&v->domain->arch.hvm_domain.ioreq_server_lock);
++            for ( s = v->domain->arch.hvm_domain.ioreq_server_list; s; s = s->next )
++            {
++                /* Prepare the ioreq */
++                set_ioreq(v, &s->ioreq, p);
++                ret = hvm_send_req_to_server(v, get_ioreq(v));
++                if (!ret)
++                    break;
++            }
++            spin_unlock(&v->domain->arch.hvm_domain.ioreq_server_lock);
++        }
++        else ret = hvm_send_req_to_server(v, p);
++    }
++    else 
++    {
++        v->arch.hvm_vcpu.ioreq_multiple = 0;
++        ret = hvm_send_req_to_server(v, p);
++    }
++    return ret;
+ }
+ 
+ void hvm_hlt(unsigned long rflags)
+@@ -3753,6 +3912,288 @@ static int hvm_replace_event_channel(struct vcpu *v, domid_t remote_domid,
+     return 0;
+ }
+ 
++static int hvm_alloc_ioreq_server_page(struct domain *d,
++                                       struct hvm_ioreq_server *s,
++                                       struct hvm_ioreq_page *pfn,
++                                       int i)
++{
++    int rc = 0;
++    unsigned long gmfn;
++
++    if (i < 0 || i > 1)
++        return -EINVAL;
++
++    hvm_init_ioreq_page(d, pfn);
++
++    gmfn = d->arch.hvm_domain.params[HVM_PARAM_IO_PFN_FIRST] +
++        (s->id - 1) * 2 + i + 1;
++
++    if (gmfn > d->arch.hvm_domain.params[HVM_PARAM_IO_PFN_LAST])
++        return -EINVAL;
++
++    rc = hvm_set_ioreq_page(d, pfn, gmfn);
++
++    if (!rc && pfn->va == NULL)
++        rc = -ENOMEM;
++
++    return rc;
++}
++
++static void hvm_init_multiple_ioserver_mode(struct domain *d)
++{
++    if (d->arch.hvm_domain.ioreq_mode == IOREQ_MULTIPLE)
++        return;
++
++    d->arch.hvm_domain.ioreq_mode = IOREQ_MULTIPLE;
++    hvm_init_pci_emul(d);
++    xen_platform_init(d);
++}
++
++static int hvmop_register_ioreq_server(
++    struct xen_hvm_register_ioreq_server *a)
++{
++    struct hvm_ioreq_server *s, **pp;
++    struct domain *d;
++    shared_iopage_t *p;
++    struct vcpu *v;
++    int i;
++    int rc = 0;
++
++    if ( current->domain->domain_id == a->domid )
++        return -EINVAL;
++
++    d = rcu_lock_domain_by_any_id(a->domid);
++    if ( d == NULL )
++        return -ESRCH;
++
++    if ( !is_hvm_domain(d) )
++    {
++        rcu_unlock_domain(d);
++        return -EINVAL;
++    }
++
++    s = xmalloc(struct hvm_ioreq_server);
++    if ( s == NULL )
++    {
++        rcu_unlock_domain(d);
++        return -ENOMEM;
++    }
++    memset(s, 0, sizeof(*s));
++
++    if ( d->is_dying)
++    {
++        rc = -EINVAL;
++        goto register_died;
++    }
++
++    hvm_init_multiple_ioserver_mode(d);
++
++    spin_lock(&d->arch.hvm_domain.ioreq_server_lock);
++
++    s->id = d->arch.hvm_domain.nr_ioreq_server + 1;
++    s->domid = current->domain->domain_id;
++
++    /* Initialize shared pages */
++    if ( (rc = hvm_alloc_ioreq_server_page(d, s, &s->ioreq, 0)) )
++        goto register_ioreq;
++    if ( (rc = hvm_alloc_ioreq_server_page(d, s, &s->buf_ioreq, 1)) )
++        goto register_buf_ioreq;
++
++    p = s->ioreq.va;
++
++    for_each_vcpu ( d, v )
++    {
++        rc = alloc_unbound_xen_event_channel(v, s->domid, NULL);
++        if ( rc < 0 )
++            goto register_ports;
++        p->vcpu_ioreq[v->vcpu_id].vp_eport = rc;
++    }
++
++    /* Allocate buffer event channel */
++    rc = alloc_unbound_xen_event_channel(d->vcpu[0], s->domid, NULL);
++
++    if (rc < 0)
++        goto register_ports;
++    s->buf_ioreq_evtchn = rc;
++
++    pp = &d->arch.hvm_domain.ioreq_server_list;
++    while ( *pp != NULL )
++        pp = &(*pp)->next;
++    *pp = s;
++
++    d->arch.hvm_domain.nr_ioreq_server += 1;
++    a->id = s->id;
++
++    spin_unlock(&d->arch.hvm_domain.ioreq_server_lock);
++    rcu_unlock_domain(d);
++
++    goto register_done;
++
++register_ports:
++    p = s->ioreq.va;
++    for ( i = 0; i < MAX_HVM_VCPUS; i++ )
++    {
++        if ( p->vcpu_ioreq[i].vp_eport )
++            free_xen_event_channel(d->vcpu[i], p->vcpu_ioreq[i].vp_eport);
++    }
++    hvm_destroy_ioreq_page(d, &s->buf_ioreq);
++register_buf_ioreq:
++    hvm_destroy_ioreq_page(d, &s->ioreq);
++register_ioreq:
++    spin_unlock(&d->arch.hvm_domain.ioreq_server_lock);
++register_died:
++    xfree(s);
++    rcu_unlock_domain(d);
++register_done:
++    return 0;
++}
++
++static int hvmop_get_ioreq_server_buf_channel(
++    struct xen_hvm_get_ioreq_server_buf_channel *a)
++{
++    struct domain *d;
++    struct hvm_ioreq_server *s;
++
++    d = rcu_lock_domain_by_any_id(a->domid);
++
++    if ( d == NULL )
++        return -ESRCH;
++
++    if ( !is_hvm_domain(d) )
++    {
++        rcu_unlock_domain(d);
++        return -EINVAL;
++    }
++
++    spin_lock(&d->arch.hvm_domain.ioreq_server_lock);
++    s = d->arch.hvm_domain.ioreq_server_list;
++
++    while ( (s != NULL) && (s->id != a->id) )
++        s = s->next;
++
++    if ( s == NULL )
++    {
++        spin_unlock(&d->arch.hvm_domain.ioreq_server_lock);
++        rcu_unlock_domain(d);
++        return -ENOENT;
++    }
++
++    a->channel = s->buf_ioreq_evtchn;
++
++    spin_unlock(&d->arch.hvm_domain.ioreq_server_lock);
++    rcu_unlock_domain(d);
++
++    return 0;
++}
++
++static int hvmop_map_io_range_to_ioreq_server(
++    struct xen_hvm_map_io_range_to_ioreq_server *a)
++{
++    struct hvm_ioreq_server *s;
++    struct hvm_io_range *x;
++    struct domain *d;
++
++    d = rcu_lock_domain_by_any_id(a->domid);
++    if ( d == NULL )
++        return -ESRCH;
++
++    if ( !is_hvm_domain(d) )
++    {
++        rcu_unlock_domain(d);
++        return -EINVAL;
++    }
++
++    spin_lock(&d->arch.hvm_domain.ioreq_server_lock);
++
++    x = xmalloc(struct hvm_io_range);
++    s = d->arch.hvm_domain.ioreq_server_list;
++    while ( (s != NULL) && (s->id != a->id) )
++        s = s->next;
++    if ( (s == NULL) || (x == NULL) )
++    {
++        xfree(x);
++        spin_unlock(&d->arch.hvm_domain.ioreq_server_lock);
++        rcu_unlock_domain(d);
++        return x ? -ENOENT : -ENOMEM;
++    }
++
++    x->s = a->s;
++    x->e = a->e;
++    if ( a->is_mmio )
++    {
++        x->next = s->mmio_range_list;
++        s->mmio_range_list = x;
++    }
++    else
++    {
++        x->next = s->portio_range_list;
++        s->portio_range_list = x;
++    }
++
++    spin_unlock(&d->arch.hvm_domain.ioreq_server_lock);
++    rcu_unlock_domain(d);
++    return 0;
++}
++
++static int hvmop_unmap_io_range_from_ioreq_server(
++    struct xen_hvm_unmap_io_range_from_ioreq_server *a)
++{
++    struct hvm_ioreq_server *s;
++    struct hvm_io_range *x, **xp;
++    struct domain *d;
++    int rc;
++
++    d = rcu_lock_domain_by_any_id(a->domid);
++    if ( d == NULL )
++        return -ESRCH;
++
++    if ( !is_hvm_domain(d) )
++    {
++        rcu_unlock_domain(d);
++        return -EINVAL;
++    }
++
++    spin_lock(&d->arch.hvm_domain.ioreq_server_lock);
++
++    s = d->arch.hvm_domain.ioreq_server_list;
++    while ( (s != NULL) && (s->id != a->id) )
++        s = s->next;
++    if ( (s == NULL) )
++    {
++        spin_unlock(&d->arch.hvm_domain.ioreq_server_lock);
++        rcu_unlock_domain(d);
++        return -ENOENT;
++    }
++
++    if ( a->is_mmio )
++    {
++        x = s->mmio_range_list;
++        xp = &s->mmio_range_list;
++    }
++    else
++    {
++        x = s->portio_range_list;
++        xp = &s->portio_range_list;
++    }
++    while ( (x != NULL) && (a->addr < x->s || a->addr > x->e) )
++    {
++      xp = &x->next;
++      x = x->next;
++    }
++    if ( (x != NULL) )
++    {
++      *xp = x->next;
++      xfree(x);
++      rc = 0;
++    }
++    else
++      rc = -ENOENT;
++
++    spin_unlock(&d->arch.hvm_domain.ioreq_server_lock);
++    rcu_unlock_domain(d);
++    return rc;
++}
++
+ long do_hvm_op(unsigned long op, XEN_GUEST_HANDLE_PARAM(void) arg)
+ 
+ {
+@@ -3828,19 +4269,36 @@ long do_hvm_op(unsigned long op, XEN_GUEST_HANDLE_PARAM(void) arg)
+             {
+             case HVM_PARAM_IOREQ_PFN:
+                 iorp = &d->arch.hvm_domain.ioreq;
+-                if ( (rc = hvm_set_ioreq_page(d, iorp, a.value)) != 0 )
++                gdprintk(XENLOG_INFO, "Setting IOREQ pfn %llx\n", (long long unsigned int)a.value);
++                if ( (rc = hvm_set_ioreq_page(d, iorp, a.value)) != 0 ) {
++                    gdprintk(XENLOG_INFO, "Failed\n");
+                     break;
++                }
++                gdprintk(XENLOG_INFO, "ioreq->va = %p\n", iorp->va);
+                 spin_lock(&iorp->lock);
+-                if ( iorp->va != NULL )
++                if ( iorp->va != NULL ) {
+                     /* Initialise evtchn port info if VCPUs already created. */
+-                    for_each_vcpu ( d, v )
++                    for_each_vcpu ( d, v ) {
+                         get_ioreq(v)->vp_eport = v->arch.hvm_vcpu.xen_port;
++                    }
++                }
++                else
++                    gdprintk(XENLOG_INFO, "va is NULL!\n");
+                 spin_unlock(&iorp->lock);
+                 break;
+-            case HVM_PARAM_BUFIOREQ_PFN: 
++            case HVM_PARAM_BUFIOREQ_PFN:
++                gdprintk(XENLOG_INFO, "%s\n", "HVM_PARAM_BUFIOREQ_PFN");
+                 iorp = &d->arch.hvm_domain.buf_ioreq;
+                 rc = hvm_set_ioreq_page(d, iorp, a.value);
+                 break;
++            case HVM_PARAM_IO_PFN_FIRST:
++                if ( (d->arch.hvm_domain.params[HVM_PARAM_IO_PFN_FIRST]) )
++                    rc = -EINVAL;
++                break;
++            case HVM_PARAM_IO_PFN_LAST:
++                if ( (d->arch.hvm_domain.params[HVM_PARAM_IO_PFN_LAST]) )
++                    rc = -EINVAL;
++                break;
+             case HVM_PARAM_CALLBACK_IRQ:
+                 hvm_set_callback_via(d, a.value);
+                 hvm_latch_shinfo_size(d);
+@@ -4475,6 +4933,80 @@ long do_hvm_op(unsigned long op, XEN_GUEST_HANDLE_PARAM(void) arg)
+         break;
+     }
+ 
++    case HVMOP_register_ioreq_server:
++    {
++        struct xen_hvm_register_ioreq_server a;
++
++        if ( copy_from_guest(&a, arg, 1) )
++            return -EFAULT;
++
++        rc = hvmop_register_ioreq_server(&a);
++        if ( rc != 0 )
++            return rc;
++
++        rc = copy_to_guest(arg, &a, 1) ? -EFAULT : 0;
++        break;
++    }
++
++    case HVMOP_get_ioreq_server_buf_channel:
++    {
++        struct xen_hvm_get_ioreq_server_buf_channel a;
++
++        if ( copy_from_guest(&a, arg, 1) )
++            return -EFAULT;
++
++        rc = hvmop_get_ioreq_server_buf_channel(&a);
++        if ( rc != 0 )
++            return rc;
++
++        rc = copy_to_guest(arg, &a, 1) ? -EFAULT : 0;
++
++        break;
++    }
++
++    case HVMOP_map_io_range_to_ioreq_server:
++    {
++        struct xen_hvm_map_io_range_to_ioreq_server a;
++
++        if ( copy_from_guest(&a, arg, 1) )
++            return -EFAULT;
++
++        rc = hvmop_map_io_range_to_ioreq_server(&a);
++        if ( rc != 0 )
++            return rc;
++
++        break;
++    }
++
++    case HVMOP_unmap_io_range_from_ioreq_server:
++    {
++        struct xen_hvm_unmap_io_range_from_ioreq_server a;
++
++        if ( copy_from_guest(&a, arg, 1) )
++            return -EFAULT;
++
++        rc = hvmop_unmap_io_range_from_ioreq_server(&a);
++        if ( rc != 0 )
++            return rc;
++
++        break;
++    }
++
++    case HVMOP_register_pcidev:
++    {
++        struct xen_hvm_register_pcidev a;
++
++        if ( copy_from_guest(&a, arg, 1) )
++            return -EFAULT;
++
++        rc = hvm_register_pcidev(a.domid, a.id, a.domain,
++                                 a.bus, a.device, a.function);
++        if ( rc != 0 )
++            return rc;
++
++        break;
++    }
++
+     default:
+     {
+         gdprintk(XENLOG_DEBUG, "Bad HVM op %ld.\n", op);
+diff --git a/xen/arch/x86/hvm/io.c b/xen/arch/x86/hvm/io.c
+index aedd6b4..1c8a598 100644
+--- a/xen/arch/x86/hvm/io.c
++++ b/xen/arch/x86/hvm/io.c
+@@ -46,28 +46,15 @@
+ #include <xen/iocap.h>
+ #include <public/hvm/ioreq.h>
+ 
+-int hvm_buffered_io_send(ioreq_t *p)
++static int _hvm_buffered_io_send(ioreq_t *p, struct hvm_ioreq_page *iorp, unsigned int buf_ioreq_evtchn)
+ {
+     struct vcpu *v = current;
+-    struct hvm_ioreq_page *iorp = &v->domain->arch.hvm_domain.buf_ioreq;
+-    buffered_iopage_t *pg = iorp->va;
++    buffered_iopage_t *pg;
+     buf_ioreq_t bp;
+     /* Timeoffset sends 64b data, but no address. Use two consecutive slots. */
+     int qw = 0;
+ 
+-    /* Ensure buffered_iopage fits in a page */
+-    BUILD_BUG_ON(sizeof(buffered_iopage_t) > PAGE_SIZE);
+-
+-    /*
+-     * Return 0 for the cases we can't deal with:
+-     *  - 'addr' is only a 20-bit field, so we cannot address beyond 1MB
+-     *  - we cannot buffer accesses to guest memory buffers, as the guest
+-     *    may expect the memory buffer to be synchronously accessed
+-     *  - the count field is usually used with data_is_ptr and since we don't
+-     *    support data_is_ptr we do not waste space for the count field either
+-     */
+-    if ( (p->addr > 0xffffful) || p->data_is_ptr || (p->count != 1) )
+-        return 0;
++    pg = iorp->va;
+ 
+     bp.type = p->type;
+     bp.dir  = p->dir;
+@@ -118,13 +105,69 @@ int hvm_buffered_io_send(ioreq_t *p)
+     wmb();
+     pg->write_pointer += qw ? 2 : 1;
+ 
+-    notify_via_xen_event_channel(v->domain,
+-            v->domain->arch.hvm_domain.params[HVM_PARAM_BUFIOREQ_EVTCHN]);
++    notify_via_xen_event_channel(v->domain, buf_ioreq_evtchn);
+     spin_unlock(&iorp->lock);
+     
+     return 1;
+ }
+ 
++int hvm_buffered_io_send(ioreq_t *p)
++{
++    struct vcpu *v = current;
++    struct hvm_ioreq_server *s;
++    int rc = 1;
++
++    /* Ensure buffered_iopage fits in a page */
++    BUILD_BUG_ON(sizeof(buffered_iopage_t) > PAGE_SIZE);
++
++    /*
++     * Return 0 for the cases we can't deal with:
++     *  - 'addr' is only a 20-bit field, so we cannot address beyond 1MB
++     *  - we cannot buffer accesses to guest memory buffers, as the guest
++     *    may expect the memory buffer to be synchronously accessed
++     *  - the count field is usually used with data_is_ptr and since we don't
++     *    support data_is_ptr we do not waste space for the count field either
++     */
++    if ( (p->addr > 0xffffful) || p->data_is_ptr || (p->count != 1) )
++        return 0;
++
++    spin_lock(&v->domain->arch.hvm_domain.ioreq_server_lock);
++    if ( v->domain->arch.hvm_domain.nr_ioreq_server == 0 )
++    {
++        rc = _hvm_buffered_io_send(p, &v->domain->arch.hvm_domain.buf_ioreq,
++                                   v->domain->arch.hvm_domain.params[HVM_PARAM_BUFIOREQ_EVTCHN]);
++    }
++    else if ( p->type == IOREQ_TYPE_TIMEOFFSET )
++    {
++        /* Send TIME OFFSET to all servers */
++        for ( s = v->domain->arch.hvm_domain.ioreq_server_list; s; s = s->next )
++            rc = _hvm_buffered_io_send(p, &s->buf_ioreq, s->buf_ioreq_evtchn) && rc;
++    }
++    else
++    {
++        for ( s = v->domain->arch.hvm_domain.ioreq_server_list; s; s = s->next )
++        {
++            struct hvm_io_range *x = (p->type == IOREQ_TYPE_COPY)
++                ? s->mmio_range_list : s->portio_range_list;
++            for ( ; x; x = x->next )
++            {
++                if ( (p->addr >= x->s) && (p->addr <= x->e) )
++                {
++                    rc = _hvm_buffered_io_send(p, &s->buf_ioreq, s->buf_ioreq_evtchn);
++                    spin_unlock(&v->domain->arch.hvm_domain.ioreq_server_lock);
++
++                    return rc;
++                }
++            }
++        }
++        rc = 0;
++    }
++
++    spin_unlock(&v->domain->arch.hvm_domain.ioreq_server_lock);
++
++    return rc;
++}
++
+ void send_timeoffset_req(unsigned long timeoff)
+ {
+     ioreq_t p[1];
+@@ -147,7 +190,11 @@ void send_timeoffset_req(unsigned long timeoff)
+ void send_invalidate_req(void)
+ {
+     struct vcpu *v = current;
+-    ioreq_t *p = get_ioreq(v);
++    ioreq_t *p;
++
++    /* Use the default shared page */
++    v->arch.hvm_vcpu.ioreq = &v->domain->arch.hvm_domain.ioreq;
++    p = get_ioreq(v);
+ 
+     if ( p->state != STATE_IOREQ_NONE )
+     {
+@@ -161,8 +208,11 @@ void send_invalidate_req(void)
+     p->size = 4;
+     p->dir = IOREQ_WRITE;
+     p->data = ~0UL; /* flush all */
++    p->count = 0;
++    p->addr = 0;
+ 
+-    (void)hvm_send_assist_req(v);
++    /* Send this ioreq to all servers */
++    hvm_send_assist_req(v, 1);
+ }
+ 
+ int handle_mmio(void)
+diff --git a/xen/arch/x86/hvm/pci_emul.c b/xen/arch/x86/hvm/pci_emul.c
+new file mode 100644
+index 0000000..925612b
+--- /dev/null
++++ b/xen/arch/x86/hvm/pci_emul.c
+@@ -0,0 +1,211 @@
++/*
++ * pci_emul.c: Emulation of configuration space registers.
++ *
++ * Copyright (c) 2012, Citrix Systems, Inc.
++ *
++ * This program is free software; you can redistribute it and/or modify it
++ * under the terms and conditions of the GNU General Public License,
++ * version 2, as published by the Free Software Foundation.
++ *
++ * This program is distributed in the hope it will be useful, but WITHOUT
++ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
++ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
++ * more details.
++ *
++ * You should have received a copy of the GNU General Public License along with
++ * this program; if not, write to the Free Software Foundation, Inc., 59 Temple
++ * Place - Suite 330, Boston, MA 02111-1307 USA.
++ */
++
++#include <asm/hvm/support.h>
++#include <xen/hvm/pci_emul.h>
++#include <xen/pci.h>
++#include <xen/sched.h>
++#include <xen/xmalloc.h>
++
++#define PCI_DEBUGSTR "%x:%x.%x"
++#define PCI_DEBUG(bdf) ((bdf) >> 8) & 0xff, ((bdf) >> 3) & 0x1f, ((bdf)) & 0x7
++#define PCI_MASK_BDF(bdf) (((bdf) & 0x00ffff00) >> 8)
++#define PCI_CMP_BDF(Pci, Bdf) ((pci)->bdf == PCI_MASK_BDF(Bdf))
++
++#if 0
++static struct radix_tree_node *rtn_alloc(void *arg)
++{
++    struct radix_tree_node *node;
++
++    node = xmalloc(struct radix_tree_node);
++
++    if ( !node )
++        return NULL;
++
++    memset(node, 0, sizeof (struct radix_tree_node));
++
++    return node;
++}
++
++static void rtn_free(struct radix_tree_node *rtn)
++{
++    xfree(rtn);
++}
++#endif
++
++static void pgp_destroy(void *v)
++{
++}
++
++static int handle_config_space(int dir, uint32_t port, uint32_t bytes,
++                               uint32_t *val)
++{
++    uint32_t pci_cf8;
++    struct hvm_ioreq_server *s;
++    ioreq_t *p = get_ioreq(current);
++    int rc = X86EMUL_UNHANDLEABLE;
++    struct vcpu *v = current;
++
++    if ( port == 0xcf8 && bytes == 4 )
++    {
++        if ( dir == IOREQ_READ )
++            *val = v->arch.hvm_vcpu.pci_cf8;
++        else
++            v->arch.hvm_vcpu.pci_cf8 = *val;
++        return X86EMUL_OKAY;
++    }
++    else if ( port < 0xcfc )
++        return X86EMUL_UNHANDLEABLE;
++
++    spin_lock(&v->domain->arch.hvm_domain.pci_root.pci_lock);
++    spin_lock(&v->domain->arch.hvm_domain.ioreq_server_lock);
++
++    pci_cf8 = v->arch.hvm_vcpu.pci_cf8;
++
++    /* Retrieve PCI */
++    s = radix_tree_lookup(&v->domain->arch.hvm_domain.pci_root.pci_list,
++                          PCI_MASK_BDF(pci_cf8));
++
++    if ( unlikely(s == NULL) )
++    {
++        *val = ~0;
++        rc = X86EMUL_OKAY;
++        goto end_handle;
++    }
++
++    /**
++     * We just fill the ioreq, hvm_send_assist_req will send the request
++     * The size is used to find the right access
++     **/
++    /* We use the 16 high-bits for the offset (0 => 0xcfc, 1 => 0xcfd...) */
++    p->size = (p->addr - 0xcfc) << 16 | (p->size & 0xffff);
++    p->type = IOREQ_TYPE_PCI_CONFIG;
++    p->addr = pci_cf8;
++
++    set_ioreq(v, &s->ioreq, p);
++
++end_handle:
++    spin_unlock(&v->domain->arch.hvm_domain.ioreq_server_lock);
++    spin_unlock(&v->domain->arch.hvm_domain.pci_root.pci_lock);
++
++    return rc;
++}
++
++int hvm_register_pcidev(domid_t domid, ioservid_t id,
++                        uint16_t domain, uint8_t bus,
++                        uint8_t device, uint8_t function)
++{
++    struct domain *d;
++    struct hvm_ioreq_server *s;
++    struct radix_tree_root *tree;
++    uint16_t bdf = 0;
++    int rc = 0;
++
++    /* For the moment we don't handle pci when domain != 0 */
++    if ( domain != 0 )
++        return -EINVAL;
++
++    d = rcu_lock_domain_by_any_id(domid);
++
++    if ( d == NULL )
++        return -ESRCH;
++
++    if ( !is_hvm_domain(d) )
++    {
++        rcu_unlock_domain(d);
++        return -EINVAL;
++    }
++
++    /* Search server */
++    spin_lock(&d->arch.hvm_domain.ioreq_server_lock);
++    s = d->arch.hvm_domain.ioreq_server_list;
++    while ( (s != NULL) && (s->id != id) )
++        s = s->next;
++
++    spin_unlock(&d->arch.hvm_domain.ioreq_server_lock);
++
++    if ( s == NULL )
++    {
++        gdprintk(XENLOG_ERR, "Cannot find server %u\n", id);
++        rc = -ENOENT;
++        goto fail;
++    }
++
++    spin_lock(&d->arch.hvm_domain.pci_root.pci_lock);
++
++    tree = &d->arch.hvm_domain.pci_root.pci_list;
++
++    bdf |= ((uint16_t)bus) << 8;
++    bdf |= ((uint16_t)device & 0x1f) << 3;
++    bdf |= ((uint16_t)function & 0x7);
++
++    if ( radix_tree_lookup(tree, bdf) )
++    {
++        rc = -EEXIST;
++        gdprintk(XENLOG_ERR, "Bdf " PCI_DEBUGSTR " is already allocated\n",
++                 PCI_DEBUG(bdf));
++        goto create_end;
++    }
++
++    rc = radix_tree_insert(tree, bdf, s);
++    if ( rc )
++    {
++        gdprintk(XENLOG_ERR, "Cannot insert the bdf\n");
++        goto create_end;
++    }
++
++create_end:
++    spin_unlock(&d->arch.hvm_domain.pci_root.pci_lock);
++fail:
++    rcu_unlock_domain(d);
++
++    return rc;
++}
++
++void hvm_init_pci_emul(struct domain *d)
++{
++    struct pci_root_emul *root = &d->arch.hvm_domain.pci_root;
++    spin_lock(&root->pci_lock);
++    radix_tree_init(&root->pci_list);
++    spin_unlock(&root->pci_lock);
++
++    /* Register the config space handler */
++    register_portio_handler(d, 0xcf8, 8, handle_config_space);
++}
++
++void hvm_destroy_pci_emul(struct domain *d)
++{
++    struct pci_root_emul *root = &d->arch.hvm_domain.pci_root;
++
++    spin_lock(&root->pci_lock);
++
++    radix_tree_destroy(&root->pci_list, pgp_destroy);
++
++    spin_unlock(&root->pci_lock);
++}
++
++/*
++ * Local variables:
++ * mode: C
++ * c-set-style: "BSD"
++ * c-basic-offset: 4
++ * tab-width: 4
++ * indent-tabs-mode: nil
++ * End:
++ */
+diff --git a/xen/arch/x86/hvm/xen_platform.c b/xen/arch/x86/hvm/xen_platform.c
+new file mode 100644
+index 0000000..6abea35
+--- /dev/null
++++ b/xen/arch/x86/hvm/xen_platform.c
+@@ -0,0 +1,62 @@
++/*
++ * XEN platform pci device, formerly known as the event channel device
++ *
++ * Copyright (c) 2003-2004 Intel Corp.
++ * Copyright (c) 2006 XenSource
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining a copy
++ * of this software and associated documentation files (the "Software"), to deal
++ * in the Software without restriction, including without limitation the rights
++ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
++ * copies of the Software, and to permit persons to whom the Software is
++ * furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included in
++ * all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
++ * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
++ * THE SOFTWARE.
++ */
++
++#include <asm/hvm/support.h>
++#include <xen/hvm/xen_platform.h>
++
++/*
++ * With disaggregation we need to forward unplug event to all ioreq servers.
++ * This function will trap the ioport the prepare request.
++ */
++static int handle_platform_io(int dir, uint32_t port, uint32_t bytes,
++                              uint32_t *val)
++{
++    struct vcpu *v = current;
++    ioreq_t *p = get_ioreq(v);
++
++    /* Dispatch to another handler if it's not the right size and ioport */
++    if ( !(port == XEN_PLATFORM_IOPORT && bytes == 2 && dir == IOREQ_WRITE) )
++        return X86EMUL_UNHANDLEABLE;
++
++    p->type = IOREQ_TYPE_EVENT;
++    p->size = 2;
++    p->data = 0x0;
++    p->data_is_ptr = 0;
++    if ( *val & XEN_PLATFORM_UNPLUG_ALL_IDE_DISKS )
++        p->data |= IOREQ_EVENT_UNPLUG_ALL_IDE_DISKS;
++    if ( *val & XEN_PLATFORM_UNPLUG_ALL_NICS )
++        p->data |= IOREQ_EVENT_UNPLUG_ALL_NICS;
++    if ( *val & XEN_PLATFORM_UNPLUG_AUX_IDE_DISKS )
++        p->data |= IOREQ_EVENT_UNPLUG_AUX_IDE_DISKS;
++    p->count = 0;
++    p->addr = 0;
++
++    return X86EMUL_UNHANDLEABLE;
++}
++
++void xen_platform_init(struct domain *d)
++{
++    register_portio_handler(d, XEN_PLATFORM_IOPORT, 16, handle_platform_io);
++}
+diff --git a/xen/include/asm-x86/hvm/domain.h b/xen/include/asm-x86/hvm/domain.h
+index 27b3de5..2705aa4 100644
+--- a/xen/include/asm-x86/hvm/domain.h
++++ b/xen/include/asm-x86/hvm/domain.h
+@@ -28,6 +28,7 @@
+ #include <asm/hvm/vioapic.h>
+ #include <asm/hvm/io.h>
+ #include <xen/hvm/iommu.h>
++#include <xen/hvm/pci_emul.h>
+ #include <asm/hvm/viridian.h>
+ #include <asm/hvm/vmx/vmcs.h>
+ #include <asm/hvm/svm/vmcb.h>
+@@ -41,14 +42,39 @@ struct hvm_ioreq_page {
+     void *va;
+ };
+ 
++struct hvm_io_range {
++    uint64_t s, e;
++    struct hvm_io_range *next;
++};
++
++struct hvm_ioreq_server {
++    unsigned int id;
++    domid_t domid;
++    struct hvm_io_range *mmio_range_list;
++    struct hvm_io_range *portio_range_list;
++    struct hvm_ioreq_server *next;
++    struct hvm_ioreq_page ioreq;
++    struct hvm_ioreq_page buf_ioreq;
++    unsigned int buf_ioreq_evtchn;
++};
++
+ struct hvm_domain {
+     struct hvm_ioreq_page  ioreq;
+     struct hvm_ioreq_page  buf_ioreq;
++    struct hvm_ioreq_server *ioreq_server_list;
++    uint32_t                nr_ioreq_server;
++    spinlock_t              ioreq_server_lock;
++    enum {   IOREQ_UNINIT = 0,
++             IOREQ_SINGLE,
++             IOREQ_MULTIPLE, } ioreq_mode;
+ 
+     struct pl_time         pl_time;
+ 
+     struct hvm_io_handler *io_handler;
+ 
++    /* PCI Information */
++    struct pci_root_emul pci_root;
++
+     /* Lock protects access to irq, vpic and vioapic. */
+     spinlock_t             irq_lock;
+     struct hvm_irq         irq;
+diff --git a/xen/include/asm-x86/hvm/hvm.h b/xen/include/asm-x86/hvm/hvm.h
+index 8408420..16e3f0d 100644
+--- a/xen/include/asm-x86/hvm/hvm.h
++++ b/xen/include/asm-x86/hvm/hvm.h
+@@ -219,7 +219,8 @@ int prepare_ring_for_helper(struct domain *d, unsigned long gmfn,
+                             struct page_info **_page, void **_va);
+ void destroy_ring_for_helper(void **_va, struct page_info *page);
+ 
+-bool_t hvm_send_assist_req(struct vcpu *v);
++/* Send ioreq to only one or all ioreq servers */
++bool_t hvm_send_assist_req(struct vcpu *v, bool_t all);
+ 
+ void hvm_get_guest_pat(struct vcpu *v, u64 *guest_pat);
+ int hvm_set_guest_pat(struct vcpu *v, u64 guest_pat);
+diff --git a/xen/include/asm-x86/hvm/support.h b/xen/include/asm-x86/hvm/support.h
+index 7ddc806..d2034ad 100644
+--- a/xen/include/asm-x86/hvm/support.h
++++ b/xen/include/asm-x86/hvm/support.h
+@@ -29,11 +29,31 @@
+ 
+ static inline ioreq_t *get_ioreq(struct vcpu *v)
+ {
+-    struct domain *d = v->domain;
+-    shared_iopage_t *p = d->arch.hvm_domain.ioreq.va;
+-    ASSERT((v == current) || spin_is_locked(&d->arch.hvm_domain.ioreq.lock));
+-    ASSERT(d->arch.hvm_domain.ioreq.va != NULL);
+-    return &p->vcpu_ioreq[v->vcpu_id];
++    shared_iopage_t *p;
++    p = v->arch.hvm_vcpu.ioreq->va;
++    ASSERT((v == current) || spin_is_locked(&v->arch.hvm_vcpu.ioreq->lock));
++    ASSERT(v->arch.hvm_vcpu.ioreq->va != NULL);
++
++    return &p->vcpu_ioreq[v->vcpu_id];    
++}
++
++static inline void set_ioreq(struct vcpu *v, struct hvm_ioreq_page *page,
++                            ioreq_t *p)
++{
++    ioreq_t *np;
++
++    v->arch.hvm_vcpu.ioreq = page;
++    spin_lock(&v->arch.hvm_vcpu.ioreq->lock);
++    np = get_ioreq(v);
++    np->dir = p->dir;
++    np->data_is_ptr = p->data_is_ptr;
++    np->type = p->type;
++    np->size = p->size;
++    np->addr = p->addr;
++    np->count = p->count;
++    np->df = p->df;
++    np->data = p->data;
++    spin_unlock(&v->arch.hvm_vcpu.ioreq->lock);
+ }
+ 
+ #define HVM_DELIVER_NO_ERROR_CODE  -1
+diff --git a/xen/include/asm-x86/hvm/vcpu.h b/xen/include/asm-x86/hvm/vcpu.h
+index e8b8cd7..2ad78c5 100644
+--- a/xen/include/asm-x86/hvm/vcpu.h
++++ b/xen/include/asm-x86/hvm/vcpu.h
+@@ -126,6 +126,11 @@ struct hvm_vcpu {
+     struct list_head    tm_list;
+ 
+     int                 xen_port;
++    struct hvm_ioreq_page      *ioreq;
++    /* Did we forward ioreq to multiple ioreq server */
++    int                 ioreq_multiple;
++    /* PCI Information */
++    uint32_t            pci_cf8;
+ 
+     bool_t              flag_dr_dirty;
+     bool_t              debug_state_latch;
+diff --git a/xen/include/public/hvm/hvm_op.h b/xen/include/public/hvm/hvm_op.h
+index 3b234cd..34ad93b 100644
+--- a/xen/include/public/hvm/hvm_op.h
++++ b/xen/include/public/hvm/hvm_op.h
+@@ -23,6 +23,9 @@
+ 
+ #include "../xen.h"
+ #include "../trace.h"
++#include "../event_channel.h"
++
++#include "hvm_info_table.h" /* HVM_MAX_VCPUS */
+ 
+ /* Get/set subcommands: extra argument == pointer to xen_hvm_param struct. */
+ #define HVMOP_set_param           0
+@@ -241,6 +244,55 @@ struct xen_hvm_inject_trap {
+ typedef struct xen_hvm_inject_trap xen_hvm_inject_trap_t;
+ DEFINE_XEN_GUEST_HANDLE(xen_hvm_inject_trap_t);
+ 
++#define HVMOP_register_ioreq_server 20
++struct xen_hvm_register_ioreq_server {
++    domid_t domid;  /* IN - domain to be serviced */
++    ioservid_t id;  /* OUT - handle for identifying this server */
++};
++typedef struct xen_hvm_register_ioreq_server xen_hvm_register_ioreq_server_t;
++DEFINE_XEN_GUEST_HANDLE(xen_hvm_register_ioreq_server_t);
++
++#define HVMOP_get_ioreq_server_buf_channel 21
++struct xen_hvm_get_ioreq_server_buf_channel {
++    domid_t domid;          /* IN - domain to be serviced */
++    ioservid_t id;          /* IN - handle from HVMOP_register_ioreq_server */
++    evtchn_port_t channel;  /* OUT - buf ioreq channel */
++};
++typedef struct xen_hvm_get_ioreq_server_buf_channel xen_hvm_get_ioreq_server_buf_channel_t;
++DEFINE_XEN_GUEST_HANDLE(xen_hvm_get_ioreq_server_buf_channel_t);
++
++#define HVMOP_map_io_range_to_ioreq_server 22
++struct xen_hvm_map_io_range_to_ioreq_server {
++    domid_t domid;          /* IN - domain to be serviced */
++    int is_mmio;         /* IN - MMIO or port IO? */
++    ioservid_t id;          /* IN - handle from HVMOP_register_ioreq_server */
++    uint64_aligned_t s, e;  /* IN - inclusive start and end of range */
++};
++typedef struct xen_hvm_map_io_range_to_ioreq_server xen_hvm_map_io_range_to_ioreq_server_t;
++DEFINE_XEN_GUEST_HANDLE(xen_hvm_map_io_range_to_ioreq_server_t);
++
++#define HVMOP_unmap_io_range_from_ioreq_server 23
++struct xen_hvm_unmap_io_range_from_ioreq_server {
++    domid_t domid;          /* IN - domain to be serviced */
++    uint8_t is_mmio;        /* IN - MMIO or port IO? */
++    ioservid_t id;          /* IN - handle from HVMOP_register_ioreq_server */
++    uint64_aligned_t addr;  /* IN - address inside the range to remove */
++};
++typedef struct xen_hvm_unmap_io_range_from_ioreq_server xen_hvm_unmap_io_range_from_ioreq_server_t;
++DEFINE_XEN_GUEST_HANDLE(xen_hvm_unmap_io_range_from_ioreq_server_t);
++
++#define HVMOP_register_pcidev 24
++struct xen_hvm_register_pcidev {
++    domid_t domid;	   /* IN - domain to be serviced */
++    ioservid_t id;	   /* IN - handle from HVMOP_register_ioreq_server */
++    /* IN - PCI identification in PCI topology (domain:bus:device:function) */
++    uint16_t domain;
++    uint8_t bus, device, function;
++};
++typedef struct xen_hvm_register_pcidev xen_hvm_register_pcidev_t;
++DEFINE_XEN_GUEST_HANDLE(xen_hvm_register_pcidev_t);
++
++
+ #endif /* defined(__XEN__) || defined(__XEN_TOOLS__) */
+ 
+ #define HVMOP_get_mem_type    15
+diff --git a/xen/include/public/hvm/ioreq.h b/xen/include/public/hvm/ioreq.h
+index f05d130..377838c 100644
+--- a/xen/include/public/hvm/ioreq.h
++++ b/xen/include/public/hvm/ioreq.h
+@@ -36,6 +36,12 @@
+ #define IOREQ_TYPE_COPY         1 /* mmio ops */
+ #define IOREQ_TYPE_TIMEOFFSET   7
+ #define IOREQ_TYPE_INVALIDATE   8 /* mapcache */
++#define IOREQ_TYPE_PCI_CONFIG   9 /* pci config space ops */
++#define IOREQ_TYPE_EVENT        10 /* unplug event */
++
++#define IOREQ_EVENT_UNPLUG_ALL_IDE_DISKS 1
++#define IOREQ_EVENT_UNPLUG_ALL_NICS 2
++#define IOREQ_EVENT_UNPLUG_AUX_IDE_DISKS 4
+ 
+ /*
+  * VMExit dispatcher should cooperate with instruction decoder to
+diff --git a/xen/include/public/hvm/params.h b/xen/include/public/hvm/params.h
+index d8554d4..f4073ba 100644
+--- a/xen/include/public/hvm/params.h
++++ b/xen/include/public/hvm/params.h
+@@ -150,6 +150,9 @@
+ /* use Xci cpuid signature instead of standard Xen one */
+ #define HVM_PARAM_XCI_CPUID_SIGNATURE 32 
+ 
+-#define HVM_NR_PARAMS          33
++/* Param for ioreq servers */
++#define HVM_PARAM_IO_PFN_FIRST  33
++#define HVM_PARAM_IO_PFN_LAST   34
++#define HVM_NR_PARAMS           35
+ 
+ #endif /* __XEN_PUBLIC_HVM_PARAMS_H__ */
+diff --git a/xen/include/public/xen.h b/xen/include/public/xen.h
+index c803165..a0818da 100644
+--- a/xen/include/public/xen.h
++++ b/xen/include/public/xen.h
+@@ -491,6 +491,7 @@ DEFINE_XEN_GUEST_HANDLE(mmuext_op_t);
+ #ifndef __ASSEMBLY__
+ 
+ typedef uint16_t domid_t;
++typedef uint32_t ioservid_t;
+ 
+ /* Domain ids >= DOMID_FIRST_RESERVED cannot be used for ordinary domains. */
+ #define DOMID_FIRST_RESERVED (0x7FF0U)
+diff --git a/xen/include/xen/hvm/pci_emul.h b/xen/include/xen/hvm/pci_emul.h
+new file mode 100644
+index 0000000..6a61a49
+--- /dev/null
++++ b/xen/include/xen/hvm/pci_emul.h
+@@ -0,0 +1,48 @@
++/*
++ * pci_emul.h: Emulation of configuration space registers.
++ *
++ * Copyright (c) 2012, Citrix Systems, Inc.
++ *
++ * This program is free software; you can redistribute it and/or modify it
++ * under the terms and conditions of the GNU General Public License,
++ * version 2, as published by the Free Software Foundation.
++ *
++ * This program is distributed in the hope it will be useful, but WITHOUT
++ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
++ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
++ * more details.
++ *
++ * You should have received a copy of the GNU General Public License along with
++ * this program; if not, write to the Free Software Foundation, Inc., 59 Temple
++ * Place - Suite 330, Boston, MA 02111-1307 USA.
++ */
++
++#ifndef __XEN_HVM_PCI_EMUL_H__
++# define __XEN_HVM_PCI_EMUL_H__
++
++# include <xen/radix-tree.h>
++# include <xen/spinlock.h>
++# include <xen/types.h>
++
++void hvm_init_pci_emul(struct domain *d);
++void hvm_destroy_pci_emul(struct domain *d);
++int hvm_register_pcidev(domid_t domid, ioservid_t id,
++                        uint16_t domain, uint8_t bus,
++                        uint8_t device, uint8_t function);
++
++struct pci_root_emul {
++    spinlock_t pci_lock;
++    struct radix_tree_root pci_list;
++};
++
++#endif /* !__XEN_HVM_PCI_EMUL_H__ */
++
++/*
++ * Local variables:
++ * mode: C
++ * c-set-style: "BSD"
++ * c-basic-offset: 4
++ * tab-width: 4
++ * indent-tabs-mode: nil
++ * End:
++ */
+diff --git a/xen/include/xen/hvm/xen_platform.h b/xen/include/xen/hvm/xen_platform.h
+new file mode 100644
+index 0000000..fc2e1a5
+--- /dev/null
++++ b/xen/include/xen/hvm/xen_platform.h
+@@ -0,0 +1,40 @@
++/*
++ * XEN platform pci device, formerly known as the event channel device
++ *
++ * Copyright (c) 2003-2004 Intel Corp.
++ * Copyright (c) 2006 XenSource
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining a copy
++ * of this software and associated documentation files (the "Software"), to deal
++ * in the Software without restriction, including without limitation the rights
++ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
++ * copies of the Software, and to permit persons to whom the Software is
++ * furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included in
++ * all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
++ * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
++ * THE SOFTWARE.
++ */
++
++#ifndef __XEN_HVM_XEN_PLATFORM_H__
++#define __XEN_HVM_XEN_PLATFORM_H__
++
++# include <xen/types.h>
++
++#define XEN_PLATFORM_IOPORT 0x10
++
++/* Unplug events */
++#define XEN_PLATFORM_UNPLUG_ALL_IDE_DISKS 1
++#define XEN_PLATFORM_UNPLUG_ALL_NICS 2
++#define XEN_PLATFORM_UNPLUG_AUX_IDE_DISKS 4
++
++void xen_platform_init(struct domain *d);
++
++#endif /* __XEN_HVM_XEN_PLATFORM_H__ */
