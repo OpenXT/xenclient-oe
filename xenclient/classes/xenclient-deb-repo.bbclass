@@ -127,7 +127,7 @@ Name: ${DEB_NAME}
 Maintainer: ${DEB_PKG_MAINTAINER}
 
 Files: *
-Copyright: ${crt_year} Citrix Systems.  All rights reserved.
+Copyright: ${crt_year} Citrix Systems.
 
 License: GPL-2+
  This file is free software; you can redistribute it and/or modify it

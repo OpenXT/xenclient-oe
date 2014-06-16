@@ -1,6 +1,5 @@
 /*
  * Copyright (C) 2010 Citrix Systems, Inc.
- * All Rights Reserved.
  *
  */
 
