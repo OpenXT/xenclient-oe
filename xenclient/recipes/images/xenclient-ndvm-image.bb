@@ -75,9 +75,6 @@ ROOTFS_POSTPROCESS_COMMAND += "echo 'ca:12345:ctrlaltdel:/sbin/shutdown -t1 -a -
 # Move resolv.conf to /var/volatile/etc, as rootfs is readonly
 ROOTFS_POSTPROCESS_COMMAND += "rm -f ${IMAGE_ROOTFS}/etc/resolv.conf; ln -s /var/volatile/etc/resolv.conf ${IMAGE_ROOTFS}/etc/resolv.conf;"
 
-# do labeling after all postprocess commands
-IMAGE_PREPROCESS_COMMAND_append = " setfiles -r ${IMAGE_ROOTFS} ${IMAGE_ROOTFS}/etc/selinux/xc_policy/contexts/files/file_contexts ${IMAGE_ROOTFS} || exit 1;"
-
 ROOTFS_POSTPROCESS_COMMAND += "opkg-cl ${IPKG_ARGS} -force-depends \
                                 remove ${PACKAGE_REMOVE};"
 

@@ -100,9 +100,6 @@ ROOTFS_POSTPROCESS_COMMAND += "cat ${STUBDOMAIN_IMAGE} > ${IMAGE_ROOTFS}/usr/lib
 ROOTFS_POSTPROCESS_COMMAND += "cat ${STUBDOMAIN_KERNEL} > ${IMAGE_ROOTFS}/usr/lib/xen/boot/stubdomain-bzImage ;" 
 ### End of stubdomain stuff
 
-# Do SELinux labelling after all rootfs postprocessing commands.
-IMAGE_PREPROCESS_COMMAND_append = " setfiles -r ${IMAGE_ROOTFS} ${IMAGE_ROOTFS}/etc/selinux/xc_policy/contexts/files/file_contexts ${IMAGE_ROOTFS} || exit 1;"
-
 inherit selinux-image
 #inherit validate-package-versions
 inherit xenclient-image-src-info
