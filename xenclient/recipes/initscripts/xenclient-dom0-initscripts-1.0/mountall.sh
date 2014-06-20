@@ -26,10 +26,10 @@ if test -f /etc/default/mountall; then
     . /etc/default/mountall
 fi
 
-RESTORECON=/sbin/restorecon
+. /etc/init.d/functions
 
 mkdir -p /dev/shm /dev/pts
-[ -x ${RESTORECON} ] && ${RESTORECON} -r /dev/shm /dev/pts
+restore /dev/shm /dev/pts
 
 # Mount local filesystems in /etc/fstab. For some reason, people
 # might want to mount "proc" several times, and mount -v complains
@@ -45,8 +45,12 @@ if test ! -p /dev/initctl
 then
 	rm -f /dev/initctl
 	mknod -m 600 /dev/initctl p
-	[ -x ${RESTORECON} ] && ${RESTORECON} /dev/initctl
+	restore /dev/initctl
 fi
+
+# /config and /boot/system are relabeled earlier in boot
+restore_firstboot -r /storage /var/log /var/cores
+
 kill -USR1 1
 
 #
