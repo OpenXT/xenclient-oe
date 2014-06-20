@@ -17,6 +17,7 @@
 # Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 #
 
+. /etc/init.d/functions
 CFG_ETC=/config/etc
 
 umask 077
@@ -38,6 +39,7 @@ rm -f ${CFG_ETC}/lvm/lvm.conf
 if [ ! -r ${CFG_ETC}/USB_always.conf -a \
      -r /config/USB_always.conf ] ; then
     mv /config/USB_always.conf ${CFG_ETC}
+    restore ${CFG_ETC}/USB_always.conf
 fi
 
 #------------------------------------------------------------------------------
@@ -67,7 +69,7 @@ fi
 if [ ! -L /var/log/wtmp ] ; then
     rm -f /var/log/wtmp
     ln -s /var/volatile/log/wtmp /var/log/wtmp
-    [ -x /sbin/restorecon ] && /sbin/restorecon /var/log/wtmp
+    restore /var/log/wtmp
 fi
 
 #------------------------------------------------------------------------------
@@ -136,18 +138,11 @@ if [ -r ${INSTALL_CONF}/repo-cert.conf ] ; then
     fi
     mv -f ${INSTALL_CONF}/repo-cert.conf ${INSTALL_CONF}/repo-cert.conf.DONE
 fi
+restore -r ${INSTALL_CONF} /config/deferred_*
 
 if [ -r ${INSTALL_CONF}/uivm-gconf,aes-xts-plain,256.key ] ; then
     KEY_FOLDER="/config/platform-crypto-keys"
     mkdir -p ${KEY_FOLDER}
     mv ${INSTALL_CONF}/uivm-gconf,aes-xts-plain,256.key ${KEY_FOLDER}
-fi
-
-#------------------------------------------------------------------------------
-# Other stuff.
-#------------------------------------------------------------------------------
-
-# Set SELinux labels on persistent volumes.
-if [ -x /sbin/restorecon ] ; then
-    /sbin/restorecon -r /config /storage /var/log /var/cores /boot/system
+    restore -r ${KEY_FOLDER}
 fi
