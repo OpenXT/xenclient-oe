@@ -18,7 +18,6 @@ SRC_URI = "file://enter-s3.sh \
 	   file://complete-boot.sh \
 	   file://dom0_add_vif.sh \
 	   file://blacklist-nvidiafb.conf \
-	   file://autorelabel.initscript \
 	   file://r8168.conf \
 	   file://create-ndvm \
 	   file://i915modprobe.sh \
@@ -35,24 +34,14 @@ SRC_URI = "file://enter-s3.sh \
 	   file://selinux-state \
 "
 
-PACKAGES = "${PN}"
-
 FILES_${PN} = "/"
 
 inherit update-rc.d
 
-PACKAGES =+ "${PN}-autorelabel"
-RDEPENDS_${PN} += "${PN}-autorelabel"
-
-INITSCRIPT_PACKAGES = "${PN} ${PN}-autorelabel"
+INITSCRIPT_PACKAGES = "${PN}"
 
 INITSCRIPT_NAME_${PN} = "firstboot"
 INITSCRIPT_PARAMS_${PN} = "start 70 S ."
-
-INITSCRIPT_NAME_${PN}-autorelabel = "autorelabel"
-INITSCRIPT_PARAMS_${PN}-autorelabel = "start 71 S ."
-
-FILES_${PN}-autorelabel += "/etc/init.d/autorelabel"
 
 do_install () {
 	install -d ${D}/etc
@@ -101,8 +90,6 @@ do_install () {
 
 	mkdir -p ${D}/opt/xensource
 	ln -sf /usr/bin ${D}/opt/xensource/libexec
-
-	install -m 0755 ${WORKDIR}/autorelabel.initscript ${D}${sysconfdir}/init.d/autorelabel
 
         install -d ${D}/root/.ssh
 
