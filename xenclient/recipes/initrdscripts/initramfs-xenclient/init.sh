@@ -25,6 +25,7 @@ MODULE_DIR=/initrd.d
 ROOT_DEVICE=
 ROOT_READONLY=
 DEFINIT=/sbin/init
+FIRSTBOOT_FLAG=/boot/system/firstboot
 
 early_setup() {
     mkdir -p /proc /sys /mnt /tmp
@@ -152,6 +153,13 @@ boot_root() {
     mount --bind /dev /root/dev
     mount --bind /proc /root/proc
     mount --move /sys /root/sys
+
+    # set selinux contexts for /boot/system on firstboot
+    if [ -f /root$FIRSTBOOT_FLAG ]; then
+        POL_NAME=$(sed -n 's&^[[:space:]]*SELINUXTYPE[[:space:]]*=[[:space:]]*\([A-Za-z0-9_-]\+\)[[:space:]]*$&\1&p' /root/etc/selinux/config)
+        echo "initramfs: setting file contexts for boot partition"
+        setfiles /root/etc/selinux/$POL_NAME/contexts/files/file_contexts /root/boot/system
+    fi
     exec switch_root -c /dev/console /root /sbin/selinux-load.sh ${INIT:-$DEFINIT}
 }
 
