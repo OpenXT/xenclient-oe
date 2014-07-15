@@ -1,3 +1,4 @@
+DEPENDS += "policycoreutils-native"
 IMAGE_INSTALL += " \
     libselinux-bin \
     policycoreutils-loadpolicy \
