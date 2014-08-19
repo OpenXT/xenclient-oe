@@ -49,7 +49,7 @@ sysroot_stage_all_append () {
 }
 
 pkg_postinst_${PN} () {
-	/sbin/setfiles /etc/selinux/${POL_TYPE}/contexts/files/file_contexts /
+	/sbin/setfiles ${STAGING_DIR_HOST}/etc/selinux/${POL_TYPE}/contexts/files/file_contexts /
 }
 
 pkg_postinst_${PN}_xenclient-ndvm () {
