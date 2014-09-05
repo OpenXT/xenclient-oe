@@ -1,7 +1,7 @@
 require recipes/ghc/ghc-pkg.inc
 
 GHC_PN  = "${PN}"
-SRC_URI = "http://hackage.haskell.org/packages/archive/${GHC_PN}/${PV}/${GHC_PN}-${PV}.tar.gz"
+SRC_URI = "http://hackage.haskell.org/package/${GHC_PN}-${PV}/${GHC_PN}-${PV}.tar.gz"
 S       = "${WORKDIR}/${GHC_PN}-${PV}"
 PR      = "r6"
 
