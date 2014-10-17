@@ -9,7 +9,7 @@ XENCLIENT_BUILD_BRANCH ?= "unknown"
 XENCLIENT_VERSION ?= "unknown"
 XENCLIENT_RELEASE ?= "unknown"
 
-SRC_URI = "${OPENXT_GIT_MIRROR}/sync-wui.git;protocol=git;tag=${OPENXT_TAG}"
+SRC_URI = "${OPENXT_GIT_MIRROR}/sync-wui.git;protocol=xtgit;tag=${OPENXT_TAG}"
 
 S = "${WORKDIR}/git"
 

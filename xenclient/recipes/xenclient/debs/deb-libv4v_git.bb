@@ -10,7 +10,7 @@ DEPENDS += " deb-xc-pvdrivers-dkms deb-libxenstore libtool"
 
 export STAGING_KERNEL_DIR
 
-SRC_URI = "${OPENXT_GIT_MIRROR}/v4v.git;protocol=git;tag=${OPENXT_TAG}"
+SRC_URI = "${OPENXT_GIT_MIRROR}/v4v.git;protocol=xtgit;tag=${OPENXT_TAG}"
 
 S="${WORKDIR}/git/libv4v"
 

@@ -5,7 +5,7 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=4641e94ec96f98fabc56ff9cc48be14b"
 
 inherit xenclient-repo
 
-SRC_URI = "${OPENXT_GIT_MIRROR}/v4v.git;protocol=git;tag=${OPENXT_TAG}"
+SRC_URI = "${OPENXT_GIT_MIRROR}/v4v.git;protocol=xtgit;tag=${OPENXT_TAG}"
 
 S = "${WORKDIR}/git/v4v"
 

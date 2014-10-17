@@ -18,7 +18,7 @@ DEPENDS_append_xenclient-nilfvm += " ${@deb_bootstrap_deps(d)} "
 
 inherit ${@"xenclient-simple-deb"if(bb.data.getVar("MACHINE",d,1)=="xenclient-nilfvm")else("null")}
 
-SRC_URI = "${OPENXT_GIT_MIRROR}/v4v.git;protocol=git;tag=${OPENXT_TAG} \
+SRC_URI = "${OPENXT_GIT_MIRROR}/v4v.git;protocol=xtgit;tag=${OPENXT_TAG} \
 	   file://DEBIAN_postinst"
 
 S = "${WORKDIR}/git/v4v"

@@ -9,8 +9,8 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=441c28d2cf86e15a37fa47e15a72fbac  \
 
 DEPENDS = "xen-tools alsa-lib pciutils libpng blktap libxenacpi libv4v libdmbus openssl seabios ipxe"
 
-SRC_URI = "${OPENXT_GIT_MIRROR}/ioemu.git;protocol=git;tag=${OPENXT_TAG} \
-	   ${OPENXT_GIT_MIRROR}/ioemu-pq.git;protocol=git;tag=${OPENXT_TAG} \
+SRC_URI = "${OPENXT_GIT_MIRROR}/ioemu.git;protocol=xtgit;tag=${OPENXT_TAG} \
+	   ${OPENXT_GIT_MIRROR}/ioemu-pq.git;protocol=xtgit;tag=${OPENXT_TAG} \
 	   file://qemu-ifup-stubdom"
 
 S = "${WORKDIR}/git"

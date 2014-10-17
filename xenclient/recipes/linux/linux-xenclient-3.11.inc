@@ -9,7 +9,7 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=d7810fab7487fb0aad327b76f1be7cd7"
 KERNEL_IMAGETYPE = "bzImage"
 
 SRC_URI = "${OPENXT_MIRROR}/linux-3.11.10.4.tar.gz;name=kernel \
-           ${OPENXT_GIT_MIRROR}/linux-3.11-pq.git;protocol=git;tag=${OPENXT_TAG} \
+           ${OPENXT_GIT_MIRROR}/linux-3.11-pq.git;protocol=xtgit;tag=${OPENXT_TAG} \
            file://defconfig"
 
 S = "${WORKDIR}/linux-3.11.10.4"

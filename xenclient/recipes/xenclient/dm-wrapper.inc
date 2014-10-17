@@ -3,7 +3,7 @@ LICENSE = "GPLv2"
 LIC_FILES_CHKSUM = "file://COPYING;md5=4641e94ec96f98fabc56ff9cc48be14b"
 DEPENDS = "xen xen-tools libv4v libdmbus libevent"
 
-SRC_URI = "${OPENXT_GIT_MIRROR}/dm-wrapper.git;protocol=git;tag=${OPENXT_TAG}"
+SRC_URI = "${OPENXT_GIT_MIRROR}/dm-wrapper.git;protocol=xtgit;tag=${OPENXT_TAG}"
 S = "${WORKDIR}/git"
 
 #EXTRA_OECONF += "--with-libxc=yes"

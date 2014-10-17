@@ -6,7 +6,7 @@ LIC_FILES_CHKSUM = "file://../COPYING;md5=4641e94ec96f98fabc56ff9cc48be14b"
 DEPENDS = "udbus udbus-intro ghc-hsyslog ghc-parsec ghc-text compleat libxchv4v"
 RDEPENDS_${PN} += "glibc-gconv-utf-32 ghc-runtime-native"
 
-SRC_URI = "${OPENXT_GIT_MIRROR}/manager.git;protocol=git;tag=${OPENXT_TAG}"
+SRC_URI = "${OPENXT_GIT_MIRROR}/manager.git;protocol=xtgit;tag=${OPENXT_TAG}"
 
 S = "${WORKDIR}/git/xec"
 

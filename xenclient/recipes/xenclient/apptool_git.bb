@@ -6,7 +6,7 @@ LIC_FILES_CHKSUM = "file://../COPYING;md5=4641e94ec96f98fabc56ff9cc48be14b"
 DEPENDS = "libxenmgr-core libxchutils libxchdb libxch-rpc xenclient-rpcgen-native xenclient-idl ghc-json ghc-hsyslog ghc-regex-posix ghc-hxt udbus-intro"
 RDEPENDS_${PN} += "glibc-gconv-utf-32 cdrtools xenclient-idl-dev xsd-validate"
 
-SRC_URI = "${OPENXT_GIT_MIRROR}/manager.git;protocol=git;tag=${OPENXT_TAG}"
+SRC_URI = "${OPENXT_GIT_MIRROR}/manager.git;protocol=xtgit;tag=${OPENXT_TAG}"
 
 S = "${WORKDIR}/git/apptool"
 
