@@ -8,7 +8,7 @@ DEPENDS_append_xenclient-nilfvm += " ${@deb_bootstrap_deps(d)} "
 
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
-SRC_URI = "${OPENXT_GIT_MIRROR}/manager.git;protocol=git;tag=${OPENXT_TAG}"
+SRC_URI = "${OPENXT_GIT_MIRROR}/manager.git;protocol=xtgit;tag=${OPENXT_TAG}"
 
 SRC_URI += " file://db-exists-dom0 \
 	     file://db-ls-dom0 \

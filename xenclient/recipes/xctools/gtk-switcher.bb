@@ -4,7 +4,7 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=4641e94ec96f98fabc56ff9cc48be14b"
 DEPENDS = "xenclient-idl xenclient-rpcgen-native dbus libxcdbus libglade libnotify xen-tools"
 RDEPENDS = "notification-daemon"
 
-SRC_URI = "${OPENXT_GIT_MIRROR}/xctools.git;protocol=git;tag=${OPENXT_TAG}"
+SRC_URI = "${OPENXT_GIT_MIRROR}/xctools.git;protocol=xtgit;tag=${OPENXT_TAG}"
 
 EXTRA_OECONF += "--with-idldir=${STAGING_IDLDIR}"
 

@@ -2,7 +2,7 @@ DESCRIPTION = "PV linux audio alsa driver"
 LICENSE = "GPLv2"
 LIC_FILES_CHKSUM="file://${TOPDIR}/COPYING.GPLv2;md5=751419260aa954499f7abaabaa882bbe"
 
-SRC_URI = "${OPENXT_GIT_MIRROR}/pv-linux-drivers.git;protocol=git;tag=${OPENXT_TAG}"
+SRC_URI = "${OPENXT_GIT_MIRROR}/pv-linux-drivers.git;protocol=xtgit;tag=${OPENXT_TAG}"
 DEPENDS = "virtual/kernel v4v-module"
 
 S = "${WORKDIR}/git/xc-audio"

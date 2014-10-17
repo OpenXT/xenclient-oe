@@ -6,7 +6,7 @@ LIC_FILES_CHKSUM="file://../COPYING;md5=4641e94ec96f98fabc56ff9cc48be14b"
 DEPENDS = "libv4v xenclient-rpcgen-native xenclient-idl xen-tools ghc-native ghc-hsyslog ghc-network ghc-monadprompt libxch-rpc ghc-http ghc-xenstore libxchxenstore libxchutils ghc-parsec ghc-deepseq ghc-text ghc-mtl ghc-json ghc-regex-posix ghc-hinotify ghc-lifted-base ghc-monad-control  ghc-transformers-base ghc-monad-loops"
 RDEPENDS += "glibc-gconv-utf-32 ghc-runtime-native"
 
-SRC_URI = "${OPENXT_GIT_MIRROR}/manager.git;protocol=git;tag=${OPENXT_TAG}"
+SRC_URI = "${OPENXT_GIT_MIRROR}/manager.git;protocol=xtgit;tag=${OPENXT_TAG}"
 SRC_URI += "file://updatemgr.initscript"
 
 S = "${WORKDIR}/git/updatemgr"

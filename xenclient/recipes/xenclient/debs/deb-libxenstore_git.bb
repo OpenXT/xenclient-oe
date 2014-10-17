@@ -6,7 +6,7 @@ LICENSE = "GPLv2"
 DEPENDS = "${@deb_bootstrap_deps(d)}"
 
 SRC_URI = "${XEN_SRC_URI} \
-	   ${OPENXT_GIT_MIRROR}/xen-common-pq.git;protocol=git;tag=${OPENXT_TAG} \
+	   ${OPENXT_GIT_MIRROR}/xen-common-pq.git;protocol=xtgit;tag=${OPENXT_TAG} \
 "
 
 SRC_URI[md5sum] := "${XEN_SRC_MD5SUM}"

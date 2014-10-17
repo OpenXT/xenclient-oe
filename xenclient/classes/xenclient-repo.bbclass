@@ -1,8 +1,11 @@
 # classs to handle XC Git repositories (and replace old repo class)
 
+def is_xc_repo_protocol(url):
+    return [ x.split('=')[1] == 'xtgit' for x in [ comp for comp in url.split(';') ] if 'protocol=' in x ].count(True)
+
 def is_xc_repo(url, d):
     xc_repo_prefix = bb.data.getVar("OPENXT_GIT_MIRROR", d, True)
-    return url.startswith(xc_repo_prefix)
+    return url.startswith(xc_repo_prefix) or is_xc_repo_protocol(url)
 
 def filter_out_xc_repos(d):
     """Removes all occurences of XC Git repositories from SRC_URI variable"""

@@ -5,7 +5,7 @@ LIC_FILES_CHKSUM="file://COPYING;md5=4641e94ec96f98fabc56ff9cc48be14b"
 
 RDEPENDS_${PN} += "glibc-gconv-utf-16"
 
-SRC_URI = "${OPENXT_GIT_MIRROR}/blktap.git;protocol=git;tag=${OPENXT_TAG}"
+SRC_URI = "${OPENXT_GIT_MIRROR}/blktap.git;protocol=xtgit;tag=${OPENXT_TAG}"
 
 S = "${WORKDIR}/git"
 

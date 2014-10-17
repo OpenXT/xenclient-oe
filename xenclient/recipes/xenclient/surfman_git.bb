@@ -5,7 +5,7 @@ DEPENDS = " xen-tools xenfb2 libv4v dbus xenclient-idl xenclient-rpcgen-native l
 
 RDEPENDS_${PN} += "fbtap"
 
-SRC_URI = "${OPENXT_GIT_MIRROR}/surfman.git;protocol=git;tag=${OPENXT_TAG} \
+SRC_URI = "${OPENXT_GIT_MIRROR}/surfman.git;protocol=xtgit;tag=${OPENXT_TAG} \
            file://surfman.initscript \
            file://surfman.conf"
 

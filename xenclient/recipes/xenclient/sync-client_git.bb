@@ -24,7 +24,7 @@ RDEPENDS_${PN} += "python \
                    curl \
                    xen-tools-xenstore-utils"
 
-SRC_URI = "${OPENXT_GIT_MIRROR}/sync-client.git;protocol=git;tag=${OPENXT_TAG} \
+SRC_URI = "${OPENXT_GIT_MIRROR}/sync-client.git;protocol=xtgit;tag=${OPENXT_TAG} \
            file://sync-client-daemon.initscript"
 
 INITSCRIPT_NAME = "sync-client-daemon"

@@ -5,7 +5,7 @@ inherit xenclient-deb-dkms
 LICENSE = "GPLv2"
 DEPENDS = "${@deb_bootstrap_deps(d)}"
 
-SRC_URI = "${OPENXT_GIT_MIRROR}/pv-linux-drivers.git;protocol=git;tag=${OPENXT_TAG}"
+SRC_URI = "${OPENXT_GIT_MIRROR}/pv-linux-drivers.git;protocol=xtgit;tag=${OPENXT_TAG}"
 
 S="${WORKDIR}/git"
 
