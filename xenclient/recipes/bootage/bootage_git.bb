@@ -3,7 +3,10 @@ LICENSE = "GPLv2"
 LIC_FILES_CHKSUM = "file://COPYING;md5=4641e94ec96f98fabc56ff9cc48be14b"
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
-SRC_URI = "${OPENXT_GIT_MIRROR}/bootage.git;protocol=git;tag=${OPENXT_TAG} \
+PV = "0+git${SRCPV}"
+
+SRCREV = "ebb0cdcbdeff450a411dde195edbc0eb6b8b369b"
+SRC_URI = "git://github.com/openxt/bootage.git;protocol=https \
 	   file://bootage.conf-${PACKAGE_ARCH}"
 
 S = "${WORKDIR}/git"

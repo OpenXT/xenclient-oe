@@ -5,14 +5,18 @@ inherit xenclient-deb
 LICENSE = "GPLv2"
 DEPENDS = "${@deb_bootstrap_deps(d)}"
 
-SRC_URI = "${XEN_SRC_URI} \
-	   ${OPENXT_GIT_MIRROR}/xen-common-pq.git;protocol=git;tag=${OPENXT_TAG} \
+SRCREV_FORMAT = "source_patchqueue"
+
+PV = "4.3.2+git${SRCPV}"
+
+SRCREV_source = "RELEASE-4.3.2"
+SRCREV_patchqueue = "4400dd3b3505ffa69ecd5b69ff4be582bc4164f3"
+
+SRC_URI = "git://xenbits.xen.org/xen.git;protocol=git;name=source \
+	  git://github.com/openxt/xen-common-pq.git;protocol=https;destsuffix=patchqueue;name=patchqueue \
 "
 
-SRC_URI[md5sum] := "${XEN_SRC_MD5SUM}"
-SRC_URI[sha256sum] := "${XEN_SRC_SHA256SUM}"
-
-S = "${WORKDIR}/xen-${XEN_VERSION}"
+S = "${WORKDIR}/git"
 
 DEB_SUITE = "wheezy"
 DEB_ARCH = "i386"

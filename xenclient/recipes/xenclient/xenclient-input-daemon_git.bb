@@ -5,7 +5,10 @@ DEPENDS = "xenclient-idl dbus xen-tools libxcdbus udev xenclient-rpcgen-native o
 
 RDEPENDS_${PN} += "xenclient-keyboard-list libxcxenstore"
 
-SRC_URI = "${OPENXT_GIT_MIRROR}/input.git;protocol=git;tag=${OPENXT_TAG} \
+PV = "0+git${SRCPV}"
+
+SRCREV = "6b439ff65933f312e3554748b76d50b402ea54e9"
+SRC_URI = "git://github.com/openxt/input.git;protocol=https \
 	   file://input-daemon.initscript \
 "
 EXTRA_OECONF += "--with-idldir=${STAGING_IDLDIR}"

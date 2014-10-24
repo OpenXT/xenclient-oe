@@ -8,7 +8,10 @@ RDEPENDS += "glibc-gconv-utf-32 ghc-runtime-native"
 
 # Ocaml stuff is built with the native compiler with "-m32".
 
-SRC_URI = "${OPENXT_GIT_MIRROR}/manager.git;protocol=git;tag=${OPENXT_TAG}"
+PV = "0+git${SRCPV}"
+
+SRCREV = "71bfc70ec028c744e84914dc7ffcdccdd499c8c8"
+SRC_URI = "git://github.com/openxt/manager.git;protocol=https"
 
 S = "${WORKDIR}/git/upgrade-db"
 

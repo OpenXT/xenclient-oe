@@ -3,7 +3,10 @@ LICENSE = "LGPL-2.1"
 LIC_FILES_CHKSUM = "file://COPYING;md5=321bf41f280cf805086dd5a720b37785"
 DEPENDS = "xen-tools xen"
 
-SRC_URI = "${OPENXT_GIT_MIRROR}/libxenbackend.git;protocol=git;tag=${OPENXT_TAG}"
+PV = "0+git${SRCPV}"
+
+SRCREV = "62e57c7f656b0d3509983e68eb7f27fffc48d793"
+SRC_URI = "git://github.com/openxt/libxenbackend.git;protocol=https"
 
 S = "${WORKDIR}/git"
 

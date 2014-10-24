@@ -5,7 +5,10 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=4641e94ec96f98fabc56ff9cc48be14b"
 
 inherit xenclient
 
-SRC_URI = "${OPENXT_GIT_MIRROR}/installer.git;protocol=git;tag=${OPENXT_TAG}"
+PV = "0+git${SRCPV}"
+
+SRCREV = "e3705f28f7c5ce36ac5b369ca7d5e5fc80f1c19f"
+SRC_URI = "git://github.com/openxt/installer.git;protocol=https"
 
 S = "${WORKDIR}/git"
 

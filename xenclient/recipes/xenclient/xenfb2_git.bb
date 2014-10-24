@@ -7,7 +7,10 @@ LIC_FILES_CHKSUM="file://../COPYING;md5=4641e94ec96f98fabc56ff9cc48be14b"
 
 DEPENDS_append_xenclient-nilfvm += " ${@deb_bootstrap_deps(d)} "
 
-SRC_URI = "${OPENXT_GIT_MIRROR}/xenfb2.git;protocol=git;tag=${OPENXT_TAG}"
+PV = "0+git${SRCPV}"
+
+SRCREV = "4cbaf0b1bde5328da110cd50e22438ac2e5c8338"
+SRC_URI = "git://github.com/openxt/xenfb2.git;protocol=https"
 
 S = "${WORKDIR}/git/linux"
 

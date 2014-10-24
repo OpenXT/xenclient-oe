@@ -9,7 +9,10 @@ XENCLIENT_BUILD_BRANCH ?= "unknown"
 XENCLIENT_VERSION ?= "unknown"
 XENCLIENT_RELEASE ?= "unknown"
 
-SRC_URI = "${OPENXT_GIT_MIRROR}/sync-wui.git;protocol=git;tag=${OPENXT_TAG}"
+PV = "0+git${SRCPV}"
+
+SRCREV = "e37a0993f7821365e7dae1e969a837125df418de"
+SRC_URI = "git://github.com/openxt/sync-wui.git;protocol=https"
 
 S = "${WORKDIR}/git"
 

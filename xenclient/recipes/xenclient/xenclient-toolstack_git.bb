@@ -31,7 +31,10 @@ DEB_PKG_MAINTAINER = "Citrix Systems <customerservice@citrix.com>"
 # Ocaml stuff is built with the native compiler with "-m32".
 CFLAGS_append = " -I${OCAML_HEADERS}"
 
-SRC_URI = "${OPENXT_GIT_MIRROR}/toolstack.git;protocol=git;tag=${OPENXT_TAG}	\
+PV = "0+git${SRCPV}"
+
+SRCREV = "4bcabca9e4f9275ea3052fcc4b0cb7b225f145cb"
+SRC_URI = "git://github.com/openxt/toolstack.git;protocol=https	\
            file://vif"
 
 PACKAGE_ARCH = "${MACHINE_ARCH}"

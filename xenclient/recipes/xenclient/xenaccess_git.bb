@@ -7,8 +7,14 @@ DEPENDS = "xen-tools"
 LICENSE = "GPLv2"
 LIC_FILES_CHKSUM = "file://COPYING;md5=d6058eb45f5694b85b31237bef240081"
 
-SRC_URI = "${OPENXT_GIT_MIRROR}/xenaccess.git;protocol=git;tag=${OPENXT_TAG} \
-	   ${OPENXT_GIT_MIRROR}/xenaccess-pq.git;protocol=git;tag=${OPENXT_TAG}"
+SRCREV_FORMAT = "source_patchqueue"
+SRCREV_source = "ef1f6b10e0b217b534959affc0642b91e0b357b8"
+SRCREV_patchqueue = "810cd3d577005e8759bc4ea11a7f07c93cc80812"
+
+PV = "0+git${SRCPV}"
+
+SRC_URI = "git://github.com/openxt/xenaccess.git;protocol=https;name=source \
+	   git://github.com/openxt/xenaccess-pq.git;protocol=https;destsuffix=patchqueue;name=patchqueue"
 
 PARALLEL_MAKE = ""
 

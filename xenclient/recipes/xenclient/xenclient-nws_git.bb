@@ -6,7 +6,10 @@ LIC_FILES_CHKSUM="file://../COPYING;md5=4641e94ec96f98fabc56ff9cc48be14b"
 DEPENDS = "carrier-detect libxchutils xenclient-rpcgen-native xenclient-idl ghc-native ghc-hsyslog libxch-rpc libxchxenstore networkmanager ghc-regex-posix ghc-deepseq ghc-text ghc-mtl ghc-network"
 RDEPENDS_${PN} += "glibc-gconv-utf-32 ghc-runtime-native"
 
-SRC_URI = "${OPENXT_GIT_MIRROR}/network.git;protocol=git;tag=${OPENXT_TAG}"
+PV = "0+git${SRCPV}"
+
+SRCREV = "b2b3aaf8102097d830f26d282dac28598dff6675"
+SRC_URI = "git://github.com/openxt/network.git;protocol=https"
 
 S = "${WORKDIR}/git/nws"
 IDL_DIR = "${STAGING_DATADIR}/idl"
