@@ -33,6 +33,9 @@ do_apply_patchqueue(){
             if ! git symbolic-ref HEAD 2>/dev/null ; then
                 # If we're not on a branch, create one for guilt.
                 git checkout -b make-guilt-happy
+                # if patches are applied via normal bitbake SRC_URI
+                # and source repo is from git, we need to commit the applied changes
+                git commit -a -m "make-guilt-happy" || true
             fi
             [ -d ${WORKDIR}/git/.git/patches ] && rmdir ${WORKDIR}/git/.git/patches
             branch=$(cd ${WORKDIR}/git && git branch | grep '*' | cut -d' ' -f2)
