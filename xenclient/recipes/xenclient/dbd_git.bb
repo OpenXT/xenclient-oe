@@ -8,7 +8,10 @@ DEPENDS = "xenclient-idl ocaml-cross ocaml-dbus xenclient-toolstack xenclient-rp
 
 # Ocaml stuff is built with the native compiler with "-m32".
 
-SRC_URI = "${OPENXT_GIT_MIRROR}/manager.git;protocol=git;tag=${OPENXT_TAG}"
+PV = "0+git${SRCPV}"
+
+SRCREV = "71bfc70ec028c744e84914dc7ffcdccdd499c8c8"
+SRC_URI = "git://github.com/openxt/manager.git;protocol=https"
 
 SRC_URI += "file://dbd.initscript \
             file://db.default \

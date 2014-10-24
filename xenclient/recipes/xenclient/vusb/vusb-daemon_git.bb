@@ -4,7 +4,10 @@ LIC_FILES_CHKSUM="file://COPYING;md5=4641e94ec96f98fabc56ff9cc48be14b"
 DEPENDS = " libusb-compat xen-tools libv4v libxcdbus xenclient-idl xenclient-rpcgen-native libevent libxcxenstore"
 RDEPENDS += "libxcxenstore"
 
-SRC_URI = "${OPENXT_GIT_MIRROR}/xc-vusb-daemon.git;protocol=git;tag=${OPENXT_TAG} \
+PV = "0+git${SRCPV}"
+
+SRCREV = "e67d79a04252e02615e908d1c0b28842cdf0e3ce"
+SRC_URI = "git://github.com/openxt/xc-vusb-daemon.git;protocol=https \
            file://xenclient-vusb.initscript \
            "
 

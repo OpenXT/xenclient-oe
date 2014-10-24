@@ -7,7 +7,10 @@ inherit xenclient-deb
 DEPENDS = "${@deb_bootstrap_deps(d)}"
 DEPENDS += " deb-libxenstore"
 
-SRC_URI = "${OPENXT_GIT_MIRROR}/xblanker.git;protocol=git;tag=${OPENXT_TAG}"
+PV = "0+git${SRCPV}"
+
+SRCREV = "80de9b1ed31b497e2c02b75a74237f7e92c53e05"
+SRC_URI = "git://github.com/openxt/xblanker.git;protocol=https"
 
 S="${WORKDIR}/git"
 

@@ -8,7 +8,10 @@ RDEPENDS += "glibc-gconv-utf-32 ghc-runtime-native"
 
 # Ocaml stuff is built with the native compiler with "-m32".
 
-SRC_URI = "${OPENXT_GIT_MIRROR}/xctools.git;protocol=git;tag=${OPENXT_TAG}"
+PV = "0+git${SRCPV}"
+
+SRCREV = "80d1955ecbfe803997b3b98f5363bc76dc510478"
+SRC_URI = "git://github.com/openxt/xctools.git;protocol=https"
 
 S = "${WORKDIR}/git/fusechat"
 

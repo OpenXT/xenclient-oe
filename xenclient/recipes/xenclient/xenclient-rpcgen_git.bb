@@ -2,6 +2,8 @@ require recipes/ghc/ghc-pkg.inc
 require xenclient-rpcgen.inc
 BBCLASSEXTEND = "native"
 
+SRCREV = "652898375d541ac2c63b3bf1350986297c4b269c"
+
 S = "${WORKDIR}/git/rpcgen"
 
 PACKAGES = " ${PN} ${PN}-dev ${PN}-dbg "

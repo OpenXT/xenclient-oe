@@ -5,7 +5,10 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=4641e94ec96f98fabc56ff9cc48be14b"
 
 export MODULE_MAKE_FLAGS
 
-SRC_URI = "${OPENXT_GIT_MIRROR}/fbtap.git;protocol=git;tag=${OPENXT_TAG}"
+PV = "0+git${SRCPV}"
+
+SRCREV = "14a85aa26841b47dae23a44f74671a467cbab2be"
+SRC_URI = "git://github.com/openxt/fbtap.git;protocol=https"
 
 S = "${WORKDIR}/git"
 MAKE_TARGETS += "modules"

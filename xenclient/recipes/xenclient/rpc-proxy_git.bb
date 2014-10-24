@@ -6,8 +6,10 @@ LIC_FILES_CHKSUM = "file://../COPYING;md5=4641e94ec96f98fabc56ff9cc48be14b"
 DEPENDS += "libxchutils libxchwebsocket libxchv4v libxchxenstore xenclient-rpcgen-native xenclient-idl ghc-dbus-core ghc-json ghc-hsyslog ghc-network-bytestring libxch-rpc ghc-transformers ghc-parsec ghc-deepseq ghc-text ghc-mtl ghc-network ghc-monad-loops ghc-lifted-base ghc-monad-control libxchdb ghc-errors"
 RDEPENDS += "glibc-gconv-utf-32 ghc-runtime-native"
 
-SRC_URI = "${OPENXT_GIT_MIRROR}/manager.git;protocol=git;tag=${OPENXT_TAG}"
+PV = "0+git${SRCPV}"
 
+SRCREV = "71bfc70ec028c744e84914dc7ffcdccdd499c8c8"
+SRC_URI = "git://github.com/openxt/manager.git;protocol=https"
 SRC_URI += "file://rpc-proxy.rules \
             file://rpc-proxy.initscript \
 "

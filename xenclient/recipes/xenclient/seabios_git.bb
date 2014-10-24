@@ -3,8 +3,14 @@ LICENSE = "LGPLv3"
 LIC_FILES_CHKSUM = "file://COPYING;md5=d32239bcb673463ab874e80d47fae504      \
                     file://COPYING.LESSER;md5=6a6a8e020838b23406c81b19c1d46df6"
 
-SRC_URI = "${OPENXT_GIT_MIRROR}/seabios.git;protocol=git;tag=${OPENXT_TAG} \
-           ${OPENXT_GIT_MIRROR}/seabios-pq.git;protocol=git;tag=${OPENXT_TAG} \
+SRCREV_FORMAT = "source_patchqueue"
+SRCREV_source = "d7323eab4817886c9e20c32968f3f5dc9fe553d6"
+SRCREV_patchqueue = "3ae92fb7b617a2e17547244411a75ffa0ebaf5a4"
+
+PV = "0+git${SRCPV}"
+
+SRC_URI = "git://github.com/openxt/seabios.git;protocol=https;name=source \
+           git://github.com/openxt/seabios-pq.git;protocol=https;destsuffix=patchqueue;name=patchqueue \
            file://defconfig \
           "
 

@@ -4,7 +4,10 @@ LIC_FILES_CHKSUM = "file://LICENSE;md5=524443efef4a3e092cca058d99996c88"
 
 PR .= "+xc1"
 
-SRC_URI = "${OPENXT_GIT_MIRROR}/ocaml.git;protocol=git;tag=${OPENXT_TAG} \
+PV = "0+git${SRCPV}"
+
+SRCREV = "27c4ac1fa337dfb06c796413033a0442ad4f9288"
+SRC_URI = "git://github.com/openxt/ocaml.git;protocol=https \
            file://0007-Fix-ocamlopt-w.r.t.-binutils-2.21.patch;patch=1 \
 	   file://config.patch \
 "
