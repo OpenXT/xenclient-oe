@@ -1,5 +1,7 @@
 require dm-agent.inc
 
+SRCREV = "${OPENXT_TAG}"
+
 SRC_URI += "file://dm-agent.initscript"
 
 inherit update-rc.d

@@ -6,7 +6,10 @@ LIC_FILES_CHKSUM = "file://../COPYING;md5=321bf41f280cf805086dd5a720b37785"
 DEPENDS += "libxch-rpc xenclient-rpcgen-native xenclient-idl ghc-mtl ghc-text ghc-json libxchutils"
 RDEPENDS += "glibc-gconv-utf-32 ghc-runtime-native"
 
-SRC_URI = "${OPENXT_GIT_MIRROR}/xclibs.git;protocol=git;tag=${OPENXT_TAG}"
+PV = "0+git${SRCPV}"
+
+SRCREV = "${OPENXT_TAG}"
+SRC_URI = "git://${OPENXT_GIT_MIRROR}/xclibs.git;protocol=${OPENXT_GIT_PROTOCOL};branch=${OPENXT_BRANCH}"
 S = "${WORKDIR}/git/xchdb"
 
 do_configure_append() {

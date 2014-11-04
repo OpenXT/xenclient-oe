@@ -9,8 +9,12 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=441c28d2cf86e15a37fa47e15a72fbac  \
 
 DEPENDS = "xen-tools alsa-lib pciutils libpng blktap libxenacpi libv4v libdmbus openssl seabios ipxe"
 
-SRC_URI = "${OPENXT_GIT_MIRROR}/ioemu.git;protocol=git;tag=${OPENXT_TAG} \
-	   ${OPENXT_GIT_MIRROR}/ioemu-pq.git;protocol=git;tag=${OPENXT_TAG} \
+SRCREV_FORMAT = "source_patchqueue"
+
+PV = "0+git${SRCPV}"
+
+SRC_URI = "git://${OPENXT_GIT_MIRROR}/ioemu.git;protocol=${OPENXT_GIT_PROTOCOL};branch=${OPENXT_BRANCH};name=source \
+	   git://${OPENXT_GIT_MIRROR}/ioemu-pq.git;protocol=${OPENXT_GIT_PROTOCOL};branch=${OPENXT_BRANCH};destsuffix=patchqueue;name=patchqueue \
 	   file://qemu-ifup-stubdom"
 
 S = "${WORKDIR}/git"

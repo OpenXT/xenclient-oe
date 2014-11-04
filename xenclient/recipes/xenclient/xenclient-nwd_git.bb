@@ -6,7 +6,10 @@ LIC_FILES_CHKSUM="file://../COPYING;md5=4641e94ec96f98fabc56ff9cc48be14b"
 DEPENDS = "libxchutils xenclient-rpcgen-native xenclient-idl ghc-native ghc-hsyslog libxch-rpc ghc-regex-posix ghc-deepseq ghc-text ghc-mtl ghc-network libxchdb libxchxenstore"
 RDEPENDS += ""
 
-SRC_URI = "${OPENXT_GIT_MIRROR}/network.git;protocol=git;tag=${OPENXT_TAG}"
+PV = "0+git${SRCPV}"
+
+SRCREV = "${OPENXT_TAG}"
+SRC_URI = "git://${OPENXT_GIT_MIRROR}/network.git;protocol=${OPENXT_GIT_PROTOCOL};branch=${OPENXT_BRANCH}"
 
 S = "${WORKDIR}/git/nwd"
 IDL_DIR = "${STAGING_DATADIR}/idl"
