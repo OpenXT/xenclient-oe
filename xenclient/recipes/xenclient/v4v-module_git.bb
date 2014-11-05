@@ -20,7 +20,7 @@ inherit ${@"xenclient-simple-deb"if(bb.data.getVar("MACHINE",d,1)=="xenclient-ni
 
 PV = "git${SRCPV}"
 
-SRCREV = "${OPENXT_TAG}"
+SRCREV = "${AUTOREV}"
 SRC_URI = "git://${OPENXT_GIT_MIRROR}/v4v.git;protocol=${OPENXT_GIT_PROTOCOL};branch=${OPENXT_BRANCH} \
 	   file://DEBIAN_postinst"
 

@@ -5,7 +5,7 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 PV = "0+git${SRCPV}"
 
-SRCREV = "${OPENXT_TAG}"
+SRCREV = "${AUTOREV}"
 SRC_URI = "git://${OPENXT_GIT_MIRROR}/bootage.git;protocol=${OPENXT_GIT_PROTOCOL};branch=${OPENXT_BRANCH} \
 	   file://bootage.conf-${PACKAGE_ARCH}"
 

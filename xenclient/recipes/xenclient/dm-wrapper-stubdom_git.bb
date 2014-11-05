@@ -1,5 +1,5 @@
 require dm-wrapper.inc
 
-SRCREV = "${OPENXT_TAG}"
+SRCREV = "${AUTOREV}"
 
 EXTRA_OECONF += "--disable-syslog"

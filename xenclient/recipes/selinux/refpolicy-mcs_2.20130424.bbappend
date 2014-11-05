@@ -3,8 +3,8 @@ FILESEXTRAPATHS_prepend := "${FILESEXTRA}:"
 
 SRCREV_FORMAT = "modules_patchqueue"
 
-SRCREV_modules = "${OPENXT_TAG}"
-SRCREV_patchqueue = "${OPENXT_TAG}"
+SRCREV_modules = "${AUTOREV}"
+SRCREV_patchqueue = "${AUTOREV}"
 
 # FIXME: We really should be setting this, but doing so breaks the base include which expects PV=2.20130424
 # PV = "2.20130424+git${SRCPV}"

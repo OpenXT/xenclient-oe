@@ -6,7 +6,7 @@ RDEPENDS_${PN} = " libx11 xen-tools-xenstore-utils libxrandr libxrender"
 
 PV = "0+git${SRCPV}"
 
-SRCREV = "${OPENXT_TAG}"
+SRCREV = "${AUTOREV}"
 SRC_URI = "git://${OPENXT_GIT_MIRROR}/resized.git;protocol=${OPENXT_GIT_PROTOCOL};branch=${OPENXT_BRANCH}"
 
 S = "${WORKDIR}/git"

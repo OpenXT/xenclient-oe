@@ -12,7 +12,7 @@ SRCREV_FORMAT = "kernel_patchqueue"
 
 PV = "3.11+git${SRCPV}"
 
-SRCREV_patchqueue = "${OPENXT_TAG}"
+SRCREV_patchqueue = "${AUTOREV}"
 
 SRC_URI = "http://mirror.openxt.org/linux-3.11.10.4.tar.gz;name=kernel \
            git://${OPENXT_GIT_MIRROR}/linux-3.11-pq.git;protocol=${OPENXT_GIT_PROTOCOL};branch=${OPENXT_BRANCH};destsuffix=patchqueue;name=patchqueue \

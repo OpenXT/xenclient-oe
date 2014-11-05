@@ -8,7 +8,7 @@ S = "${WORKDIR}/git"
 
 PV = "${XEN_VERSION}+git${SRCPV}"
 
-SRCREV = "${OPENXT_TAG}"
+SRCREV = "${AUTOREV}"
 SRC_URI = "git://${OPENXT_GIT_MIRROR}/xsm-policy.git;protocol=${OPENXT_GIT_PROTOCOL};branch=${OPENXT_BRANCH}"
 
 FILES_${PN} += "/etc/xen/refpolicy/policy/policy.24"

@@ -4,8 +4,8 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=d32239bcb673463ab874e80d47fae504      \
                     file://COPYING.LESSER;md5=6a6a8e020838b23406c81b19c1d46df6"
 
 SRCREV_FORMAT = "source_patchqueue"
-SRCREV_source = "${OPENXT_TAG}"
-SRCREV_patchqueue = "${OPENXT_TAG}"
+SRCREV_source = "${AUTOREV}"
+SRCREV_patchqueue = "${AUTOREV}"
 
 PV = "0+git${SRCPV}"
 

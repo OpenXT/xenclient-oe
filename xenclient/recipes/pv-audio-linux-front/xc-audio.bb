@@ -4,7 +4,7 @@ LIC_FILES_CHKSUM="file://${TOPDIR}/COPYING.GPLv2;md5=751419260aa954499f7abaabaa8
 
 PV = "0+git${SRCPV}"
 
-SRCREV = "${OPENXT_TAG}"
+SRCREV = "${AUTOREV}"
 SRC_URI = "git://${OPENXT_GIT_MIRROR}/pv-linux-drivers.git;protocol=${OPENXT_GIT_PROTOCOL};branch=${OPENXT_BRANCH}"
 DEPENDS = "virtual/kernel v4v-module"
 

@@ -5,7 +5,7 @@ SRCREV_FORMAT = "source_patchqueue"
 
 PV = "${XEN_VERSION}+git${SRCPV}"
 
-SRCREV_patchqueue = "${OPENXT_TAG}"
+SRCREV_patchqueue = "${AUTOREV}"
 
 SRC_URI = "${XEN_SRC_URI};name=source \
 	  git://${OPENXT_GIT_MIRROR}/xen-common-pq.git;protocol=${OPENXT_GIT_PROTOCOL};branch=${OPENXT_BRANCH};destsuffix=patchqueue;name=patchqueue \

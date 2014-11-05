@@ -5,7 +5,7 @@ DEPENDS = "xen-tools linux-v4v-headers v4v-module"
 
 PV = "git${SRCPV}"
 
-SRCREV = "${OPENXT_TAG}"
+SRCREV = "${AUTOREV}"
 SRC_URI = "git://${OPENXT_GIT_MIRROR}/v4v.git;protocol=${OPENXT_GIT_PROTOCOL};branch=${OPENXT_BRANCH} \
 	   file://13-v4v.rules"
 

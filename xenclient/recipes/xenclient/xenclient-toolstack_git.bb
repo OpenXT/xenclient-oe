@@ -33,7 +33,7 @@ CFLAGS_append = " -I${OCAML_HEADERS}"
 
 PV = "0+git${SRCPV}"
 
-SRCREV = "${OPENXT_TAG}"
+SRCREV = "${AUTOREV}"
 SRC_URI = "git://${OPENXT_GIT_MIRROR}/toolstack.git;protocol=${OPENXT_GIT_PROTOCOL};branch=${OPENXT_BRANCH}	\
            file://vif"
 

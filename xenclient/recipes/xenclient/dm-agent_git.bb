@@ -1,6 +1,6 @@
 require dm-agent.inc
 
-SRCREV = "${OPENXT_TAG}"
+SRCREV = "${AUTOREV}"
 
 SRC_URI += "file://dm-agent.initscript"
 

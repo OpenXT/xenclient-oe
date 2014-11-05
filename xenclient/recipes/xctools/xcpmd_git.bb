@@ -5,7 +5,7 @@ DEPENDS = "xenclient-idl dbus xen-tools pciutils libxcdbus libxenacpi xenclient-
 
 PV = "0+git${SRCPV}"
 
-SRCREV = "${OPENXT_TAG}"
+SRCREV = "${AUTOREV}"
 SRC_URI = "git://${OPENXT_GIT_MIRROR}/xctools.git;protocol=${OPENXT_GIT_PROTOCOL};branch=${OPENXT_BRANCH} \
 	   file://xcpmd.initscript \
 "

@@ -19,7 +19,7 @@ DEPENDS = "xenclient-rpcgen-native xenclient-idl dojosdk-native"
 
 PV = "0+git${SRCPV}"
 
-SRCREV = "${OPENXT_TAG}"
+SRCREV = "${AUTOREV}"
 SRC_URI = "git://${OPENXT_GIT_MIRROR}/toolstack-data.git;protocol=${OPENXT_GIT_PROTOCOL};branch=${OPENXT_BRANCH}"
 
 S = "${WORKDIR}/git"

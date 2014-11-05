@@ -12,7 +12,7 @@ export STAGING_KERNEL_DIR
 
 PV = "git${SRCPV}"
 
-SRCREV = "${OPENXT_TAG}"
+SRCREV = "${AUTOREV}"
 SRC_URI = "git://${OPENXT_GIT_MIRROR}/v4v.git;protocol=${OPENXT_GIT_PROTOCOL};branch=${OPENXT_BRANCH}"
 
 S="${WORKDIR}/git/libv4v"

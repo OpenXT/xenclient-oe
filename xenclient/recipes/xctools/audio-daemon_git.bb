@@ -5,7 +5,7 @@ DEPENDS = " libv4v speex libevent libxcxenstore libxenbackend alsa-lib "
 
 PV = "0+git${SRCPV}"
 
-SRCREV = "${OPENXT_TAG}"
+SRCREV = "${AUTOREV}"
 SRC_URI = "git://${OPENXT_GIT_MIRROR}/xctools.git;protocol=${OPENXT_GIT_PROTOCOL};branch=${OPENXT_BRANCH} \
           file://audio-daemon-start"
 

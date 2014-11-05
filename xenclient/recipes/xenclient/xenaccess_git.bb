@@ -8,8 +8,8 @@ LICENSE = "GPLv2"
 LIC_FILES_CHKSUM = "file://COPYING;md5=d6058eb45f5694b85b31237bef240081"
 
 SRCREV_FORMAT = "source_patchqueue"
-SRCREV_source = "${OPENXT_TAG}"
-SRCREV_patchqueue = "${OPENXT_TAG}"
+SRCREV_source = "${AUTOREV}"
+SRCREV_patchqueue = "${AUTOREV}"
 
 PV = "0+git${SRCPV}"
 

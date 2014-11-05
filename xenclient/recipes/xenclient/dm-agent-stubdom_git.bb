@@ -1,5 +1,5 @@
 require dm-agent.inc
 
-SRCREV = "${OPENXT_TAG}"
+SRCREV = "${AUTOREV}"
 
 EXTRA_OECONF += "--disable-syslog --disable-dmbus"

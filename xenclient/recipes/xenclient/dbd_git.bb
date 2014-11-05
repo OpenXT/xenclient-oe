@@ -10,7 +10,7 @@ DEPENDS = "xenclient-idl ocaml-cross ocaml-dbus xenclient-toolstack xenclient-rp
 
 PV = "0+git${SRCPV}"
 
-SRCREV = "${OPENXT_TAG}"
+SRCREV = "${AUTOREV}"
 SRC_URI = "git://${OPENXT_GIT_MIRROR}/manager.git;protocol=${OPENXT_GIT_PROTOCOL};branch=${OPENXT_BRANCH}"
 
 SRC_URI += "file://dbd.initscript \
