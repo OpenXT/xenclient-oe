@@ -6,7 +6,10 @@ DEPENDS = "ocaml-cross ocaml-dbus xenclient-toolstack"
 
 # Ocaml stuff is built with the native compiler with "-m32".
 
-SRC_URI = "${OPENXT_GIT_MIRROR}/uid.git;protocol=git;tag=${OPENXT_TAG}"
+PV = "0+git${SRCPV}"
+
+SRCREV = "${AUTOREV}"
+SRC_URI = "git://${OPENXT_GIT_MIRROR}/uid.git;protocol=${OPENXT_GIT_PROTOCOL};branch=${OPENXT_BRANCH}"
 
 SRC_URI += "file://uid_dbus.conf \
 	    file://uid.conf \

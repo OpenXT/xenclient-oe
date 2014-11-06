@@ -6,7 +6,10 @@ PROVIDES = "xen-xsm-policy"
 
 S = "${WORKDIR}/git"
 
-SRC_URI = "${OPENXT_GIT_MIRROR}/xsm-policy.git;protocol=git;tag=${OPENXT_TAG}"
+PV = "${XEN_VERSION}+git${SRCPV}"
+
+SRCREV = "${AUTOREV}"
+SRC_URI = "git://${OPENXT_GIT_MIRROR}/xsm-policy.git;protocol=${OPENXT_GIT_PROTOCOL};branch=${OPENXT_BRANCH}"
 
 FILES_${PN} += "/etc/xen/refpolicy/policy/policy.24"
 

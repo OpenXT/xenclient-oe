@@ -2,7 +2,10 @@ DESCRIPTION = "XenClient IDL definitions + rpc stubs generation mechanism"
 LICENSE = "GPLv2"
 LIC_FILES_CHKSUM = "file://${TOPDIR}/COPYING.GPLv2;md5=751419260aa954499f7abaabaa882bbe"
 
-SRC_URI = "${OPENXT_GIT_MIRROR}/idl.git;protocol=git;tag=${OPENXT_TAG}"
+PV = "0+git${SRCPV}"
+
+SRCREV = "${AUTOREV}"
+SRC_URI = "git://${OPENXT_GIT_MIRROR}/idl.git;protocol=${OPENXT_GIT_PROTOCOL};branch=${OPENXT_BRANCH}"
 S = "${WORKDIR}/git"
 
 inherit xenclient

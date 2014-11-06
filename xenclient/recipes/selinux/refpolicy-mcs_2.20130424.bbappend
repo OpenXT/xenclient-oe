@@ -1,10 +1,17 @@
 FILESEXTRA := "${THISDIR}/${PN}"
 FILESEXTRAPATHS_prepend := "${FILESEXTRA}:"
 
-SRC_URI += " \
-	   ${OPENXT_GIT_MIRROR}/refpolicy-xt-pq.git;protocol=git;tag=${OPENXT_TAG} \
-	   ${OPENXT_GIT_MIRROR}/selinux-policy.git;protocol=git;tag=${OPENXT_TAG} \
-	   file://config \
+SRCREV_FORMAT = "modules_patchqueue"
+
+SRCREV_modules = "${AUTOREV}"
+SRCREV_patchqueue = "${AUTOREV}"
+
+# FIXME: We really should be setting this, but doing so breaks the base include which expects PV=2.20130424
+# PV = "2.20130424+git${SRCPV}"
+
+SRC_URI += "git://${OPENXT_GIT_MIRROR}/selinux-policy.git;protocol=${OPENXT_GIT_PROTOCOL};branch=${OPENXT_BRANCH};destsuffix=modules;name=modules \
+        git://${OPENXT_GIT_MIRROR}/refpolicy-xt-pq.git;protocol=${OPENXT_GIT_PROTOCOL};branch=${OPENXT_BRANCH};destsuffix=patchqueue;name=patchqueue \
+        file://config \
 "
 
 RDEPENDS_${PN} = ""
@@ -30,8 +37,6 @@ conf_file = "${FILESEXTRA}/config"
 POL_TYPE = "${@get_poltype(conf_file)}"
 
 do_apply_patchqueue_prepend() {
-        # no way to clone to a directory other than 'git'?
-        mv ${WORKDIR}/git ${MODS_DIR}
         find ${MODS_DIR} -name '*.fc' -o -name '*.if' -o -name '*.te' | while read MOD_FILE; do
                 DIR_PART=$(echo ${MOD_FILE} | grep -o 'policy/modules/[0-9a-zA-Z_\-]\+/')
                 cp ${MOD_FILE} ${S}/${DIR_PART}

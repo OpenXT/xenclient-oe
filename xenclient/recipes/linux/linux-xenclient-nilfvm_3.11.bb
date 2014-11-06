@@ -13,3 +13,5 @@ DEPENDS = " ${@deb_bootstrap_deps(d)} "
 DEB_DESC = "${DESCRIPTION}"
 DEB_DESC_EXT = "This package provides the linux kernel image for XenClient VPN domain."
 
+FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}-3.11"
+

@@ -17,7 +17,10 @@ LICENSE = "GPLv2"
 LIC_FILES_CHKSUM="file://COPYING;md5=4641e94ec96f98fabc56ff9cc48be14b"
 DEPENDS = "xenclient-rpcgen-native xenclient-idl dojosdk-native"
 
-SRC_URI = "${OPENXT_GIT_MIRROR}/toolstack-data.git;protocol=git;tag=${OPENXT_TAG}"
+PV = "0+git${SRCPV}"
+
+SRCREV = "${AUTOREV}"
+SRC_URI = "git://${OPENXT_GIT_MIRROR}/toolstack-data.git;protocol=${OPENXT_GIT_PROTOCOL};branch=${OPENXT_BRANCH}"
 
 S = "${WORKDIR}/git"
 OUTPUT_DIR = "${S}/dist/script/services"
