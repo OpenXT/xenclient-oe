@@ -54,15 +54,13 @@ sysroot_stage_all_append () {
 }
 
 pkg_postinst_${PN} () {
-	/sbin/setfiles /etc/selinux/${POL_TYPE}/contexts/files/file_contexts /
-}
-
-pkg_postinst_${PN}_xenclient-ndvm () {
-    if [ -z "$D" ];then
-        /sbin/setfiles /etc/selinux/${POL_TYPE}/contexts/files/file_contexts /
+    if [ -z "$D" ]; then
+		/sbin/setfiles /etc/selinux/${POL_TYPE}/contexts/files/file_contexts /
     fi
 }
 
 pkg_postinst_${PN}_append_xenclient-dom0 () {
-	/sbin/setfiles /etc/selinux/${POL_TYPE}/contexts/files/file_contexts /config /storage
+    if [ -z "$D" ]; then
+		/sbin/setfiles /etc/selinux/${POL_TYPE}/contexts/files/file_contexts /config /storage
+	fi
 }
