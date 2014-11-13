@@ -50,19 +50,17 @@ do_install_append() {
 }
 
 sysroot_stage_all_append () {
-	sysroot_stage_dir ${D}${sysconfdir} ${SYSROOT_DESTDIR}${sysconfdir}
+    sysroot_stage_dir ${D}${sysconfdir} ${SYSROOT_DESTDIR}${sysconfdir}
 }
 
 pkg_postinst_${PN} () {
-	/sbin/setfiles /etc/selinux/${POL_TYPE}/contexts/files/file_contexts /
-}
-
-pkg_postinst_${PN}_xenclient-ndvm () {
-    if [ -z "$D" ];then
+    if [ -z "$D" ]; then
         /sbin/setfiles /etc/selinux/${POL_TYPE}/contexts/files/file_contexts /
     fi
 }
 
 pkg_postinst_${PN}_append_xenclient-dom0 () {
-	/sbin/setfiles /etc/selinux/${POL_TYPE}/contexts/files/file_contexts /config /storage
+    if [ -z "$D" ]; then
+        /sbin/setfiles /etc/selinux/${POL_TYPE}/contexts/files/file_contexts /config /storage
+    fi
 }
