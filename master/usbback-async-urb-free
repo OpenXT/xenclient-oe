@@ -4,11 +4,10 @@ From: Ross Philipson <ross.philipson@gmail.com>, Tomasz Wroblewski <tomasz.wrobl
 
 The calls to free the USB requests in interrupt context was causing an
 oops in dma_free_attrs. On x84 32b it does a WARN_ON(irqs_disabled()) "for
-portability". Also have to ensure the URBs do not disappear after the
-completion routine runs - hold a ref count on the URBs until the final
-cleanup in vusb_free_coherent.
+portability".
 
 Signed-off-by: Ross Philipson <ross.philipson@gmail.com>
+---
 diff --git a/drivers/usb/xen-usbback/common.h b/drivers/usb/xen-usbback/common.h
 index 27977cd..76dbdb3 100644
 --- a/drivers/usb/xen-usbback/common.h
@@ -22,7 +21,7 @@ index 27977cd..76dbdb3 100644
  #ifdef USBBK_TIMEOUT
  	struct timer_list        timer;
 diff --git a/drivers/usb/xen-usbback/usbback.c b/drivers/usb/xen-usbback/usbback.c
-index 8e32d75..ccd3575 100644
+index 8e32d75..f006c79 100644
 --- a/drivers/usb/xen-usbback/usbback.c
 +++ b/drivers/usb/xen-usbback/usbback.c
 @@ -76,6 +76,11 @@ static pending_segment_t *pending_segments;
@@ -73,20 +72,15 @@ index 8e32d75..ccd3575 100644
  
  	debug_print(LOG_LVL_INFO, "end id %llu len %d status %d %s\n",
  		pending_req->id, urb->actual_length, status,
-@@ -575,7 +602,19 @@ static void end_usb_io_op(struct urb *urb)
+@@ -575,7 +602,14 @@ static void end_usb_io_op(struct urb *urb)
  	make_response(usbif, pending_req->id, urb->actual_length,
  		urb->start_frame, get_usb_status(status));
  	usbif_put(pending_req->usbif);
 -	free_req(pending_req);
 +
-+	/* Schedule async free as it causes an oops on 32bit kernel doing dma frees
-+	 * in this completion handler with irqs disabled. There is a
-+	 * WARN_ON(irqs_disabled()) in dma_free_attrs.  We have to bump the ref count
-+	 * on the urb since it will be released after this completion routine returns.
-+	 * See the code in hcd.c:usb_hcd_giveback_urb() that call the completion
-+	 * callback.
-+	 */
-+	urb = usb_get_urb(urb);
++	/* Schedule async free as it cases an oops on 32bit kernel doing dma frees
++	 * in interrupt context. There is a WARN_ON(irqs_disabled()) in dma_free_attrs.
++         */
 +	spin_lock_irqsave(&pending_to_free_lock, flags);
 +	list_add_tail(&pending_req->to_free_list, &pending_to_free);
 +	spin_unlock_irqrestore(&pending_to_free_lock, flags);
@@ -94,7 +88,7 @@ index 8e32d75..ccd3575 100644
  }
  
  /******************************************************************************
-@@ -1142,6 +1181,8 @@ static int __init usbif_init(void)
+@@ -1142,6 +1176,8 @@ static int __init usbif_init(void)
  		list_add_tail(&pending_reqs[i].free_list, &pending_free);
  	}
  
@@ -103,32 +97,3 @@ index 8e32d75..ccd3575 100644
  	usbif_xenbus_init();
  
  	printk("USB backend driver intialized!\n");
-diff --git a/drivers/usb/xen-usbback/vusb.c b/drivers/usb/xen-usbback/vusb.c
-index 60b2c43..1a2a92b 100644
---- a/drivers/usb/xen-usbback/vusb.c
-+++ b/drivers/usb/xen-usbback/vusb.c
-@@ -876,12 +876,22 @@ void vusb_free_coherent(struct vusb *vusb, struct urb *urb)
- {
- 	struct usb_device *usbdev = urb->dev ? urb->dev : vusb->usbdev;
- 
--	if (usbdev)
-+	if (usbdev) {
-+		/* This frees the dma resources for this urb */
- 		usb_free_coherent(usbdev, urb->transfer_buffer_length,
- 		        urb->transfer_buffer, urb->transfer_dma);
--	else
-+		/* The urb had its ref count bumped before being queued for
-+		 * cleanup in the bottom half async_free_reqs(). This was to
-+		 * keep it alive so it can be asynchronously cleaned up.
-+		 * Dropping that ref here will finally cleanup and release the
-+		 * urb.
-+		 */
-+		usb_free_urb(urb);
-+	}
-+	else {
- 		debug_print(LOG_LVL_ERROR, "%s: leaking buffer! no dev!",
- 			__FUNCTION__);
-+	}
- 	urb->transfer_buffer = NULL;
- }
- 
