@@ -1,6 +1,6 @@
 DESCRIPTION = "XenClient keymap sync daemon"
 LICENSE = "MIT"
-LIC_FILES_CHKSUM = "file://${TOPDIR}/COPYING.MIT;md5=3da9cfbcb788c80a0384361b4de20420"
+LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=3da9cfbcb788c80a0384361b4de20420"
 SRC_URI = "file://keymap-sync"
 RDEPENDS = "xenclient-keyboard-list"
 
