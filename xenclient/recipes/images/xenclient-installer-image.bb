@@ -37,6 +37,10 @@ IMAGE_INSTALL = "\
     task-base \
     task-xenclient-common \
     task-xenclient-installer \
+    intel-e1000e \
+    intel-e1000e-conf \
+    linux-firmware \
+    rt2870-firmware \
     ${ANGSTROM_EXTRA_INSTALL}"
 
 IMAGE_FSTYPES = "cpio.gz"
