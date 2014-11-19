@@ -4,10 +4,11 @@ From: Ross Philipson <ross.philipson@gmail.com>, Tomasz Wroblewski <tomasz.wrobl
 
 The calls to free the USB requests in interrupt context was causing an
 oops in dma_free_attrs. On x84 32b it does a WARN_ON(irqs_disabled()) "for
-portability".
+portability". Also have to ensure the URBs do not disappear after the
+completion routine runs - hold a ref count on the URBs until the final
+cleanup in async_free_reqs.
 
 Signed-off-by: Ross Philipson <ross.philipson@gmail.com>
----
 diff --git a/drivers/usb/xen-usbback/common.h b/drivers/usb/xen-usbback/common.h
 index 27977cd..76dbdb3 100644
 --- a/drivers/usb/xen-usbback/common.h
@@ -21,7 +22,7 @@ index 27977cd..76dbdb3 100644
  #ifdef USBBK_TIMEOUT
  	struct timer_list        timer;
 diff --git a/drivers/usb/xen-usbback/usbback.c b/drivers/usb/xen-usbback/usbback.c
-index 8e32d75..f006c79 100644
+index 8e32d75..d7f3c1c 100644
 --- a/drivers/usb/xen-usbback/usbback.c
 +++ b/drivers/usb/xen-usbback/usbback.c
 @@ -76,6 +76,11 @@ static pending_segment_t *pending_segments;
@@ -36,7 +37,7 @@ index 8e32d75..f006c79 100644
  static int do_usb_io_op(usbif_t *usbif);
  static void dispatch_usb_io(usbif_t *usbif,
  				 usbif_request_t *req,
-@@ -274,6 +279,27 @@ static void free_req(pending_req_t *req)
+@@ -274,6 +279,38 @@ static void free_req(pending_req_t *req)
  		wake_up(&pending_free_wq);
  }
  
@@ -44,27 +45,38 @@ index 8e32d75..f006c79 100644
 +{
 +	struct list_head tmp;
 +	pending_req_t *req;
++	struct urb *urb;
 +	unsigned long flags;
 +
 +	INIT_LIST_HEAD(&tmp);
 +
-+	/* copy to temp list */
++	/* Copy to temp list */
 +	spin_lock_irqsave(&pending_to_free_lock, flags);
 +	list_splice_init(&pending_to_free, &tmp);
 +	spin_unlock_irqrestore(&pending_to_free_lock, flags);
 +
-+	/* run actual free outside of interrupt context */
++	/* Run actual free outside of interrupt context */
 +	while (!list_empty(&tmp)) {
 +		req = list_entry(tmp.next, pending_req_t, to_free_list);
 +		list_del(&req->to_free_list);
++
++		/* Stash the urb and call the real free_req routine */
++		urb = req->urb;
 +		free_req(req);
++
++		/* The urb had its ref count bumped to keep it alive before being queued for
++		 * cleanup in this bottom half routine. Dropping that ref here will likely
++		 * cleanup and release the urb.
++	 	 */
++		if (urb)
++			usb_put_urb(urb);
 +	}
 +}
 +
  #ifdef INDIRECT_SEGMENTS
  static void fast_flush_area_indirect(pending_req_t *req)
  {
-@@ -548,6 +574,7 @@ static void end_usb_io_op(struct urb *urb)
+@@ -548,6 +585,7 @@ static void end_usb_io_op(struct urb *urb)
  	usbif_t *usbif = pending_req->usbif;
  	int status = vusb_canceling_requests(&usbif->vusb) ?
  		-ECONNRESET : urb->status;
@@ -72,15 +84,19 @@ index 8e32d75..f006c79 100644
  
  	debug_print(LOG_LVL_INFO, "end id %llu len %d status %d %s\n",
  		pending_req->id, urb->actual_length, status,
-@@ -575,7 +602,14 @@ static void end_usb_io_op(struct urb *urb)
+@@ -575,7 +613,18 @@ static void end_usb_io_op(struct urb *urb)
  	make_response(usbif, pending_req->id, urb->actual_length,
  		urb->start_frame, get_usb_status(status));
  	usbif_put(pending_req->usbif);
 -	free_req(pending_req);
 +
-+	/* Schedule async free as it cases an oops on 32bit kernel doing dma frees
-+	 * in interrupt context. There is a WARN_ON(irqs_disabled()) in dma_free_attrs.
-+         */
++	/* Schedule async free as it causes an oops on 32bit kernel doing dma frees in
++	 * this completion handler with irqs disabled (the WARN_ON(irqs_disabled())
++	 * in dma_free_attrs).  We have to bump the ref count on the urb since it will
++	 * be released after this completion routine returns. See the code in
++	 * hcd.c:usb_hcd_giveback_urb() that call the completion callback.
++	 */
++	urb = usb_get_urb(urb);
 +	spin_lock_irqsave(&pending_to_free_lock, flags);
 +	list_add_tail(&pending_req->to_free_list, &pending_to_free);
 +	spin_unlock_irqrestore(&pending_to_free_lock, flags);
@@ -88,7 +104,7 @@ index 8e32d75..f006c79 100644
  }
  
  /******************************************************************************
-@@ -1142,6 +1176,8 @@ static int __init usbif_init(void)
+@@ -1142,6 +1191,8 @@ static int __init usbif_init(void)
  		list_add_tail(&pending_reqs[i].free_list, &pending_free);
  	}
  
