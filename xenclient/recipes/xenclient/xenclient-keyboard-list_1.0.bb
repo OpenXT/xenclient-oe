@@ -1,6 +1,6 @@
 DESCRIPTION = "XenClient keyboard list"
 LICENSE = "MIT"
-LIC_FILES_CHKSUM = "file://${TOPDIR}/COPYING.MIT;md5=3da9cfbcb788c80a0384361b4de20420"
+LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=3da9cfbcb788c80a0384361b4de20420"
 DEPENDS = "xkeyboard-config"
 
 SRC_URI = "file://supported-keyboards \
