@@ -1,6 +1,6 @@
 DESCRIPTION = "loads haskell libs into file system cache which reduces boot time"
 LICENSE = "GPLv2"
-LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/GPL-2.0;md5=751419260aa954499f7abaabaa882bbe"
+LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/GPL-2.0;md5=801f80980d171dd6425610833a22dbe6"
 
 inherit xenclient
 RDEPENDS += " util-linux-ionice "

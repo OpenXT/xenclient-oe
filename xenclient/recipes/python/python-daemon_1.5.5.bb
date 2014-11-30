@@ -1,7 +1,7 @@
 DESCRIPTION = "Python library to implement a well-behaved UNIX daemon process"
 LICENSE = "PSFv2 & GPLv2"
 LIC_FILES_CHKSUM = "file://LICENSE.PSF-2;md5=df85bcaff3f7eee8d043d15be0f5f123      \
-                    file://LICENSE.GPL-2;md5=751419260aa954499f7abaabaa882bbe"
+                    file://LICENSE.GPL-2;md5=801f80980d171dd6425610833a22dbe6"
 RDEPENDS_${PN} += "python-io \
                    python-lang \
                    python-resource"

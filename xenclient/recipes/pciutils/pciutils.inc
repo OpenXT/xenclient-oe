@@ -4,7 +4,7 @@ DESCRIPTION_pciutils-ids = 'The list of PCI IDs for pciutils'
 SECTION = "console/utils"
 HOMEPAGE = "http://atrey.karlin.mff.cuni.cz/~mj/pciutils.shtml"
 LICENSE = "GPLv2"
-LIC_FILES_CHKSUM = "file://COPYING;md5=751419260aa954499f7abaabaa882bbe"
+LIC_FILES_CHKSUM = "file://COPYING;md5=801f80980d171dd6425610833a22dbe6"
 DEPENDS = "zlib"
 
 SRC_URI = "ftp://ftp.kernel.org/pub/software/utils/pciutils/pciutils-${PV}.tar.bz2"
