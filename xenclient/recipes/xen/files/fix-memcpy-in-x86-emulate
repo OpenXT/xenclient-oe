@@ -1,0 +1,80 @@
+diff --git a/xen/arch/x86/hvm/hvm.c b/xen/arch/x86/hvm/hvm.c
+index 2dd9b7e..2ad603e 100644
+--- a/xen/arch/x86/hvm/hvm.c
++++ b/xen/arch/x86/hvm/hvm.c
+@@ -2602,6 +2602,26 @@ void hvm_task_switch(
+     hvm_unmap_entry(nptss_desc);
+ }
+ 
++/*
++ * Routine to make __hvm_copy appropriate to use for copying the
++ * results of instruction emulation back to guest memory - these
++ * typically require 64-bit, 32-bit and 16-bit writes to be atomic
++ * whereas memcpy is only atomic for 64-bit writes. This is still
++ * not 100% correct since copies larger than 64-bits will not be
++ * atomic for the last 2-6 bytes but should be good enough for
++ * instruction emulation
++ */
++static inline void __hvm_atomic_copy(
++    void *to, void *from, int count)
++{
++    if (count == sizeof(uint32_t))
++        *(uint32_t *)to = *(uint32_t *)from;
++    else if (count == sizeof(uint16_t))
++        *(uint16_t *)to = *(uint16_t *)from;
++    else
++        memcpy(to, from, count);
++}
++
+ #define HVMCOPY_from_guest (0u<<0)
+ #define HVMCOPY_to_guest   (1u<<0)
+ #define HVMCOPY_no_fault   (0u<<1)
+@@ -2701,7 +2721,7 @@ static enum hvm_copy_result __hvm_copy(
+             }
+             else
+             {
+-                memcpy(p, buf, count);
++                __hvm_atomic_copy(p, buf, count);
+                 paging_mark_dirty(curr->domain, page_to_mfn(page));
+             }
+         }
+diff --git a/xen/arch/x86/mm/shadow/multi.c b/xen/arch/x86/mm/shadow/multi.c
+index 3fed0b6..5e0da82 100644
+--- a/xen/arch/x86/mm/shadow/multi.c
++++ b/xen/arch/x86/mm/shadow/multi.c
+@@ -4762,6 +4762,26 @@ static void emulate_unmap_dest(struct vcpu *v,
+     atomic_inc(&v->domain->arch.paging.shadow.gtable_dirty_version);
+ }
+ 
++/*
++ * Routine to make sh_x86_emulate_write appropriate to use for copying the
++ * results of instruction emulation back to guest memory - these
++ * typically require 64-bit, 32-bit and 16-bit writes to be atomic
++ * whereas memcpy is only atomic for 64-bit writes. This is still
++ * not 100% correct since copies larger than 64-bits will not be
++ * atomic for the last 2-6 bytes but should be good enough for
++ * instruction emulation
++ */
++static inline void __sh_atomic_write(
++    void *to, void *from, int count)
++{
++    if (count == sizeof(uint32_t))
++        *(uint32_t *)to = *(uint32_t *)from;
++    else if (count == sizeof(uint16_t))
++        *(uint16_t *)to = *(uint16_t *)from;
++    else
++        memcpy(to, from, count);
++}
++
+ static int
+ sh_x86_emulate_write(struct vcpu *v, unsigned long vaddr, void *src,
+                      u32 bytes, struct sh_emulate_ctxt *sh_ctxt)
+@@ -4777,7 +4797,7 @@ sh_x86_emulate_write(struct vcpu *v, unsigned long vaddr, void *src,
+         return (long)addr;
+ 
+     paging_lock(v->domain);
+-    memcpy(addr, src, bytes);
++    __sh_atomic_write(addr, src, bytes);
+ 
+     if ( tb_init_done )
+     {

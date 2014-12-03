@@ -1,0 +1,374 @@
+diff --git a/tools/firmware/hvmloader/hvmloader.c b/tools/firmware/hvmloader/hvmloader.c
+index 9c1cba2..15e42f5 100644
+--- a/tools/firmware/hvmloader/hvmloader.c
++++ b/tools/firmware/hvmloader/hvmloader.c
+@@ -125,11 +125,13 @@ static void init_hypercalls(void)
+         *(uint32_t *)(signature + 8) = edx;
+         signature[12] = '\0';
+ 
+-        if ( !strcmp("XenVMMXenVMM", signature) )
++        if ( !strcmp("XenVMMXenVMM", signature) ||
++             !strcmp("XciVMMXciVMM", signature) )
+             break;
+     }
+ 
+-    BUG_ON(strcmp("XenVMMXenVMM", signature) || ((eax - base) < 2));
++    BUG_ON((   strcmp("XenVMMXenVMM", signature)
++            && strcmp("XciVMMXciVMM", signature) )|| ((eax - base) < 2));
+ 
+     /* Fill in hypercall transfer pages. */
+     cpuid(base + 2, &eax, &ebx, &ecx, &edx);
+diff --git a/tools/libxc/xc_cpuid_x86.c b/tools/libxc/xc_cpuid_x86.c
+index 17efc0f..77cb077 100644
+--- a/tools/libxc/xc_cpuid_x86.c
++++ b/tools/libxc/xc_cpuid_x86.c
+@@ -125,6 +125,7 @@ static void amd_xc_cpuid_policy(
+         break;
+     }
+ 
++#if 0 /* Removed by xc-cpuid */
+     case 0x80000008:
+         /*
+          * ECX[15:12] is ApicIdCoreSize: ECX[7:0] is NumberOfCores (minus one).
+@@ -132,6 +133,7 @@ static void amd_xc_cpuid_policy(
+          */
+         regs[2] = ((regs[2] & 0xf000u) + 1) | ((regs[2] & 0xffu) << 1) | 1u;
+         break;
++#endif
+ 
+     case 0x8000000a: {
+         if (!is_nestedhvm) {
+@@ -178,13 +180,8 @@ static void intel_xc_cpuid_policy(
+         break;
+ 
+     case 0x00000004:
+-        /*
+-         * EAX[31:26] is Maximum Cores Per Package (minus one).
+-         * Update to reflect vLAPIC_ID = vCPU_ID * 2.
+-         */
+-        regs[0] = (((regs[0] & 0x7c000000u) << 1) | 0x04000000u |
+-                   (regs[0] & 0x3ffu));
+-        regs[3] &= 0x3ffu;
++        regs[0] &= 0x3FF;
++        regs[3] &= 0x3FF;
+         break;
+ 
+     case 0x80000000:
+@@ -208,11 +205,6 @@ static void intel_xc_cpuid_policy(
+     case 0x80000005:
+         regs[0] = regs[1] = regs[2] = 0;
+         break;
+-
+-    case 0x80000008:
+-        /* Mask AMD Number of Cores information. */
+-        regs[2] = 0;
+-        break;
+     }
+ }
+ 
+@@ -300,12 +292,6 @@ static void xc_cpuid_hvm_policy(
+         break;
+ 
+     case 0x00000001:
+-        /*
+-         * EBX[23:16] is Maximum Logical Processors Per Package.
+-         * Update to reflect vLAPIC_ID = vCPU_ID * 2.
+-         */
+-        regs[1] = (regs[1] & 0x0000ffffu) | ((regs[1] & 0x007f0000u) << 1);
+-
+         regs[2] &= (bitmaskof(X86_FEATURE_XMM3) |
+                     bitmaskof(X86_FEATURE_PCLMULQDQ) |
+                     bitmaskof(X86_FEATURE_SSSE3) |
+@@ -348,8 +334,7 @@ static void xc_cpuid_hvm_policy(
+                     bitmaskof(X86_FEATURE_MMX) |
+                     bitmaskof(X86_FEATURE_FXSR) |
+                     bitmaskof(X86_FEATURE_XMM) |
+-                    bitmaskof(X86_FEATURE_XMM2) |
+-                    bitmaskof(X86_FEATURE_HT));
++                    bitmaskof(X86_FEATURE_XMM2));
+             
+         /* We always support MTRR MSRs. */
+         regs[3] |= bitmaskof(X86_FEATURE_MTRR);
+@@ -403,7 +388,7 @@ static void xc_cpuid_hvm_policy(
+ 
+     case 0x80000008:
+         regs[0] &= 0x0000ffffu;
+-        regs[1] = regs[3] = 0;
++        regs[1] = regs[2] = regs[3] = 0;
+         break;
+ 
+     case 0x00000002: /* Intel cache info (dumped by AMD policy) */
+diff --git a/tools/libxc/xc_domain.c b/tools/libxc/xc_domain.c
+index c58f559..cf640b9 100644
+--- a/tools/libxc/xc_domain.c
++++ b/tools/libxc/xc_domain.c
+@@ -667,6 +667,17 @@ int xc_domain_set_time_offset(xc_interface *xch,
+     return do_domctl(xch, &domctl);
+ }
+ 
++int xc_domain_set_cores_per_socket(xc_interface *xch,
++                                   uint32_t domid,
++                                   uint32_t cores_per_socket)
++{
++    DECLARE_DOMCTL;
++    domctl.cmd = XEN_DOMCTL_setcorespersocket;
++    domctl.domain = (domid_t)domid;
++    domctl.u.setcorespersocket.cores_per_socket = cores_per_socket;
++    return do_domctl(xch, &domctl);
++}
++
+ int xc_domain_disable_migrate(xc_interface *xch, uint32_t domid)
+ {
+     DECLARE_DOMCTL;
+diff --git a/tools/libxc/xenctrl.h b/tools/libxc/xenctrl.h
+index 3e028f8..57d7793 100644
+--- a/tools/libxc/xenctrl.h
++++ b/tools/libxc/xenctrl.h
+@@ -1127,6 +1127,10 @@ int xc_domain_set_time_offset(xc_interface *xch,
+                               uint32_t domid,
+                               int32_t time_offset_seconds);
+ 
++int xc_domain_set_cores_per_socket(xc_interface *xch,
++				   uint32_t domid,
++				   uint32_t cores_per_socket);
++
+ int xc_domain_set_tsc_info(xc_interface *xch,
+                            uint32_t domid,
+                            uint32_t tsc_mode,
+diff --git a/xen/arch/x86/hvm/hvm.c b/xen/arch/x86/hvm/hvm.c
+index c6fce9a..337bc6e 100644
+--- a/xen/arch/x86/hvm/hvm.c
++++ b/xen/arch/x86/hvm/hvm.c
+@@ -3864,6 +3864,10 @@ long do_hvm_op(unsigned long op, XEN_GUEST_HANDLE_PARAM(void) arg)
+                 if ( a.value > 1 )
+                     rc = -EINVAL;
+                 break;
++            case HVM_PARAM_XCI_CPUID_SIGNATURE:
++                if ( a.value > 1 )
++                    rc = -EINVAL;
++                break;
+             case HVM_PARAM_IDENT_PT:
+                 /* Not reflexive, as we must domain_pause(). */
+                 rc = -EPERM;
+diff --git a/xen/arch/x86/hvm/svm/svm.c b/xen/arch/x86/hvm/svm/svm.c
+index cdc176d..151ca78 100644
+--- a/xen/arch/x86/hvm/svm/svm.c
++++ b/xen/arch/x86/hvm/svm/svm.c
+@@ -1353,21 +1353,34 @@ static void svm_fpu_dirty_intercept(void)
+         vmcb_set_cr0(vmcb, vmcb_get_cr0(vmcb) & ~X86_CR0_TS);
+ }
+ 
++#define bitmaskof(idx)  (1U << ((idx) & 31))
+ static void svm_cpuid_intercept(
+     unsigned int *eax, unsigned int *ebx,
+     unsigned int *ecx, unsigned int *edx)
+ {
+     unsigned int input = *eax;
+     struct vcpu *v = current;
++    unsigned int cores_per_socket = current->domain->cores_per_socket;
+ 
+     hvm_cpuid(input, eax, ebx, ecx, edx);
+ 
+     switch (input) {
++    case 0x00000001:
++        if ( cores_per_socket > 1 )
++        {
++            *ebx &= 0xFF00FFFF;
++            *ebx |= (2 * cores_per_socket & 0xFF) << 16;
++            *edx |= 0x1 << 28;
++        }
++        break;
+     case 0x80000001:
+         /* Fix up VLAPIC details. */
+         if ( vlapic_hw_disabled(vcpu_vlapic(v)) )
+             __clear_bit(X86_FEATURE_APIC & 31, edx);
+         break;
++        if (cores_per_socket > 1)
++            *ecx |= cpufeat_mask(X86_FEATURE_CMP_LEGACY);
++        break;
+     case 0x8000001c: 
+     {
+         /* LWP capability CPUID */
+@@ -1386,6 +1399,12 @@ static void svm_cpuid_intercept(
+         }
+         break;
+     }
++    case 0x80000008:
++        /* Make sure Number of CPU core is 1 when HTT=0 */
++        *ecx &= 0xFFFF0F00;
++        if ( cores_per_socket > 1 )
++            *ecx |= (2 * cores_per_socket - 1) & 0xFF;
++        break;
+     default:
+         break;
+     }
+diff --git a/xen/arch/x86/hvm/vmx/vmx.c b/xen/arch/x86/hvm/vmx/vmx.c
+index d0de44a..33886d5 100644
+--- a/xen/arch/x86/hvm/vmx/vmx.c
++++ b/xen/arch/x86/hvm/vmx/vmx.c
+@@ -1646,11 +1646,31 @@ static void vmx_cpuid_intercept(
+     unsigned int input = *eax;
+     struct segment_register cs;
+     struct vcpu *v = current;
++    unsigned int cores_per_socket = current->domain->cores_per_socket;
+ 
+     hvm_cpuid(input, eax, ebx, ecx, edx);
+ 
+     switch ( input )
+     {
++        case 0x00000001:
++            if ( cores_per_socket > 1 )
++            {
++                /* to fake out #vcpus per socket first force on HT/MC */
++                *edx |= cpufeat_mask(X86_FEATURE_HT);
++                /* and then inform guest of #cores per package */
++                *ebx &= 0xFF00FFFF;
++                *ebx |= (((cores_per_socket * 2) & 0xFF) << 16);
++            }
++            break;
++
++        case 0x00000004:
++            if (cores_per_socket > 1) {
++                /* fake out cores per socket */
++                *eax &= 0x3FFF; /* one thread, one core */
++                *eax |= (((cores_per_socket * 2) - 1) << 26);
++            }
++            break;
++
+         case 0x80000001:
+             /* SYSCALL is visible iff running in long mode. */
+             vmx_get_segment_register(v, x86_seg_cs, &cs);
+diff --git a/xen/arch/x86/traps.c b/xen/arch/x86/traps.c
+index 0f2361a..8c7244e 100644
+--- a/xen/arch/x86/traps.c
++++ b/xen/arch/x86/traps.c
+@@ -700,10 +700,18 @@ int cpuid_hypervisor_leaves( uint32_t idx, uint32_t sub_idx,
+     switch ( idx )
+     {
+     case 0:
+-        *eax = base + limit; /* Largest leaf */
+-        *ebx = XEN_CPUID_SIGNATURE_EBX;
+-        *ecx = XEN_CPUID_SIGNATURE_ECX;
+-        *edx = XEN_CPUID_SIGNATURE_EDX;
++        /* possibly use XenClient cpuid signature */
++        if (is_hvm_domain(d) && (d->arch.hvm_domain.params[HVM_PARAM_XCI_CPUID_SIGNATURE])) {
++            *eax = base + limit; /* Largest leaf */
++            *ebx = XCI_CPUID_SIGNATURE_EBX;
++            *ecx = XCI_CPUID_SIGNATURE_ECX;
++            *edx = XCI_CPUID_SIGNATURE_EDX;
++        } else {
++            *eax = base + limit; /* Largest leaf */
++            *ebx = XEN_CPUID_SIGNATURE_EBX;
++            *ecx = XEN_CPUID_SIGNATURE_ECX;
++            *edx = XEN_CPUID_SIGNATURE_EDX;
++        }
+         break;
+ 
+     case 1:
+@@ -805,7 +813,6 @@ static void pv_cpuid(struct cpu_user_regs *regs)
+         __clear_bit(X86_FEATURE_PBE, &d);
+ 
+         __clear_bit(X86_FEATURE_DTES64 % 32, &c);
+-        __clear_bit(X86_FEATURE_MWAIT % 32, &c);
+         __clear_bit(X86_FEATURE_DSCPL % 32, &c);
+         __clear_bit(X86_FEATURE_VMXE % 32, &c);
+         __clear_bit(X86_FEATURE_SMXE % 32, &c);
+diff --git a/xen/common/domctl.c b/xen/common/domctl.c
+index 03714e2..a55fe30 100644
+--- a/xen/common/domctl.c
++++ b/xen/common/domctl.c
+@@ -873,6 +873,21 @@ long do_domctl(XEN_GUEST_HANDLE_PARAM(xen_domctl_t) u_domctl)
+     }
+     break;
+ 
++    case XEN_DOMCTL_setcorespersocket:
++    {
++        struct domain *d;
++
++        ret = -ESRCH;
++        d = rcu_lock_domain_by_id(op->domain);
++        if ( d != NULL )
++        {
++            d->cores_per_socket = op->u.setcorespersocket.cores_per_socket;
++            rcu_unlock_domain(d);
++            ret = 0;
++        }
++    }
++    break;
++
+     default:
+         ret = arch_do_domctl(op, d, u_domctl);
+         break;
+diff --git a/xen/include/public/arch-x86/cpuid.h b/xen/include/public/arch-x86/cpuid.h
+index d9bd627..42fc3d3 100644
+--- a/xen/include/public/arch-x86/cpuid.h
++++ b/xen/include/public/arch-x86/cpuid.h
+@@ -45,6 +45,11 @@
+ #define XEN_CPUID_SIGNATURE_ECX 0x65584d4d /* "MMXe" */
+ #define XEN_CPUID_SIGNATURE_EDX 0x4d4d566e /* "nVMM" */
+ 
++/* alternate XenClient cpuid signature */
++#define XCI_CPUID_SIGNATURE_EBX 0x56696358 /* "XciV" */
++#define XCI_CPUID_SIGNATURE_ECX 0x63584d4d /* "MMXc" */
++#define XCI_CPUID_SIGNATURE_EDX 0x4d4d5669 /* "iVMM" */
++
+ /*
+  * Leaf 2 (0x40000001)
+  * EAX[31:16]: Xen major version.
+diff --git a/xen/include/public/domctl.h b/xen/include/public/domctl.h
+index 75a20b4..138fa97 100644
+--- a/xen/include/public/domctl.h
++++ b/xen/include/public/domctl.h
+@@ -858,6 +858,13 @@ struct xen_domctl_set_broken_page_p2m {
+ typedef struct xen_domctl_set_broken_page_p2m xen_domctl_set_broken_page_p2m_t;
+ DEFINE_XEN_GUEST_HANDLE(xen_domctl_set_broken_page_p2m_t);
+ 
++#define XEN_DOMCTL_setcorespersocket  99
++struct xen_domctl_setcorespersocket {
++    uint32_t cores_per_socket;
++};
++typedef struct xen_domctl_setcorespersocket xen_domctl_setcorespersocket_t;
++DEFINE_XEN_GUEST_HANDLE(xen_domctl_setcorespersocket_t);
++
+ struct xen_domctl {
+     uint32_t cmd;
+ #define XEN_DOMCTL_createdomain                   1
+@@ -955,6 +962,7 @@ struct xen_domctl {
+         struct xen_domctl_hypercall_init    hypercall_init;
+         struct xen_domctl_arch_setup        arch_setup;
+         struct xen_domctl_settimeoffset     settimeoffset;
++        struct xen_domctl_setcorespersocket setcorespersocket;
+         struct xen_domctl_disable_migrate   disable_migrate;
+         struct xen_domctl_tsc_info          tsc_info;
+         struct xen_domctl_real_mode_area    real_mode_area;
+diff --git a/xen/include/public/hvm/params.h b/xen/include/public/hvm/params.h
+index 517a184..d8554d4 100644
+--- a/xen/include/public/hvm/params.h
++++ b/xen/include/public/hvm/params.h
+@@ -145,6 +145,11 @@
+ /* SHUTDOWN_* action in case of a triple fault */
+ #define HVM_PARAM_TRIPLE_FAULT_REASON 31
+ 
+-#define HVM_NR_PARAMS          32
++/* XenClient specific hvm params */
++
++/* use Xci cpuid signature instead of standard Xen one */
++#define HVM_PARAM_XCI_CPUID_SIGNATURE 32 
++
++#define HVM_NR_PARAMS          33
+ 
+ #endif /* __XEN_PUBLIC_HVM_PARAMS_H__ */
+diff --git a/xen/include/xen/sched.h b/xen/include/xen/sched.h
+index 8f78fcd..f5ec5a9 100644
+--- a/xen/include/xen/sched.h
++++ b/xen/include/xen/sched.h
+@@ -337,6 +337,9 @@ struct domain
+ 
+     struct arch_domain arch;
+ 
++    /*Nb of cores exposed for cpuid, see XEN_DOMCTL_setcorespersocket*/
++    unsigned int cores_per_socket;
++
+     void *ssid; /* sHype security subject identifier */
+ 
+     /* Control-plane tools handle for this domain. */

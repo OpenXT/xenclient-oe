@@ -1,0 +1,144 @@
+diff --git a/xen/arch/x86/irq.c b/xen/arch/x86/irq.c
+index b0b0c65..47d3e4f 100644
+--- a/xen/arch/x86/irq.c
++++ b/xen/arch/x86/irq.c
+@@ -2100,9 +2100,102 @@ void free_domain_pirqs(struct domain *d)
+     spin_unlock(&pcidevs_lock);
+ }
+ 
++static void dump_lapic(void *unused)
++{
++    int i;
++    printk("LAPIC%u IRR: ", smp_processor_id());
++    for ( i = 0; i < APIC_ISR_NR; i++ )
++        printk("%04x:", apic_read(APIC_IRR + i*0x10));
++    printk("\n");
++    printk("LAPIC%u ISR: ", smp_processor_id());
++    for ( i = 0; i < APIC_ISR_NR; i++ )
++        printk("%04x:", apic_read(APIC_ISR + i*0x10));
++    printk("\n");
++    printk("LAPIC%u TMR: ", smp_processor_id());
++    for ( i = 0; i < APIC_ISR_NR; i++ )
++        printk("%04x:", apic_read(APIC_TMR + i*0x10));
++    printk("\n");
++}
++
++#define vlapic_test_vector(vec, bitmap)                         \
++    test_bit(VEC_POS(vec),                                      \
++                     (unsigned long *)((bitmap) + REG_POS(vec)))
++
++
++static void dump_lapic_register(struct vlapic *l,char *name,int base)
++{
++int i;
++
++printk(KERN_ERR "%s",name);
++for (i=0;i<256;++i) {
++if (vlapic_test_vector(i,&l->regs->data[base]))
++       printk(" %d",i);
++}
++printk("\n");
++
++}
++
++static void dump_lapics(struct domain *d)
++{
++struct vcpu *v;
++struct vlapic *l;
++
++for_each_vcpu ( d, v ) {
++       printk(KERN_ERR "  Vcpu %d:\n",v->vcpu_id);
++    l = vcpu_vlapic(v);
++
++    dump_lapic_register(l,"  ISR:",APIC_ISR);
++    dump_lapic_register(l,"  TMR:",APIC_TMR);
++    dump_lapic_register(l,"  IRR:",APIC_IRR);
++}
++
++
++}
++
++static void dump_ioapic(struct domain *d)
++{
++    struct hvm_hw_vioapic *vioapic = domain_vioapic(d);
++    int irq;
++
++    for (irq=0;irq<VIOAPIC_NUM_PINS;++irq) {
++
++    uint16_t dest = vioapic->redirtbl[irq].fields.dest_id;
++    uint8_t dest_mode = vioapic->redirtbl[irq].fields.dest_mode;
++    uint8_t delivery_mode = vioapic->redirtbl[irq].fields.delivery_mode;
++    uint8_t vector = vioapic->redirtbl[irq].fields.vector;
++    uint8_t trig_mode = vioapic->redirtbl[irq].fields.trig_mode;
++    uint8_t mask = vioapic->redirtbl[irq].fields.mask;
++
++    if (vector==255) continue;
++    if (vector==0) continue;
++
++     printk(KERN_ERR " IOAPIC: irq %2d    "
++               "dest=%x dest_mode=%x delivery_mode=%x "
++                "vector=%3d trig_mode=%x mask=%d\n",irq,
++                dest, dest_mode, delivery_mode, vector, trig_mode,mask);
++    }
++
++}
++
++static void dump_hvm_irq_status(void)
++{
++    struct domain *d;
++   for_each_domain (d)
++   {
++               if (!is_hvm_domain(d)) continue;
++
++                       printk(KERN_ERR "\nMisery for domain %d:\n",d->domain_id);
++
++               dump_lapics(d);
++               dump_ioapic(d);
++
++   }
++
++}
++
+ static void dump_irqs(unsigned char key)
+ {
+-    int i, irq, pirq;
++    int i, irq, pirq, cpu;
+     struct irq_desc *desc;
+     irq_guest_action_t *action;
+     struct domain *d;
+@@ -2140,6 +2233,11 @@ static void dump_irqs(unsigned char key)
+ 
+             printk("in-flight=%d domain-list=", action->in_flight);
+ 
++#if 0
++        if ( desc->handler == &pci_msi_type ) { //FIXME I'M UGLY
++			printk("oh not I'm not");
++	} else {
++#endif
+             for ( i = 0; i < action->nr_guests; i++ )
+             {
+                 d = action->guest[i];
+@@ -2159,7 +2257,9 @@ static void dump_irqs(unsigned char key)
+                 if ( i != action->nr_guests )
+                     printk(",");
+             }
+-
++#if 0
++	}
++#endif
+             printk("\n");
+         }
+         else if ( desc->action )
+@@ -2173,6 +2273,12 @@ static void dump_irqs(unsigned char key)
+     }
+ 
+     dump_ioapic_irq_info();
++
++    for_each_cpu(cpu, &cpu_online_map) {
++        on_selected_cpus(cpumask_of(cpu), dump_lapic, NULL, 0);
++    }
++
++    dump_hvm_irq_status();
+ }
+ 
+ static struct keyhandler dump_irqs_keyhandler = {

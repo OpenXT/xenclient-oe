@@ -1,0 +1,35 @@
+diff --git a/xen/arch/x86/domain_build.c b/xen/arch/x86/domain_build.c
+index f18a144..51a0876 100644
+--- a/xen/arch/x86/domain_build.c
++++ b/xen/arch/x86/domain_build.c
+@@ -41,6 +41,7 @@
+ static long __initdata dom0_nrpages;
+ static long __initdata dom0_min_nrpages;
+ static long __initdata dom0_max_nrpages = LONG_MAX;
++static long __initdata dom0_max_nrpages_inc;
+ 
+ /*
+  * dom0_mem=[min:<min_amt>,][max:<max_amt>,][<amt>]
+@@ -74,7 +75,11 @@ static void __init parse_dom0_mem(const char *s)
+             dom0_min_nrpages = parse_amt(s+4, &s);
+         else if ( !strncmp(s, "max:", 4) )
+             dom0_max_nrpages = parse_amt(s+4, &s);
+-        else
++        else if ( !strncmp(s, "auto:", 5) ) {
++            dom0_max_nrpages = parse_amt(s+5, &s);
++            if (*s == '^')
++                dom0_max_nrpages_inc = parse_amt(s+1, &s);
++        } else
+             dom0_nrpages = parse_amt(s, &s);
+         if ( *s != ',' )
+             break;
+@@ -182,7 +187,8 @@ static unsigned long __init compute_dom0_nr_pages(
+     unsigned long avail = avail_domheap_pages() + initial_images_nrpages();
+     unsigned long nr_pages = dom0_nrpages;
+     unsigned long min_pages = dom0_min_nrpages;
+-    unsigned long max_pages = dom0_max_nrpages;
++    unsigned long max_pages = dom0_max_nrpages +
++                         ((dom0_max_nrpages_inc * avail) >> (30 - PAGE_SHIFT));
+ 
+     /* Reserve memory for further dom0 vcpu-struct allocations... */
+     avail -= (opt_dom0_max_vcpus - 1UL)
