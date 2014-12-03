@@ -1,0 +1,104 @@
+This patch allows cirrus vga and Surfman connection
+diff --git a/hw/cirrus_vga.c b/hw/cirrus_vga.c
+index 2a2c8da..b6ad26e 100644
+--- a/hw/cirrus_vga.c
++++ b/hw/cirrus_vga.c
+@@ -2946,6 +2946,18 @@ static const TypeInfo isa_cirrus_vga_info = {
+  *
+  ***************************************/
+ 
++/*
++** DMBUS Connection tools
++*/
++
++#include "xen-dmbus.h"
++
++const struct dmbus_ops xen_surfman_ops;
++
++static struct xen_cirrus_vga {
++    dmbus_service_t service;
++} xen_surfman;
++
+ static int pci_cirrus_vga_initfn(PCIDevice *dev)
+ {
+      PCICirrusVGAState *d = DO_UPCAST(PCICirrusVGAState, dev, dev);
+@@ -2978,6 +2990,20 @@ static int pci_cirrus_vga_initfn(PCIDevice *dev)
+      if (device_id == CIRRUS_ID_CLGD5446) {
+          pci_register_bar(&d->dev, 1, 0, &s->cirrus_mmio_io);
+      }
++
++     /* Connection to the Surfman server via DMBUS */
++     xen_surfman.service = dmbus_service_connect(DMBUS_SERVICE_SURFMAN,
++						 DEVICE_TYPE_VESA,
++						 &xen_surfman_ops,
++						 &xen_surfman);
++
++     if ( !xen_surfman.service )
++     {
++         fprintf (stderr, "%s(%u): unable to connect to surfman server\n",
++		  __FILE__, __LINE__);
++	 exit (0);
++     }
++
+      return 0;
+ }
+ 
+diff --git a/include/ui/console.h b/include/ui/console.h
+index fc23baa..0570ece 100644
+--- a/include/ui/console.h
++++ b/include/ui/console.h
+@@ -166,6 +166,10 @@ struct DisplayChangeListener {
+     void (*dpy_mouse_set)(struct DisplayState *s, int x, int y, int on);
+     void (*dpy_cursor_define)(struct DisplayState *s, QEMUCursor *cursor);
+ 
++    /* XenClient */
++    void (*dpy_get_max_res)(struct DisplayState *s, int *xres, int *yres);
++    unsigned int (*dpy_get_stride_alignment)(struct DisplayState *s);
++
+     QLIST_ENTRY(DisplayChangeListener) next;
+ };
+ 
+@@ -349,6 +353,43 @@ static inline bool dpy_cursor_define_supported(struct DisplayState *s)
+     return false;
+ }
+ 
++static inline void dpy_get_max_res(struct DisplayState *s,
++				   int *xres,
++				   int *yres)
++{
++    struct DisplayChangeListener *dcl;
++    int x, y;
++
++    *xres = 1920;
++    *yres = 1200;
++
++    QLIST_FOREACH(dcl, &s->listeners, next) {
++        if (dcl->dpy_get_max_res) {
++            dcl->dpy_get_max_res(s, &x, &y);
++            if (*xres > x)
++                *xres = x;
++            if (*yres > y)
++                *yres = y;
++        }
++    }
++}
++
++static inline unsigned int dpy_get_stride_alignment(struct DisplayState *s)
++{
++    unsigned int ret = 1, tmp;
++    struct DisplayChangeListener *dcl;
++
++    QLIST_FOREACH (dcl, &s->listeners, next) {
++        if (dcl->dpy_get_stride_alignment) {
++            tmp = dcl->dpy_get_stride_alignment(s);
++            if (tmp > ret)
++                ret = tmp;
++        }
++    }
++
++    return ret;
++}
++
+ static inline int ds_get_linesize(DisplayState *ds)
+ {
+     return pixman_image_get_stride(ds->surface->image);
