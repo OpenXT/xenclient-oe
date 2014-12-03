@@ -3,21 +3,29 @@ LICENSE = "LGPLv3"
 LIC_FILES_CHKSUM = "file://COPYING;md5=d32239bcb673463ab874e80d47fae504      \
                     file://COPYING.LESSER;md5=6a6a8e020838b23406c81b19c1d46df6"
 
-SRCREV_FORMAT = "source_patchqueue"
 SRCREV_source = "${AUTOREV}"
-SRCREV_patchqueue = "${AUTOREV}"
 
 PV = "0+git${SRCPV}"
 
 SRC_URI = "git://${OPENXT_GIT_MIRROR}/seabios.git;protocol=${OPENXT_GIT_PROTOCOL};branch=${OPENXT_BRANCH};name=source \
-           git://${OPENXT_GIT_MIRROR}/seabios-pq.git;protocol=${OPENXT_GIT_PROTOCOL};branch=${OPENXT_BRANCH};destsuffix=patchqueue;name=patchqueue \
-           file://defconfig \
-          "
+    file://build-fix.patch;patch=1 \
+    file://xenclient-version.patch;patch=1 \
+    file://vbe-linesize-align.patch;patch=1 \
+    file://vbe-function-15h.patch;patch=1 \
+    file://xengfx.patch;patch=1 \
+    file://halt-if-no-bootable.patch;patch=1 \
+    file://init-vgahooks-if-optionroms-deployed.patch;patch=1 \
+    file://xci-cpuid-signature.patch;patch=1 \
+    file://amd-gpu-support.patch;patch=1 \
+    file://only-boot-selected-devices.patch;patch=1 \
+    file://gpu-pt-page-align-sections.patch;patch=1 \
+    file://gpu-pt-fixed-debug-port.patch;patch=1 \
+    file://defconfig \
+"
 
 S= "${WORKDIR}/git"
 
 inherit xenclient
-inherit xenclient-pq
 
 FILES_${PN} = "/usr/share/firmware/*.bin"
 
