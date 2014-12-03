@@ -1,6 +1,5 @@
 
 inherit xenclient
-inherit xenclient-pq
 inherit pkgconfig
 
 LICENSE = "GPLv2"
