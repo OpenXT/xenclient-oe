@@ -1,24 +1,10 @@
 inherit xenclient
-inherit xenclient-pq
 inherit xenclient-deb
+
+require recipes/xen/xen.inc
 
 LICENSE = "GPLv2"
 DEPENDS = "${@deb_bootstrap_deps(d)}"
-
-SRCREV_FORMAT = "source_patchqueue"
-
-PV = "${XEN_VERSION}+git${SRCPV}"
-
-SRCREV_patchqueue = "${AUTOREV}"
-
-SRC_URI = "${XEN_SRC_URI};name=source \
-	  git://${OPENXT_GIT_MIRROR}/xen-common-pq.git;protocol=${OPENXT_GIT_PROTOCOL};branch=${OPENXT_BRANCH};destsuffix=patchqueue;name=patchqueue \
-"
-
-SRC_URI[source.md5sum] := "${XEN_SRC_MD5SUM}"
-SRC_URI[source.sha256sum] := "${XEN_SRC_SHA256SUM}"
-
-S = "${WORKDIR}/xen-${XEN_VERSION}"
 
 DEB_SUITE = "wheezy"
 DEB_ARCH = "i386"
