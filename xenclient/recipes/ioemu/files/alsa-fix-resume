@@ -1,0 +1,43 @@
+diff --git a/audio/alsaaudio.c b/audio/alsaaudio.c
+index 86e8ce8..715cb2a 100644
+--- a/audio/alsaaudio.c
++++ b/audio/alsaaudio.c
+@@ -547,6 +547,18 @@ static snd_pcm_sframes_t alsa_get_avail (snd_pcm_t *handle)
+     return avail;
+ }
+ 
++static void alsa_resume(snd_pcm_t *h)
++{
++    snd_pcm_drop(h);
++    snd_pcm_prepare(h);
++    snd_pcm_resume(h);
++    if (snd_pcm_state(h) == SND_PCM_STATE_SUSPENDED)
++    {
++        fprintf(stderr, "alsa: try to resume but failed\n");
++        exit(1);
++    }
++}
++
+ static int alsa_run_out (HWVoiceOut *hw)
+ {
+     ALSAVoiceOut *alsa = (ALSAVoiceOut *) hw;
+@@ -556,6 +568,9 @@ static int alsa_run_out (HWVoiceOut *hw)
+     struct st_sample *src;
+     snd_pcm_sframes_t avail;
+ 
++    if (snd_pcm_state(alsa->handle) == SND_PCM_STATE_SUSPENDED)
++        alsa_resume(alsa->handle);
++
+     live = audio_pcm_hw_get_live_out (hw);
+     if (!live) {
+         return 0;
+@@ -601,6 +616,9 @@ static int alsa_run_out (HWVoiceOut *hw)
+                         dolog ("Recovering from playback xrun\n");
+                     }
+                     continue;
++                case -ESTRPIPE:
++                    alsa_resume(alsa->handle);
++                    goto exit;
+ 
+                 case -EAGAIN:
+                     goto exit;

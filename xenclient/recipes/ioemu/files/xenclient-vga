@@ -1,0 +1,484 @@
+diff --git a/console.h b/console.h
+index 81484bd..9993ae8 100644
+--- a/console.h
++++ b/console.h
+@@ -105,6 +105,10 @@ struct DisplayChangeListener {
+                      int w, int h, uint32_t c);
+     void (*dpy_text_cursor)(struct DisplayState *s, int x, int y);
+ 
++    /* XenClient */
++    void (*dpy_get_max_res)(struct DisplayState *s, int *xres, int *yres);
++    unsigned int (*dpy_get_stride_alignment)(struct DisplayState *s);
++
+     struct DisplayChangeListener *next;
+ };
+ 
+@@ -241,6 +245,42 @@ static inline void dpy_cursor(struct DisplayState *s, int x, int y) {
+     }
+ }
+ 
++static inline void dpy_get_max_res(struct DisplayState *s, int *xres,
++                                                           int *yres) {
++    struct DisplayChangeListener *dcl = s->listeners;
++    int x, y;
++
++    *xres = 1920;
++    *yres = 1200;
++
++    while (dcl != NULL) {
++        if (dcl->dpy_get_max_res) {
++            dcl->dpy_get_max_res(s, &x, &y);
++            if (*xres > x)
++                *xres = x;
++            if (*yres > y)
++                *yres = y;
++        }
++        dcl = dcl->next;
++    }
++}
++
++static inline unsigned int dpy_get_stride_alignment(struct DisplayState *s) {
++    unsigned int ret = 1, tmp;
++    struct DisplayChangeListener *dcl = s->listeners;
++
++    while (dcl != NULL) {
++        if (dcl->dpy_get_stride_alignment) {
++            tmp = dcl->dpy_get_stride_alignment(s);
++            if (tmp > ret)
++                ret = tmp;
++        }
++        dcl = dcl->next;
++    }
++
++    return ret;
++}
++
+ static inline int ds_get_linesize(DisplayState *ds)
+ {
+     return ds->surface->linesize;
+diff --git a/hw/cirrus_vga.c b/hw/cirrus_vga.c
+index 38c829a..3b0a456 100644
+--- a/hw/cirrus_vga.c
++++ b/hw/cirrus_vga.c
+@@ -3151,9 +3151,9 @@ static int cirrus_vga_load(QEMUFile *f, void *opaque, int version_id)
+         /* Old guest, VRAM is not mapped, we have to restore it
+          * ourselves */
+         s->vram_gmfn = vga_acc ? s->lfb_addr : VRAM_RESERVED_ADDRESS;
+-        xen_vga_populate_vram(s->vram_gmfn, s->vram_size);
++        xen_vga_populate_vram(&s->vram_ptr, s->vram_gmfn, s->vram_size);
+     } else {
+-        xen_vga_vram_map(s->vram_gmfn, s->vram_size);
++        xen_vga_vram_map(&s->vram_ptr, s->vram_gmfn, s->vram_size);
+     }
+     if (version_id < 3 || (!vga_acc && !t))
+         qemu_get_buffer(f, s->vram_ptr, s->vram_size);
+diff --git a/hw/vga.c b/hw/vga.c
+index d0c12aa..596259c 100644
+--- a/hw/vga.c
++++ b/hw/vga.c
+@@ -45,6 +45,8 @@
+ #define PCI_COMMAND_MEMACCESS               0x0002
+ #define PCI_COMMAND_BUSMASTER               0x0004
+ 
++#define DIV_CEIL(a, b) (((a) + (b) - 1) / (b))
++
+ /* force some bits to zero */
+ const uint8_t sr_mask[8] = {
+     (uint8_t)~0xfc,
+@@ -159,7 +161,6 @@ static uint16_t expand2[256];
+ static uint8_t expand4to8[16];
+ 
+ static void vga_bios_init(VGAState *s);
+-static void vga_screen_dump(void *opaque, const char *filename);
+ 
+ static void vga_dumb_update_retrace_info(VGAState *s)
+ {
+@@ -552,7 +553,22 @@ static uint32_t vbe_ioport_read_data(void *opaque, uint32_t addr)
+                 break;
+             }
+         } else {
+-            val = s->vbe_regs[s->vbe_index];
++            int dummy = 0;
++
++            switch(s->vbe_index)
++            {
++            case VBE_DISPI_INDEX_EDID_XRES:
++                dpy_get_max_res(s->ds, &val, &dummy);
++                break;
++            case VBE_DISPI_INDEX_EDID_YRES:
++                dpy_get_max_res(s->ds, &dummy, &val);
++                break;
++            case VBE_DISPI_INDEX_STRIDE_ALIGN:
++                val = dpy_get_stride_alignment(s->ds);
++                break;
++            default:
++                val = s->vbe_regs[s->vbe_index];
++            }
+         }
+     } else {
+         val = 0;
+@@ -588,7 +604,7 @@ static void vbe_ioport_write_data(void *opaque, uint32_t addr, uint32_t val)
+             }
+             break;
+         case VBE_DISPI_INDEX_XRES:
+-            if ((val <= VBE_DISPI_MAX_XRES) && ((val & 7) == 0)) {
++            if (val <= VBE_DISPI_MAX_XRES) {
+                 s->vbe_regs[s->vbe_index] = val;
+             }
+             break;
+@@ -630,11 +646,14 @@ static void vbe_ioport_write_data(void *opaque, uint32_t addr, uint32_t val)
+                 s->vbe_regs[VBE_DISPI_INDEX_X_OFFSET] = 0;
+                 s->vbe_regs[VBE_DISPI_INDEX_Y_OFFSET] = 0;
+ 
+-                if (s->vbe_regs[VBE_DISPI_INDEX_BPP] == 4)
+-                    s->vbe_line_offset = s->vbe_regs[VBE_DISPI_INDEX_XRES] >> 1;
+-                else
+-                    s->vbe_line_offset = s->vbe_regs[VBE_DISPI_INDEX_XRES] *
+-                        ((s->vbe_regs[VBE_DISPI_INDEX_BPP] + 7) >> 3);
++                if (!s->vbe_regs[VBE_DISPI_INDEX_STRIDE])
++                {
++                    if (s->vbe_regs[VBE_DISPI_INDEX_BPP] == 4)
++                        s->vbe_line_offset = s->vbe_regs[VBE_DISPI_INDEX_XRES] >> 1;
++                    else
++                        s->vbe_line_offset = s->vbe_regs[VBE_DISPI_INDEX_XRES] *
++                            ((s->vbe_regs[VBE_DISPI_INDEX_BPP] + 7) >> 3);
++                }
+                 s->vbe_start_addr = 0;
+ 
+                 /* clear the screen (should be done in BIOS) */
+@@ -679,7 +698,7 @@ static void vbe_ioport_write_data(void *opaque, uint32_t addr, uint32_t val)
+             break;
+         case VBE_DISPI_INDEX_VIRT_WIDTH:
+             {
+-                int w, h, line_offset;
++                int w, h, line_offset, stride_alignment;
+ 
+                 if (val < s->vbe_regs[VBE_DISPI_INDEX_XRES])
+                     return;
+@@ -694,7 +713,8 @@ static void vbe_ioport_write_data(void *opaque, uint32_t addr, uint32_t val)
+                     return;
+                 s->vbe_regs[VBE_DISPI_INDEX_VIRT_WIDTH] = w;
+                 s->vbe_regs[VBE_DISPI_INDEX_VIRT_HEIGHT] = h;
+-                s->vbe_line_offset = line_offset;
++                stride_alignment = dpy_get_stride_alignment(s->ds);
++                s->vbe_line_offset = DIV_CEIL(line_offset, stride_alignment) * stride_alignment;
+             }
+             break;
+         case VBE_DISPI_INDEX_X_OFFSET:
+@@ -711,6 +731,12 @@ static void vbe_ioport_write_data(void *opaque, uint32_t addr, uint32_t val)
+                 s->vbe_start_addr >>= 2;
+             }
+             break;
++        case VBE_DISPI_INDEX_STRIDE:
++            {
++                s->vbe_line_offset = val;
++                s->vbe_regs[VBE_DISPI_INDEX_STRIDE] = val;
++                break;
++            }
+         default:
+             break;
+         }
+@@ -1600,19 +1626,12 @@ static void vga_draw_graphic(VGAState *s, int full_update)
+         disp_width != s->last_width ||
+         height != s->last_height ||
+         s->last_depth != depth) {
+-#if defined(WORDS_BIGENDIAN) == defined(TARGET_WORDS_BIGENDIAN)
+-        if (depth == 16 || depth == 32) {
+-#else
+         if (depth == 32) {
+-#endif
+             if (is_graphic_console()) {
+                 qemu_free_displaysurface(s->ds);
+                 s->ds->surface = qemu_create_displaysurface_from(disp_width, height, depth,
+                                                                s->line_offset,
+                                                                s->vram_ptr + (s->start_addr * 4));
+-#if defined(WORDS_BIGENDIAN) != defined(TARGET_WORDS_BIGENDIAN)
+-                s->ds->surface->pf = qemu_different_endianness_pixelformat(depth);
+-#endif
+                 dpy_resize(s->ds);
+             } else {
+                 qemu_console_resize(s->ds, disp_width, height);
+@@ -1684,6 +1703,11 @@ static void vga_draw_graphic(VGAState *s, int full_update)
+         }
+     }
+ 
++    /* NOTE: Don't update dirty bit mapping if vram is mapped by something else, it falls to this entity to deal with it. */
++    if (is_buffer_shared(s->ds->surface)) {
++        return;
++    }
++
+     vga_draw_line = vga_draw_line_table[v * NB_DEPTHS + get_depth_index(s->ds)];
+     if (!is_buffer_shared(s->ds->surface) && s->cursor_invalidate)
+         s->cursor_invalidate(s);
+@@ -1852,7 +1876,7 @@ static void vga_draw_blank(VGAState *s, int full_update)
+ #define GMODE_GRAPH    1
+ #define GMODE_BLANK 2
+ 
+-static void vga_update_display(void *opaque)
++void vga_update_display(void *opaque)
+ {
+     VGAState *s = (VGAState *)opaque;
+     int full_update, graphic_mode;
+@@ -1886,7 +1910,7 @@ static void vga_update_display(void *opaque)
+ }
+ 
+ /* force a full display refresh */
+-static void vga_invalidate_display(void *opaque)
++void vga_invalidate_display(void *opaque)
+ {
+     VGAState *s = (VGAState *)opaque;
+ 
+@@ -1967,7 +1991,7 @@ void vga_reset(void *opaque)
+         ((v & 0x00000800) << 10) | ((v & 0x00007000) >> 1))
+ /* relay text rendering to the display driver
+  * instead of doing a full vga_update_display() */
+-static void vga_update_text(void *opaque, console_ch_t *chardata)
++void vga_update_text(void *opaque, console_ch_t *chardata)
+ {
+     VGAState *s = (VGAState *) opaque;
+     int graphic_mode, i, cursor_offset, cursor_visible;
+@@ -2150,6 +2174,14 @@ void set_vram_mapping(void *opaque, unsigned long begin, unsigned long end)
+ 
+     fprintf(logfile,"mapping vram to %lx - %lx\n", begin, end);
+ 
++    /* pin needs to be done before add_to_physmap to correctly handle HAP (otherwise EPT table
++     * is likely going to miss the attribute update */
++    (void)xc_domain_pin_memory_cacheattr(
++        xc_handle, domid,
++        begin >> TARGET_PAGE_BITS,
++        end >> TARGET_PAGE_BITS,
++        XEN_DOMCTL_MEM_CACHEATTR_WC);
++
+     for (i = 0; i < (end - begin) >> TARGET_PAGE_BITS; i++) {
+         unsigned long idx = (s->vram_gmfn >> TARGET_PAGE_BITS) + i;
+         xen_pfn_t gpfn = (begin >> TARGET_PAGE_BITS) + i;
+@@ -2160,12 +2192,6 @@ void set_vram_mapping(void *opaque, unsigned long begin, unsigned long end)
+         }
+     }
+ 
+-    (void)xc_domain_pin_memory_cacheattr(
+-        xc_handle, domid,
+-        begin >> TARGET_PAGE_BITS,
+-        end >> TARGET_PAGE_BITS,
+-        XEN_DOMCTL_MEM_CACHEATTR_WB);
+-
+     s->vram_gmfn = begin;
+ }
+ 
+@@ -2294,11 +2320,11 @@ static int vga_load(QEMUFile *f, void *opaque, int version_id)
+         if (version_id >= 4) {
+             qemu_get_be64s(f, &s->vram_gmfn);
+             if (s->vram_gmfn)
+-                xen_vga_vram_map(s->vram_gmfn, s->vram_size);
++                xen_vga_vram_map(&s->vram_ptr, s->vram_gmfn, s->vram_size);
+         }
+         /* Old guest, VRAM is not mapped, we have to restore it ourselves */
+         if (!s->vram_gmfn) {
+-            xen_vga_populate_vram(VRAM_RESERVED_ADDRESS, s->vram_size);
++            xen_vga_populate_vram(&s->vram_ptr, VRAM_RESERVED_ADDRESS, s->vram_size);
+             s->vram_gmfn = VRAM_RESERVED_ADDRESS;
+             qemu_get_buffer(f, s->vram_ptr, s->vram_size); 
+         }
+@@ -2469,10 +2495,11 @@ static void vga_bios_init(VGAState *s)
+ }
+ 
+ 
+-static VGAState *xen_vga_state;
++VGAState *xen_vga_state;
+ 
+ /* Allocate video memory in the GPFN space */
+-void xen_vga_populate_vram(uint64_t vram_addr, uint32_t vga_ram_size)
++void xen_vga_populate_vram(uint8_t **vram_ptr, uint64_t vram_addr,
++                           uint32_t vga_ram_size)
+ {
+     unsigned long nr_pfn;
+     xen_pfn_t *pfn_list;
+@@ -2495,15 +2522,16 @@ void xen_vga_populate_vram(uint64_t vram_addr, uint32_t vga_ram_size)
+     }
+     free(pfn_list);
+ 
+-    xen_vga_vram_map(vram_addr, vga_ram_size);
++    xen_vga_vram_map(vram_ptr, vram_addr, vga_ram_size);
+ 
+     /* Win2K seems to assume that the pattern buffer is at 0xff
+        initially ! */
+-    memset(xen_vga_state->vram_ptr, 0xff, vga_ram_size);
++    memset(*vram_ptr, 0xff, vga_ram_size);
+ }
+ 
+ /* Mapping the video memory from GPFN space  */
+-void xen_vga_vram_map(uint64_t vram_addr, uint32_t vga_ram_size)
++void xen_vga_vram_map(uint8_t **vram_ptr, uint64_t vram_addr,
++                      uint32_t vga_ram_size)
+ {
+     unsigned long nr_pfn;
+     xen_pfn_t *pfn_list;
+@@ -2520,9 +2548,10 @@ void xen_vga_vram_map(uint64_t vram_addr, uint32_t vga_ram_size)
+     for (i = 0; i < nr_pfn; i++)
+         pfn_list[i] = (vram_addr >> TARGET_PAGE_BITS) + i;
+ 
+-    vram = xc_map_foreign_pages(xc_handle, domid,
+-                                        PROT_READ|PROT_WRITE,
+-                                        pfn_list, nr_pfn);
++    vram = xc_map_foreign_batch_cacheattr(xc_handle, domid,
++                                         PROT_READ|PROT_WRITE,
++                                         pfn_list, nr_pfn,
++                                         XC_MAP_CACHEATTR_WC);
+ 
+     if (!vram) {
+         fprintf(stderr, "Failed to map vram nr_pfn=0x%lx vram_addr=%llx: %s\n",
+@@ -2530,16 +2559,20 @@ void xen_vga_vram_map(uint64_t vram_addr, uint32_t vga_ram_size)
+         exit(1);
+     }
+ 
+-    xen_vga_state->vram_ptr = vram;
++    *vram_ptr = vram;
+ #ifdef CONFIG_STUBDOM
+     xenfb_pv_display_vram(vram);
+ #endif
+     free(pfn_list);
+ }
+ 
+-/* when used on xen environment, the vga_ram_base is not used */
+-void vga_common_init(VGAState *s, uint8_t *vga_ram_base,
+-                     unsigned long vga_ram_offset, int vga_ram_size)
++void vga_common_init2(VGAState *s, uint8_t *vga_ram_base,
++                     unsigned long vga_ram_offset, int vga_ram_size,
++                     vga_hw_update_ptr update,
++                     vga_hw_invalidate_ptr invalidate,
++                     vga_hw_screen_dump_ptr screen_dump,
++                     vga_hw_text_update_ptr text_update,
++                     void *opaque)
+ {
+     int i, j, v, b;
+ 
+@@ -2575,11 +2608,11 @@ void vga_common_init(VGAState *s, uint8_t *vga_ram_base,
+     s->get_offsets = vga_get_offsets;
+     s->get_resolution = vga_get_resolution;
+ 
+-    s->ds = graphic_console_init(vga_update_display, vga_invalidate_display,
+-                                 vga_screen_dump, vga_update_text, s);
++    s->ds = graphic_console_init(update, invalidate,
++                                 screen_dump, text_update, opaque);
+ 
+     if (!restore) {
+-        xen_vga_populate_vram(VRAM_RESERVED_ADDRESS, s->vram_size);
++        xen_vga_populate_vram(&s->vram_ptr, VRAM_RESERVED_ADDRESS, s->vram_size);
+         s->vram_gmfn = VRAM_RESERVED_ADDRESS;
+     }
+ 
+@@ -2597,8 +2630,17 @@ void vga_common_init(VGAState *s, uint8_t *vga_ram_base,
+     }
+ }
+ 
++/* when used on xen environment, the vga_ram_base is not used */
++void vga_common_init(VGAState *s, uint8_t *vga_ram_base,
++                     unsigned long vga_ram_offset, int vga_ram_size)
++{
++    vga_common_init2(s, vga_ram_base, vga_ram_offset, vga_ram_size,
++                     vga_update_display, vga_invalidate_display,
++                     vga_screen_dump, vga_update_text, s);
++}
++
+ /* used by both ISA and PCI */
+-static void vga_init(VGAState *s)
++void vga_init(VGAState *s)
+ {
+     int vga_io_memory;
+ 
+@@ -2692,6 +2734,7 @@ int pci_vga_init(PCIBus *bus, uint8_t *vga_ram_base,
+     PCIVGAState *d;
+     VGAState *s;
+     uint8_t *pci_conf;
++    int ptr = 0xdc;
+ 
+     d = (PCIVGAState *)pci_register_device(bus, "VGA",
+                                            sizeof(PCIVGAState),
+@@ -2723,6 +2766,18 @@ int pci_vga_init(PCIBus *bus, uint8_t *vga_ram_base,
+     pci_conf[0x2e] = 0x01; /* subsystem device */
+     pci_conf[0x2f] = 0x00;
+ 
++    pci_conf[PCI_INTERRUPT_PIN] = 1;    /* interrupt pin 0 */
++    pci_conf[0x34] = ptr; /* caps list pointer */
++    pci_conf[ptr++] = 0x01; /*PM cap */
++    pci_conf[ptr++] = 0x00; /* <eol> */
++    pci_conf[ptr++] = 0x02; /* PCM, v 1.1 */
++    pci_conf[ptr++] = 0x00; /* no D!, D2 or PME wakeups */
++
++    pci_conf[ptr++] = 0x00; /* default (clear) PMCSR */
++    pci_conf[ptr++] = 0x00; /* (PM Control/status reg) */
++    pci_conf[ptr++] = 0x00; /* no PMCSR_BSE */
++    pci_conf[ptr++] = 0x00; /* clear data register */
++
+     /* XXX: vga_ram_size must be a power of two */
+     pci_register_io_region(&d->dev, 0, vga_ram_size,
+                            PCI_ADDRESS_SPACE_MEM_PREFETCH, vga_map);
+@@ -2796,7 +2851,7 @@ int ppm_save(const char *filename, struct DisplaySurface *ds)
+ 
+ /* save the vga display in a PPM image even if no display is
+    available */
+-static void vga_screen_dump(void *opaque, const char *filename)
++void vga_screen_dump(void *opaque, const char *filename)
+ {
+     VGAState *s = (VGAState *)opaque;
+     DisplayState *saved_ds, ds1, *ds = &ds1;
+diff --git a/hw/vga_int.h b/hw/vga_int.h
+index 94da4c7..ea2ca14 100644
+--- a/hw/vga_int.h
++++ b/hw/vga_int.h
+@@ -47,7 +47,14 @@
+ #define VBE_DISPI_INDEX_VIDEO_MEMORY_64K 0xa
+ #define VBE_DISPI_INDEX_LFB_ADDRESS_H    0xb
+ #define VBE_DISPI_INDEX_LFB_ADDRESS_L    0xc
+-#define VBE_DISPI_INDEX_NB               0xd
++
++/* Xenclient custom registers */
++#define VBE_DISPI_INDEX_STRIDE           0xd
++#define VBE_DISPI_INDEX_EDID_XRES        0xe
++#define VBE_DISPI_INDEX_EDID_YRES        0xf
++#define VBE_DISPI_INDEX_STRIDE_ALIGN     0x10
++
++#define VBE_DISPI_INDEX_NB               0x11
+ 
+ #define VBE_DISPI_ID0                    0xB0C0
+ #define VBE_DISPI_ID1                    0xB0C1
+@@ -188,6 +195,14 @@ static inline int c6_to_8(int v)
+ 
+ void vga_common_init(VGAState *s, uint8_t *vga_ram_base,
+                      unsigned long vga_ram_offset, int vga_ram_size);
++void vga_common_init2(VGAState *s, uint8_t *vga_ram_base,
++                     unsigned long vga_ram_offset, int vga_ram_size,
++                     vga_hw_update_ptr update,
++                     vga_hw_invalidate_ptr invalidate,
++                     vga_hw_screen_dump_ptr screen_dump,
++                     vga_hw_text_update_ptr text_update,
++                     void *opaque);
++void vga_init(VGAState *s);
+ void vga_reset(void *s);
+ uint32_t vga_mem_readb(void *opaque, target_phys_addr_t addr);
+ void vga_mem_writeb(void *opaque, target_phys_addr_t addr, uint32_t val);
+@@ -211,4 +226,9 @@ void *vga_update_vram(VGAState *s, void *vga_ram_base, int vga_ram_size);
+ extern const uint8_t sr_mask[8];
+ extern const uint8_t gr_mask[16];
+ 
++void vga_update_display(void *opaque);
++void vga_invalidate_display(void *opaque);
++void vga_update_text(void *opaque, console_ch_t *chardata);
++void vga_screen_dump(void *opaque, const char *filename);
++
+ #define VRAM_RESERVED_ADDRESS	0xfd000000
+diff --git a/qemu-xen.h b/qemu-xen.h
+index d84d05e..ac512c7 100644
+--- a/qemu-xen.h
++++ b/qemu-xen.h
+@@ -42,8 +42,8 @@ void timeoffset_get(void);
+ 
+ /* xen_platform.c */
+ #ifndef QEMU_TOOL
+-void xen_vga_populate_vram(uint64_t vram_addr, uint32_t size);
+-void xen_vga_vram_map(uint64_t vram_addr, uint32_t size);
++void xen_vga_populate_vram(uint8_t **vram_ptr, uint64_t vram_addr, uint32_t size);
++void xen_vga_vram_map(uint8_t **vram_ptr, uint64_t vram_addr, uint32_t size);
+ void set_vram_mapping(void *opaque, unsigned long begin, unsigned long end);
+ void unset_vram_mapping(void *opaque);
+ #endif

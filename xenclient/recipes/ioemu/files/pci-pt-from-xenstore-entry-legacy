@@ -1,0 +1,80 @@
+diff --git a/hw/pass-through.c b/hw/pass-through.c
+index 3644a83..a5ed736 100644
+--- a/hw/pass-through.c
++++ b/hw/pass-through.c
+@@ -4475,10 +4475,75 @@ int power_off_php_devfn(int php_devfn)
+     return unregister_real_device(php_devfn);
+ }
+ 
++extern struct xs_handle *xsh;
++void acpi_php_add(int devfn);
++static int pasprintf(char **buf, const char *fmt, ...)
++{
++    va_list ap;
++    int ret = 0;
++
++    if (*buf)
++        free(*buf);
++    va_start(ap, fmt);
++    if (vasprintf(buf, fmt, ap) == -1) {
++        buf = NULL;
++        ret = -1;
++    }
++    va_end(ap);
++    return ret;
++}
++/*
++ * Read former xenstore entry and add pci devices to pci_devfn.
++ */
++static void pt_pci_from_xenstore_legacy(void)
++{
++    char *buf = NULL, *key;
++    int i, len, num, devfn;
++    int pci_dm_domid = domid;
++
++    key = xs_read(xsh, XBT_NULL, "domid", &len);
++    if (key) {
++        pci_dm_domid = atoi(key);
++    }
++
++    /* How many devices to passthrough */
++    if (pasprintf(&buf, "/local/domain/0/backend/pci/%u/%u/num_devs", pci_dm_domid, 0) == -1) {
++        return;
++    }
++    key = xs_read(xsh, XBT_NULL, buf, &len);
++    free(buf);
++    buf = NULL;
++    if (key == NULL) {
++        return;
++    }
++    num = atoi(key);
++    free(key);
++
++    /* Processing each device */
++    for (i = 0; i < num; i++) {
++        if (pasprintf(&buf, "/local/domain/0/backend/pci/%u/%u/dev-%d",
++                      pci_dm_domid, 0, i) != -1) {
++            key = xs_read(xsh, XBT_NULL, buf, &len);
++            free(buf);
++            buf = NULL;
++            if (key == NULL) {
++                fprintf(stderr, "qemu: Can't read pci pass-through device information (%s)\n", key);
++            }
++            /* TODO: Replace by do_pci_add from xen-vl-extra.c */
++            devfn = insert_to_pci_devfn(key);
++            fprintf(stderr, "qemu: Inserting device '%s' to pci_devfn ... %s\n", key, devfn < 0 ? "failed" : "done");
++            free(key);
++            acpi_php_add(devfn);
++        }
++    }
++}
++
+ int pt_init(PCIBus *e_bus)
+ {
+     memset(&dpci_infos, 0, sizeof(struct dpci_infos));
+     dpci_infos.e_bus      = e_bus;
+ 
++    pt_pci_from_xenstore_legacy();
++
+     return 0;
+ }

@@ -1,0 +1,85 @@
+diff --git a/hw/pass-through.c b/hw/pass-through.c
+index 9c5620d..d7c32af 100644
+--- a/hw/pass-through.c
++++ b/hw/pass-through.c
+@@ -89,10 +89,14 @@
+ #include "pt-msi.h"
+ #include "qemu-xen.h"
+ #include "iomulti.h"
++#include "xen_platform.h"
+ 
+ #include <unistd.h>
+ #include <sys/ioctl.h>
+ 
++#define IS_MEI(b, d, f) (((b) == 0) && ((d) == 3) && ((f) == 0) && \
++        pt_pci_host_read((b), (d), (f), 0xa, 4) == 0x0780)
++
+ extern int gfx_passthru;
+ int igd_passthru = 0;
+ 
+@@ -2456,6 +2460,10 @@ static int pt_init_pci_config(struct pt_dev *ptdev)
+             PT_LOG("Error: Rebinding of interrupt failed! ret=%d\n", ret);
+     }
+ 
++    /* If passing thru a MEI creates a dummy IDE-R */
++    if (IS_MEI(pci_bus_num(d->bus), PCI_SLOT(d->devfn), PCI_FUNC(d->devfn)))
++        ider_init(d->bus, 0x2a46, (3 << 3) | 2, 0);
++
+     return ret;
+ }
+ 
+diff --git a/hw/xen_platform.c b/hw/xen_platform.c
+index 789c138..54dc294 100644
+--- a/hw/xen_platform.c
++++ b/hw/xen_platform.c
+@@ -448,6 +448,39 @@ static int xen_pci_load(QEMUFile *f, void *opaque, int version_id)
+     return 0;
+ }
+ 
++void ider_init(PCIBus *bus, int did, int devfn, int type)
++{
++    PCIXenPlatformState *d;
++    struct pci_config_header *pch;
++
++    printf("Register dummy ider\n");
++    d = (PCIXenPlatformState *)pci_register_device(
++        bus, "dummy-ider", sizeof(PCIXenPlatformState), devfn, NULL, NULL);
++    pch = (struct pci_config_header *)d->pci_dev.config;
++    pch->vendor_id = 0x8086;
++    pch->device_id = did;
++    pch->command = 3; /* IO and memory access */
++    pch->revision = 1;
++    pch->api = 0;
++    pch->subclass = 0x80; /* Other */
++    pch->class = 0xff; /* Unclassified device class */
++    pch->header_type = type;
++    pch->interrupt_pin = 1;
++
++    /* Microsoft WHQL requires non-zero subsystem IDs. */
++    /* http://www.pcisig.com/reflector/msg02205.html.  */
++    pch->subsystem_vendor_id = pch->vendor_id; /* Duplicate vendor id.  */
++    pch->subsystem_id        = 0x0001;         /* Hardcode sub-id as 1. */
++
++    pci_register_io_region(&d->pci_dev, 0, 0x100,
++                           PCI_ADDRESS_SPACE_IO, platform_ioport_map);
++
++    /* reserve 16MB mmio address for share memory*/
++    pci_register_io_region(&d->pci_dev, 1, 0x1000000,
++                           PCI_ADDRESS_SPACE_MEM_PREFETCH, platform_mmio_map);
++
++}
++
+ void pci_xen_platform_init(PCIBus *bus)
+ {
+     PCIXenPlatformState *d;
+diff --git a/hw/xen_platform.h b/hw/xen_platform.h
+index 33af766..821bfc1 100644
+--- a/hw/xen_platform.h
++++ b/hw/xen_platform.h
+@@ -5,5 +5,6 @@
+ 
+ void pci_xen_platform_init(PCIBus *bus);
+ void platform_fixed_ioport_init(void);
++void ider_init(PCIBus *bus, int did, int devfn, int type);
+ 
+ #endif

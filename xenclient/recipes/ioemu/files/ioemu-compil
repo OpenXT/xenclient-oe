@@ -1,0 +1,103 @@
+diff --git a/hw/pci.h b/hw/pci.h
+index e4cc79a..7fc3171 100644
+--- a/hw/pci.h
++++ b/hw/pci.h
+@@ -177,9 +177,13 @@ typedef struct PCIIORegion {
+ #define PCI_STATUS_RESERVED1	0x007
+ #define PCI_STATUS_INT_STATUS	0x008
+ #define PCI_STATUS_CAPABILITIES	0x010
+-#define PCI_STATUS_66MHZ	0x020
++#ifndef PCI_STATUS_66MHZ
++#define PCI_STATUS_66MHZ        0x020
++#endif
+ #define PCI_STATUS_RESERVED2	0x040
+-#define PCI_STATUS_FAST_BACK	0x080
++#ifndef PCI_STATUS_FAST_BACK
++#define PCI_STATUS_FAST_BACK    0x080
++#endif
+ #define PCI_STATUS_DEVSEL	0x600
+ 
+ #define PCI_STATUS_RESERVED_MASK_LO (PCI_STATUS_RESERVED1 | \
+diff --git a/vl.c b/vl.c
+index 9dfa609..214fde1 100644
+--- a/vl.c
++++ b/vl.c
+@@ -30,6 +30,7 @@
+ #include "hw/isa.h"
+ #include "hw/baum.h"
+ #include "hw/bt.h"
++#include "dma.h"
+ #include "net.h"
+ #include "console.h"
+ #include "sysemu.h"
+diff --git a/xen-hooks.mak b/xen-hooks.mak
+index 253915d..7e6b403 100644
+--- a/xen-hooks.mak
++++ b/xen-hooks.mak
+@@ -18,7 +18,7 @@ endif
+ CFLAGS += $(CMDLINE_CFLAGS)
+ 
+ LIBS += -L$(XEN_ROOT)/tools/libxc -lxenctrl -lxenguest
+-LIBS += -L$(XEN_ROOT)/tools/xenstore -lxenstore
++LIBS += -L$(XEN_ROOT)/tools/xenstore -lxenstore -lpthread 
+ 
+ LDFLAGS := $(CFLAGS) $(LDFLAGS)
+ 
+@@ -52,23 +52,15 @@ OBJS += xen_blktap.o
+ OBJS += tpm_tis.o
+ endif
+ 
+-ifdef CONFIG_STUBDOM
+-CONFIG_PASSTHROUGH=1
+-else
+-  ifeq (,$(wildcard /usr/include/pci))
+-$(warning === pciutils-dev package not found - missing /usr/include/pci)
+-$(warning === PCI passthrough capability has been disabled)
+-  else
+-CONFIG_PASSTHROUGH=1
+-  endif
+-endif
+-
+-ifdef CONFIG_PASSTHROUGH
++# CONFIG_PASSTROUGH
+ OBJS+= pass-through.o pt-msi.o pt-graphics.o
++ifdef PCI_PREFIX_DIR
++LIBS += -L$(PCI_PREFIX_DIR)/usr/lib
++endif
+ LIBS += -lpci
+ CFLAGS += -DCONFIG_PASSTHROUGH 
+ $(info === PCI passthrough capability has been enabled ===)
+-endif
++# !CONFIG_PASSTROUGH
+ 
+ BAD_OBJS += gdbstub.o acpi.o apic.o
+ BAD_OBJS += vmmouse.o vmport.o tcg* helper.o vmware_vga.o virtio-balloon.o
+@@ -81,4 +73,8 @@ datadir := $(subst qemu,xen/qemu,$(datadir))
+ docdir :=  $(subst qemu,xen/qemu,$(docdir))
+ mandir :=  $(subst share/man,share/xen/man,$(mandir))
+ 
++XEN_SCRIPT_DIR ?= /etc/xen
+ configdir := $(XEN_SCRIPT_DIR)
++
++TOOLS =
++
+diff --git a/xen-setup b/xen-setup
+index c3af79b..a527e96 100755
+--- a/xen-setup
++++ b/xen-setup
+@@ -18,7 +18,7 @@ if test -z "${XEN_SCRIPT_DIR}"; then
+ 	XEN_SCRIPT_DIR="/etc/xen/scripts"
+ fi
+ 
+-${QEMU_ROOT:-.}/configure --disable-gfx-check --disable-curses --disable-slirp "$@" --prefix=${PREFIX}
++${QEMU_ROOT:-.}/configure --disable-gfx-check --disable-curses --disable-slirp --disable-vnc-tls --disable-sdl --disable-aio "$@" --prefix=/usr --cc=gcc
+ 
+ if [ "x$XEN_ROOT" != x ]; then
+ 	echo "XEN_ROOT=$XEN_ROOT" >>config-host.mak
+@@ -36,4 +36,6 @@ echo '#include "xen-config-host.h"' >>config-host.h.new
+ if test -f config-host.h~; then mv config-host.h~ config-host.h; fi
+ cmp -s config-host.h.new config-host.h || mv config-host.h.new config-host.h
+ 
++sed -i'' -re 's/.*XEN_ROOT.*//' config-host.mak
++
+ echo 'qemu successfuly configured for Xen qemu-dm build'

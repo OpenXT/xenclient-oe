@@ -1,0 +1,125 @@
+diff --git a/hw/pass-through.h b/hw/pass-through.h
+index dd218f7..09a7de0 100644
+--- a/hw/pass-through.h
++++ b/hw/pass-through.h
+@@ -412,8 +412,8 @@ void intel_pch_init(PCIBus *bus);
+ int register_vga_regions(struct pt_dev *real_device);
+ int unregister_vga_regions(struct pt_dev *real_device);
+ int setup_vga_pt(struct pt_dev *real_device);
+-PCIBus *intel_pci_bridge_init(PCIBus *bus, int devfn, uint16_t vid,
+-           uint16_t did, const char *name, uint16_t revision);
++PCIBus *intel_pci_bridge_init(PCIBus *bus, int devfn, uint16_t vid, uint16_t did, uint16_t svid, uint16_t sdid,
++                                      const char *name, uint16_t revision, uint8_t *caps, int caps_len );
+ void igd_pci_write(PCIDevice *pci_dev, uint32_t config_addr, uint32_t val, int len);
+ uint32_t igd_pci_read(PCIDevice *pci_dev, uint32_t config_addr, int len);
+ 
+diff --git a/hw/pci.c b/hw/pci.c
+index 0334e90..c22c5a1 100644
+--- a/hw/pci.c
++++ b/hw/pci.c
+@@ -919,8 +919,8 @@ static int intel_bridge_irq_function(PCIDevice *pci_dev, int irq_num)
+     return irq_num;
+ }
+ 
+-PCIBus *intel_pci_bridge_init(PCIBus *bus, int devfn, uint16_t vid, uint16_t did,
+-                              const char *name, uint16_t revision)
++PCIBus *intel_pci_bridge_init(PCIBus *bus, int devfn, uint16_t vid, uint16_t did, uint16_t svid, uint16_t sdid,
++                              const char *name, uint16_t revision, uint8_t *caps, int caps_len )
+ {
+     PCIBridge *s;
+     s = (PCIBridge *)pci_register_device(bus, name, sizeof(PCIBridge),
+@@ -939,7 +939,24 @@ PCIBus *intel_pci_bridge_init(PCIBus *bus, int devfn, uint16_t vid, uint16_t did
+     s->dev.config[0x0D] = 0x10; // latency_timer
+     s->dev.config[0x0E] = 0x81; // header_type
+     s->dev.config[0x1E] = 0xa0; // secondary status
+-
++  
++    s->dev.config[0x2c] = svid;
++    s->dev.config[0x2e] = sdid;
++
++    syslog(LOG_ERR,"FOX - caps_len=%d caps=%02x %02x %02x %02x  %02x %02x %02x %02x  %02x %02x %02x %02x\n",
++		caps_len,
++		caps[0],caps[1],caps[2],caps[3],
++		caps[4],caps[5],caps[6],caps[7],
++		caps[8],caps[9],caps[10],caps[11]);
++
++    if (caps && caps_len ) {
++    	s->dev.config[0x6] |= 0x10;
++    	s->dev.config[0x34] = 0xe0; // caps
++    	s->dev.config[0xe0] = 0x9;
++    	s->dev.config[0xe1] = 0x0;
++	memcpy(&s->dev.config[0xe2],caps,caps_len);
++    }
++	
+     s->bus = pci_register_secondary_bus(&s->dev, intel_bridge_irq_function);
+     return s->bus;
+ }
+diff --git a/hw/pci.h b/hw/pci.h
+index 1117d07..0b8d84a 100644
+--- a/hw/pci.h
++++ b/hw/pci.h
+@@ -266,8 +266,8 @@ int pci_assign_devaddr(const char *addr, int *domp, int *busp, unsigned *slotp);
+ 
+ void pci_info(void);
+ 
+-PCIBus *intel_pci_bridge_init(PCIBus *bus, int devfn, uint16_t vid, uint16_t did,
+-                             const char *name, uint16_t revision);
++PCIBus *intel_pci_bridge_init(PCIBus *bus, int devfn, uint16_t vid, uint16_t did, uint16_t svid, uint16_t sdid,
++                              const char *name, uint16_t revision, uint8_t *caps, int caps_len );
+ 
+ PCIBus *pci_bridge_init(PCIBus *bus, int devfn, uint16_t vid, uint16_t did,
+                         uint8_t rid, pci_map_irq_fn map_irq, const char *name);
+diff --git a/hw/pt-graphics.c b/hw/pt-graphics.c
+index e3fdf8e..f07a366 100644
+--- a/hw/pt-graphics.c
++++ b/hw/pt-graphics.c
+@@ -21,8 +21,9 @@ static int pch_map_irq(PCIDevice *pci_dev, int irq_num)
+ 
+ void intel_pch_init(PCIBus *bus)
+ {
+-    uint16_t vid, did;
+-    uint8_t  rid;
++    uint16_t vid, did, rid, svid, sdid;
++    uint8_t caps[0x20];
++    int cap_len = 0;
+ 
+     if ( !gfx_passthru )
+         return;
+@@ -31,9 +32,34 @@ void intel_pch_init(PCIBus *bus)
+     did = pt_pci_host_read(0, 0x1f, 0, 2, 2);
+     rid = pt_pci_host_read(0, 0x1f, 0, 8, 1);
+ 
+-    if ( vid == 0x8086 ) 
+-        pci_bridge_init(bus, PCI_DEVFN(0x1f, 0), vid, did, rid,
+-                        pch_map_irq, "intel_bridge_1f");
++    if ( vid == 0x8086 ) {
++        svid = pt_pci_host_read(0, 0x1f, 0,0x2c, 2);
++        sdid = pt_pci_host_read(0, 0x1f, 0,0x2e, 2);
++
++        do {
++            uint8_t status, cap_ptr, cap;
++            int q;
++
++            status=pt_pci_host_read(0, 0x1f, 0, 6, 1);
++            if (!(status & 0x10)) break;
++
++            cap_ptr=pt_pci_host_read(0, 0x1f, 0, 0x34, 1);
++            if (!cap_ptr) break;
++
++            cap=pt_pci_host_read(0, 0x1f, 0, cap_ptr, 1);
++            if (cap != 0x9) break;
++
++            cap_len=pt_pci_host_read(0, 0x1f, 0, cap_ptr+2, 1);
++
++            if (cap_len >sizeof(caps)) break;
++
++            for (q=0;q<cap_len;++q) 
++                caps[q]=pt_pci_host_read(0, 0x1f, 0, cap_ptr+3+q, 1);
++
++        } while (0);
++
++        (void)intel_pci_bridge_init(bus, PCI_DEVFN(0x1f, 0), vid, did, svid,sdid,"intel_bridge_1f", rid, caps, cap_len);
++    }
+ }
+ 
+ void igd_pci_write(PCIDevice *pci_dev, uint32_t config_addr, uint32_t val, int len)

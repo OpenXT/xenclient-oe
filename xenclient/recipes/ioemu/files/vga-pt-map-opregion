@@ -1,0 +1,82 @@
+diff --git a/hw/pass-through.c b/hw/pass-through.c
+index 08bdd2d..a1f8616 100644
+--- a/hw/pass-through.c
++++ b/hw/pass-through.c
+@@ -90,7 +90,10 @@
+ #include "qemu-xen.h"
+ #include <unistd.h>
+ 
++#define GUEST_OPREGION_MAPPED 0xfed00000
++
+ extern int vga_passthrough;
++uint32_t guest_opregion_mapped = GUEST_OPREGION_MAPPED;
+ 
+ struct php_dev {
+     struct pt_dev *pt_dev;
+@@ -1576,6 +1579,7 @@ static int pt_register_regions(struct pt_dev *assigned_device)
+     struct pci_dev *pci_dev = assigned_device->pci_dev;
+     PCIDevice *d = &assigned_device->dev;
+     uint16_t vendor_id, class;
++    uint32_t opregion;
+ 
+     /* Register PIO/MMIO BARs */
+     for ( i = 0; i < PCI_BAR_ENTRIES; i++ )
+@@ -1646,6 +1650,14 @@ static int pt_register_regions(struct pt_dev *assigned_device)
+                                       DPCI_ADD_MAPPING);
+         ret |= xc_domain_memory_mapping(xc_handle, domid, 0xa0, 0xa0, 32,
+                                        DPCI_ADD_MAPPING);
++        // Read opregion address from 0xfc
++        opregion = pt_pci_host_read_long(0, 2, 0, 0xfc) & 0xffffff00;
++        ret |= xc_domain_memory_mapping(xc_handle, domid,
++                GUEST_OPREGION_MAPPED >> XC_PAGE_SHIFT,
++                opregion >> XC_PAGE_SHIFT,
++                0x2,
++                DPCI_ADD_MAPPING);
++        
+         if ( ret != 0 )
+         {
+             PT_LOG("legacy mapping failed !\n");
+@@ -1662,6 +1674,7 @@ static void pt_unregister_regions(struct pt_dev *assigned_device)
+     uint32_t e_size;
+     PCIDevice *d = (PCIDevice*)assigned_device;
+     uint16_t class, vendor_id;
++    uint32_t opregion;
+ 
+     for ( i = 0; i < PCI_NUM_REGIONS; i++ )
+     {
+@@ -1718,6 +1731,14 @@ static void pt_unregister_regions(struct pt_dev *assigned_device)
+                                        DPCI_REMOVE_MAPPING);
+         ret |= xc_domain_memory_mapping(xc_handle, domid, 0xa0, 0xa0, 32,
+                                         DPCI_REMOVE_MAPPING);
++        // Read opregion address from 0xfc
++        opregion = pt_pci_host_read_long(0, 2, 0, 0xfc) & 0xffffff00;
++        ret |= xc_domain_memory_mapping(xc_handle, domid,
++                GUEST_OPREGION_MAPPED >> XC_PAGE_SHIFT,
++                opregion >> XC_PAGE_SHIFT,
++                0x2,
++                DPCI_REMOVE_MAPPING);
++
+         if ( ret != 0 )
+         {
+             PT_LOG("legacy unmapping failed !\n");
+diff --git a/hw/pci.c b/hw/pci.c
+index 51b65b4..cbab95e 100644
+--- a/hw/pci.c
++++ b/hw/pci.c
+@@ -38,6 +38,7 @@
+ #endif
+ 
+ extern int vga_passthrough;
++extern uint32_t guest_opregion_mapped;
+ 
+ //#define DEBUG_PCI
+ 
+@@ -672,7 +673,7 @@ uint32_t pci_data_read(void *opaque, uint32_t addr, int len)
+             switch config_addr:
+             {
+                 case 0xfc:
+-                    val = 0; // force to fall back to SMI mode
++                    val = guest_opregion_mapped;
+                     break;
+                 case 0x34:
+                     /* For intel graphics card, temporarily disable msi capabilities for iGfx */

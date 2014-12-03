@@ -1,0 +1,692 @@
+diff --git a/cpu-all.h b/cpu-all.h
+index 60e0ac3..3229c61 100644
+--- a/cpu-all.h
++++ b/cpu-all.h
+@@ -907,6 +907,7 @@ static inline void cpu_register_physical_memory(target_phys_addr_t start_addr,
+     cpu_register_physical_memory_offset(start_addr, size, phys_offset, 0);
+ }
+ #endif
++void cpu_unregister_physical_memory(target_phys_addr_t start_addr);
+ 
+ ram_addr_t cpu_get_physical_page_desc(target_phys_addr_t addr);
+ ram_addr_t qemu_ram_alloc(ram_addr_t);
+diff --git a/hw/pc.c b/hw/pc.c
+index bdaf921..ad93abd 100644
+--- a/hw/pc.c
++++ b/hw/pc.c
+@@ -41,6 +41,7 @@
+ #include "virtio-balloon.h"
+ #include "virtio-console.h"
+ #include "hpet_emul.h"
++#include "xenmou.h"
+ 
+ #ifdef CONFIG_PASSTHROUGH
+ #include "pass-through.h"
+@@ -1061,6 +1062,7 @@ vga_bios_error:
+             pci_xen_platform_init(pci_bus);
+             platform_fixed_ioport_init();
+         }
++        pci_xenmou_init (pci_bus, -1);
+     }
+ 
+     for(i = 0; i < MAX_SERIAL_PORTS; i++) {
+diff --git a/hw/xenmou.c b/hw/xenmou.c
+new file mode 100644
+index 0000000..31a7ba7
+--- /dev/null
++++ b/hw/xenmou.c
+@@ -0,0 +1,508 @@
++/*
++  ITEmou.c: xen mouse pci card emulator
++ */
++
++#include "hw.h"
++#include "qemu-timer.h"
++#include "console.h"
++#include "xenmou.h"
++#include <sys/mman.h>
++#define DEBUG_XENMOU 1
++
++#ifdef DEBUG_XENMOU
++#include <sys/syslog.h>
++#define XENMOU_SYSLOG_PRIORITY   (LOG_DEBUG | LOG_LOCAL0)
++#endif
++
++#define NPAGES			2		//Number of pages of events
++#define N_EVENTS		(((NPAGES * TARGET_PAGE_SIZE) / EVENT_N_BYTES) -1) // Number of events (first entry is for rptr and wtr);
++
++#define NEXT(a)		(((a)+1) % N_EVENTS)
++
++#define MMIO_BAR_SIZE            0x4000
++#define MMIO_CPU_MAPPED_SIZE     0x1000
++
++#define PCI_FREQUENCY            33000000L
++
++typedef struct xenmou
++{
++  PCIDevice *pci_dev;
++
++  int mmio_handle;
++
++  uint32_t isr;
++
++  int acceleration; 
++  int enable_device,enable_device_interrupts;
++
++  void *mapping;
++  uint32_t *rptr_guest;
++  uint32_t *wptr_guest;
++  uint32_t wptr;
++
++  struct xenmou_event *event_queue;
++
++  int last_buttons;
++} Xenmou;
++
++typedef struct xenmou_event {
++  uint32_t flags_and_revision;
++  uint32_t x_and_y;
++} Xenmou_Event;
++
++static unsigned events_max = 0;
++
++
++
++static void xenmou_update_irq(Xenmou *m)
++{
++    if (!m->enable_device_interrupts) 	
++    	qemu_set_irq(m->pci_dev->irq[0], 0);
++    else 
++    	qemu_set_irq(m->pci_dev->irq[0], m->isr ? 1:0);
++}
++
++static void xenmou_reset(Xenmou *m)
++{
++  m->last_buttons=0;
++  m->acceleration=1;
++
++  m->enable_device=0;
++  m->enable_device_interrupts=0;
++
++  m->isr=0;
++  xenmou_update_irq(m);
++
++  m->wptr=0;
++
++  if (m->rptr_guest) *(m->rptr_guest)=0;
++  if (m->wptr_guest) *(m->wptr_guest)=m->wptr;
++
++}
++
++
++static void
++xenmou_set_pointers(Xenmou * m)
++{
++
++  if (!m->mapping) 
++	return;
++
++  m->rptr_guest=(uint32_t *) m->mapping;
++  m->wptr_guest=m->rptr_guest+1;
++  m->event_queue=(Xenmou_Event *) (m->wptr_guest+1);
++
++#ifdef DEBUG_XENMOU
++    syslog(XENMOU_SYSLOG_PRIORITY, "xenmou: reset: event_queue=%p\n", m->event_queue);
++#endif
++
++  *(m->rptr_guest)=0;
++  *(m->wptr_guest)=m->wptr;
++
++#ifdef DEBUG_XENMOU
++    syslog(XENMOU_SYSLOG_PRIORITY, "xenmou: reset WRITE_PTR=%p READ_PTR=%p events_max=%d\n", m->wptr_guest, m->rptr_guest, N_EVENTS);
++#endif
++}
++
++static void
++mmio_write_8 (void *opaque, target_phys_addr_t addr, uint32_t val)
++{
++  Xenmou *x = (Xenmou *) opaque;
++#ifdef DEBUG_XENMOU
++  syslog(XENMOU_SYSLOG_PRIORITY, "xenmou: mmio_write_8(%p, %#0x)\n", opaque, (unsigned int)addr);
++#endif
++  /*only dwords */
++}
++
++static void
++mmio_write_16 (void *opaque, target_phys_addr_t addr, uint32_t val)
++{
++  Xenmou *x = (Xenmou *) opaque;
++#ifdef DEBUG_XENMOU
++  syslog(XENMOU_SYSLOG_PRIORITY, "xenmou: mmio_write_16(%p, %#0x)\n", opaque, (unsigned int)addr);
++#endif
++  /*only dwords */
++}
++
++static int xenmou_inject(Xenmou *xm,int x,int y,uint32_t flags)
++{
++  if (NEXT(xm->wptr)==*(xm->rptr_guest)) {
++    syslog(XENMOU_SYSLOG_PRIORITY, "xenmou: event received but ring full\n");
++    return 1;
++  }
++
++  xm->event_queue[xm->wptr].x_and_y = x | (y << 16);
++  xm->event_queue[xm->wptr].flags_and_revision = flags | (XENMOU_CURRENT_REV << 16);
++
++#if DEBUG_XENMOU && 0
++  syslog(XENMOU_SYSLOG_PRIORITY, "xenmou: shipping(%d,%d,%04x)\n", x,y,flags);
++#endif
++
++  xm->wptr=NEXT(xm->wptr);
++  *(xm->wptr_guest)=xm->wptr;
++  return 1;
++}
++
++
++static void xenmou_event(void *opaque,
++			 int x, int y, int z, int buttons_state, int absolute)
++{
++  Xenmou *xm = (Xenmou *) opaque;
++  int bdiff=xm->last_buttons;
++  int schedule_irq=0;
++
++  if (!xm->mapping) {
++#ifdef DEBUG_XENMOU
++    syslog(XENMOU_SYSLOG_PRIORITY, "xenmou: event received before queue set up\n");
++#endif
++    return;
++  }
++
++  buttons_state &= MOUSE_EVENT_LBUTTON | MOUSE_EVENT_RBUTTON | MOUSE_EVENT_MBUTTON;
++
++  bdiff^=buttons_state;
++
++  if (bdiff & MOUSE_EVENT_LBUTTON) 
++    schedule_irq+=xenmou_inject(xm,0,0, (buttons_state & MOUSE_EVENT_LBUTTON) ? LEFT_BUTTON_DOW:LEFT_BUTTON_U);
++
++  if (bdiff & MOUSE_EVENT_MBUTTON) 
++    schedule_irq+=xenmou_inject(xm,0,0, (buttons_state & MOUSE_EVENT_MBUTTON) ? MIDDLE_BUTTON_DOW:MIDDLE_BUTTON_U);
++
++  if (bdiff & MOUSE_EVENT_RBUTTON) 
++    schedule_irq+=xenmou_inject(xm,0,0, (buttons_state & MOUSE_EVENT_RBUTTON) ? RIGHT_BUTTON_DOW:RIGHT_BUTTON_U);
++    
++  xm->last_buttons=buttons_state;
++
++  if (absolute) {
++	x&=0x7fff;
++	x<<=1;
++
++	y&=0x7fff;
++	y<<=1;
++
++        schedule_irq+=xenmou_inject(xm,x,y,ABSOLUTE);
++  } else {
++	if (x || y) 
++           schedule_irq+=xenmou_inject(xm,x,y,RELATIVE);
++  } 
++  
++
++  if (schedule_irq && xm->enable_device_interrupts)  {
++    xm->isr|= XMOU_ISR_INT;
++    xenmou_update_irq(xm);
++  }
++
++#if DEBUG_XENMOU && 0
++  syslog(XENMOU_SYSLOG_PRIORITY, "xenmou: WRITE_PTR=%d READ_PTR=%d events_max=%d event_queue=%p isr=%08x sched_irq=%d\n", xm->wptr, *(xm->rptr_guest), N_EVENTS, xm->event_queue,xm->isr,schedule_irq);
++#endif
++
++}
++
++static void xenmou_rel_event(void *opaque,
++			 int x, int y, int z, int buttons_state)
++{
++  xenmou_event(opaque, x, y, z, buttons_state, 0);
++}
++
++static void xenmou_abs_event(void *opaque,
++			 int x, int y, int z, int buttons_state)
++{
++  xenmou_event(opaque, x, y, z, buttons_state, 1);
++}
++
++static QEMUPutMouseEntry *relative_handler = NULL;
++static QEMUPutMouseEntry *absolute_handler = NULL;
++
++static void
++mmio_write_32 (void *opaque, target_phys_addr_t addr, uint32_t val)
++{
++  Xenmou *x = (Xenmou *) opaque;
++
++#if DEBUG_XENMOU && 0
++  syslog(XENMOU_SYSLOG_PRIORITY, "xenmou: mmio_write_32(%p, %#0x, %#0x)\n", x, (unsigned int)addr, val);
++#endif
++
++  switch (addr & (TARGET_PAGE_SIZE - 1)) {
++  case XMOU_MAGIC       :	/* 0x00000 */
++    break;
++  case XMOU_REV         :	/* 0x00004 */
++    break;
++  case XMOU_CONTROL     :	/* 0x00100 */
++    x->enable_device = val & XMOU_CONTROL_XMOU_EN;
++    x->enable_device_interrupts = val & XMOU_CONTROL_INT_EN;
++    xenmou_update_irq(x);
++
++    if (x->enable_device) {
++#ifdef DEBUG_XENMOU
++      syslog(XENMOU_SYSLOG_PRIORITY, "xenmou: adding mouse event handlers\n");
++#endif
++
++      absolute_handler = qemu_add_mouse_event_handler(xenmou_abs_event, x, 1, "Xen Mouse");
++    } else {
++      /* todo: should I turn it off now? */
++#ifdef DEBUG_XENMOU
++      syslog(XENMOU_SYSLOG_PRIORITY, "xenmou: removing mouse event handlers\n");
++#endif
++      qemu_remove_mouse_event_handler(absolute_handler);
++    }
++    switcher_abs_enabled(x->enable_device);
++    break;
++  case XMOU_EVENT_SIZE  :	/* 0x00104 */
++    break;
++  case XMOU_EVENT_NPAGES:	/* 0x00108 */
++    break;
++  case XMOU_ACCELERATION:	/* 0x0010C */
++    x->acceleration = val;
++    break;
++  case XMOU_ISR:            /* 0x00110 */
++	x->isr&=~val;
++	xenmou_update_irq(x);
++  }
++}
++
++static uint32_t mmio_read_32(void *opaque, target_phys_addr_t addr);
++
++static uint32_t
++mmio_read_8 (void *opaque, target_phys_addr_t addr)
++{
++  uint32_t d;
++#ifdef DEBUG_XENMOU
++  syslog(XENMOU_SYSLOG_PRIORITY, "xenmou: mmio_read_8(%p, %#0x)\n", opaque, (unsigned int)addr);
++#endif
++  d = mmio_read_32(opaque, addr & ~3);
++
++  addr &= 3;
++  addr <<= 3;
++  d >>= addr;
++
++  return d & 0xff;
++}
++
++static uint32_t
++mmio_read_16 (void *opaque, target_phys_addr_t addr)
++{
++  uint32_t d;
++#ifdef DEBUG_XENMOU
++  syslog(XENMOU_SYSLOG_PRIORITY, "xenmou: mmio_read_16(%p, %#0x)\n", opaque, (unsigned int)addr);
++#endif
++  d = mmio_read_32(opaque, addr & ~3);
++
++  if (addr & 0x2) {
++    d >>= 16;
++  }
++  return d && 0xffff;
++}
++
++static uint32_t
++mmio_read_32(void *opaque, target_phys_addr_t addr)
++{
++  Xenmou *x = (Xenmou *) opaque;
++
++  switch (addr & (TARGET_PAGE_SIZE - 1)) {	  
++  case XMOU_MAGIC       :	/* 0x00000 */
++    return 0x584D4F55;		/* 0x584D4F55 */
++  case XMOU_REV         :	/* 0x00004 */
++    return XENMOU_CURRENT_REV;
++  case XMOU_CONTROL     :	/* 0x00100 */
++    return (x->enable_device_interrupts ? XMOU_CONTROL_INT_EN : 0)
++      | (x->enable_device ? XMOU_CONTROL_XMOU_EN : 0);
++  case XMOU_EVENT_SIZE  :	/* 0x00104 */
++    return EVENT_N_BYTES;
++  case XMOU_EVENT_NPAGES:	/* 0x00108 */
++    return NPAGES;
++  case XMOU_ACCELERATION:	/* 0x0010C */
++    return 0xffffffff;
++  case XMOU_ISR:            /* 0x00110 */
++    return x->isr ;
++  default:
++    return 0xffffffff;
++  }
++}
++
++typedef struct xenmou_pci
++{
++  PCIDevice dev;
++  Xenmou x;
++} Xenmou_pci;
++
++static uint32_t old_addr = 0;
++
++static void
++mmio_map (PCIDevice * pci_dev, int region_num,
++          uint32_t addr, uint32_t size, int type)
++{
++  Xenmou_pci *p = (Xenmou_pci *) pci_dev;
++  Xenmou *x = &p->x;
++
++  unsigned long nr_pfn = NPAGES;
++  xen_pfn_t *pfn_list;
++
++  unsigned long i;
++
++  syslog(XENMOU_SYSLOG_PRIORITY, "xenmou: %d %x %x %d", region_num, addr, size, type);
++
++  if (addr == old_addr) {
++#ifdef DEBUG_XENMOU
++    syslog(XENMOU_SYSLOG_PRIORITY, "xenmou: remap to same address %x\n", addr);
++#endif
++    /* Have to call this here to reset the io_index which is
++       being set back to a default value before calling mmio_map()
++       for a BAR remapping. */
++    cpu_register_physical_memory(addr, MMIO_CPU_MAPPED_SIZE, x->mmio_handle);
++    return;
++  }
++
++  pfn_list = (xen_pfn_t*)malloc(nr_pfn * sizeof(xen_pfn_t*));
++
++  /* Skipping the first page that is put in the MMIO register map. */
++  for (i = 0; i < nr_pfn; i++) {
++    pfn_list[i] = (addr  >> TARGET_PAGE_BITS ) + i +1 ;
++  }
++
++  if (old_addr != 0) {
++    int rc;
++
++    /* This is not the first time we've been called; move the pages */
++#ifdef DEBUG_XENMOU
++    syslog(XENMOU_SYSLOG_PRIORITY, "xenmou: xenmou mmio_map moving pages\n");
++#endif
++
++    munmap(x->event_queue, nr_pfn*TARGET_PAGE_SIZE);    /* undoes event_queue=xc_map_foreign_range(); */
++    x->event_queue = NULL;
++
++    /* This seems a reasonable function to use to shrink the MMIO count and list. */
++    cpu_unregister_physical_memory(addr);
++
++    for (i = 0; i < nr_pfn; i++) {
++      unsigned long idx = (old_addr >> TARGET_PAGE_BITS) + i;
++      xen_pfn_t gpfn = (addr >> TARGET_PAGE_BITS) + i;
++
++      rc = xc_domain_add_to_physmap(xc_handle, domid, XENMAPSPACE_gmfn, idx, gpfn);
++      if (rc) {
++	    syslog(XENMOU_SYSLOG_PRIORITY, "xenmou: moving MFN %x to PFN %x failed: %d\n",
++               (unsigned int)idx, (unsigned int)gpfn, rc);
++	    return;
++      }
++
++    }
++
++  } else {
++
++#ifdef DEBUG_XENMOU
++    syslog(XENMOU_SYSLOG_PRIORITY, "xenmou: populating physmap\n");
++#endif
++
++    /* allocate event pages as normal memory - xc_domain_memory_populate_physmap */
++    if (xc_domain_populate_physmap_exact(xc_handle, domid, nr_pfn, 0, 0, pfn_list)) {
++      syslog(XENMOU_SYSLOG_PRIORITY, "xenmou: Failed to populate XenMouse RAM\n");
++      exit(-1);
++    }
++  }
++
++  old_addr = addr;
++
++#ifdef DEBUG_XENMOU
++    syslog(XENMOU_SYSLOG_PRIORITY, "xenmou: registering physical memory, mmio_handle=%x, addr=%#x, MMIO_CPU_MAPPED_SIZE=%#x\n", x->mmio_handle, addr, MMIO_CPU_MAPPED_SIZE);
++#endif
++  cpu_register_physical_memory(addr, MMIO_CPU_MAPPED_SIZE, x->mmio_handle);
++
++  /* these need to be mapped as well */
++  x->mapping = xc_map_foreign_batch(xc_handle, domid,
++				     PROT_READ|PROT_WRITE,
++				     pfn_list, nr_pfn);
++
++  if (x->mapping == NULL) {
++    syslog(XENMOU_SYSLOG_PRIORITY, "xenmou: map ringbuffer pages returned error %d\n", errno);
++    exit(-1);
++  }
++
++  xenmou_set_pointers(x);
++  xenmou_reset(x); // FIXME shouldn't really be here - JMM
++
++  free(pfn_list);
++}
++
++static CPUReadMemoryFunc *mmio_read[3] = {
++  mmio_read_8,
++  mmio_read_16,
++  mmio_read_32,
++};
++
++static CPUWriteMemoryFunc *mmio_write[3] = {
++  mmio_write_8,
++  mmio_write_16,
++  mmio_write_32,
++};
++
++PCIDevice *
++pci_xenmou_init (PCIBus * bus, int devfn)
++{
++  Xenmou_pci *p = NULL;
++  Xenmou *x;
++  uint8_t *pci_conf;
++  int instance;
++
++#if 1
++#ifdef DEBUG_XENMOU
++  syslog(XENMOU_SYSLOG_PRIORITY, "xenmou: init started\n");
++#endif
++
++  p = (Xenmou_pci *) pci_register_device (bus,
++                                          "XENMOU", sizeof (Xenmou_pci),
++                                          devfn, NULL, NULL);
++
++#ifdef DEBUG_XENMOU
++  syslog(XENMOU_SYSLOG_PRIORITY , "xenmou: Registered xenmou device, devfn=%#0x name=%s\n", p->dev.devfn, p->dev.name);
++#endif
++
++  pci_conf = p->dev.config;
++  pci_config_set_vendor_id (pci_conf, PCI_VENDOR_ID_XEN);
++  pci_config_set_device_id (pci_conf, PCI_DEVICE_ID_XENMOU);
++  pci_conf[0x04] = 0x06;        /* command = Mem space, Bus Master */
++  pci_conf[0x08] = 0x01;
++  pci_config_set_class (pci_conf, PCI_CLASS_INPUT_DEVICE);
++  pci_conf[0x0e] = 0x00;        /* header_type */
++  pci_conf[0x3d] = 1;           /* interrupt pin 0 */
++  /* no caps ? pci_conf[0x34] = 0xdc; */
++  pci_conf[0x2c] = PCI_VENDOR_ID_XEN & 0xff;
++  pci_conf[0x2d] = (PCI_VENDOR_ID_XEN >> 8);
++  pci_conf[0x2e] = PCI_DEVICE_ID_XENMOU & 0xff;
++  pci_conf[0x2f] = (PCI_DEVICE_ID_XENMOU >> 8);
++
++  x = &p->x;
++
++  memset (x, 0, sizeof (*x));
++
++  /* I/O handler for memory-mapped I/O */
++  x->mmio_handle = cpu_register_io_memory (0, mmio_read, mmio_write, x);
++  syslog(XENMOU_SYSLOG_PRIORITY, "xenmou: mmio_handle=%x\n", x->mmio_handle);
++
++#ifdef DEBUG_XENMOU
++  syslog(XENMOU_SYSLOG_PRIORITY, "xenmou: registered IO memory\n");
++#endif
++
++  x->pci_dev = (PCIDevice *) p;
++
++  xenmou_reset(x);
++
++  pci_register_io_region (&p->dev, 0, MMIO_BAR_SIZE, PCI_ADDRESS_SPACE_MEM,
++                          mmio_map);
++
++#ifdef DEBUG_XENMOU
++  syslog(XENMOU_SYSLOG_PRIORITY, "xenmou: registered IO region\n");
++#endif
++  
++#ifdef DEBUG_XENMOU
++  syslog(XENMOU_SYSLOG_PRIORITY, "xenmou: events_max=%d\n", N_EVENTS);
++#endif
++
++#ifdef DEBUG_XENMOU
++  syslog(XENMOU_SYSLOG_PRIORITY, "xenmou: reset xenmou\n");
++  syslog(XENMOU_SYSLOG_PRIORITY, "xenmou: init completed\n");
++#endif
++#endif
++
++  return (PCIDevice *) p;
++}
++
++/* xenmou.c ends here */
+diff --git a/hw/xenmou.h b/hw/xenmou.h
+new file mode 100644
+index 0000000..e740953
+--- /dev/null
++++ b/hw/xenmou.h
+@@ -0,0 +1,39 @@
++#ifndef _XENMOU_H_
++#define _XENMOU_H_
++#include "pci.h"
++
++#include "xenmou_regs.h"
++
++#include "switcher.h"
++
++/* TODO put in pci.h */
++#define PCI_CLASS_INPUT_DEVICE     0x0980
++
++#ifndef PCI_VENDOR_ID_XEN
++#define PCI_VENDOR_ID_XEN	0x5853
++#endif
++
++#ifndef PCI_DEVICE_ID_XENMOU
++#define PCI_DEVICE_ID_XENMOU 0xc110 
++#endif
++
++#define ABSOLUTE 		    0x0001
++#define RELATIVE 		    0x0002
++#define FENCE 			    0x0004
++#define LEFT_BUTTON_DOW 	0x0008
++#define LEFT_BUTTON_U 		0x0010
++#define RIGHT_BUTTON_DOW 	0x0020
++#define RIGHT_BUTTON_U 		0x0040
++#define MIDDLE_BUTTON_DOW	0x0080
++#define MIDDLE_BUTTON_U 	0x0100
++#define HWHEEL 			    0x0200
++#define VWHEEL 			    0x0400
++
++#define EVENT_N_BYTES 8
++#define EVENT_N_BITS (8 * EVENT_N_BYTES)
++
++#define XENMOU_CURRENT_REV   0x1
++
++extern PCIDevice *pci_xenmou_init (PCIBus * bus, int devfn);
++
++#endif
+diff --git a/hw/xenmou_regs.h b/hw/xenmou_regs.h
+new file mode 100644
+index 0000000..7fa1a5b
+--- /dev/null
++++ b/hw/xenmou_regs.h
+@@ -0,0 +1,31 @@
++#ifndef _XENMOU_REG_H_
++#define _XENMOU_REG_H_
++
++
++/* Global Registers */
++#define XMOU_GLOBAL_BASE               0x000000
++
++#define XMOU_MAGIC                     0x00000
++#define XMOU_REV                       0x00004
++#define XMOU_CONTROL                   0x00100
++#define XMOU_EVENT_SIZE                0x00104
++#define XMOU_EVENT_NPAGES              0x00108
++#define XMOU_ACCELERATION              0x0010C
++#define XMOU_ISR                       0x00110
++
++#define XMOU_MAGIC_VALUE               0x58464758
++
++/* XMOU_CONTROL bits */
++#define XMOU_CONTROL_XMOU_EN           0x00000001
++#define XMOU_CONTROL_INT_EN            0x00000002
++
++/* XMOU_ISR bits */
++#define XMOU_ISR_INT                   0x00000001
++
++/* Event Registers */
++#define XMOU_EVENT_BASE                0x10000
++
++#define XMOU_READ_PTR                  0x00000
++#define XMOU_WRITE_PTR                 0x00004
++
++#endif
+diff --git a/i386-dm/exec-dm.c b/i386-dm/exec-dm.c
+index 2158f7c..6db990e 100644
+--- a/i386-dm/exec-dm.c
++++ b/i386-dm/exec-dm.c
+@@ -324,6 +324,23 @@ static int get_free_io_mem_idx(void)
+     return -1;
+ }
+ 
++void cpu_unregister_physical_memory(target_phys_addr_t start_addr)
++{
++    int i;
++
++    for (i = 0; i < mmio_cnt; i++) {
++      if(mmio[i].start == start_addr) {
++	for (; i < mmio_cnt; i++) {
++	  mmio[i].start = mmio[i+1].start;
++	  mmio[i].io_index = mmio[i+1].io_index;
++	  mmio[i].size = mmio[i+1].size;
++	}
++	mmio_cnt--;
++	return;
++      }
++    }
++}
++
+ /* mem_read and mem_write are arrays of functions containing the
+    function to access byte (index 0), word (index 1) and dword (index
+    2). All functions must be supplied. If io_index is non zero, the
+diff --git a/switcher.h b/switcher.h
+index cf0f5b9..010041d 100644
+--- a/switcher.h
++++ b/switcher.h
+@@ -33,5 +33,6 @@
+ void switcher_shutdown(int reason);
+ 
+ void switcher_send_led_code(int led_code);
++void switcher_abs_enabled(int enabled);
+ 
+ #endif
+diff --git a/vl.c b/vl.c
+index 2e3cf28..c462d82 100644
+--- a/vl.c
++++ b/vl.c
+@@ -242,7 +242,7 @@ int win2k_install_hack = 0;
+ int rtc_td_hack = 0;
+ const char *dom0_input = NULL;
+ #endif
+-int usb_enabled = 1;
++int usb_enabled = 0;
+ int smp_cpus = 1;
+ const char *vnc_display;
+ int acpi_enabled = 1;
+diff --git a/xen-hooks.mak b/xen-hooks.mak
+index efc74db..7b8d805 100644
+--- a/xen-hooks.mak
++++ b/xen-hooks.mak
+@@ -28,6 +28,7 @@ OBJS += xen_platform.o
+ OBJS += xen_machine_fv.o
+ OBJS += xen_machine_pv.o
+ OBJS += xen_backend.o
++OBJS += xenmou.o
+ OBJS += xenfb.o
+ OBJS += xen_console.o
+ ifndef CONFIG_STUBDOM

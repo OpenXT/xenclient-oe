@@ -1,0 +1,96 @@
+diff --git a/hw/vga.c b/hw/vga.c
+index 596259c..779ac93 100644
+--- a/hw/vga.c
++++ b/hw/vga.c
+@@ -566,6 +566,9 @@ static uint32_t vbe_ioport_read_data(void *opaque, uint32_t addr)
+             case VBE_DISPI_INDEX_STRIDE_ALIGN:
+                 val = dpy_get_stride_alignment(s->ds);
+                 break;
++	    case VBE_DISPI_INDEX_32BPP_ONLY:
++	        val = xenstore_is_32bpp_only();
++                break;
+             default:
+                 val = s->vbe_regs[s->vbe_index];
+             }
+diff --git a/hw/vga_int.h b/hw/vga_int.h
+index ea2ca14..9385911 100644
+--- a/hw/vga_int.h
++++ b/hw/vga_int.h
+@@ -53,8 +53,9 @@
+ #define VBE_DISPI_INDEX_EDID_XRES        0xe
+ #define VBE_DISPI_INDEX_EDID_YRES        0xf
+ #define VBE_DISPI_INDEX_STRIDE_ALIGN     0x10
++#define VBE_DISPI_INDEX_32BPP_ONLY       0x11
+ 
+-#define VBE_DISPI_INDEX_NB               0x11
++#define VBE_DISPI_INDEX_NB               0x12
+ 
+ #define VBE_DISPI_ID0                    0xB0C0
+ #define VBE_DISPI_ID1                    0xB0C1
+diff --git a/qemu-xen.h b/qemu-xen.h
+index 81a855d..39425f3 100644
+--- a/qemu-xen.h
++++ b/qemu-xen.h
+@@ -144,6 +144,7 @@ int xenstore_pv_driver_build_blacklisted(uint16_t product_number,
+                                          uint32_t build_nr);
+ void xenstore_do_eject(BlockDriverState *bs);
+ int xenstore_find_device(BlockDriverState *bs);
++int xenstore_is_32bpp_only(void);
+ 
+ /* xenfbfront.c */
+ int xenfb_pv_display_init(DisplayState *ds);
+diff --git a/xenstore.c b/xenstore.c
+index d46585f..b57a5ed 100644
+--- a/xenstore.c
++++ b/xenstore.c
+@@ -14,6 +14,7 @@
+ #include "block_int.h"
+ #include <unistd.h>
+ #include <assert.h>
++#include <stdio.h>
+ 
+ #include "exec-all.h"
+ #include "sysemu.h"
+@@ -1913,6 +1914,42 @@ int xenstore_read_bcl_cmd(void)
+     return xenstore_extended_power_mgmt_read_int("bcl_cmd", 0);
+ }
+ 
++int xenstore_is_32bpp_only(void)
++{
++    unsigned int len;
++    int   retVal;
++    char *value = NULL, *depth_path = NULL;
++    char *domain_path;
++
++    domain_path = xs_get_domain_path(xsh, domid);
++    
++    if (domain_path == NULL) {
++      fprintf(logfile, "xs_get_domain_path() error, domid %d\n", domid);
++      goto out;
++    }
++
++    if (pasprintf(&depth_path, "%s/platform/restrictdisplaydepth", domain_path) == -1) {
++      fprintf(logfile, "%s out of memory.\n", __FUNCTION__);
++      goto out;
++    }
++
++    value = xs_read(xsh, XBT_NULL, depth_path, &len);
++    if (value == NULL) {
++      retVal = 0;
++      goto out;
++    }
++
++    retVal = strtol(value, NULL, 10);
++
++    fprintf(logfile, "%s depth restricted %s, %d\n", __FUNCTION__, value, retVal);
++ out:
++    free(domain_path);
++    free(depth_path);
++    free(value);
++
++    return retVal;
++}
++
+ /*
+  * Create a store entry for a device (e.g., monitor, serial/parallel lines).
+  * The entry is <domain-path><storeString>/tty and the value is the name

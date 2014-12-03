@@ -1,0 +1,116 @@
+diff --git a/hw/ac97.c b/hw/ac97.c
+index 0d4b86e..9c8ebbd 100644
+--- a/hw/ac97.c
++++ b/hw/ac97.c
+@@ -18,6 +18,7 @@
+ #include "audiodev.h"
+ #include "audio/audio.h"
+ #include "pci.h"
++#include "sysemu.h"
+ 
+ enum {
+     AC97_Reset                     = 0x00,
+@@ -1076,6 +1077,13 @@ static int read_audio (AC97LinkState *s, AC97BusMasterRegs *r,
+     int to_copy = 0;
+     SWVoiceIn *voice = (r - s->bm_regs) == MC_INDEX ? s->voice_mc : s->voice_pi;
+ 
++    /* Disable audio recording. */
++    if (disable_audio_recording)
++    {
++        *stop = 1;
++        return 0;
++    }
++
+     temp = audio_MIN (temp, max);
+ 
+     if (!temp) {
+diff --git a/qemu-doc.texi b/qemu-doc.texi
+index 616de48..5136729 100644
+--- a/qemu-doc.texi
++++ b/qemu-doc.texi
+@@ -421,6 +421,10 @@ require manually specifying clocking.
+ modprobe i810_audio clocking=48000
+ @end example
+ 
++@item -disable-audio-rec
++
++Disable audio recording in the guest.
++
+ @end table
+ 
+ USB options:
+diff --git a/sysemu.h b/sysemu.h
+index fb44005..2ce6100 100644
+--- a/sysemu.h
++++ b/sysemu.h
+@@ -240,8 +240,10 @@ struct soundhw {
+ };
+ 
+ extern struct soundhw soundhw[];
++extern int disable_audio_recording;
+ #endif
+ 
++
+ void do_usb_add(const char *devname);
+ void do_usb_del(const char *devname);
+ void usb_info(void);
+diff --git a/vl.c b/vl.c
+index ee5626a..7e5a8e6 100644
+--- a/vl.c
++++ b/vl.c
+@@ -278,6 +278,10 @@ static QEMUTimer *nographic_timer;
+ 
+ uint8_t qemu_uuid[16];
+ 
++#ifdef HAS_AUDIO
++int disable_audio_recording;
++#endif
++
+ #include "xen-vl-extra.c"
+ 
+ char *get_time(void)
+@@ -4056,6 +4060,7 @@ static void help(int exitcode)
+            "                and only specified sound cards (comma separated list)\n"
+            "                use -soundhw ? to get the list of supported cards\n"
+            "                use -soundhw all to enable all of them\n"
++           "-disable-audio-rec     disable audio recording in the guest\n"
+ #endif
+            "-usb            enable the USB driver (will be the default soon)\n"
+            "-usbdevice name add the host or guest USB device 'name'\n"
+@@ -4264,6 +4269,7 @@ enum {
+     QEMU_OPTION_k,
+     QEMU_OPTION_audio_help,
+     QEMU_OPTION_soundhw,
++    QEMU_OPTION_disable_audio_rec,
+     QEMU_OPTION_usb,
+     QEMU_OPTION_usbdevice,
+     QEMU_OPTION_name,
+@@ -4388,6 +4394,7 @@ static const QEMUOption qemu_options[] = {
+ #ifdef HAS_AUDIO
+     { "audio-help", 0, QEMU_OPTION_audio_help },
+     { "soundhw", HAS_ARG, QEMU_OPTION_soundhw },
++    { "disable-audio-rec", 0, QEMU_OPTION_disable_audio_rec},
+ #endif
+     { "usb", 0, QEMU_OPTION_usb },
+     { "usbdevice", HAS_ARG, QEMU_OPTION_usbdevice },
+@@ -4884,6 +4891,10 @@ int main(int argc, char **argv, char **envp)
+     tb_size = 0;
+     autostart= 1;
+ 
++#ifdef HAS_AUDIO
++    disable_audio_recording = 0;
++#endif
++
+     optind = 1;
+     for(;;) {
+         if (optind >= argc)
+@@ -5128,6 +5139,9 @@ int main(int argc, char **argv, char **envp)
+             case QEMU_OPTION_soundhw:
+                 select_soundhw (optarg);
+                 break;
++            case QEMU_OPTION_disable_audio_rec:
++                disable_audio_recording = 1;
++                break;
+ #endif
+             case QEMU_OPTION_h:
+                 help(0);

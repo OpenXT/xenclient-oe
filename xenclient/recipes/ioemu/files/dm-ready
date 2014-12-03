@@ -1,0 +1,59 @@
+diff --git a/qemu-xen.h b/qemu-xen.h
+index d50c89f..a31a11a 100644
+--- a/qemu-xen.h
++++ b/qemu-xen.h
+@@ -105,6 +105,8 @@ void xenstore_dom_chmod(int domid, const char *key, const char *perms);
+ char *xenstore_read(const char *path);
+ int xenstore_write(const char *path, const char *val);
+ 
++void xenstore_dm_finished_startup(void);
++
+  /* `danger' means that this parameter, variable or function refers to
+   * an area of xenstore which is writeable by the guest and thus must
+   * not be trusted by qemu code.  For variables containing xenstore
+diff --git a/vl.c b/vl.c
+index 214fde1..2b12f92 100644
+--- a/vl.c
++++ b/vl.c
+@@ -6161,6 +6161,8 @@ int main(int argc, char **argv, char **envp)
+         close(fd);
+     }
+ 
++    xenstore_dm_finished_startup();
++
+     main_loop();
+     quit_timers();
+     net_cleanup();
+diff --git a/xenstore.c b/xenstore.c
+index 4c483e2..8acca6f 100644
+--- a/xenstore.c
++++ b/xenstore.c
+@@ -1258,6 +1258,28 @@ void xenstore_read_vncpasswd(int domid, char *pwbuf, size_t pwbuflen)
+ }
+ 
+ 
++/* Advertise through xenstore that the device model is up and the
++   domain can be started. */
++void xenstore_dm_finished_startup(void)
++{
++    char *path;
++    char *buf = NULL;
++
++    path = xs_get_domain_path(xsh, domid);
++    if (!path) {
++        fprintf(logfile, "xs_get_domain_path() failed.\n");
++        goto out;
++    }
++    if (pasprintf(&buf, "%s/device-misc/dm-ready", path) == -1) {
++        fprintf(logfile, "pasprintf failed to get path.\n");
++        goto out;
++    }
++    if (xs_write(xsh, XBT_NULL, buf, "1", 1) == 0)
++        fprintf(logfile, "xs_write() dm-ready failed\n");
++ out:
++    free(buf);
++    free(path);
++}
+ /*
+  * get all device instances of a certain type
+  */

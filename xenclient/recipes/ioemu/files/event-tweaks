@@ -1,0 +1,629 @@
+diff --git a/aio.c b/aio.c
+index 53077e8..519efff 100644
+--- a/aio.c
++++ b/aio.c
+@@ -15,6 +15,7 @@
+ #include "block.h"
+ #include "sys-queue.h"
+ #include "qemu_socket.h"
++#include "qemu-char.h"
+ 
+ #ifndef CONFIG_STUBDOM
+ 
+diff --git a/i386-dm/helper2.c b/i386-dm/helper2.c
+index b829431..a690cc2 100644
+--- a/i386-dm/helper2.c
++++ b/i386-dm/helper2.c
+@@ -60,6 +60,7 @@
+ #include "qemu-timer.h"
+ #include "sysemu.h"
+ #include "qemu-xen.h"
++#include "qemu-char.h"
+ 
+ #include "switcher.h"
+ 
+diff --git a/qemu-char.h b/qemu-char.h
+index b30541a..d175ad0 100644
+--- a/qemu-char.h
++++ b/qemu-char.h
+@@ -85,14 +85,15 @@ extern int term_escape_char;
+ 
+ /* async I/O support */
+ 
+-int qemu_set_fd_handler2(int fd,
+-                         IOCanRWHandler *fd_read_poll,
+-                         IOHandler *fd_read,
+-                         IOHandler *fd_write,
+-                         void *opaque);
+-int qemu_set_fd_handler(int fd,
+-                        IOHandler *fd_read,
+-                        IOHandler *fd_write,
+-                        void *opaque);
++int __qemu_set_fd_handler2(int fd,
++                           IOCanRWHandler *fd_read_poll,
++                           IOHandler *fd_read,
++                           IOHandler *fd_write,
++                           void *opaque,
++                           const char *name);
++#define qemu_set_fd_handler2(fd, fd_read_poll, fd_read, fd_write, opaque) \
++    __qemu_set_fd_handler2(fd, fd_read_poll, fd_read, fd_write, opaque, #fd_read "_" #fd_write)
++#define qemu_set_fd_handler(fd, fd_read, fd_write, opaque) \
++    __qemu_set_fd_handler2(fd, NULL, fd_read, fd_write, opaque, #fd_read "_" #fd_write)
+ 
+ #endif
+diff --git a/usb-linux.c b/usb-linux.c
+index 5dfed8c..d10a696 100644
+--- a/usb-linux.c
++++ b/usb-linux.c
+@@ -32,6 +32,7 @@
+ 
+ #include "qemu-common.h"
+ #include "qemu-timer.h"
++#include "qemu-char.h"
+ #include "console.h"
+ 
+ #include <dirent.h>
+diff --git a/vl.c b/vl.c
+index 3d21182..c8913bf 100644
+--- a/vl.c
++++ b/vl.c
+@@ -129,6 +129,9 @@
+ #include "libslirp.h"
+ #endif
+ 
++#include <sys/epoll.h>
++#include <sys/timerfd.h>
++
+ #if defined(__OpenBSD__)
+ #include <util.h>
+ #endif
+@@ -1384,42 +1387,11 @@ static int timer_load(QEMUFile *f, void *opaque, int version_id)
+     return 0;
+ }
+ 
+-#ifdef _WIN32
+-void CALLBACK host_alarm_handler(UINT uTimerID, UINT uMsg,
+-                                 DWORD_PTR dwUser, DWORD_PTR dw1, DWORD_PTR dw2)
+-#else
+-static void host_alarm_handler(int host_signum)
+-#endif
++static void try_to_rearm_timer(void *opaque);
++static void host_alarm_handler2(void *opaque)
+ {
+-#if 0
+-#define DISP_FREQ 1000
+-    {
+-        static int64_t delta_min = INT64_MAX;
+-        static int64_t delta_max, delta_cum, last_clock, delta, ti;
+-        static int count;
+-        ti = qemu_get_clock(vm_clock);
+-        if (last_clock != 0) {
+-            delta = ti - last_clock;
+-            if (delta < delta_min)
+-                delta_min = delta;
+-            if (delta > delta_max)
+-                delta_max = delta;
+-            delta_cum += delta;
+-            if (++count == DISP_FREQ) {
+-                printf("timer: min=%" PRId64 " us max=%" PRId64 " us avg=%" PRId64 " us avg_freq=%0.3f Hz\n",
+-                       muldiv64(delta_min, 1000000, ticks_per_sec),
+-                       muldiv64(delta_max, 1000000, ticks_per_sec),
+-                       muldiv64(delta_cum, 1000000 / DISP_FREQ, ticks_per_sec),
+-                       (double)ticks_per_sec / ((double)delta_cum / DISP_FREQ));
+-                count = 0;
+-                delta_min = INT64_MAX;
+-                delta_max = 0;
+-                delta_cum = 0;
+-            }
+-        }
+-        last_clock = ti;
+-    }
+-#endif
++    struct qemu_alarm_timer *t = opaque;
++
+     if (alarm_has_dynticks(alarm_timer) ||
+         (!use_icount &&
+             qemu_timer_expired(active_timers[QEMU_TIMER_VIRTUAL],
+@@ -1428,25 +1400,15 @@ static void host_alarm_handler(int host_signum)
+                            qemu_get_clock(rt_clock))) {
+         CPUState *env = next_cpu;
+ 
+-#ifdef _WIN32
+-        struct qemu_alarm_win32 *data = ((struct qemu_alarm_timer*)dwUser)->priv;
+-        SetEvent(data->host_alarm);
+-#else
+-        static const char byte = 0;
+-        write(alarm_timer_wfd, &byte, sizeof(byte));
+-#endif
+         alarm_timer->flags |= ALARM_FLAG_EXPIRED;
+ 
+         if (env) {
+             /* stop the currently executing cpu because a timer occured */
+             cpu_interrupt(env, CPU_INTERRUPT_EXIT);
+-#ifdef USE_KQEMU
+-            if (env->kqemu_enabled) {
+-                kqemu_cpu_interrupt(env);
+-            }
+-#endif
+         }
+         event_pending = 1;
++
++        try_to_rearm_timer(t);
+     }
+ }
+ 
+@@ -1514,20 +1476,6 @@ static int fcntl_setfl(int fd, int flag)
+ 
+ #define RTC_FREQ 1024
+ 
+-static void enable_sigio_timer(int fd)
+-{
+-    struct sigaction act;
+-
+-    /* timer signal */
+-    sigfillset(&act.sa_mask);
+-    act.sa_flags = 0;
+-    act.sa_handler = host_alarm_handler;
+-
+-    sigaction(SIGIO, &act, NULL);
+-    fcntl_setfl(fd, O_ASYNC);
+-    fcntl(fd, F_SETOWN, getpid());
+-}
+-
+ static int hpet_start_timer(struct qemu_alarm_timer *t)
+ {
+     struct hpet_info info;
+@@ -1561,7 +1509,7 @@ static int hpet_start_timer(struct qemu_alarm_timer *t)
+     if (r < 0)
+         goto fail;
+ 
+-    enable_sigio_timer(fd);
++    qemu_set_fd_handler2(fd, NULL, host_alarm_handler2, NULL, t);
+     t->priv = (void *)(long)fd;
+ 
+     return 0;
+@@ -1599,8 +1547,7 @@ static int rtc_start_timer(struct qemu_alarm_timer *t)
+         return -1;
+     }
+ 
+-    enable_sigio_timer(rtc_fd);
+-
++    qemu_set_fd_handler2(rtc_fd, NULL, host_alarm_handler2, NULL, t);
+     t->priv = (void *)(long)rtc_fd;
+ 
+     return 0;
+@@ -1615,21 +1562,9 @@ static void rtc_stop_timer(struct qemu_alarm_timer *t)
+ 
+ static int dynticks_start_timer(struct qemu_alarm_timer *t)
+ {
+-    struct sigevent ev;
+-    timer_t host_timer;
+-    struct sigaction act;
+-
+-    sigfillset(&act.sa_mask);
+-    act.sa_flags = 0;
+-    act.sa_handler = host_alarm_handler;
+-
+-    sigaction(SIGALRM, &act, NULL);
+-
+-    ev.sigev_value.sival_int = 0;
+-    ev.sigev_notify = SIGEV_SIGNAL;
+-    ev.sigev_signo = SIGALRM;
++    int fd;
+ 
+-    if (timer_create(CLOCK_REALTIME, &ev, &host_timer)) {
++    if ((fd = timerfd_create(CLOCK_REALTIME, 0)) == -1) {
+         perror("timer_create");
+ 
+         /* disable dynticks */
+@@ -1638,21 +1573,23 @@ static int dynticks_start_timer(struct qemu_alarm_timer *t)
+         return -1;
+     }
+ 
+-    t->priv = (void *)(long)host_timer;
++    t->priv = (void *)fd;
++    qemu_set_fd_handler2(fd, NULL, host_alarm_handler2, NULL, t);
+ 
+     return 0;
+ }
+ 
+ static void dynticks_stop_timer(struct qemu_alarm_timer *t)
+ {
+-    timer_t host_timer = (timer_t)(long)t->priv;
++    int fd = (int)t->priv;
+ 
+-    timer_delete(host_timer);
++    qemu_set_fd_handler2(fd, NULL, NULL, NULL, NULL);
++    close(fd);
+ }
+ 
+ static void dynticks_rearm_timer(struct qemu_alarm_timer *t)
+ {
+-    timer_t host_timer = (timer_t)(long)t->priv;
++    int host_timer = (int)t->priv;
+     struct itimerspec timeout;
+     int64_t nearest_delta_us = INT64_MAX;
+     int64_t current_us;
+@@ -1664,7 +1601,7 @@ static void dynticks_rearm_timer(struct qemu_alarm_timer *t)
+     nearest_delta_us = qemu_next_deadline_dyntick();
+ 
+     /* check whether a timer is already running */
+-    if (timer_gettime(host_timer, &timeout)) {
++    if (timerfd_gettime(host_timer, &timeout)) {
+         perror("gettime");
+         fprintf(stderr, "Internal timer error: aborting\n");
+         exit(1);
+@@ -1677,7 +1614,7 @@ static void dynticks_rearm_timer(struct qemu_alarm_timer *t)
+     timeout.it_interval.tv_nsec = 0; /* 0 for one-shot timer */
+     timeout.it_value.tv_sec =  nearest_delta_us / 1000000;
+     timeout.it_value.tv_nsec = (nearest_delta_us % 1000000) * 1000;
+-    if (timer_settime(host_timer, 0 /* RELATIVE */, &timeout, NULL)) {
++    if (timerfd_settime(host_timer, 0 /* RELATIVE */, &timeout, NULL)) {
+         perror("settime");
+         fprintf(stderr, "Internal timer error: aborting\n");
+         exit(1);
+@@ -1689,6 +1626,7 @@ static void dynticks_rearm_timer(struct qemu_alarm_timer *t)
+ #ifndef CONFIG_STUBDOM
+ static int unix_start_timer(struct qemu_alarm_timer *t)
+ {
++#if 0
+     struct sigaction act;
+     struct itimerval itv;
+     int err;
+@@ -1711,14 +1649,19 @@ static int unix_start_timer(struct qemu_alarm_timer *t)
+         return -1;
+ 
+     return 0;
++#else
++    return -1;
++#endif
+ }
+ 
+ static void unix_stop_timer(struct qemu_alarm_timer *t)
+ {
++#if 0
+     struct itimerval itv;
+ 
+     memset(&itv, 0, sizeof(itv));
+     setitimer(ITIMER_REAL, &itv, NULL);
++#endif
+ }
+ #else
+ static int unix_start_timer(struct qemu_alarm_timer *t) { return 0; }
+@@ -1729,16 +1672,6 @@ static void unix_stop_timer(struct qemu_alarm_timer *t) { }
+ static void try_to_rearm_timer(void *opaque)
+ {
+     struct qemu_alarm_timer *t = opaque;
+-#ifndef _WIN32
+-    ssize_t len;
+-
+-    /* Drain the notify pipe */
+-    do {
+-        char buffer[512];
+-        len = read(alarm_timer_rfd, buffer, sizeof(buffer));
+-    } while ((len == -1 && errno == EINTR) || len > 0);
+-#endif
+-
+     if (t->flags & ALARM_FLAG_EXPIRED) {
+         alarm_timer->flags &= ~ALARM_FLAG_EXPIRED;
+         qemu_rearm_alarm_timer(alarm_timer);
+@@ -1839,25 +1772,6 @@ static int init_timer_alarm(void)
+     struct qemu_alarm_timer *t = NULL;
+     int i, err = -1;
+ 
+-#if !defined(_WIN32) && !defined(CONFIG_STUBDOM)
+-    int fds[2];
+-
+-    err = pipe(fds);
+-    if (err == -1)
+-        return -errno;
+-
+-    err = fcntl_setfl(fds[0], O_NONBLOCK);
+-    if (err < 0)
+-        goto fail;
+-
+-    err = fcntl_setfl(fds[1], O_NONBLOCK);
+-    if (err < 0)
+-        goto fail;
+-
+-    alarm_timer_rfd = fds[0];
+-    alarm_timer_wfd = fds[1];
+-#endif
+-
+     for (i = 0; alarm_timers[i].name; i++) {
+         t = &alarm_timers[i];
+ 
+@@ -1871,20 +1785,11 @@ static int init_timer_alarm(void)
+         goto fail;
+     }
+ 
+-#if !defined(_WIN32) && !defined(CONFIG_STUBDOM)
+-    qemu_set_fd_handler2(alarm_timer_rfd, NULL,
+-                         try_to_rearm_timer, NULL, t);
+-#endif
+-
+     alarm_timer = t;
+ 
+     return 0;
+ 
+ fail:
+-#if !defined(_WIN32) && !defined(CONFIG_STUBDOM)
+-    close(fds[0]);
+-    close(fds[1]);
+-#endif
+     return err;
+ }
+ 
+@@ -3047,46 +2952,99 @@ static void dumb_display_init(void)
+ 
+ typedef struct IOHandlerRecord {
+     int fd;
+-    IOCanRWHandler *fd_read_poll;
+     IOHandler *fd_read;
+     IOHandler *fd_write;
+-    int deleted;
++    IOCanRWHandler *fd_read_poll;
++
+     void *opaque;
+-    /* temporary data */
+-    struct pollfd *ufd;
+     struct IOHandlerRecord *next;
++    struct epoll_event ev;
++
++    /* Profiling data */
++    const char *name;
++    unsigned int count;
++    struct timeval tv_min;
++    struct timeval tv_max;
++    struct timeval tv_total;
++    int del_pending;
+ } IOHandlerRecord;
+ 
+ static IOHandlerRecord *first_io_handler;
++static int epfd = -1;
+ 
+-/* XXX: fd_read_poll should be suppressed, but an API change is
+-   necessary in the character devices to suppress fd_can_read(). */
+-int qemu_set_fd_handler2(int fd,
+-                         IOCanRWHandler *fd_read_poll,
+-                         IOHandler *fd_read,
+-                         IOHandler *fd_write,
+-                         void *opaque)
++static void print_profile(int sig)
++{
++    IOHandlerRecord *ioh;
++    fprintf(stderr, "Event handlers profile:\n");
++
++    for (ioh = first_io_handler; ioh; ioh = ioh->next) {
++        if (unlikely(ioh->del_pending))
++                continue;
++        fprintf(stderr, "name=%s, "
++                        "times called = %u, "
++                        "total time = %ld.%06ld, "
++                        "max time = %ld.%06ld, "
++                        "min time = %ld.%06ld\n",
++        ioh->name, ioh->count,
++        ioh->tv_total.tv_sec, ioh->tv_total.tv_usec,
++        ioh->tv_max.tv_sec, ioh->tv_max.tv_usec,
++        ioh->tv_min.tv_sec, ioh->tv_min.tv_usec);
++
++    }
++}
++
++int __qemu_set_fd_handler2(int fd,
++                           IOCanRWHandler *fd_read_poll,
++                           IOHandler *fd_read,
++                           IOHandler *fd_write,
++                           void *opaque,
++                           const char *name)
+ {
+     IOHandlerRecord **pioh, *ioh;
++    int rc;
++
++    if (epfd == -1) {
++        struct sigaction sa;
++
++        epfd = epoll_create(1024);
++        if (epfd == -1)
++            fprintf(stderr, "epoll_create() failed: %s\n", strerror (errno));
++
++        memset(&sa, 0, sizeof (sa));
++        sa.sa_handler = print_profile;
++        sigemptyset(&sa.sa_mask);
++        sa.sa_flags = SA_RESTART;
++        sigaction(SIGUSR2, &sa, NULL);
++    }
+ 
+     if (!fd_read && !fd_write) {
+-        pioh = &first_io_handler;
+-        for(;;) {
++        for(pioh = &first_io_handler; *pioh; pioh = &(*pioh)->next) {
+             ioh = *pioh;
+-            if (ioh == NULL)
+-                break;
++            if (unlikely(ioh->del_pending))
++                continue;
+             if (ioh->fd == fd) {
+-                ioh->deleted = 1;
++                rc = epoll_ctl(epfd, EPOLL_CTL_DEL, ioh->fd, (void *)-1);
++                if (rc == -1)
++                    fprintf(stderr, "epoll_ctl(%d, EPOLL_CTL_DEL, %d, -1) failed: %s\n",
++                            epfd, ioh->fd, strerror(errno));
++                ioh->del_pending = 1;
+                 break;
+             }
+-            pioh = &ioh->next;
+         }
+     } else {
+         for(ioh = first_io_handler; ioh != NULL; ioh = ioh->next) {
+-            if (ioh->fd == fd)
++            if (unlikely(ioh->del_pending))
++                continue;
++            if (ioh->fd == fd) {
++                rc = epoll_ctl(epfd, EPOLL_CTL_DEL, ioh->fd, (void *)-1);
++                if (rc == -1)
++                    fprintf(stderr, "epoll_ctl(%d, EPOLL_CTL_DEL, %d, -1) failed: %s\n",
++                            epfd, ioh->fd, strerror(errno));
+                 goto found;
++            }
+         }
+         ioh = qemu_mallocz(sizeof(IOHandlerRecord));
++        ioh->del_pending = 0;
+         ioh->next = first_io_handler;
+         first_io_handler = ioh;
+     found:
+@@ -3095,19 +3053,25 @@ int qemu_set_fd_handler2(int fd,
+         ioh->fd_read = fd_read;
+         ioh->fd_write = fd_write;
+         ioh->opaque = opaque;
+-        ioh->deleted = 0;
++        ioh->name = name;
++        ioh->count = 0;
++        timerclear(&ioh->tv_min);
++        timerclear(&ioh->tv_max);
++        ioh->tv_min.tv_sec = 10000;
++        timerclear(&ioh->tv_total);
++        if (fd_read)
++            ioh->ev.events |= EPOLLIN;
++        if (fd_write)
++            ioh->ev.events |= EPOLLOUT;
++        ioh->ev.data.ptr = ioh;
++        rc = epoll_ctl(epfd, EPOLL_CTL_ADD, ioh->fd, &ioh->ev);
++        if (rc == -1)
++             fprintf(stderr, "epoll_ctl(%d, EPOLL_CTL_ADD, %d, %p) failed: %s\n",
++                     epfd, ioh->fd, &ioh->ev, strerror(errno));
+     }
+     return 0;
+ }
+ 
+-int qemu_set_fd_handler(int fd,
+-                        IOHandler *fd_read,
+-                        IOHandler *fd_write,
+-                        void *opaque)
+-{
+-    return qemu_set_fd_handler2(fd, NULL, fd_read, fd_write, opaque);
+-}
+-
+ #ifdef _WIN32
+ /***********************************************************/
+ /* Polling handling */
+@@ -3844,80 +3808,58 @@ static void host_main_loop_wait(int *timeout)
+ 
+ void main_loop_wait(int timeout)
+ {
+-    IOHandlerRecord *ioh;
+-    fd_set rfds, wfds, xfds;
+-    int ret, nfds;
+-    struct timeval tv;
++#define MAX_EVTS 32
++    IOHandlerRecord *ioh, *pvioh;
++    struct epoll_event evts[MAX_EVTS];
++    int ret, i;
+ 
+     qemu_bh_update_timeout(&timeout);
+ 
+     host_main_loop_wait(&timeout);
+ 
+-    /* poll any events */
+-    /* XXX: separate device handlers from system ones */
+-    nfds = -1;
+-    FD_ZERO(&rfds);
+-    FD_ZERO(&wfds);
+-    FD_ZERO(&xfds);
+-    for(ioh = first_io_handler; ioh != NULL; ioh = ioh->next) {
+-        if (ioh->deleted)
+-            continue;
+-        if (ioh->fd_read &&
+-            (!ioh->fd_read_poll ||
+-             ioh->fd_read_poll(ioh->opaque) != 0)) {
+-            FD_SET(ioh->fd, &rfds);
+-            if (ioh->fd > nfds)
+-                nfds = ioh->fd;
+-        }
+-        if (ioh->fd_write) {
+-            FD_SET(ioh->fd, &wfds);
+-            if (ioh->fd > nfds)
+-                nfds = ioh->fd;
+-        }
+-    }
+-
+-    tv.tv_sec = timeout / 1000;
+-    tv.tv_usec = (timeout % 1000) * 1000;
+-
+-#if defined(CONFIG_SLIRP)
+-    if (slirp_is_inited()) {
+-        slirp_select_fill(&nfds, &rfds, &wfds, &xfds);
+-    }
+-#endif
+-    ret = select(nfds + 1, &rfds, &wfds, &xfds, &tv);
++    ret = epoll_wait(epfd, evts, MAX_EVTS, timeout);
+     if (ret > 0) {
+-        IOHandlerRecord **pioh;
++        for (i = 0; i < ret; i++) {
++            struct timeval tv, tv1;
+ 
+-        for(ioh = first_io_handler; ioh != NULL; ioh = ioh->next) {
+-            if (!ioh->deleted && ioh->fd_read && FD_ISSET(ioh->fd, &rfds)) {
+-                ioh->fd_read(ioh->opaque);
++            ioh = evts[i].data.ptr;
++            if (unlikely(ioh->del_pending))
++                continue;
++
++            gettimeofday (&tv, NULL);
++            if (evts[i].events & (EPOLLIN | EPOLLHUP | EPOLLERR)) {
++                if (!ioh->fd_read_poll || ioh->fd_read_poll(ioh->opaque) != 0)
++                    ioh->fd_read(ioh->opaque);
+             }
+-            if (!ioh->deleted && ioh->fd_write && FD_ISSET(ioh->fd, &wfds)) {
++            if (evts[i].events & EPOLLOUT)
+                 ioh->fd_write(ioh->opaque);
+-            }
+-        }
+-
+-	/* remove deleted IO handlers */
+-	pioh = &first_io_handler;
+-	while (*pioh) {
+-            ioh = *pioh;
+-            if (ioh->deleted) {
+-                *pioh = ioh->next;
+-                qemu_free(ioh);
+-            } else
+-                pioh = &ioh->next;
++            gettimeofday (&tv1, NULL);
++
++            timersub(&tv1, &tv, &tv);
++            ioh->count++;
++            timeradd(&tv, &ioh->tv_total, &ioh->tv_total);
++            if (timercmp(&tv, &ioh->tv_min, <))
++                ioh->tv_min = tv;
++            if (timercmp(&tv, &ioh->tv_min, >))
++                ioh->tv_max = tv;
+         }
+     }
+-#if defined(CONFIG_SLIRP)
+-    if (slirp_is_inited()) {
+-        if (ret < 0) {
+-            FD_ZERO(&rfds);
+-            FD_ZERO(&wfds);
+-            FD_ZERO(&xfds);
++
++    /* clean up events marked for deletion. should be thread safe for now */
++    pvioh = NULL;
++    ioh = first_io_handler;
++    while (ioh) {
++        if (unlikely(ioh->del_pending)) {
++           if (!pvioh)
++                first_io_handler = ioh->next;
++           else
++                pvioh->next = ioh->next;
++           qemu_free(ioh);
++        } else {
++           pvioh = ioh;
+         }
+-        slirp_select_poll(&rfds, &wfds, &xfds);
++        ioh = pvioh ? pvioh->next : first_io_handler;
+     }
+-#endif
+ 
+     /* vm time timers */
+     if (vm_running && likely(!(cur_cpu->singlestep_enabled & SSTEP_NOTIMER)))

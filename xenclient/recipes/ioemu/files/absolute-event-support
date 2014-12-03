@@ -1,0 +1,391 @@
+diff --git a/console.h b/console.h
+index 14b42f3..81484bd 100644
+--- a/console.h
++++ b/console.h
+@@ -33,6 +33,7 @@ void qemu_remove_mouse_event_handler(QEMUPutMouseEntry *entry);
+ 
+ void kbd_put_keycode(int keycode);
+ void kbd_mouse_event(int dx, int dy, int dz, int buttons_state);
++void kbd_mouse_event_absolute(int x, int y, int dz, int buttons_state);
+ int kbd_mouse_is_absolute(void);
+ 
+ void do_info_mice(void);
+diff --git a/hw/usb-hid.c b/hw/usb-hid.c
+index 4d889d6..17cde4b 100644
+--- a/hw/usb-hid.c
++++ b/hw/usb-hid.c
+@@ -910,7 +910,7 @@ static USBDevice *usb_pointer_init(int kind, int xyrel, const char *devname)
+ 
+ USBDevice *usb_tablet_init(void)
+ {
+-    return usb_pointer_init(USB_TABLET, 0, "QEMU USB Tablet");
++    return usb_pointer_init(USB_TABLET, 0, "Absolute Input");
+ }
+ 
+ USBDevice *usb_mouse_init(void)
+diff --git a/hw/xenfb.c b/hw/xenfb.c
+index b5d1163..04c58d7 100644
+--- a/hw/xenfb.c
++++ b/hw/xenfb.c
+@@ -65,10 +65,10 @@ struct common {
+ 
+ struct XenInput {
+     struct common c;
+-    int abs_pointer_wanted; /* Whether guest supports absolute pointer */
+     int button_state;       /* Last seen pointer button state */
+     int extended;
+     QEMUPutMouseEntry *qmouse;
++    QEMUPutMouseEntry *qtablet;
+ };
+ 
+ #define UP_QUEUE 8
+@@ -249,8 +249,8 @@ static int xenfb_send_motion(struct XenInput *xenfb,
+ 
+     memset(&event, 0, XENKBD_IN_EVENT_SIZE);
+     event.type = XENKBD_TYPE_MOTION;
+-    event.motion.rel_x = rel_x;
+-    event.motion.rel_y = rel_y;
++    event.motion.rel_x = rel_x * 20;
++    event.motion.rel_y = rel_y * 20;
+ #if __XEN_LATEST_INTERFACE_VERSION__ >= 0x00030207
+     event.motion.rel_z = rel_z;
+ #endif
+@@ -311,10 +311,25 @@ static void xenfb_key_event(void *opaque, int scancode)
+     xenfb_send_key(xenfb, down, scancode2linux[scancode]);
+ }
+ 
++static void xenfb_buttons(struct XenInput *xenfb, int button_state)
++{
++    int i;
++
++    for (i = 0 ; i < 8 ; i++) {
++       int lastDown = xenfb->button_state & (1 << i);
++       int down = button_state & (1 << i);
++       if (down == lastDown)
++           continue;
++
++       if (xenfb_send_key(xenfb, down, BTN_LEFT+i) < 0)
++           return;
++    }
++    xenfb->button_state = button_state;
++}
++
+ /*
+  * Send a mouse event from the client to the guest OS
+  *
+- * The QEMU mouse can be in either relative, or absolute mode.
+  * Movement is sent separately from button state, which has to
+  * be encoded as virtual key events. We also don't actually get
+  * given any button up/down events, so have to track changes in
+@@ -326,28 +341,29 @@ static void xenfb_mouse_event(void *opaque,
+     struct XenInput *xenfb = opaque;
+     int dw = ds_get_width(xenfb->c.ds);
+     int dh = ds_get_height(xenfb->c.ds);
+-    int i;
+ 
+-#if 0
+-    if (xenfb->abs_pointer_wanted)
+-	xenfb_send_position(xenfb,
+-			    dx * (dw - 1) / 0x7fff,
+-			    dy * (dh - 1) / 0x7fff,
+-			    dz);
+-    else
+-#endif
+-	xenfb_send_motion(xenfb, dx, dy, dz);
++    xenfb_send_motion(xenfb, dx, dy, dz);
+ 
+-    for (i = 0 ; i < 8 ; i++) {
+-	int lastDown = xenfb->button_state & (1 << i);
+-	int down = button_state & (1 << i);
+-	if (down == lastDown)
+-	    continue;
++    xenfb_buttons(xenfb, button_state);
++}
+ 
+-	if (xenfb_send_key(xenfb, down, BTN_LEFT+i) < 0)
+-	    return;
+-    }
+-    xenfb->button_state = button_state;
++/*
++ * Send a tablet event from the client to the guest OS
++ */
++static void xenfb_tablet_event(void *opaque,
++			       int dx, int dy, int dz, int button_state)
++{
++    struct XenInput *xenfb = opaque;
++
++
++#if 0
++    xenfb_send_position(xenfb,
++                        dx * (ds_get_width(xenfb->c.ds) - 1) / 0x7fff,
++                        dy * (ds_get_height(xenfb->c.ds) - 1) / 0x7fff,
++                        dz);
++#endif
++    xenfb_send_position(xenfb, dx, dy, dz);
++    xenfb_buttons(xenfb, button_state);
+ }
+ 
+ static int input_init(struct XenDevice *xendev)
+@@ -380,21 +396,28 @@ static void input_connected(struct XenDevice *xendev)
+ {
+     struct XenInput *in = container_of(xendev, struct XenInput, c.xendev);
+ 
++#if 0
+     if (xenstore_read_fe_int(xendev, "request-abs-pointer",
+                              &in->abs_pointer_wanted) == -1)
+ 	in->abs_pointer_wanted = 0;
+-
++#endif
+     if (in->qmouse)
+ 	qemu_remove_mouse_event_handler(in->qmouse);
+-    in->qmouse = qemu_add_mouse_event_handler(xenfb_mouse_event, in,
+-					      in->abs_pointer_wanted,
++    in->qmouse = qemu_add_mouse_event_handler(xenfb_mouse_event, in, 0,
+ 					      "Xen PVFB Mouse");
++    in->qtablet = qemu_add_mouse_event_handler(xenfb_tablet_event, in, 1,
++					      "Xen PVFB Tablet");
+ }
+ 
+ static void input_disconnect(struct XenDevice *xendev)
+ {
+     struct XenInput *in = container_of(xendev, struct XenInput, c.xendev);
+ 
++    if (in->qtablet) {
++	qemu_remove_mouse_event_handler(in->qtablet);
++	in->qtablet = NULL;
++    }
++
+     if (in->qmouse) {
+ 	qemu_remove_mouse_event_handler(in->qmouse);
+ 	in->qmouse = NULL;
+diff --git a/switcher.c b/switcher.c
+index 315e1f7..6307f2c 100644
+--- a/switcher.c
++++ b/switcher.c
+@@ -211,7 +211,9 @@ int switcher_get_pvm(void)
+ 
+ static void switcher_event(struct input_event *e)
+ {
+-    static int  mouse_button_state = 0;
++    static int mouse_button_state = 0;
++    static int absolute_x=0, absolute_y=0, absolute_z=0, absolute=0;
++    static int relative_x=0, relative_y=0, relative_z=0, relative=0;
+ 
+     if (e->type == EV_KEY)
+     {
+@@ -242,24 +244,54 @@ static void switcher_event(struct input_event *e)
+             switcher_key_inject(e->value, e->code);
+     }
+ 
+-    if (e->type == EV_REL || e->type == EV_ABS)
++    /* Mouse motion */
++    if (e->type == EV_REL)
+     {
+-        /* Mouse motion */
+-        int x = 0, y = 0, z = 0;
+-        if (e->type == EV_REL)
+-            switch (e->code)
+-            {
+-                case REL_X:
+-                    x = e->value;
+-                    break;
+-                case REL_Y:
+-                    y = e->value;
+-                    break;
+-                case REL_WHEEL:
+-                    z = -e->value;
+-                    break;
+-            }
+-        kbd_mouse_event (x, y, z, mouse_button_state);
++        switch (e->code)
++        {
++            case REL_X:
++                relative_x = e->value;
++                break;
++            case REL_Y:
++                relative_y = e->value;
++                break;
++            case REL_WHEEL:
++                relative_z = -e->value;
++                break;
++        }
++	relative++;
++    }
++
++    if (e->type == EV_ABS)
++    {
++        switch (e->code)
++        {
++            case ABS_X:
++                absolute_x = e->value;
++                break;
++            case ABS_Y:
++                absolute_y = e->value;
++                break;
++            case ABS_WHEEL:
++                absolute_z = -e->value;
++                break;
++        }
++	absolute++;
++
++    }
++
++    if (e->type == EV_SYN && e->code == SYN_REPORT)
++    {
++        if (relative)
++        {
++            kbd_mouse_event (relative_x, relative_y, relative_z, mouse_button_state);
++            relative = relative_x = relative_y = relative_z = 0;
++        }
++        if (absolute)
++        {
++            kbd_mouse_event_absolute (absolute_x, absolute_y, absolute_z, mouse_button_state);
++            absolute = absolute_z = 0;
++        }
+     }
+ }
+ 
+diff --git a/vl.c b/vl.c
+index c992563..bae5e8a 100644
+--- a/vl.c
++++ b/vl.c
+@@ -242,7 +242,7 @@ int win2k_install_hack = 0;
+ int rtc_td_hack = 0;
+ const char dom0_input = NULL;
+ #endif
+-int usb_enabled = 0;
++int usb_enabled = 1;
+ int smp_cpus = 1;
+ const char *vnc_display;
+ int acpi_enabled = 1;
+@@ -560,6 +560,7 @@ static QEMUPutKBDEvent *qemu_put_kbd_event;
+ static void *qemu_put_kbd_event_opaque;
+ static QEMUPutMouseEntry *qemu_put_mouse_event_head;
+ static QEMUPutMouseEntry *qemu_put_mouse_event_current;
++static QEMUPutMouseEntry *qemu_put_mouse_event_current_absolute;
+ 
+ void qemu_add_kbd_event_handler(QEMUPutKBDEvent *func, void *opaque)
+ {
+@@ -582,7 +583,14 @@ QEMUPutMouseEntry *qemu_add_mouse_event_handler(QEMUPutMouseEvent *func,
+     s->next = NULL;
+ 
+     if (!qemu_put_mouse_event_head) {
+-        qemu_put_mouse_event_head = qemu_put_mouse_event_current = s;
++
++        qemu_put_mouse_event_head = s;
++
++        if (absolute)
++            qemu_put_mouse_event_current_absolute = s;
++        else
++            qemu_put_mouse_event_current = s;
++
+         return s;
+     }
+ 
+@@ -591,7 +599,11 @@ QEMUPutMouseEntry *qemu_add_mouse_event_handler(QEMUPutMouseEvent *func,
+         cursor = cursor->next;
+ 
+     cursor->next = s;
+-    qemu_put_mouse_event_current = s;
++
++    if (absolute)
++        qemu_put_mouse_event_current_absolute = s;
++    else
++        qemu_put_mouse_event_current = s;
+ 
+     return s;
+ }
+@@ -613,8 +625,12 @@ void qemu_remove_mouse_event_handler(QEMUPutMouseEntry *entry)
+         return;
+     else if (prev == NULL) { // entry is head
+         qemu_put_mouse_event_head = cursor->next;
++
+         if (qemu_put_mouse_event_current == entry)
+             qemu_put_mouse_event_current = cursor->next;
++        else if (qemu_put_mouse_event_current_absolute == entry)
++            qemu_put_mouse_event_current_absolute = cursor->next;
++
+         qemu_free(entry->qemu_put_mouse_event_name);
+         qemu_free(entry);
+         return;
+@@ -624,6 +640,8 @@ void qemu_remove_mouse_event_handler(QEMUPutMouseEntry *entry)
+ 
+     if (qemu_put_mouse_event_current == entry)
+         qemu_put_mouse_event_current = prev;
++    else if (qemu_put_mouse_event_current_absolute == entry)
++        qemu_put_mouse_event_current_absolute = prev;
+ 
+     qemu_free(entry->qemu_put_mouse_event_name);
+     qemu_free(entry);
+@@ -665,12 +683,34 @@ void kbd_mouse_event(int dx, int dy, int dz, int buttons_state)
+     }
+ }
+ 
++void kbd_mouse_event_absolute(int x, int y, int dz, int buttons_state)
++{
++    QEMUPutMouseEvent *mouse_event;
++    void *mouse_event_opaque;
++    int width;
++
++    if (!qemu_put_mouse_event_current_absolute) {
++        return;
++    }
++
++    mouse_event =
++        qemu_put_mouse_event_current_absolute->qemu_put_mouse_event;
++    mouse_event_opaque =
++        qemu_put_mouse_event_current_absolute->qemu_put_mouse_event_opaque;
++
++    if (mouse_event)
++    {
++        mouse_event(mouse_event_opaque,
++                    x, y, dz, buttons_state);
++    }
++}
++
+ int kbd_mouse_is_absolute(void)
+ {
+-    if (!qemu_put_mouse_event_current)
++    if (!qemu_put_mouse_event_current_absolute)
+         return 0;
+-
+-    return qemu_put_mouse_event_current->qemu_put_mouse_event_absolute;
++    else
++        return 1;
+ }
+ 
+ void do_info_mice(void)
+@@ -687,7 +727,8 @@ void do_info_mice(void)
+     cursor = qemu_put_mouse_event_head;
+     while (cursor != NULL) {
+         term_printf("%c Mouse #%d: %s\n",
+-                    (cursor == qemu_put_mouse_event_current ? '*' : ' '),
++                    (((cursor == qemu_put_mouse_event_current) ||
++                      (cursor == qemu_put_mouse_event_current_absolute)) ? '*' : ' '),
+                     index, cursor->qemu_put_mouse_event_name);
+         index++;
+         cursor = cursor->next;
+@@ -711,7 +752,12 @@ void do_mouse_set(int index)
+     }
+ 
+     if (cursor != NULL)
+-        qemu_put_mouse_event_current = cursor;
++    {
++        if (cursor->qemu_put_mouse_event_absolute)
++            qemu_put_mouse_event_current_absolute = cursor;
++        else
++            qemu_put_mouse_event_current = cursor;
++    }
+     else
+         term_printf("Mouse at given index not found\n");
+ }
+@@ -4990,6 +5036,9 @@ int main(int argc, char **argv, char **envp)
+     disable_audio_recording = 0;
+ #endif
+ 
++    /* Enable the USB tablet by default. */
++    usb_devices[usb_devices_index++] = "tablet";
++
+     optind = 1;
+     for(;;) {
+         if (optind >= argc)

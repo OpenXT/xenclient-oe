@@ -1,0 +1,481 @@
+diff --git a/hw/pass-through.c b/hw/pass-through.c
+index 73c2f23..14b898d 100644
+--- a/hw/pass-through.c
++++ b/hw/pass-through.c
+@@ -90,6 +90,11 @@
+ #include "qemu-xen.h"
+ #include <unistd.h>
+ 
++#define GUEST_OPREGION_MAPPED 0xfed20000
++
++extern int vga_passthrough;
++uint32_t guest_opregion_mapped = GUEST_OPREGION_MAPPED;
++
+ struct php_dev {
+     struct pt_dev *pt_dev;
+     uint8_t valid;
+@@ -1004,7 +1009,7 @@ static void pt_iomem_map(PCIDevice *d, int i, uint32_t e_phys, uint32_t e_size,
+         e_phys, (unsigned long)assigned_device->bases[i].access.maddr,
+         type, e_size, i, first_map);
+ 
+-    if ( e_size == 0 )
++    if ( e_size == 0 || !first_map)
+         return;
+ 
+     if ( !first_map && old_ebase != -1 )
+@@ -1569,10 +1574,12 @@ static int pt_dev_is_virtfn(struct pci_dev *dev)
+ 
+ static int pt_register_regions(struct pt_dev *assigned_device)
+ {
+-    int i = 0;
++    int i = 0, ret = 0;
+     uint32_t bar_data = 0;
+     struct pci_dev *pci_dev = assigned_device->pci_dev;
+     PCIDevice *d = &assigned_device->dev;
++    uint16_t vendor_id, class;
++    uint32_t opregion;
+ 
+     /* Register PIO/MMIO BARs */
+     for ( i = 0; i < PCI_BAR_ENTRIES; i++ )
+@@ -1628,6 +1635,36 @@ static int pt_register_regions(struct pt_dev *assigned_device)
+             (uint32_t)(pci_dev->rom_size), (uint32_t)(pci_dev->rom_base_addr));
+     }
+ 
++    /* Map legacy ioport and iomem, for specific devices */
++    vendor_id = pci_read_word(pci_dev, 0x00);
++    class = pci_read_word(pci_dev, 0x0a);
++
++    PT_LOG("Real device vendor_id=0x%x class=0x%x\n", vendor_id, class);
++    if ( vga_passthrough && class == 0x0300 )
++    {
++        PT_LOG("add an intel graphic card\n");
++
++        ret = xc_domain_ioport_mapping(xc_handle, domid, 0x3B0, 0x3B0, 0xb,
++                                      DPCI_ADD_MAPPING);
++        ret = xc_domain_ioport_mapping(xc_handle, domid, 0x3C0, 0x3C0, 32,
++                                      DPCI_ADD_MAPPING);
++        ret |= xc_domain_memory_mapping(xc_handle, domid, 0xa0, 0xa0, 32,
++                                       DPCI_ADD_MAPPING);
++        // Read opregion address from 0xfc
++        opregion = pt_pci_host_read(0, 2, 0, 0xfc, 4) & 0xffffff00;
++        ret |= xc_domain_memory_mapping(xc_handle, domid,
++                GUEST_OPREGION_MAPPED >> XC_PAGE_SHIFT,
++                opregion >> XC_PAGE_SHIFT,
++                0x2,
++                DPCI_ADD_MAPPING);
++
++        if ( ret != 0 )
++        {
++            PT_LOG("legacy mapping failed !\n");
++            return ret;
++        }
++    }
++
+     return 0;
+ }
+ 
+@@ -1636,6 +1673,8 @@ static void pt_unregister_regions(struct pt_dev *assigned_device)
+     int i, type, ret;
+     uint32_t e_size;
+     PCIDevice *d = (PCIDevice*)assigned_device;
++    uint16_t class, vendor_id;
++    uint32_t opregion;
+ 
+     for ( i = 0; i < PCI_NUM_REGIONS; i++ )
+     {
+@@ -1677,6 +1716,34 @@ static void pt_unregister_regions(struct pt_dev *assigned_device)
+ 
+     }
+ 
++    /* unmap legacy ioport and iomem, for specific devices */
++    vendor_id = pci_read_word(assigned_device->pci_dev, 0x00);
++    class = pci_read_word(assigned_device->pci_dev, 0x0a);
++
++    PT_LOG("Real device vendor_id=0x%x class=0x%x\n", vendor_id, class);
++    if ( vga_passthrough && class == 0x0300 )
++    {
++        PT_LOG("remove an intel graphic card\n");
++
++        ret = xc_domain_ioport_mapping(xc_handle, domid, 0x3B0, 0x3B0, 0xb,
++                                      DPCI_REMOVE_MAPPING);
++        ret = xc_domain_ioport_mapping(xc_handle, domid, 0x3C0, 0x3C0, 32,
++                                       DPCI_REMOVE_MAPPING);
++        ret |= xc_domain_memory_mapping(xc_handle, domid, 0xa0, 0xa0, 32,
++                                        DPCI_REMOVE_MAPPING);
++        // Read opregion address from 0xfc
++        opregion = pt_pci_host_read(0, 2, 0, 0xfc, 4) & 0xffffff00;
++        ret |= xc_domain_memory_mapping(xc_handle, domid,
++                GUEST_OPREGION_MAPPED >> XC_PAGE_SHIFT,
++                opregion >> XC_PAGE_SHIFT,
++                0x2,
++                DPCI_REMOVE_MAPPING);
++
++        if ( ret != 0 )
++        {
++            PT_LOG("legacy unmapping failed !\n");
++        }
++    }
+ }
+ 
+ static uint8_t find_cap_offset(struct pci_dev *pci_dev, uint8_t cap)
+@@ -4160,3 +4227,50 @@ err:
+     return status;
+ }
+ 
++static void pci_access_init(void)
++{
++    struct pci_access *pci_access;
++
++    if (dpci_infos.pci_access)
++	return;
++
++    /* Initialize libpci */
++    pci_access = pci_alloc();
++    if ( pci_access == NULL ) {
++	PT_LOG("Error: pci_access is NULL\n");
++	return;
++    }
++    pci_init(pci_access);
++    pci_scan_bus(pci_access);
++    dpci_infos.pci_access = pci_access;
++}
++
++u32 pt_pci_host_read(int bus, int dev, int fn, u32 addr, int len)
++{
++    struct pci_dev *pci_dev;
++    u32 val = -1;
++    u32 ret = 0;
++
++    pci_access_init();
++    pci_dev = pci_get_dev(dpci_infos.pci_access, 0, bus, dev, fn);
++    if ( !pci_dev )
++	return 0;
++
++    pci_read_block(pci_dev, addr, (u8 *) &val, len);
++    memcpy((u8 *)&ret, (u8 *)&val, len);
++    return ret;
++}
++
++int pt_pci_host_write(int bus, int dev, int fn, u32 addr, u32 val, int len)
++{
++    struct pci_dev *pci_dev;
++    int ret = 0;
++
++    pci_access_init();
++    pci_dev = pci_get_dev(dpci_infos.pci_access, 0, bus, dev, fn);
++    if ( !pci_dev )
++        return 0;
++
++    ret = pci_write_block(pci_dev, addr, (u8 *) &val, len);
++    return ret;
++}
+diff --git a/hw/pass-through.h b/hw/pass-through.h
+index a503e80..5bb3329 100644
+--- a/hw/pass-through.h
++++ b/hw/pass-through.h
+@@ -392,5 +392,8 @@ static inline pciaddr_t pt_pci_base_addr(pciaddr_t base)
+     return base & PCI_ADDR_MEM_MASK;
+ }
+ 
++u32 pt_pci_host_read(int bus, int dev, int fn, u32 addr, int len);
++int pt_pci_host_write(int bus, int dev, int fn, u32 addr, u32 val, int len);
++
+ #endif /* __PASSTHROUGH_H__ */
+ 
+diff --git a/hw/pc.c b/hw/pc.c
+index 4313ab2..7048796 100644
+--- a/hw/pc.c
++++ b/hw/pc.c
+@@ -64,6 +64,7 @@ void tpm_tis_init(SetIRQFunc *set_irq, void *opaque, int irq);
+ 
+ extern uint8_t *acpi_tables;
+ extern size_t acpi_tables_len;
++extern int vga_passthrough;
+ 
+ static fdctrl_t *floppy_controller;
+ static RTCState *rtc_state;
+@@ -973,12 +974,30 @@ vga_bios_error:
+     ferr_irq = i8259[13];
+ 
+     if (pci_enabled) {
++        uint32_t val;
++
+         pci_bus = i440fx_init(&i440fx_state, i8259);
++
++        if (vga_passthrough) {
++            /* Intel GMCH must report Capabilities List status for vendor specific caps */
++            val = pt_pci_host_read(0, 0, 0, 0x34, 1);
++            if ((val != 0) && (pt_pci_host_read(0, 0, 0, val, 1) == 0x09))
++                i440fx_state->config[0x06] |= 0x10; // status |= capabilities list
++        }
++
+         piix3_devfn = piix3_init(pci_bus, -1);
+     } else {
+         pci_bus = NULL;
+     }
+ 
++    if (vga_passthrough) {
++	    uint16_t vid, did, rid;
++	    vid = pt_pci_host_read(0, 0x1f, 0, 0, 2);
++	    did = pt_pci_host_read(0, 0x1f, 0, 2, 2);
++	    rid = pt_pci_host_read(0, 0x1f, 0, 8, 1);
++	    (void)intel_pci_bridge_init(pci_bus, 0x1f << 3, vid, did, "intel_bridge_1f", rid);
++    }
++
+     /* init basic PC hardware */
+     register_ioport_write(0x80, 1, 1, ioport80_write, NULL);
+ 
+diff --git a/hw/pci.c b/hw/pci.c
+index 80568da..5b32145 100644
+--- a/hw/pci.c
++++ b/hw/pci.c
+@@ -28,6 +28,8 @@
+ #include "virtio-net.h"
+ #include "sysemu.h"
+ 
++#include "pass-through.h"
++
+ #include "exec-all.h"
+ #include "qemu-xen.h"
+ 
+@@ -35,7 +37,8 @@
+ #include "hw/pass-through.h"
+ #endif
+ 
+-extern int igd_passthru;
++extern int vga_passthrough;
++extern uint32_t guest_opregion_mapped;
+ 
+ //#define DEBUG_PCI
+ 
+@@ -587,6 +590,25 @@ void pci_data_write(void *opaque, uint32_t addr, uint32_t val, int len)
+     pci_dev->config_write(pci_dev, config_addr, val, len);
+ }
+ 
++int pci_igfx_on_bus(PCIBus *bus)
++{
++    int devfn;
++    uint16_t vid, class;
++
++    for(devfn = bus->devfn_min ; devfn < 256; devfn += 8)
++        if (pci_devfn_in_use(bus, devfn))
++        {
++            PCIDevice *pci_dev = bus->devices[devfn];
++
++            vid = pci_dev->config_read(pci_dev, PCI_VENDOR_ID, 2);
++            class = pci_dev->config_read(pci_dev, PCI_CLASS_DEVICE, 2);
++            if (vid == PCI_VENDOR_ID_INTEL &&
++                class == PCI_CLASS_VGA)
++                return 1;
++        }
++    return 0;
++}
++
+ uint32_t pci_data_read(void *opaque, uint32_t addr, int len)
+ {
+     PCIBus *s = opaque;
+@@ -617,7 +639,65 @@ uint32_t pci_data_read(void *opaque, uint32_t addr, int len)
+         goto the_end;
+     }
+     config_addr = addr & 0xff;
++
+     val = pci_dev->config_read(pci_dev, config_addr, len);
++    if (vga_passthrough && pci_igfx_on_bus(s))
++    {
++        while (pci_dev->devfn == 0x00) //Host Bridge
++        {
++            val = pt_pci_host_read(0, 0, 0, 0x34, 1);
++
++            /* Only do the following for vendor specific caps (0x09) */
++            if ((val != 0) && (pt_pci_host_read(0, 0, 0, val, 1) == 0x09))
++            {
++                if (config_addr == 0x34) /* reading caps pointer */
++                    break;
++                if ((config_addr >= val)&&(config_addr < (val + 12)))
++                {
++                    /* don't allow it to chain further */
++                    if (config_addr == (val + 1))
++                    {
++                        val = 0;
++                        break;
++                    }
++                    /* reading vendor specific capabilities from PCH */
++                    val = pt_pci_host_read(0, 0, 0, config_addr, len);
++                    break;
++                }
++            }
++
++            switch (config_addr)
++            {
++                case 0x00:        /* vendor id */
++                case 0x02:        /* device id */
++                case 0x08:        /* revision id */
++                case 0x2c:        /* sybsystem vendor id */
++                case 0x2e:        /* sybsystem id */
++                case 0x50:        /* processor graphics control register */
++                case 0x52:        /* processor graphics control register */
++                case 0xa0:        /* top of memory */
++                case 0xb0:        /* ILK: BSM: should read from dev 2 offset 0x5c */
++                case 0x58:        /* SNB: PAVPC Offset */
++                case 0xa4:        /* SNB: graphics base of stolen memory */
++                case 0xa8:        /* SNB: base of GTT stolen memory */
++                    val = pt_pci_host_read(0, 0, 0, config_addr, len);
++                    break;
++                default:
++                    val = pci_dev->config_read(pci_dev, config_addr, len);
++            }
++            break;
++        }
++
++        /* For intel graphics card, temporarily disable msi capabilities for iGfx */
++        if (pci_dev->devfn == 0x10) {
++            switch (config_addr)
++            {
++                case 0xfc:
++                    val = guest_opregion_mapped;
++                    break;
++            }
++        }
++    }
+ #if defined(DEBUG_PCI)
+     printf("pci_config_read: %s: addr=%02x val=%08x len=%d\n",
+            pci_dev->name, config_addr, val, len);
+@@ -904,6 +984,38 @@ PCIDevice *pci_find_device(int bus_num, int slot, int function)
+     return bus->devices[PCI_DEVFN(slot, function)];
+ }
+ 
++
++static int intel_bridge_irq_function(PCIDevice *pci_dev, int irq_num)
++{
++    return irq_num;
++}
++
++PCIBus *intel_pci_bridge_init(PCIBus *bus, int devfn, uint16_t vid, uint16_t did,
++                              const char *name, uint16_t revision)
++{
++    PCIBridge *s;
++    s = (PCIBridge *)pci_register_device(bus, name, sizeof(PCIBridge),
++                                         devfn, NULL, pci_bridge_write_config);
++
++    pci_config_set_vendor_id(s->dev.config, vid);
++    pci_config_set_device_id(s->dev.config, did);
++
++    s->dev.config[0x04] = 0x06; // command = bus master, pci mem
++    s->dev.config[0x05] = 0x00;
++    s->dev.config[0x06] = 0xa0; // status = fast back-to-back, 66MHz, no error
++    s->dev.config[0x07] = 0x00; // status = fast devsel
++    s->dev.config[0x08] = revision; // revision
++    s->dev.config[0x09] = 0x00; // programming i/f
++    pci_config_set_class(s->dev.config, PCI_CLASS_BRIDGE_PCI);
++    s->dev.config[0x0D] = 0x10; // latency_timer
++    s->dev.config[0x0E] = 0x81; // header_type
++    s->dev.config[0x1E] = 0xa0; // secondary status
++
++    s->bus = pci_register_secondary_bus(&s->dev, intel_bridge_irq_function);
++    return s->bus;
++}
++
++
+ PCIBus *pci_bridge_init(PCIBus *bus, int devfn, uint16_t vid, uint16_t did,
+                         pci_map_irq_fn map_irq, const char *name)
+ {
+diff --git a/hw/pci.h b/hw/pci.h
+index 4d7ba2a..2ce53aa 100644
+--- a/hw/pci.h
++++ b/hw/pci.h
+@@ -165,6 +165,8 @@ typedef struct PCIIORegion {
+ #define PCI_MIN_GNT		0x3e	/* 8 bits */
+ #define PCI_MAX_LAT		0x3f	/* 8 bits */
+ 
++#define PCI_CLASS_VGA           0x300   /* Device class vga */
++
+ /* Bits in the PCI Status Register (PCI 2.3 spec) */
+ #define PCI_STATUS_RESERVED1	0x007
+ #define PCI_STATUS_INT_STATUS	0x008
+@@ -257,6 +259,10 @@ int pci_read_devaddr(const char *addr, int *domp, int *busp, unsigned *slotp);
+ int pci_assign_devaddr(const char *addr, int *domp, int *busp, unsigned *slotp);
+ 
+ void pci_info(void);
++
++PCIBus *intel_pci_bridge_init(PCIBus *bus, int devfn, uint16_t vid, uint16_t did,
++                             const char *name, uint16_t revision);
++
+ PCIBus *pci_bridge_init(PCIBus *bus, int devfn, uint16_t vid, uint16_t did,
+                         pci_map_irq_fn map_irq, const char *name);
+ 
+diff --git a/vl.c b/vl.c
+index 4ed9520..c0e470d 100644
+--- a/vl.c
++++ b/vl.c
+@@ -236,6 +236,7 @@ CharDriverState *virtcon_hds[MAX_VIRTIO_CONSOLES];
+ #ifdef TARGET_I386
+ int win2k_install_hack = 0;
+ int rtc_td_hack = 0;
++int vga_passthrough = 0;
+ #endif
+ int usb_enabled = 0;
+ int smp_cpus = 1;
+@@ -4290,6 +4291,7 @@ enum {
+     QEMU_OPTION_domainname,
+     QEMU_OPTION_acpi,
+     QEMU_OPTION_vcpus,
++    QEMU_OPTION_vga_passthrough,
+ 
+     /* Debug/Expert options: */
+     QEMU_OPTION_serial,
+@@ -4463,6 +4465,7 @@ static const QEMUOption qemu_options[] = {
+     { "pciemulation", HAS_ARG, QEMU_OPTION_pci_emulation },
+     { "vncunused", 0, QEMU_OPTION_vncunused },
+     { "vcpus", HAS_ARG, QEMU_OPTION_vcpus },
++    { "vga-passthrough", 0, QEMU_OPTION_vga_passthrough },
+ #if defined(CONFIG_XEN) && !defined(CONFIG_DM)
+     { "xen-domid", HAS_ARG, QEMU_OPTION_xen_domid },
+     { "xen-create", 0, QEMU_OPTION_xen_create },
+@@ -4623,24 +4626,20 @@ static void select_soundhw (const char *optarg)
+ static void select_vgahw (const char *p)
+ {
+     const char *opts;
++    std_vga_enabled = 0;
++    cirrus_vga_enabled = 0;
++    vmsvga_enabled = 0;
+ 
+-    if (strstart(p, "std", &opts)) {
++    if (strstart(p, "std", &opts))
+         std_vga_enabled = 1;
+-        cirrus_vga_enabled = 0;
+-        vmsvga_enabled = 0;
+-    } else if (strstart(p, "cirrus", &opts)) {
++    else if (strstart(p, "cirrus", &opts))
+         cirrus_vga_enabled = 1;
+-        std_vga_enabled = 0;
+-        vmsvga_enabled = 0;
+-    } else if (strstart(p, "vmware", &opts)) {
+-        cirrus_vga_enabled = 0;
+-        std_vga_enabled = 0;
++    else if (strstart(p, "vmware", &opts))
+         vmsvga_enabled = 1;
+-    } else if (strstart(p, "none", &opts)) {
+-        cirrus_vga_enabled = 0;
+-        std_vga_enabled = 0;
+-        vmsvga_enabled = 0;
+-    } else {
++    else if (strstart(p, "passthrough", &opts))
++        vga_passthrough = 1;
++    else if (!strstart(p, "none", &opts))
++    {
+     invalid_vga:
+         fprintf(stderr, "Unknown vga type: %s\n", p);
+         exit(1);
+@@ -5296,6 +5295,12 @@ int main(int argc, char **argv, char **envp)
+             case QEMU_OPTION_disable_opengl:
+                 opengl_enabled = 0;
+                 break;
++            case QEMU_OPTION_vga_passthrough:
++                vga_passthrough = 1;
++                std_vga_enabled = 0;
++                cirrus_vga_enabled = 0;
++                vmsvga_enabled = 0;
++                break;
+             case QEMU_OPTION_direct_pci:
+                direct_pci = optarg;
+                 break;

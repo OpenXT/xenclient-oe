@@ -1,0 +1,583 @@
+diff --git a/Makefile.target b/Makefile.target
+index 18c3dd6..06b2c7a 100644
+--- a/Makefile.target
++++ b/Makefile.target
+@@ -599,6 +599,7 @@ OBJS+= cirrus_vga.o apic.o parallel.o acpi.o piix_pci.o
+ OBJS+= usb-uhci.o vmmouse.o vmport.o vmware_vga.o hpet.o
+ OBJS += device-hotplug.o pci-hotplug.o
+ OBJS += lpc.o
++OBJS += applesmc.o
+ endif
+ ifeq ($(TARGET_BASE_ARCH), ppc)
+ CPPFLAGS += -DHAS_AUDIO -DHAS_AUDIO_CHOICE
+diff --git a/hw/applesmc.c b/hw/applesmc.c
+new file mode 100644
+index 0000000..73835b5
+--- /dev/null
++++ b/hw/applesmc.c
+@@ -0,0 +1,537 @@
++/*
++ *  Apple SMC controller
++ *
++ *  Copyright (c) 2011 James McKenzie
++ *
++ */
++
++
++/*
++ *  To make this work, you either need to have the applesmc arbiter (a device
++ *  in the XC kernel) in /dev/applesmc. Or to have have keys in /applesmc/KEY
++ *  Eg if you wanted to say the platform had 3 fans you'd do
++ *
++ *  xenstore-write "/applesmc/FNum" "\003"
++ *
++ *  The presence of the real hardware or the existance of the XS key /applesmc
++ *  will turn on the emulation.
++ *
++ */
++
++#include <sys/ioctl.h>
++#include <fcntl.h>
++#include <unistd.h>
++#include <string.h>
++#include "xs.h"
++
++
++#include "hw.h"
++#include "pci.h"
++#include "console.h"
++#include "qemu-timer.h"
++#include "pc.h"
++
++// why aren't these defined in a header
++extern struct xs_handle *xsh;
++#define XEN_BUFSIZE 1024
++
++struct applesmc_cmd
++{
++  char key[4];
++  uint32_t idx;
++  char buf[32];
++  int len;
++};
++
++#define APPLESMC_CMD_READ               _IOWR ('a',  1, struct applesmc_cmd)
++#define APPLESMC_CMD_WRITE              _IOWR ('a',  2, struct applesmc_cmd)
++#define APPLESMC_CMD_GET_KEY_BY_IDX     _IOWR ('a',  3, struct applesmc_cmd)
++#define APPLESMC_CMD_GET_TYPE           _IOWR ('a',  4, struct applesmc_cmd)
++
++
++
++#define APPLESMC_XENSTORE "/applesmc"
++
++/* data port used by Apple SMC */
++#define APPLESMC_DATA_PORT	0x300
++/* command/status port used by Apple SMC */
++#define APPLESMC_CMD_PORT	0x304
++#define APPLESMC_NR_PORTS	32    /* 0x300-0x31f */
++#define APPLESMC_MAX_DATA_LENGTH 32
++
++#define APPLESMC_READ_CMD		0x10
++#define APPLESMC_WRITE_CMD		0x11
++#define APPLESMC_GET_KEY_BY_INDEX_CMD	0x12
++#define APPLESMC_GET_KEY_TYPE_CMD	0x13
++
++struct override
++{
++  int len;
++  const uint8_t *key;
++  const uint8_t *data;
++};
++
++static struct override override_data[] = {
++  {.len = 0}
++};
++
++#define FIFO_SIZE 32
++
++typedef struct
++{
++  int have_pl_smc;
++  int fd;
++
++  int state;
++
++  uint8_t key[4];
++  uint32_t idx;
++
++  uint8_t rfifo[FIFO_SIZE];
++  int nrfifo;
++
++  uint8_t wlen;
++  uint8_t wfifo[FIFO_SIZE];
++  int nwfifo;
++} AppleSMC;
++
++#define ST_IDLE 			0x00
++
++#define ST_READ_KEY0			0x01
++#define ST_READ_KEY1			0x02
++#define ST_READ_KEY2			0x03
++#define ST_READ_KEY3			0x04
++#define ST_READ_LEN			0x05
++
++#define ST_WRITE_KEY0			0x08
++#define ST_WRITE_KEY1			0x09
++#define ST_WRITE_KEY2			0x0a
++#define ST_WRITE_KEY3			0x0b
++#define ST_WRITE_LEN			0x0c
++#define ST_WRITE_DATA			0x0d
++
++
++#define ST_KEY_BY_IDX0			0x10
++#define ST_KEY_BY_IDX1			0x11
++#define ST_KEY_BY_IDX2			0x12
++#define ST_KEY_BY_IDX3			0x13
++#define ST_KEY_BY_IDX_LEN			0x14
++
++#define ST_TYPE_KEY0			0x18
++#define ST_TYPE_KEY1			0x19
++#define ST_TYPE_KEY2			0x1a
++#define ST_TYPE_KEY3			0x1b
++#define ST_TYPE_LEN			0x1c
++
++
++static int
++pl_applesmc_read (AppleSMC * s, uint8_t * key, int len, void *buf)
++{
++  struct applesmc_cmd foo;
++  int ret;
++
++  if (!s->have_pl_smc)
++    return 0;
++
++  memset (&foo, 0, sizeof (foo));
++
++  memcpy (foo.key, key, 4);
++  foo.len = len;
++
++  if (ioctl (s->fd, APPLESMC_CMD_READ, &foo))
++    return 0;
++
++  return foo.len;
++}
++
++
++static int
++pl_applesmc_write (AppleSMC * s, uint8_t * key, int len, void *buf)
++{
++  struct applesmc_cmd foo;
++  int ret;
++
++  return -1;                    //Disable writes for now
++
++  if (!s->have_pl_smc)
++    return -1;
++
++  memset (&foo, 0, sizeof (foo));
++
++  memcpy (foo.key, key, 4);
++  foo.len = len;
++  memcpy (foo.buf, buf, len);
++
++  if (ioctl (s->fd, APPLESMC_CMD_WRITE, &foo))
++    return -1;
++
++  return 0;
++}
++
++static int
++pl_applesmc_get_key_by_idx (AppleSMC * s, uint32_t idx, uint8_t * key)
++{
++  struct applesmc_cmd foo;
++  int ret;
++
++  memset (&foo, 0, sizeof (foo));
++
++  if (!s->have_pl_smc)
++    return -1;
++
++  foo.idx = idx;
++
++  if (ioctl (s->fd, APPLESMC_CMD_GET_KEY_BY_IDX, &foo))
++    return -1;
++
++  memcpy (key, foo.buf, 4);
++
++  return 0;
++}
++
++
++static int
++pl_applesmc_get_type (AppleSMC * s, uint8_t * key, int len, void *buf)
++{
++  struct applesmc_cmd foo;
++  int ret;
++
++  if (!s->have_pl_smc)
++    return 0;
++
++  memset (&foo, 0, sizeof (foo));
++
++  memcpy (foo.key, key, 4);
++  foo.len = len;
++  memcpy (foo.buf, buf, len);
++
++  if (ioctl (s->fd, APPLESMC_CMD_GET_TYPE, &foo))
++    return 0;
++
++  return foo.len;
++}
++
++static int
++or_applesmc_read (AppleSMC * s, uint8_t * key, int len, void *buf)
++{
++  struct override *ptr = override_data;
++
++  for (ptr = override_data; ptr->len; ptr++)
++    {
++      if (memcmp (ptr->key, key, 4))
++        continue;
++
++      if (len > ptr->len)
++        len = ptr->len;
++
++      memcpy (buf, ptr->data, len);
++
++      return len;
++    }
++
++  return 0;
++}
++
++static int
++xs_applesmc_read (AppleSMC * s, uint8_t * key, int len, void *buf)
++{
++  char abspath[XEN_BUFSIZE];
++  unsigned int xlen;
++  void *x;
++
++  snprintf (abspath, sizeof (abspath), APPLESMC_XENSTORE "/%c%c%c%c", key[0],
++            key[1], key[2], key[3]);
++
++  x = xs_read (xsh, 0, abspath, &xlen);
++
++  if (!x)
++    return 0;
++
++  if (xlen > len)
++    xlen = len;
++
++  memcpy (buf, x, len);
++
++  qemu_free (x);
++
++  return len;
++}
++
++
++static int
++applesmc_read (AppleSMC * s, uint8_t * key, int len, void *buf)
++{
++  int ret;
++
++  ret = or_applesmc_read (s, key, len, buf);
++  if (ret)
++    return ret;
++
++  ret = xs_applesmc_read (s, key, len, buf);
++
++  if (ret)
++    return ret;
++
++  ret = pl_applesmc_read (s, key, len, buf);
++
++  return ret;
++}
++
++static int
++applesmc_write (AppleSMC * s, uint8_t * key, int len, void *buf)
++{
++  return pl_applesmc_write (s, key, len, buf);
++}
++
++
++static int
++applesmc_get_key_by_idx (AppleSMC * s, uint32_t idx, uint8_t * key)
++{
++  return pl_applesmc_get_key_by_idx (s, idx, key);
++}
++
++
++static int
++applesmc_get_type (AppleSMC * s, uint8_t * key, int len, void *buf)
++{
++  return pl_applesmc_get_type (s, key, len, buf);
++}
++
++
++
++static void
++write_cmd (AppleSMC * s, uint8_t v)
++{
++  s->nrfifo = s->nwfifo = 0;
++
++  switch (v)
++    {
++    case APPLESMC_READ_CMD:
++      s->state = ST_READ_KEY0;
++      break;
++    case APPLESMC_WRITE_CMD:
++      s->state = ST_WRITE_KEY0;
++      break;
++    case APPLESMC_GET_KEY_BY_INDEX_CMD:
++      s->state = ST_KEY_BY_IDX0;
++      break;
++    case APPLESMC_GET_KEY_TYPE_CMD:
++      s->state = ST_TYPE_KEY0;
++      break;
++    default:
++      s->state = ST_IDLE;
++    }
++}
++
++
++static uint8_t
++read_status (AppleSMC * s)
++{
++  switch (s->state)
++    {
++    case ST_IDLE:
++      return s->nrfifo ? 0x5 : 0x0;
++    case ST_READ_KEY0:
++    case ST_WRITE_KEY0:
++    case ST_KEY_BY_IDX0:
++    case ST_TYPE_KEY0:
++      return 0xc;
++    case ST_READ_KEY1:
++    case ST_READ_KEY2:
++    case ST_READ_KEY3:
++    case ST_READ_LEN:
++    case ST_WRITE_KEY1:
++    case ST_WRITE_KEY2:
++    case ST_WRITE_KEY3:
++    case ST_WRITE_LEN:
++    case ST_WRITE_DATA:
++    case ST_KEY_BY_IDX1:
++    case ST_KEY_BY_IDX2:
++    case ST_KEY_BY_IDX3:
++    case ST_KEY_BY_IDX_LEN:
++    case ST_TYPE_KEY1:
++    case ST_TYPE_KEY2:
++    case ST_TYPE_KEY3:
++    case ST_TYPE_LEN:
++      return 0x4;
++    }
++
++  return 0x0;
++}
++
++static uint8_t
++read_data (AppleSMC * s)
++{
++  uint8_t ret;
++
++  if (!s->nrfifo)
++    return 0;
++
++  ret = s->rfifo[0];
++
++  s->nrfifo--;
++
++  if (s->nrfifo)
++    memmove (s->rfifo, s->rfifo + 1, s->nrfifo);
++
++  return ret;
++}
++
++
++static void
++write_data (AppleSMC * s, uint8_t v)
++{
++  switch (s->state)
++    {
++    case ST_READ_KEY0:
++    case ST_WRITE_KEY0:
++    case ST_TYPE_KEY0:
++      s->key[0] = v;
++      s->state++;
++      break;
++    case ST_READ_KEY1:
++    case ST_WRITE_KEY1:
++    case ST_TYPE_KEY1:
++      s->key[1] = v;
++      s->state++;
++      break;
++    case ST_READ_KEY2:
++    case ST_WRITE_KEY2:
++    case ST_TYPE_KEY2:
++      s->key[2] = v;
++      s->state++;
++      break;
++    case ST_READ_KEY3:
++    case ST_WRITE_KEY3:
++    case ST_TYPE_KEY3:
++      s->key[3] = v;
++      s->state++;
++      break;
++    case ST_KEY_BY_IDX0:
++      s->idx = v << 24;
++      s->state++;
++      break;
++    case ST_KEY_BY_IDX1:
++      s->idx |= v << 16;
++      s->state++;
++      break;
++    case ST_KEY_BY_IDX2:
++      s->idx |= v << 8;
++      s->state++;
++      break;
++    case ST_KEY_BY_IDX3:
++      s->idx |= v;
++      s->state++;
++      break;
++    case ST_READ_LEN:
++      s->nrfifo =
++        applesmc_read (s, s->key, v > FIFO_SIZE ? FIFO_SIZE : v, s->rfifo);
++      s->state = ST_IDLE;
++      break;
++    case ST_WRITE_LEN:
++      s->wlen = v;
++      s->state++;
++      break;
++    case ST_WRITE_DATA:
++      if (s->nwfifo == FIFO_SIZE)
++        return;
++      s->wfifo[s->nwfifo] = v;
++      s->nwfifo++;
++      if (s->nwfifo == s->wlen)
++        {
++          applesmc_write (s, s->key, s->wlen, s->wfifo);
++          s->state = ST_IDLE;
++        }
++      break;
++    case ST_KEY_BY_IDX_LEN:
++      if (!applesmc_get_key_by_idx (s, s->idx, s->rfifo))
++        s->nrfifo = (v > 4) ? 4 : v;
++      s->state = ST_IDLE;
++      break;
++    case ST_TYPE_LEN:
++      s->nrfifo =
++        applesmc_get_type (s, s->key, v > FIFO_SIZE ? FIFO_SIZE : v,
++                           s->rfifo);
++      s->state = ST_IDLE;
++      break;
++    default:
++      return;
++    }
++}
++
++
++
++
++static void
++applesmc_io_cmd_writeb (void *opaque, uint32_t addr, uint32_t val)
++{
++  AppleSMC *s = (AppleSMC *) opaque;
++  fprintf (stderr, "smc_write_cmd    0x%02x in state %d\n", val, s->state);
++  write_cmd (s, (uint8_t) val);
++}
++
++static void
++applesmc_io_data_writeb (void *opaque, uint32_t addr, uint32_t val)
++{
++  AppleSMC *s = (AppleSMC *) opaque;
++  fprintf (stderr, "smc_write_data   0x%02x in state %d\n", val, s->state);
++  write_data (s, (uint8_t) val);
++}
++
++static uint32_t
++applesmc_io_data_readb (void *opaque, uint32_t addr1)
++{
++  AppleSMC *s = (AppleSMC *) opaque;
++  uint8_t ret = read_data (s);
++  fprintf (stderr, "smc_read_data   0x%02x in state %d\n", ret, s->state);
++  return ret;
++}
++
++static uint32_t
++applesmc_io_cmd_readb (void *opaque, uint32_t addr1)
++{
++  AppleSMC *s = (AppleSMC *) opaque;
++  uint8_t ret = read_status (s);
++  fprintf (stderr, "smc_read_status 0x%02x in state %d\n", ret, s->state);
++  return ret;
++}
++
++int
++applesmc_init (void)
++{
++  AppleSMC *s;
++  void *x;
++  unsigned int xlen;
++
++  s = qemu_mallocz (sizeof (AppleSMC));
++
++  s->fd = open ("/dev/applesmc", O_RDWR);
++  if (s->fd < 0)
++    {
++      s->have_pl_smc = 0;
++    }
++  else
++    {
++      s->have_pl_smc++;
++    }
++
++  x = xs_read (xsh, 0, APPLESMC_XENSTORE, &xlen);
++
++  if (!x && !s->have_pl_smc)
++    return -1;
++
++  if (x)
++    qemu_free (x);
++
++  fprintf (stderr, "smc_emulation engaged\n");
++
++  s->state = ST_IDLE;
++
++  register_ioport_read (APPLESMC_DATA_PORT, 4, 1, applesmc_io_data_readb, s);
++  register_ioport_read (APPLESMC_CMD_PORT, 4, 1, applesmc_io_cmd_readb, s);
++  register_ioport_write (APPLESMC_DATA_PORT, 4, 1, applesmc_io_data_writeb,
++                         s);
++  register_ioport_write (APPLESMC_CMD_PORT, 4, 1, applesmc_io_cmd_writeb, s);
++
++  return 0;
++}
+diff --git a/hw/pc.c b/hw/pc.c
+index e192ae2..0336f78 100644
+--- a/hw/pc.c
++++ b/hw/pc.c
+@@ -1054,6 +1054,10 @@ vga_bios_error:
+     register_ioport_read(0x92, 1, 1, ioport92_read, NULL);
+     register_ioport_write(0x92, 1, 1, ioport92_write, NULL);
+ 
++    if (!applesmc_init()) {
++      lpc_init(pci_bus, piix3_devfn, i8259);
++    }
++
+ #ifndef CONFIG_DM
+     if (pci_enabled) {
+         ioapic = ioapic_init();
+diff --git a/hw/pc.h b/hw/pc.h
+index e8a7cf1..8aeca1c 100644
+--- a/hw/pc.h
++++ b/hw/pc.h
+@@ -182,4 +182,8 @@ void isa_ne2000_init(int base, qemu_irq irq, NICInfo *nd);
+ 
+ void lpc_init(PCIBus *bus, int devfn, qemu_irq *pic);
+ 
++/* applesmc.c */
++
++int applesmc_init(void);
++
+ #endif

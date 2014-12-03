@@ -1,0 +1,207 @@
+diff --git a/xenstore.c b/xenstore.c
+index ca10214..aefa6ea 100644
+--- a/xenstore.c
++++ b/xenstore.c
+@@ -29,9 +29,12 @@
+ 
+ struct xs_handle *xsh = NULL;
+ static char *media_filename[MAX_DRIVES+1];
++static char *media_stubdomdev[MAX_DRIVES+1];
+ static QEMUTimer *insert_timer = NULL;
+ static char *xenbus_param_paths[MAX_DRIVES+1];
+ 
++extern int running_in_stubdomain;
++
+ int xenstore_find_device(BlockDriverState *bs)
+ {
+     int i;
+@@ -128,15 +131,19 @@ static void insert_media(void *opaque)
+ 
+     for (i = 0; i < MAX_DRIVES + 1; i++) {
+         bs = drives_table[i].bdrv;
++
+         if (media_filename[i] && bs && bs->filename[0] == '\0') {
+             BlockDriver *format;
+-            if ( strstart(media_filename[i], "/dev/cd", NULL) 
+-              || strstart(media_filename[i], "/dev/scd", NULL)) 
++            char *media;
++            if ( strstart(media_filename[i], "/dev/", NULL) )
+                 format = &bdrv_host_device;
+             else 
+                 format = &bdrv_raw;
+ 
+-            bdrv_open2(bs, media_filename[i], 0, format);
++            media = running_in_stubdomain ? media_stubdomdev[i] : media_filename[i];
++            if (media) {
++                bdrv_open2(bs, media, 0, format);
++            }
+ #ifdef CONFIG_STUBDOM
+             {
+                 char *buf, *backend, *params_path, *params;
+@@ -448,12 +455,22 @@ void xenstore_init(void)
+ 
+ static void xenstore_process_vif_link_event(int vifid);
+ 
++static int get_my_domid(void)
++{
++    unsigned int len;
++    char *my_domid_str = xs_read( xsh, XBT_NULL, "domid", &len );
++    if ( my_domid_str ) {
++        return atoi(my_domid_str);
++    }
++    return 0;
++}
++
+ void xenstore_parse_domain_config(int hvm_domid)
+ {
+     char **e_danger = NULL;
+     char *buf = NULL;
+-    char *fpath = NULL, *bpath = NULL,
+-        *dev = NULL, *params = NULL, *drv = NULL;
++    char *fpath = NULL, *bpath = NULL, *bpath_stubdom = NULL,
++        *dev = NULL, *params = NULL, *params_stubdom = NULL, *drv = NULL;
+     char *my_domid_str = NULL;
+     int i, ret;
+     unsigned int len, num, hd_index, pci_devid = 0;
+@@ -471,8 +488,10 @@ void xenstore_parse_domain_config(int hvm_domid)
+     char *danger_buf = NULL;
+     char *danger_type = NULL;
+ 
+-    for(i = 0; i < MAX_DRIVES + 1; i++)
++    for(i = 0; i < MAX_DRIVES + 1; i++) {
+         media_filename[i] = NULL;
++        media_stubdomdev[i] = NULL;
++    }
+ 
+     danger_path = xs_get_domain_path(xsh, hvm_domid);
+     if (danger_path == NULL) {
+@@ -505,11 +524,19 @@ void xenstore_parse_domain_config(int hvm_domid)
+             break;
+         }
+     }
+-        
++
+     for (i = 0; i < num; i++) {
+ 	format = NULL; /* don't know what the format is yet */
+         /* read the backend path */
+         xenstore_get_backend_path(&bpath, "vbd", danger_path, hvm_domid, e_danger[i]);
++        if (running_in_stubdomain) {
++            int stub_domid = get_my_domid();
++            char *stub_path = xs_get_domain_path(xsh, stub_domid);
++            if (stub_path) {
++                xenstore_get_backend_path(&bpath_stubdom, "vbd", stub_path, stub_domid, e_danger[i]);
++                free(stub_path);
++            }
++        }
+         if (bpath == NULL)
+             continue;
+         /* read the name of the device */
+@@ -538,6 +565,11 @@ void xenstore_parse_domain_config(int hvm_domid)
+         params = xs_read(xsh, XBT_NULL, buf, &len);
+         if (params == NULL)
+             continue;
++        if (pasprintf(&buf, "%s/params", bpath_stubdom) == -1)
++            continue;
++        free(params_stubdom);
++        params_stubdom = xs_read(xsh, XBT_NULL, buf, &len);
++
+         /* read the name of the device */
+         if (pasprintf(&buf, "%s/type", bpath) == -1)
+             continue;
+@@ -606,7 +638,7 @@ void xenstore_parse_domain_config(int hvm_domid)
+         /* check if it is a cdrom */
+         if (danger_type && !strcmp(danger_type, "cdrom")) {
+             bdrv_set_type_hint(bs, BDRV_TYPE_CDROM);
+-            if (pasprintf(&buf, "%s/params", bpath) != -1) {
++            if (pasprintf(&buf, "%s/params", running_in_stubdomain ? bpath_stubdom : bpath) != -1) {
+                 char *buf2, *frontend;
+                 xs_watch(xsh, buf, dev);
+                 asprintf(&buf2, "%s/frontend", bpath);
+@@ -614,6 +646,11 @@ void xenstore_parse_domain_config(int hvm_domid)
+                 asprintf(&xenbus_param_paths[nb_drives], "%s/eject", frontend);
+                 free(frontend);
+                 free(buf2);
++
++                if (running_in_stubdomain) {
++                    /* cdroms are exposed to qemu in stubdom as host devices */
++                    format = &bdrv_host_device;
++                }
+             }
+         }
+ 
+@@ -637,10 +674,11 @@ void xenstore_parse_domain_config(int hvm_domid)
+ 		    format = &bdrv_raw;
+ 		} else if (!strcmp(drv,"phy")) {
+                     if (strstart(params, "/dev/cd", NULL) 
+-                     || strstart(params, "/dev/scd", NULL)) 
++                        || strstart(params, "/dev/scd", NULL))  {
+                         format = &bdrv_host_device;
+-                    else
++                    } else {
+                         format = &bdrv_raw;
++                    }
+ 		} else {
+ 		    format = bdrv_find_format(drv);
+ 		    if (!format) {
+@@ -678,7 +716,13 @@ void xenstore_parse_domain_config(int hvm_domid)
+ #ifdef CONFIG_STUBDOM
+     media_filename[nb_drives] = strdup(danger_buf);
+ #else
+-    media_filename[nb_drives] = strdup(bs->filename);
++    if (running_in_stubdomain) {
++        media_stubdomdev[nb_drives] = strdup(params);
++        media_filename[nb_drives] = strdup(params_stubdom);
++    } else {
++        media_filename[nb_drives] = strdup(bs->filename);
++    }
++
+ #endif
+ 	nb_drives++;
+ 
+@@ -744,12 +788,8 @@ void xenstore_parse_domain_config(int hvm_domid)
+     if ( pasprintf(&buf, "domid") == -1 )
+         goto out;
+     pci_dm_domid = hvm_domid;
+-    my_domid_str = xs_read( xsh, XBT_NULL, buf, &len );
+-    if ( my_domid_str ) {
+-        int did = atoi( my_domid_str );
+-        if (did) {
+-            pci_dm_domid = did;
+-        }
++    if (running_in_stubdomain) {
++        pci_dm_domid = get_my_domid();
+     }
+ 
+     /* get the pci pass-through parameters */
+@@ -780,8 +820,10 @@ void xenstore_parse_domain_config(int hvm_domid)
+     free(danger_type);
+     free(mode);
+     free(params);
++    free(params_stubdom);
+     free(dev);
+     free(bpath);
++    free(bpath_stubdom);
+     free(buf);
+     free(danger_buf);
+     free(danger_path);
+@@ -1278,14 +1320,20 @@ void xenstore_process_event(void *opaque)
+     }
+ #endif
+ 
++    /* ignore media change if filename is not changed */
++    if (image && media_filename[hd_index] && !strcmp(image, media_filename[hd_index]))
++        goto out;
++
+     drives_table[hd_index].bdrv->filename[0] = '\0';
+     bdrv_close(drives_table[hd_index].bdrv);
++
+     if (media_filename[hd_index]) {
+         free(media_filename[hd_index]);
+         media_filename[hd_index] = NULL;
+     }
+ 
+     if (image && image[0]) {
++        /* if in stubdom reopen same host device */
+         media_filename[hd_index] = strdup(image);
+         xenstore_check_new_media_present(5000);
+     }
