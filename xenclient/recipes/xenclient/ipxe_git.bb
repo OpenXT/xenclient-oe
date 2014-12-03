@@ -2,21 +2,19 @@ DESCRIPTION = "IPXE"
 LICENSE = "GPLv2"
 LIC_FILES_CHKSUM = "file://COPYING;md5=8ca43cbc842c2336e835926c2166c28b"
 
-SRCREV_FORMAT = "source_patchqueue"
-
 PV = "0+git${SRCPV}"
 
 SRCREV_source = "8d038040eaac85bbe08f0b5ba507ff0167b3a2f3"
-SRCREV_patchqueue = "${AUTOREV}"
 
 SRC_URI = "git://git.ipxe.org/ipxe.git;protocol=git;name=source \
-           git://${OPENXT_GIT_MIRROR}/ipxe-pq.git;protocol=${OPENXT_GIT_PROTOCOL};branch=${OPENXT_BRANCH};destsuffix=patchqueue;name=patchqueue \
-          "
+    file://early-debug.patch;patch=1 \
+    file://xen-debug-output-driver.patch;patch=1 \
+    file://fix-compile-gcc-7.4.2.patch;patch=1 \
+"
 
 S = "${WORKDIR}/git"
 
 inherit xenclient
-inherit xenclient-pq
 
 FILES_${PN} = "/usr/share/firmware/*.rom"
 
