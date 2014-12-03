@@ -4,7 +4,7 @@
 DESCRIPTION = "KMOD - Handle kernel modules."
 HOMEPAGE = "https://www.kernel.org/pub/linux/utils/kernel/kmod/"
 LICENSE = "GPLv2"
-LIC_FILES_CHKSUM = "file://COPYING;md5=751419260aa954499f7abaabaa882bbe"
+LIC_FILES_CHKSUM = "file://COPYING;md5=801f80980d171dd6425610833a22dbe6"
 SECTION = "kernel/modules"
 DEPENDS = ""
 PR = "r0"
