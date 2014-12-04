@@ -1,0 +1,1054 @@
+diff --git a/hw/atapi-pt-lock.c b/hw/atapi-pt-lock.c
+new file mode 100644
+index 0000000..e4a55d8
+--- /dev/null
++++ b/hw/atapi-pt-lock.c
+@@ -0,0 +1,306 @@
++#define IDE_ATAPI_PT_EXCLUSIVE_CD_FILE_TEMPLATE "/var/lock/xen-cd-exclusive-%04x:%04x"
++
++#define ATAPI_PT_LOCK_STATE_UNLOCKED		0
++#define ATAPI_PT_LOCK_STATE_LOCKED_BY_ME	1
++#define ATAPI_PT_LOCK_STATE_LOCKED_BY_OTHER	2
++
++extern struct xs_handle *xsh;
++
++static int get_lock_fd(IDEState *s)
++{
++    static int lock_fd=-1;
++    if (lock_fd)
++      close(lock_fd);
++
++    lock_fd = open( s->atapi_pt.lock_file_name, O_RDWR | O_CREAT, 0666);
++
++    return lock_fd;
++}
++
++static int get_phys_pt_lock_state(IDEState *s)
++{
++    struct flock lock = {0};
++    int lock_fd=get_lock_fd(s);
++
++    if (lock_fd<0) return ATAPI_PT_LOCK_STATE_UNLOCKED;
++
++    lock.l_type = F_WRLCK;
++    lock.l_whence = SEEK_SET;
++    lock.l_start = 0;
++    lock.l_len = 0;
++
++    fcntl(lock_fd, F_GETLK, &lock);
++
++    if (lock.l_type == F_UNLCK)
++	return ATAPI_PT_LOCK_STATE_UNLOCKED;
++
++    return ATAPI_PT_LOCK_STATE_LOCKED_BY_OTHER;
++}
++
++static int get_atapi_pt_lock_state(IDEState *s)
++{
++  if (s->atapi_pt.lock_state == ATAPI_PT_LOCK_STATE_LOCKED_BY_ME) {
++    return ATAPI_PT_LOCK_STATE_LOCKED_BY_ME;
++  }
++
++  if (running_in_stubdomain) {
++    struct stubdom_helper *sh = s->atapi_pt.sh;
++    sh->io_buf[0] = ATAPI_PT_GET_PHYS_LOCK_STATE;
++    sh->io_buf[1] = sh->dev_id;
++    v4v_sendto(sh->atapi_pt_fd, sh->io_buf, 2, 0, &sh->remote_addr);
++    v4v_recvfrom(sh->atapi_pt_fd, sh->io_buf, MAX_V4V_MSG_SIZE, 0, &sh->remote_addr);
++    s->atapi_pt.lock_state = sh->io_buf[1];
++  } else {
++    s->atapi_pt.lock_state = get_phys_pt_lock_state(s);
++  }
++  ATAPI_PT_LOCK_DBG("ATAPI-PT  get_atapi_pt_lock_state=%d\n", s->atapi_pt.lock_state);
++  return s->atapi_pt.lock_state;
++}
++
++static int get_phys_pt_lock(IDEState *s)
++{
++    struct flock lock = {0};
++    int lock_fd=get_lock_fd(s);
++
++    if (lock_fd<0) return ATAPI_PT_LOCK_STATE_UNLOCKED;
++
++    lock.l_type = F_WRLCK;
++    lock.l_whence = SEEK_SET;
++    lock.l_start = 0;
++    lock.l_len = 0;
++
++    if (fcntl(lock_fd, F_SETLK, &lock))
++	return ATAPI_PT_LOCK_STATE_LOCKED_BY_OTHER;
++
++    return ATAPI_PT_LOCK_STATE_LOCKED_BY_ME;
++}
++
++static void release_phys_pt_lock(IDEState *s)
++{
++    struct flock lock = {0};
++    int lock_fd=get_lock_fd(s);
++
++    if (lock_fd<0) return;
++
++    lock.l_type = F_UNLCK;
++    lock.l_whence = SEEK_SET;
++    lock.l_start = 0;
++    lock.l_len = 0;
++
++    fcntl(lock_fd, F_SETLK, &lock);
++}
++
++static void get_bsgdev_id(IDEState *s, char *buf, int szbuf)
++{
++    const char *BSGPREFIX = "/dev/bsg/";
++    char *name = s->bs->filename, *p;
++
++    if (!strncmp(BSGPREFIX, name, strlen(BSGPREFIX)))
++        name += strlen(BSGPREFIX);
++    snprintf(buf, szbuf, "%s", name);
++}
++
++static void get_xs_bsg_path(IDEState *s, char *buf, int szbuf, bool req)
++{
++    const char *BSGPREFIX = "/dev/bsg/";
++    char id[64] = { 0 };
++    char *p;
++
++    get_bsgdev_id(s, id, sizeof(id));
++    p = id;
++    while (*p) {
++        if (*p == ':') *p = '_';
++        ++p;
++    }
++    snprintf(buf, szbuf, "/local/domain/%d/bsgdev%s/%s", domid, (req ? "-req" : ""), id);
++}
++
++/* report domain cd lock status through xenstore */
++static void notify_xs_lock_state(IDEState *s, int locked)
++{
++    char path[128], bsgpath[128];
++    char *curvalstr;
++    int curval;
++
++    get_xs_bsg_path(s, bsgpath, sizeof(bsgpath), false);
++    snprintf(path, sizeof(path), "%s/lock", bsgpath);
++    curvalstr = xenstore_read(path);
++    curval = curvalstr ? atoi(curvalstr) : 0;
++    free(curvalstr);
++
++    if (locked != curval) {
++        if (locked)
++            xenstore_write(path, "1");
++        else
++            xs_rm(xsh, XBT_NULL, path);
++    }
++}
++
++static int get_atapi_pt_lock(IDEState *s)
++{
++    if (s->atapi_pt.lock_state != ATAPI_PT_LOCK_STATE_LOCKED_BY_ME) {
++        if (running_in_stubdomain) {
++            struct stubdom_helper *sh = s->atapi_pt.sh;
++            sh->io_buf[0] = ATAPI_PT_GET_PHYS_LOCK;
++            sh->io_buf[1] = sh->dev_id;
++            v4v_sendto(sh->atapi_pt_fd, sh->io_buf, 2, 0, &sh->remote_addr);
++            v4v_recvfrom(sh->atapi_pt_fd, sh->io_buf, MAX_V4V_MSG_SIZE, 0, &sh->remote_addr);
++            s->atapi_pt.lock_state = sh->io_buf[1];
++        } else {
++            s->atapi_pt.lock_state = get_phys_pt_lock(s);
++        }
++    }
++    notify_xs_lock_state(s, s->atapi_pt.lock_state == ATAPI_PT_LOCK_STATE_LOCKED_BY_ME);
++    return s->atapi_pt.lock_state;
++}
++
++static void release_atapi_pt_lock(IDEState *s)
++{
++    ATAPI_PT_LOCK_DBG("ATAPI-PT  release_atapi_pt_lock domid=%d\n", domid);
++    if (s->atapi_pt.lock_state == ATAPI_PT_LOCK_STATE_LOCKED_BY_ME) {
++        if (running_in_stubdomain) {
++            struct stubdom_helper *sh = s->atapi_pt.sh;
++            sh->io_buf[0] = ATAPI_PT_RELEASE_PHYS_LOCK;
++            sh->io_buf[1] = sh->dev_id;
++            v4v_sendto(sh->atapi_pt_fd, sh->io_buf, 2, 0, &sh->remote_addr);
++        } else {
++            release_phys_pt_lock(s);
++        }
++    }
++    s->atapi_pt.lock_state = ATAPI_PT_LOCK_STATE_UNLOCKED;
++    notify_xs_lock_state(s, s->atapi_pt.lock_state == ATAPI_PT_LOCK_STATE_LOCKED_BY_ME);
++}
++
++static int lock_held(IDEState *s)
++{
++    return get_atapi_pt_lock_state(s) == ATAPI_PT_LOCK_STATE_LOCKED_BY_ME;
++}
++
++static void try_to_get_exclusive_lock(IDEState *s)
++{
++    char *tmp;
++    char xs_path[1024];
++    int lock_state;
++    sprintf(xs_path, "/local/domain/%d/switcher/have_focus", domid);
++    tmp = xenstore_read(xs_path);
++    ATAPI_PT_LOCK_DBG("ATAPI-PT  try_to_get_exclusive_lock domid=%d state=%d\n", domid, s->atapi_pt.lock_state);
++    if (tmp != NULL) {
++        if (strtol(tmp, NULL, 0) == 1) {
++            lock_state =  get_atapi_pt_lock(s);
++            ATAPI_PT_LOCK_DBG("ATAPI-PT  get_atapi_pt_lock=%d\n", lock_state);
++        }
++        free(tmp);
++    }
++}
++
++static bool read_xs_bool(const char *path, bool default_value)
++{
++    char *req = xenstore_read(path);
++    bool rv;
++    if (!req)
++        return default_value;
++    rv = !strcmp(req, "1");
++    free(req);
++    return rv;
++}
++
++static bool read_autolock_policy(IDEState *s)
++{
++    char path[128], bsgpath[128];
++    get_xs_bsg_path(s, bsgpath, sizeof(bsgpath), true);
++    snprintf(path, sizeof(path), "%s/autolock", bsgpath);
++    return read_xs_bool(path, false);
++}
++
++static void queue_media_event(IDEState *s, bool media_insert)
++{
++    s->atapi_pt.notify_new_media = media_insert;
++    s->atapi_pt.notify_media_removed = !media_insert;
++    s->atapi_pt.notify_eject_request = !media_insert;
++    s->atapi_pt.cd_change = media_insert ? 1 : 0;
++    ide_set_irq(s);
++}
++
++static void do_eject_req(IDEState *s)
++{
++    release_atapi_pt_lock(s);
++    /* queue media removed event */
++    queue_media_event(s, false);
++}
++
++static void do_assign_req(IDEState *s)
++{
++    get_atapi_pt_lock(s);
++
++    if (lock_held(s)) {
++        s->atapi_pt.local_phys_media_state = false;
++    }
++}
++
++static void eject_req_cb(const char *path, void *opaque)
++{
++    IDEState *s = (IDEState*) opaque;
++
++    if (read_xs_bool(path, false)) {
++        do_eject_req(s);
++    }
++    xs_rm(xsh, XBT_NULL, path);
++}
++
++static void assign_req_cb(const char *path, void *opaque)
++{
++    IDEState *s = (IDEState*) opaque;
++
++    if (lock_held(s))
++        return;
++
++    if (read_xs_bool(path, false)) {
++        do_assign_req(s);
++    }
++    xs_rm(xsh, XBT_NULL, path);
++}
++
++static void autolock_cb(const char *path, void *opaque)
++{
++    IDEState *s = (IDEState*) opaque;
++    bool autolock = !!read_autolock_policy(s);
++
++    if (autolock != s->atapi_pt.autolock) {
++        s->atapi_pt.autolock = autolock;
++        DEBUG_PRINTF("Setting autolock policy to %d\n", autolock);
++    }
++}
++
++static void watch_req_init(IDEState *s)
++{
++    char path[128], bsgpath[128];
++    get_xs_bsg_path(s, bsgpath, sizeof(bsgpath), true);
++
++    snprintf(path, sizeof(path), "%s/req-eject", bsgpath);
++    xenstore_watch_new_callback(path, eject_req_cb, s);
++
++    snprintf(path, sizeof(path), "%s/req-assign", bsgpath);
++    xenstore_watch_new_callback(path, assign_req_cb, s);
++
++    snprintf(path, sizeof(path), "%s/autolock", bsgpath);
++    xenstore_watch_new_callback(path, autolock_cb, s);
++}
++
++static void atapi_pt_locking_init(IDEState *s)
++{
++    if(running_in_stubdomain) {
++        s->atapi_pt.lock_state = ATAPI_PT_LOCK_STATE_UNLOCKED;
++    } else {
++        struct stat st;
++        struct BDRVRawState *raw_state = s->bs->opaque;
++        if (fstat(raw_state->fd, &st)) {
++            fprintf(stderr, "Failed to fstat() the atapi-pt device (fd=%d): %s\n", raw_state->fd,
++                    strerror(errno));
++            exit(1);
++        }
++        snprintf(s->atapi_pt.lock_file_name, sizeof(s->atapi_pt.lock_file_name), IDE_ATAPI_PT_EXCLUSIVE_CD_FILE_TEMPLATE,
++                 major(st.st_rdev), minor(st.st_rdev));
++    }
++    s->atapi_pt.autolock = read_autolock_policy(s);
++    watch_req_init(s);
++}
+diff --git a/hw/atapi-pt.c b/hw/atapi-pt.c
+index b1b318b..8db6634 100644
+--- a/hw/atapi-pt.c
++++ b/hw/atapi-pt.c
+@@ -40,6 +40,16 @@
+ #define ATAPI_PT_SET_GLOB_MEDIA_STATE        0x08
+ #define ATAPI_PT_GET_GLOB_MEDIA_STATE        0x09
+ 
++/* media status */
++#define MS_NO_CHANGE 0
++#define MS_TRAY_OPEN 1
++#define MS_MEDIA_PRESENT 2
++
++/* media event code */
++#define MEC_NO_CHANGE 0
++#define MEC_EJECT_REQUEST 1
++#define MEC_NEW_MEDIA 2
++#define MEC_MEDIA_REMOVE 3
+ 
+ #define MAX_V4V_MSG_SIZE (V4V_ATAPI_PT_RING_SIZE)
+ struct stubdom_helper {
+@@ -69,7 +79,6 @@ static int debug_enabled=-1;
+ 
+ static int exclusive_ro_access=-1;
+ 
+-#define IDE_ATAPI_PT_SHM_NAME_TEMPLATE "/xen-atapi-pt-status-%04x:%04x"
+ #define IDE_ATAPI_PT_DEBUG_ENABLE_FILE   "/etc/debugcdrom"
+ #define IDE_ATAPI_PT_DEBUG_FILE_TEMPLATE "/var/log/cdrom-%d.log"
+ 
+@@ -427,183 +436,21 @@ static const struct {
+     { 0x000000, 0x000000, "Unrecognised sense data"}
+ };
+ 
+-
+-
+-#define IDE_ATAPI_PT_EXCLUSIVE_CD_FILE_TEMPLATE "/var/lock/xen-cd-exclusive-%04x:%04x"
+-
+-#define ATAPI_PT_LOCK_STATE_UNLOCKED		0
+-#define ATAPI_PT_LOCK_STATE_LOCKED_BY_ME	1
+-#define ATAPI_PT_LOCK_STATE_LOCKED_BY_OTHER	2
+-
+-static int atapi_pt_lock_state = ATAPI_PT_LOCK_STATE_UNLOCKED;
+-
+-static int get_lock_fd(IDEState *s)
+-{
+-    static int lock_fd=-1;
+-    if (lock_fd)
+-      close(lock_fd);
+-
+-    lock_fd = open( s->atapi_pt.lock_file_name, O_RDWR | O_CREAT, 0666);
+-
+-    return lock_fd;
+-}
+-
+-static int get_phys_pt_lock_state(IDEState *s)
+-{
+-    struct flock lock = {0};
+-    int lock_fd=get_lock_fd(s);
+-
+-    if (lock_fd<0) return ATAPI_PT_LOCK_STATE_UNLOCKED;
+-
+-    lock.l_type = F_WRLCK;
+-    lock.l_whence = SEEK_SET;
+-    lock.l_start = 0;
+-    lock.l_len = 0;
+-
+-    fcntl(lock_fd, F_GETLK, &lock);
+-
+-    if (lock.l_type == F_UNLCK)
+-	return ATAPI_PT_LOCK_STATE_UNLOCKED;
+-
+-    return ATAPI_PT_LOCK_STATE_LOCKED_BY_OTHER;
+-}
+-
+-static int get_atapi_pt_lock_state(IDEState *s)
+-{
+-  if (s->atapi_pt.lock_state == ATAPI_PT_LOCK_STATE_LOCKED_BY_ME) {
+-    return ATAPI_PT_LOCK_STATE_LOCKED_BY_ME;
+-  }
+-   
+-  if (running_in_stubdomain) {
+-    struct stubdom_helper *sh = s->atapi_pt.sh;
+-    sh->io_buf[0] = ATAPI_PT_GET_PHYS_LOCK_STATE;
+-    sh->io_buf[1] = sh->dev_id;
+-    v4v_sendto(sh->atapi_pt_fd, sh->io_buf, 2, 0, &sh->remote_addr);
+-    v4v_recvfrom(sh->atapi_pt_fd, sh->io_buf, MAX_V4V_MSG_SIZE, 0, &sh->remote_addr);
+-    s->atapi_pt.lock_state = sh->io_buf[1];
+-  } else { 
+-    s->atapi_pt.lock_state = get_phys_pt_lock_state(s); 
+-  }
+-  ATAPI_PT_LOCK_DBG("ATAPI-PT  get_atapi_pt_lock_state=%d\n", s->atapi_pt.lock_state);
+-  return s->atapi_pt.lock_state;
+-}
+-
+-static int get_phys_pt_lock(IDEState *s)
+-{
+-    struct flock lock = {0};
+-    int lock_fd=get_lock_fd(s);
+-
+-    if (lock_fd<0) return ATAPI_PT_LOCK_STATE_UNLOCKED;
+-
+-    lock.l_type = F_WRLCK;
+-    lock.l_whence = SEEK_SET;
+-    lock.l_start = 0;
+-    lock.l_len = 0;
+-
+-    if (fcntl(lock_fd, F_SETLK, &lock))
+-	return ATAPI_PT_LOCK_STATE_LOCKED_BY_OTHER;
+-
+-    return ATAPI_PT_LOCK_STATE_LOCKED_BY_ME;
+-}
+-
+-static void release_phys_pt_lock(IDEState *s)
+-{
+-    struct flock lock = {0};
+-    int lock_fd=get_lock_fd(s);
+-
+-    if (lock_fd<0) return;
+-
+-    lock.l_type = F_UNLCK;
+-    lock.l_whence = SEEK_SET;
+-    lock.l_start = 0;
+-    lock.l_len = 0;
+-
+-    fcntl(lock_fd, F_SETLK, &lock);
+-}
+-
+-/* This is the only function (with release_atapi_pt_lock) able to modify 
+-   s->atapi_pt.lock_state */
+-static int get_atapi_pt_lock(IDEState *s)
+-{
+-  if (s->atapi_pt.lock_state != ATAPI_PT_LOCK_STATE_LOCKED_BY_ME) {
+-    if (running_in_stubdomain) {
+-      struct stubdom_helper *sh = s->atapi_pt.sh;
+-      sh->io_buf[0] = ATAPI_PT_GET_PHYS_LOCK;
+-      sh->io_buf[1] = sh->dev_id;
+-      v4v_sendto(sh->atapi_pt_fd, sh->io_buf, 2, 0, &sh->remote_addr);
+-      v4v_recvfrom(sh->atapi_pt_fd, sh->io_buf, MAX_V4V_MSG_SIZE, 0, &sh->remote_addr);
+-      s->atapi_pt.lock_state = sh->io_buf[1];
+-    } else { 
+-      s->atapi_pt.lock_state = get_phys_pt_lock(s); 
+-    }
+-  }
+-  return s->atapi_pt.lock_state;
+-}
+-
+-/* This is the only function (with get_atapi_pt_lock) able to modify 
+-   s->atapi_pt.lock_state */
+-static void release_atapi_pt_lock(IDEState *s)
+-{
+-  ATAPI_PT_LOCK_DBG("ATAPI-PT  release_atapi_pt_lock domid=%d\n", domid);
+-  if (s->atapi_pt.lock_state == ATAPI_PT_LOCK_STATE_LOCKED_BY_ME) {
+-    if (running_in_stubdomain) {
+-      struct stubdom_helper *sh = s->atapi_pt.sh;
+-      sh->io_buf[0] = ATAPI_PT_RELEASE_PHYS_LOCK;
+-      sh->io_buf[1] = sh->dev_id;
+-      v4v_sendto(sh->atapi_pt_fd, sh->io_buf, 2, 0, &sh->remote_addr);
+-    } else {
+-      release_phys_pt_lock(s); 
+-    }
+-  }
+-  s->atapi_pt.lock_state = ATAPI_PT_LOCK_STATE_UNLOCKED;
+-}
+-
+-static int set_global_media_state(IDEState *s, int new_state)
+-{
+-    ATAPI_PT_LOCK_DBG("ATAPI-PT  set_global_media_state new_state=%d\n", new_state);
+-    if (running_in_stubdomain) {
+-      struct stubdom_helper *sh = s->atapi_pt.sh;
+-      sh->io_buf[0] = ATAPI_PT_SET_GLOB_MEDIA_STATE;
+-      sh->io_buf[1] = sh->dev_id;
+-      sh->io_buf[2] = new_state;
+-      v4v_sendto(sh->atapi_pt_fd, sh->io_buf, 3, 0, &sh->remote_addr);
+-    } else {
+-      s->atapi_pt.shm->mediastate = new_state;
+-    }
+-  
+-}
+-
+-static int get_global_media_state(IDEState *s)
++static int cmd_require_check_ready(uint8_t cmd)
+ {
+-  int ret;
+-    if (running_in_stubdomain) {
+-      struct stubdom_helper *sh = s->atapi_pt.sh;
+-      sh->io_buf[0] = ATAPI_PT_GET_GLOB_MEDIA_STATE;
+-      sh->io_buf[1] = sh->dev_id;
+-      v4v_sendto(sh->atapi_pt_fd, sh->io_buf, 2, 0, &sh->remote_addr);
+-      v4v_recvfrom(sh->atapi_pt_fd, sh->io_buf, MAX_V4V_MSG_SIZE, 0, &sh->remote_addr);
+-      ret = sh->io_buf[1];
+-    } else {
+-      ret = s->atapi_pt.shm->mediastate;
+-    }
+-  ATAPI_PT_LOCK_DBG("ATAPI-PT  get_global_media_state state=%d\n", ret);
+-  return ret;
+-}
+-
+-static void try_to_get_exclusive_lock(IDEState *s)
+-{
+-  char *tmp;
+-  char xs_path[1024];
+-  int lock_state;
+-  sprintf(xs_path, "/local/domain/%d/switcher/have_focus", domid);
+-  tmp = xenstore_read(xs_path);
+-  ATAPI_PT_LOCK_DBG("ATAPI-PT  try_to_get_exclusive_lock domid=%d state=%d\n", domid, s->atapi_pt.lock_state);
+-  if (tmp != NULL) {
+-    if (strtol(tmp, NULL, 0) == 1) {
+-      lock_state =  get_atapi_pt_lock(s);
+-      ATAPI_PT_LOCK_DBG("ATAPI-PT  get_atapi_pt_lock=%d\n", lock_state);
+-    }
+-    free(tmp);
++  switch (cmd) {
++  case GPCMD_TEST_UNIT_READY:
++  case GPCMD_READ_CDVD_CAPACITY:
++  case GPCMD_READ_10:
++  case GPCMD_SEEK:
++  case GPCMD_READ_TOC_PMA_ATIP:
++  case GPCMD_READ_DISC_INFO:
++  case GPCMD_READ_12:
++  case GPCMD_READ_DVD_STRUCTURE:
++  case GPCMD_READ_CD:
++    return 1;
++  default:
++    return 0;
+   }
+ }
+ 
+@@ -686,6 +533,9 @@ static void atapi_dhexdump(const void* address, uint32_t len)
+ }
+ #endif /* DEBUG_IDE_ATAPI_PT */
+ 
++// FIXME
++#include "atapi-pt-lock.c"
++
+ static int atapi_stubdom_open(IDEState *s, char *filename)
+ {
+   int ret;
+@@ -1206,13 +1056,163 @@ static time_t status_file_touched(const char *fn)
+ 	return buf.st_ctime;
+ }
+ 
++/* phys media state handling */
++static void get_pms_path(IDEState *s, char *buf, int szbuf)
++{
++    const char *BSGPREFIX = "/dev/bsg/";
++    char id[64] = { 0 };
++    char *p;
++    get_bsgdev_id(s, id, sizeof(id));
++    p = id;
++    while (*p) {
++        if (*p == ':') *p = '_';
++        ++p;
++    }
++    snprintf(buf, szbuf, "/xenclient/bsgdev/%s/media", id);
++}
++
++/* accesses global state */
++static bool import_phys_media_state(IDEState *s)
++{
++    char *str;
++    bool state;
++    char path[64];
++    get_pms_path(s, path, sizeof(path));
++
++    str = xenstore_read(path);
++    state = str ? atoi(str) : false;
++    free(str);
++    return state;
++}
++
++static void export_phys_media_state(IDEState *s, bool present)
++{
++    char path[64];
++    get_pms_path(s, path, sizeof(path));
++    xenstore_write(path, present ? "1" : "0");
++}
++
++/* guest only sees media if it holds lock */
++static bool guest_media_present(IDEState *s)
++{
++    return lock_held(s) ? s->atapi_pt.local_phys_media_state : false;
++}
++
++/* invoke when state of physical and/or virtual media changes. this will sync global media state with
++ * other qemus and do policy decisions whether to
++ * autolock, or not */
++static void handle_media_state_changed(IDEState *s, bool new_state)
++{
++  if (new_state != import_phys_media_state(s)) {
++      /* notify other qemus via global key */
++      export_phys_media_state(s, new_state);
++
++      DEBUG_PRINTF("Phys media state change detected (%s)\n",
++                   new_state ? "present" : "absent");
++  }
++
++  /* autolock/unlock if needed */
++  if (s->atapi_pt.autolock) {
++      if (new_state)
++          try_to_get_exclusive_lock(s);
++      else
++          release_atapi_pt_lock(s);
++  }
++
++  /* generate virtual media events if needed due to disagreement between local and global media states */
++  if (s->atapi_pt.local_phys_media_state != new_state) {
++      s->atapi_pt.local_phys_media_state = new_state;
++      if (lock_held(s) && new_state)
++          queue_media_event(s, true);
++      else if (!new_state)
++          queue_media_event(s, false);
++  }
++}
++
++/* update based on global state */
++static void update_local_media_state(IDEState *s)
++{
++    bool ms = import_phys_media_state(s);
++    if (s->atapi_pt.local_phys_media_state != ms) {
++        /* local shadow disagrees with global, work towards common state */
++        handle_media_state_changed(s, ms);
++    }
++}
++
++static void set_reply_no_change(IDEState *s)
++{
++  s->io_buffer[2] = 4;
++  s->io_buffer[4] = MEC_NO_CHANGE;
++  s->io_buffer[5] = MS_NO_CHANGE;
++  s->io_buffer[6] = 0;
++  s->io_buffer[7] = 0;
++}
++
++static void set_reply_status_media(IDEState *s, uint8_t *buf)
++{
++  uint8_t event_code, media_status;
++
++  media_status = MS_NO_CHANGE;
++  event_code   = MEC_NO_CHANGE;
++
++  if (s->atapi_pt.notify_eject_request) {
++    media_status = MS_TRAY_OPEN;
++    event_code = MEC_EJECT_REQUEST;
++    s->atapi_pt.notify_eject_request = false;
++  } else if (s->atapi_pt.notify_media_removed) {
++    media_status = MS_TRAY_OPEN;
++    event_code = MEC_MEDIA_REMOVE;
++    s->atapi_pt.notify_media_removed = false;
++  } else if (s->atapi_pt.notify_new_media) {
++    media_status = MS_MEDIA_PRESENT;
++    event_code = MEC_NEW_MEDIA;
++    s->atapi_pt.notify_new_media = false;
++  }
++
++  buf[2] = 4;
++  buf[4] = event_code;
++  buf[5] = media_status;
++  buf[6] = 0;
++  buf[7] = 0;
++  DEBUG_PRINTF("[ATAPI] media status notification %d %d %d\n", 4, event_code, media_status);
++}
++
++static void get_event_status_notification_complete(IDEState *s)
++{
++    char *b = s->io_buffer;
++    int ev_class = b[2];
++    int ev_code = b[4];
++    if (ev_class == 4 && ev_code == MEC_NEW_MEDIA) {
++        /* This is a "new media" message coming from actual drive */
++        DEBUG_PRINTF("[ATAPI] new media detected\n");
++        handle_media_state_changed(s, true);
++    }
++
++    if (ev_class == 4 && ev_code == MEC_MEDIA_REMOVE) {
++        /* This is a "media removed" message coming from actual drive */
++        DEBUG_PRINTF("[ATAPI] media removed\n");
++        handle_media_state_changed(s, false);
++    }
++
++    update_local_media_state(s);
++
++    if ((ev_class == 4 && ev_code == MEC_NO_CHANGE) ||
++        (b[4] == 0 && b[5] == 0 && b[6] == 0 && b[7] == 0))
++    {
++        /* This is no change message, we spoof it with fabricated media events if needed */
++        set_reply_status_media(s, b);
++    } else {
++        /* don't propagate real events */
++        set_reply_no_change(s);
++    }
++}
++
+ static void ide_atapi_pt_cmd_complete(void *arg) /* Mop up result*/
+ {
+     IDEState *s = (IDEState *)arg;
+     uint8_t cmd_code = s->atapi_pt.request[0];
+     uint32_t din_actual;
+     static uint32_t serial = 0;
+-    int global_media_state;
+     time_t etime, ntime;
+     char *tmp;
+     int r;
+@@ -1229,10 +1229,8 @@ static void ide_atapi_pt_cmd_complete(void *arg) /* Mop up result*/
+     {
+ 	if (s->atapi_pt.sense.sense_key == 2 && s->atapi_pt.sense.asc == 0x3A)
+ 	{
+-            /* No media, remove exclusivity lock */
+-	  set_global_media_state(s, MEDIA_ABSENT);
+-	  s->atapi_pt.lastmediastate = MEDIA_ABSENT;
+-	  release_atapi_pt_lock(s);
++          /* detected no physical media */
++          handle_media_state_changed(s, false);
+ 	}
+         ide_atapi_pt_error(s);
+         return;
+@@ -1245,90 +1243,21 @@ static void ide_atapi_pt_cmd_complete(void *arg) /* Mop up result*/
+        s->atapi_pt.request[0] == GPCMD_READ_12 ||
+        s->atapi_pt.request[0] == GPCMD_READ_DISC_INFO)
+     {
+-      /* If this didn't fail then a media is present */
+-      if (s->atapi_pt.lastmediastate != MEDIA_PRESENT) {
+-	set_global_media_state(s, MEDIA_PRESENT);
+-	s->atapi_pt.lastmediastate = MEDIA_PRESENT;
+-	if ( s->bs->exclusive == 1) {
+-	  /* If the status has just changed to present and we are 
+-	     in an exclusive world try to get the lock */
+-	  try_to_get_exclusive_lock(s);
+-	}
+-      }
++      /* if either of these succeeded that means media is there */
++      handle_media_state_changed(s, true);
+     }
+ 
+-    if(s->atapi_pt.request[0] == GPCMD_GET_EVENT_STATUS_NOTIFICATION)
+-    {
+-        if(s->io_buffer[2] == 4 && s->io_buffer[4] == 2)
+-        {
+-            /* This is a "new media" message, tell any other VMs */
+-            DEBUG_PRINTF("[ATAPI] new media detected\n");
+-
+-	    if (s->atapi_pt.lastmediastate != MEDIA_PRESENT) {
+-	      set_global_media_state(s, MEDIA_PRESENT);
+-	      s->atapi_pt.lastmediastate = MEDIA_PRESENT;
+-	      if ( s->bs->exclusive == 1) {
+-		/* If the status has just changed to present and we are 
+-		   in an exclusive world try to get the lock */
+-		try_to_get_exclusive_lock(s);
+-	      }
+-	    }
+-	}
+-
+-        if(s->io_buffer[2] == 4 && s->io_buffer[4] == 3)
+-        {
+-            /* This is a "media removed" message, tell any other VMs */
+-            DEBUG_PRINTF("[ATAPI] media removed\n");
+-	    if (s->atapi_pt.lastmediastate != MEDIA_ABSENT) {
+-	      set_global_media_state(s, MEDIA_ABSENT);
+-	      s->atapi_pt.lastmediastate = MEDIA_ABSENT;
+-	      if (s->bs->exclusive == 1) {
+-		release_atapi_pt_lock(s);
+-	      }
+-	    }
+-	}
++    if(s->atapi_pt.request[0] == GPCMD_GET_EVENT_STATUS_NOTIFICATION) {
++        get_event_status_notification_complete(s);
++    }
+ 
+-        if((s->io_buffer[2] == 4 && s->io_buffer[4] == 0 && s->io_buffer[5] == 2) ||
+-           (s->io_buffer[4] == 0 && s->io_buffer[5] == 0 &&
+-            s->io_buffer[6] == 0 && s->io_buffer[7] == 0))
+-        {
+-            /* This is a no activity message we can hijack if we need to */
+-	    global_media_state = get_global_media_state(s);
+-	    if ((s->atapi_pt.lastmediastate != global_media_state) &&
+-	    	(global_media_state != MEDIA_STATE_UNKNOWN))
+-	    {
+-	    	s->atapi_pt.lastmediastate = global_media_state;
+-
+-	    	if (s->atapi_pt.lastmediastate == MEDIA_ABSENT)
+-	    	{
+-	    	    /* There's been an eject message that we haven't seen yet */
+-	    	    DEBUG_PRINTF("[ATAPI] media removed message spotted\n");
+-
+-	    	    s->io_buffer[2] = 4;
+-	    	    s->io_buffer[4] = 3;
+-	    	    s->io_buffer[5] = 1;
+-	    	    s->io_buffer[6] = 0;
+-	    	    s->io_buffer[7] = 0;
+-		    if (s->bs->exclusive == 1) {
+-		      release_atapi_pt_lock(s);
+-		    }
+-	    	} else {
+-	    	    DEBUG_PRINTF("[ATAPI] new media message spotted\n");
+-	    	    if (s->bs->exclusive != 1 ||
+-	    		(s->bs->exclusive == 1 && s->atapi_pt.lock_state != ATAPI_PT_LOCK_STATE_LOCKED_BY_ME))
+-	    	    {
+-	    		s->io_buffer[2] = 4;
+-	    		s->io_buffer[4] = 2;
+-	    		s->io_buffer[5] = 2;
+-	    		s->io_buffer[6] = 0;
+-	    		s->io_buffer[7] = 0;
+-	    	    }
+-		    if (s->bs->exclusive == 1) {
+-		      try_to_get_exclusive_lock(s);
+-		    }
+-	    	}
+-	    }
+-	}
++    if (s->atapi_pt.request[0] == GPCMD_GET_CONFIGURATION &&
++        !guest_media_present(s))
++    {
++        /* report no current profile if media should be not present in guest. Udev uses the current profile
++         * to detect media presence. Bytes 6,7 hold current profile */
++        s->io_buffer[6] = 0;
++        s->io_buffer[7] = 0;
+     }
+ 
+     if(s->atapi_pt.din_xfer_len == 0)
+@@ -1431,8 +1360,8 @@ static void ide_atapi_pt_setup_sgio_thread(IDEState *s)
+ {
+     int fds[2];
+     BDRVRawState *raw_state;
+-    struct stat st;
+-    char shm_name[1280];
++
++    memset(&s->atapi_pt, 0, sizeof(s->atapi_pt));
+ 
+     if(socketpair(PF_UNIX,SOCK_DGRAM,0,fds) < 0) {
+ 	    fprintf(stderr, "atapi-pt failed to create socketpair: %m\n");
+@@ -1448,52 +1377,24 @@ static void ide_atapi_pt_setup_sgio_thread(IDEState *s)
+     }
+     qemu_aio_set_fd_handler(s->atapi_pt.sgio_dispatch_fd, ide_atapi_pt_cmd_complete, NULL, ide_atapi_pt_aio_flush, (void *)s);
+ 
+-    /* Initialize the changed media shm */
+-      /* All SHM stuff wil be done from the stubdom-helper in dom0 */
+     if(running_in_stubdomain) {
+       struct stubdom_helper *sh;
+ 
+       atapi_stubdom_open(s, s->bs->filename);
+       sh = s->atapi_pt.sh;
+       s->atapi_pt.max_xfer_len = sh->max_xfer_len;
+-      //s->atapi_pt.max_xfer_len = 4096 * 24;
+-      s->atapi_pt.lock_state = ATAPI_PT_LOCK_STATE_UNLOCKED;
+     } else {
+       raw_state = s->bs->opaque;
+-      if (fstat(raw_state->fd, &st)) {
+-	fprintf(stderr, "Failed to fstat() the atapi-pt device (fd=%d): %s\n", raw_state->fd,
+-		strerror(errno));
+-	exit(1);
+-      }
+-      snprintf(shm_name, sizeof(shm_name)-1, IDE_ATAPI_PT_SHM_NAME_TEMPLATE,
+-	       major(st.st_rdev), minor(st.st_rdev));
+-      shm_name[sizeof(shm_name)-1] = '\0';
+-      s->atapi_pt.shmfd = shm_open(shm_name, O_CREAT | O_RDWR, 0666);
+-      if (s->atapi_pt.shmfd < 0) {
+-    	fprintf(stderr, "Open ATAPI-PT SHM failed: %s\n", strerror(errno));
+-    	exit(1);
+-      }
+-      ftruncate(s->atapi_pt.shmfd, sizeof(*(s->atapi_pt.shm)));
+-      s->atapi_pt.shm = mmap(NULL, sizeof(*(s->atapi_pt.shm)), PROT_READ|PROT_WRITE,
+-			     MAP_SHARED, s->atapi_pt.shmfd, 0);
+-      if (s->atapi_pt.shm == MAP_FAILED) {
+-    	fprintf(stderr, "Map ATAPI-PT SHM failed: %s\n", strerror(errno));
+-    	exit(1);
+-      }
+-      
+       /* Find out the maximum block size the hardware supports. This is needed for USB */
+       /* drives where it is 120kb (less than the normal 128kb for some reason) */
+       if (ioctl(raw_state->fd, SG_GET_RESERVED_SIZE, &(s->atapi_pt.max_xfer_len))) {
+     	fprintf(stderr, "ATAPI-PT get max xfer len failed: %s\n", strerror(errno));
+     	exit(1);
+       }
+-      s->atapi_pt.max_xfer_len = (s->atapi_pt.max_xfer_len + CD_FRAMESIZE-1) & ~(CD_FRAMESIZE-1);
+-      snprintf(s->atapi_pt.lock_file_name, sizeof(shm_name)-1, IDE_ATAPI_PT_EXCLUSIVE_CD_FILE_TEMPLATE,
+-              major(st.st_rdev), minor(st.st_rdev));
+     }
+-    s->atapi_pt.lastmediastate = MEDIA_STATE_UNKNOWN;
+     DEBUG_PRINTF("ATAPI-PT max_xfer_len: %d (%d CD-sectors)\n", s->atapi_pt.max_xfer_len,
+ 		 s->atapi_pt.max_xfer_len/CD_FRAMESIZE);
++    atapi_pt_locking_init(s);
+ }
+ 
+ static void ide_atapi_pt_do_sg_io(IDEState *s)
+@@ -1698,7 +1599,6 @@ static void ide_atapi_pt_cmd(IDEState *s)
+     FILE *fp;
+     int block_size;
+     char *tmp;
+-    static ATAPIPTMediaState laststate = MEDIA_STATE_UNKNOWN;
+ 
+     memcpy(s->atapi_pt.request, s->io_buffer, ATAPI_PACKET_SIZE);
+     cmd_code = s->atapi_pt.request[0];
+@@ -1707,33 +1607,49 @@ static void ide_atapi_pt_cmd(IDEState *s)
+ 
+     get_atapi_pt_lock_state(s);
+ 
+-    /* Check if we want exclusive read access */
+-    if (s->bs->exclusive == 1)
++    DEBUG_PRINTF("command code %x, new_media=%d media_removed=%d cdc=%d\n",
++                 cmd_code,
++                 s->atapi_pt.notify_new_media,
++                 s->atapi_pt.notify_media_removed,
++                 s->atapi_pt.cd_change);
++
++     /* if the command requires ready check, refuse the command early in guest media should not be
++     * present. */
++    if (cmd_require_check_ready(cmd_code))
++    {
++        /* first make sure we are locally aware of global media state */
++        update_local_media_state(s);
++        if (!guest_media_present(s))
++        {
++            DEBUG_PRINTF("[ATAPI] TRAY OPEN NO MEDIA\n");
++            ide_atapi_pt_set_error(s, 0x2, 0x3a, 0x2, 0x70);
++            return;
++        }
++    }
++
++    /* Always allow drive-related requests */
++    if (cmd_code != GPCMD_TEST_UNIT_READY &&
++        cmd_code != GPCMD_GET_CONFIGURATION &&
++        cmd_code != GPCMD_GET_PERFORMANCE &&
++        cmd_code != GPCMD_MECHANISM_STATUS &&
++        cmd_code != GPCMD_REQUEST_SENSE &&
++        cmd_code != GPCMD_MODE_SENSE_10 &&
++        cmd_code != GPCMD_INQUIRY &&
++        cmd_code != GPCMD_GET_EVENT_STATUS_NOTIFICATION &&
++        cmd_code != GPCMD_REPORT_KEY &&
++        cmd_code != GPCMD_READ_CDVD_CAPACITY &&
++        cmd_code != GPCMD_READ_FORMAT_CAPACITIES)
+     {
+-    	/* Always allow drive-related requests */
+-    	if (cmd_code != GPCMD_TEST_UNIT_READY &&
+-    	    cmd_code != GPCMD_GET_CONFIGURATION &&
+-    	    cmd_code != GPCMD_GET_PERFORMANCE &&
+-    	    cmd_code != GPCMD_MECHANISM_STATUS &&
+-    	    cmd_code != GPCMD_REQUEST_SENSE &&
+-    	    cmd_code != GPCMD_MODE_SENSE_10 &&
+-    	    cmd_code != GPCMD_INQUIRY &&
+-    	    cmd_code != GPCMD_GET_EVENT_STATUS_NOTIFICATION &&
+-    	    cmd_code != GPCMD_REPORT_KEY &&
+-    	    cmd_code != GPCMD_READ_CDVD_CAPACITY &&
+-    	    cmd_code != GPCMD_READ_FORMAT_CAPACITIES)
+-    	{
+-    	    /* Have lock? */
+-	  if ((s->atapi_pt.lock_state != ATAPI_PT_LOCK_STATE_LOCKED_BY_ME) &&
+-	      (s->atapi_pt.lock_state != ATAPI_PT_LOCK_STATE_UNLOCKED || cmd_code != GPCMD_START_STOP_UNIT))
+-    	    {
+-    		DEBUG_PRINTF("[ATAPI] refusing command: 0x%02x (\e[0;32m%s\e[m) dma=%d domain=%d\n",
+-    			     cmd_code, atapi_cmd_to_str(cmd_code), s->atapi_dma, domid);
+-    		ide_atapi_pt_set_error(s, SENSE_ILLEGAL_REQUEST,
+-    				       ASC_INV_FIELD_IN_CMD_PACKET, 0, 0x70);
+-    		return;
+-    	    }
+-    	}
++      /* Have lock? */
++      if ((s->atapi_pt.lock_state != ATAPI_PT_LOCK_STATE_LOCKED_BY_ME) &&
++          (s->atapi_pt.lock_state != ATAPI_PT_LOCK_STATE_UNLOCKED || cmd_code != GPCMD_START_STOP_UNIT))
++      {
++        DEBUG_PRINTF("[ATAPI] refusing command: 0x%02x (\e[0;32m%s\e[m) dma=%d domain=%d\n",
++                     cmd_code, atapi_cmd_to_str(cmd_code), s->atapi_dma, domid);
++        ide_atapi_pt_set_error(s, SENSE_ILLEGAL_REQUEST,
++                               ASC_INV_FIELD_IN_CMD_PACKET, 0, 0x70);
++        return;
++      }
+     }
+ 
+     DEBUG_PRINTF("[ATAPI] sending command: 0x%02x (\e[0;32m%s\e[m) dma=%d domain=%d\n",
+@@ -1785,7 +1701,8 @@ static void ide_atapi_pt_cmd(IDEState *s)
+ 
+ 
+ 
+-    if(s->atapi_pt.lock_state == ATAPI_PT_LOCK_STATE_LOCKED_BY_OTHER)
++    if (s->atapi_pt.lock_state == ATAPI_PT_LOCK_STATE_LOCKED_BY_OTHER &&
++        cmd_code != GPCMD_GET_EVENT_STATUS_NOTIFICATION)
+     {
+         uint8_t sense[18] = {0x70, 0, 2, 0, 0, 0, 0, 10, 0, 0, 0, 0, 0x3a, 1, 0, 0, 0, 0};
+ 
+@@ -1856,6 +1773,13 @@ static void ide_atapi_pt_cmd(IDEState *s)
+     }
+ 
+     if(cmd_code == GPCMD_START_STOP_UNIT) {
++        /* ignore start/stop if no lock held */
++        if (!lock_held(s)) {
++            DEBUG_PRINTF("Ignoring start/stop unit command due to no lock held\n");
++            ide_atapi_cmd_ok(s);
++            return;
++        }
++
+ 	if ((s->atapi_pt.request[4] & 0x3) == 0x0) {
+ 	    // Stop motor command: Win7 guest sends this on shutdown,
+ 	    // we ignore this so other VM's don't get shafted
+@@ -2010,8 +1934,7 @@ static void ide_atapi_pt_cmd(IDEState *s)
+ 
+     case GPCMD_LOAD_UNLOAD:
+         if((s->io_buffer[4] & 3) == 2)  /* Eject command, remove exclusivity lock */
+-	  release_atapi_pt_lock(s);
+-
++          release_atapi_pt_lock(s);
+         break;
+     }
+ 
+diff --git a/hw/ide.c b/hw/ide.c
+index 1c462d5..ca25964 100644
+--- a/hw/ide.c
++++ b/hw/ide.c
+@@ -429,16 +429,6 @@ struct IDEState;
+ typedef void EndTransferFunc(struct IDEState *);
+ 
+ #ifdef __linux__
+-typedef enum {
+-	MEDIA_STATE_UNKNOWN = 0x0,
+-	MEDIA_PRESENT = 0x1,
+-	MEDIA_ABSENT = 0x2
+-} ATAPIPTMediaState;
+-
+-typedef struct ATAPIPTShm
+-{
+-    ATAPIPTMediaState    mediastate;
+-} ATAPIPTShm;
+ 
+ typedef struct ATAPIPassThroughState
+ {
+@@ -449,10 +439,16 @@ typedef struct ATAPIPassThroughState
+     uint32_t             timeout;  /* in milliseconds */
+     uint32_t             result;   /* 0 => OK */
+ 
+-    int                  shmfd;
+-    ATAPIPTShm *         volatile shm;
+-    ATAPIPTMediaState    lastmediastate;
+     int                  lock_state;
++    bool                 autolock; /* autolock drive to focused vm on media inserts etc */
++    /* for media event handling */
++    bool                 notify_new_media;
++    bool                 notify_media_removed;
++    bool                 notify_eject_request;
++    int                  cd_change;
++    /* physical media present? copy of the global state hold by xenstore key */
++    bool                 local_phys_media_state;
++
+     uint32_t             max_xfer_len;
+     void *               sh; /* stubdom_helper related*/
+     pthread_t            sgio_thread;

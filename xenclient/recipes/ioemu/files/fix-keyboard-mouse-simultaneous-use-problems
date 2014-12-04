@@ -1,0 +1,379 @@
+diff --git a/hw/pckbd.c b/hw/pckbd.c
+index f91a387..dd37507 100644
+--- a/hw/pckbd.c
++++ b/hw/pckbd.c
+@@ -115,6 +115,11 @@
+ #define KBD_PENDING_KBD         1
+ #define KBD_PENDING_AUX         2
+ 
++#define KBD_NEXT_KEYBOARD       1
++#define KBD_NEXT_MOUSE          2
++
++#define NUM_STATUS_REQUESTS_BEFORE_READ 2
++
+ typedef struct KBDState {
+     uint8_t write_cmd; /* if non zero, write data to port 60 is expected */
+     uint8_t status;
+@@ -123,6 +128,8 @@ typedef struct KBDState {
+     uint8_t pending;
+     void *kbd;
+     void *mouse;
++    uint8_t interrupt_is;
++    uint8_t next_read;
+ 
+     qemu_irq irq_kbd;
+     qemu_irq irq_mouse;
+@@ -142,12 +149,9 @@ static void kbd_update_irq(KBDState *s)
+ 
+     irq_kbd_level = 0;
+     irq_mouse_level = 0;
+-    s->status &= ~(KBD_STAT_OBF | KBD_STAT_MOUSE_OBF);
+     if (s->pending) {
+-        s->status |= KBD_STAT_OBF;
+         /* kbd data takes priority over aux data.  */
+         if (s->pending == KBD_PENDING_AUX) {
+-            s->status |= KBD_STAT_MOUSE_OBF;
+             if (s->mode & KBD_MODE_MOUSE_INT)
+                 irq_mouse_level = 1;
+         } else {
+@@ -156,40 +160,142 @@ static void kbd_update_irq(KBDState *s)
+                 irq_kbd_level = 1;
+         }
+     }
+-    qemu_set_irq(s->irq_kbd, irq_kbd_level);
+-    qemu_set_irq(s->irq_mouse, irq_mouse_level);
++
++    if (irq_kbd_level)
++    {
++        s->interrupt_is = KBD_NEXT_KEYBOARD;
++        qemu_set_irq(s->irq_kbd, !irq_kbd_level);
++        qemu_set_irq(s->irq_kbd, irq_kbd_level);
++    }
++    else
++    {
++        qemu_set_irq(s->irq_kbd, irq_kbd_level);
++    }
++
++    if (irq_mouse_level)
++    {
++        s->interrupt_is = KBD_NEXT_MOUSE;
++        qemu_set_irq(s->irq_mouse, !irq_mouse_level);
++        qemu_set_irq(s->irq_mouse, irq_mouse_level);
++    }
++    else
++    {
++        qemu_set_irq(s->irq_mouse, irq_mouse_level);
++    }
+ }
+ 
+-static void kbd_update_kbd_irq(void *opaque, int level)
++static void kbd_update_kbd_irq(void *opaque, int level, int set_irq, int queue_data)
+ {
+     KBDState *s = (KBDState *)opaque;
++    int queue_size = 0;
++    int raise_irq = 1;
++    uint8_t prev_interrupt_is = s->interrupt_is;
+ 
+     if (level)
++    {
+         s->pending |= KBD_PENDING_KBD;
++        s->interrupt_is = KBD_NEXT_KEYBOARD;
++    }
+     else
++    {
+         s->pending &= ~KBD_PENDING_KBD;
+-    kbd_update_irq(s);
++    }
++
++    if (queue_data && set_irq && level)
++    {
++        queue_size = ps2_get_queue_size(s->kbd);
++        if (queue_size > 1)
++            raise_irq = 0;
++
++        queue_size = ps2_get_queue_size(s->mouse);
++        if (queue_size > 0)
++            raise_irq = 0;
++
++        if (!raise_irq)
++            s->interrupt_is = prev_interrupt_is;
++    }
++
++    if (set_irq && raise_irq)
++    {
++        kbd_update_irq(s);
++    }
+ }
+ 
+-static void kbd_update_aux_irq(void *opaque, int level)
++static void kbd_update_aux_irq(void *opaque, int level, int set_irq, int queue_data)
+ {
+     KBDState *s = (KBDState *)opaque;
++    int queue_size = 0;
++    int raise_irq = 1;
++    uint8_t prev_interrupt_is = s->interrupt_is;
+ 
+     if (level)
++    {
+         s->pending |= KBD_PENDING_AUX;
++        s->interrupt_is = KBD_NEXT_MOUSE;
++    }
+     else
++    {
+         s->pending &= ~KBD_PENDING_AUX;
+-    kbd_update_irq(s);
++    }
++
++    if (queue_data && set_irq && level)
++    {
++        /* We are queuing mouse data, do not raise the interrupt if there
++           is keyboard or mouse data pending already. */
++        queue_size = ps2_get_queue_size(s->mouse);
++        if (queue_size > 1)
++            raise_irq = 0;
++
++        queue_size = ps2_get_queue_size(s->kbd);
++        if (queue_size > 0)
++            raise_irq = 0;
++
++        if (!raise_irq)
++            s->interrupt_is = prev_interrupt_is;
++    }
++
++    if (set_irq && raise_irq)
++    {
++        kbd_update_irq(s);
++    }
+ }
+ 
+ static uint32_t kbd_read_status(void *opaque, uint32_t addr)
+ {
+     KBDState *s = opaque;
+     int val;
++
++    const int level = 1;
++    const int set_irq = 1;
++    const int queue_data = 0;
++
++    s->next_read = KBD_NEXT_KEYBOARD;
++
++    if((s->interrupt_is == KBD_NEXT_KEYBOARD) && (s->pending & KBD_PENDING_KBD))
++    {
++        s->status |= KBD_STAT_OBF;
++    }
++    else
++    {
++        s->status &= ~KBD_STAT_OBF;
++    }
++
++    if((s->interrupt_is == KBD_NEXT_MOUSE) && (s->pending & KBD_PENDING_AUX))
++    {
++        s->status |= (KBD_STAT_OBF | KBD_STAT_MOUSE_OBF);
++        s->next_read = KBD_NEXT_MOUSE;
++    }
++    else
++    {
++        s->status &= ~KBD_STAT_MOUSE_OBF;
++    }
++
+     val = s->status;
++
+ #if defined(DEBUG_KBD)
+     fprintf(stderr, "kbd: read status=0x%02x\n", val);
+ #endif
++
+     return val;
+ }
+ 
+@@ -284,10 +390,32 @@ static uint32_t kbd_read_data(void *opaque, uint32_t addr)
+     KBDState *s = opaque;
+     uint32_t val;
+ 
+-    if (s->pending == KBD_PENDING_AUX)
++    const int set_irq = 1;
++    const int queue_data = 0;
++
++    if (s->next_read == KBD_NEXT_MOUSE)
++    {
+         val = ps2_read_data(s->mouse);
++    }
+     else
++    {
+         val = ps2_read_data(s->kbd);
++    }
++
++    /* Set the IRQs. */
++    if (s->pending & KBD_PENDING_KBD)
++    {
++        kbd_update_kbd_irq(s, 1, set_irq, queue_data);
++    }
++    else if (s->pending & KBD_PENDING_AUX)
++    {
++        kbd_update_aux_irq(s, 1, set_irq, queue_data);
++    }
++    else
++    {
++        kbd_update_kbd_irq(s, 0, set_irq, queue_data);
++        s->interrupt_is = KBD_NEXT_KEYBOARD;
++    }
+ 
+ #if defined(DEBUG_KBD)
+     fprintf(stderr, "kbd: read data=0x%02x\n", val);
+@@ -356,6 +484,8 @@ static void kbd_reset(void *opaque)
+ 
+     s->mode = KBD_MODE_KBD_INT | KBD_MODE_MOUSE_INT;
+     s->status = KBD_STAT_CMD | KBD_STAT_UNLOCKED;
++    s->interrupt_is = KBD_NEXT_KEYBOARD;
++    s->next_read = KBD_NEXT_KEYBOARD;
+ }
+ 
+ static void kbd_save(QEMUFile* f, void* opaque)
+diff --git a/hw/pl050.c b/hw/pl050.c
+index 0ab60bf..de630bf 100644
+--- a/hw/pl050.c
++++ b/hw/pl050.c
+@@ -32,7 +32,7 @@ typedef struct {
+ static const unsigned char pl050_id[] =
+ { 0x50, 0x10, 0x04, 0x00, 0x0d, 0xf0, 0x05, 0xb1 };
+ 
+-static void pl050_update(void *opaque, int level)
++static void pl050_update(void *opaque, int level, int unused, int also_unused)
+ {
+     pl050_state *s = (pl050_state *)opaque;
+     int raise;
+@@ -91,7 +91,7 @@ static void pl050_write(void *opaque, target_phys_addr_t offset,
+     switch (offset >> 2) {
+     case 0: /* KMICR */
+         s->cr = value;
+-        pl050_update(s, s->pending);
++        pl050_update(s, s->pending, 0, 0);
+         /* ??? Need to implement the enable/disable bit.  */
+         break;
+     case 2: /* KMIDATA */
+diff --git a/hw/ps2.c b/hw/ps2.c
+index fb77005..5a652c5 100644
+--- a/hw/ps2.c
++++ b/hw/ps2.c
+@@ -80,7 +80,7 @@ typedef struct {
+ typedef struct {
+     PS2Queue queue;
+     int32_t write_cmd;
+-    void (*update_irq)(void *, int);
++    void (*update_irq)(void *, int, int, int);
+     void *update_arg;
+ } PS2State;
+ 
+@@ -125,13 +125,26 @@ void ps2_queue(void *opaque, int b)
+     PS2State *s = (PS2State *)opaque;
+     PS2Queue *q = &s->queue;
+ 
++    const int level = 1;
++    const int set_irq = 1;
++    const int queue_data = 1;
++
+     if (q->count >= PS2_QUEUE_SIZE)
+         return;
+     q->data[q->wptr] = b;
+     if (++q->wptr == PS2_QUEUE_SIZE)
+         q->wptr = 0;
+     q->count++;
+-    s->update_irq(s->update_arg, 1);
++
++    s->update_irq(s->update_arg, level, set_irq, queue_data);
++}
++
++int ps2_get_queue_size(void *opaque)
++{
++    PS2State *s = (PS2State *)opaque;
++    PS2Queue *q = &s->queue;
++
++    return (q->count);
+ }
+ 
+ /*
+@@ -159,6 +172,10 @@ uint32_t ps2_read_data(void *opaque)
+     PS2Queue *q;
+     int val, index;
+ 
++    const int level = 0;
++    const int set_irq = 0;
++    const int queue_data = 0;
++
+     q = &s->queue;
+     if (q->count == 0) {
+         /* NOTE: if no data left, we return the last keyboard one
+@@ -174,9 +191,9 @@ uint32_t ps2_read_data(void *opaque)
+             q->rptr = 0;
+         q->count--;
+         /* reading deasserts IRQ */
+-        s->update_irq(s->update_arg, 0);
++        s->update_irq(s->update_arg, level, set_irq, queue_data);
+         /* reassert IRQs if data left */
+-        s->update_irq(s->update_arg, q->count != 0);
++        s->update_irq(s->update_arg, (q->count != 0), set_irq, queue_data);
+     }
+     return val;
+ }
+@@ -366,7 +383,7 @@ void ps2_write_mouse(void *opaque, int val)
+ {
+     PS2MouseState *s = (PS2MouseState *)opaque;
+ #ifdef DEBUG_MOUSE
+-    printf("kbd: write mouse 0x%02x\n", val);
++    fprintf(stderr, "kbd: write mouse 0x%02x\n", val);
+ #endif
+     switch(s->common.write_cmd) {
+     default:
+@@ -492,12 +509,17 @@ static void ps2_reset(void *opaque)
+ {
+     PS2State *s = (PS2State *)opaque;
+     PS2Queue *q;
++
++    const int level = 0;
++    const int set_irq = 1;
++    const int queue_data = 0;
++
+     s->write_cmd = -1;
+     q = &s->queue;
+     q->rptr = 0;
+     q->wptr = 0;
+     q->count = 0;
+-    s->update_irq(s->update_arg, 0);
++    s->update_irq(s->update_arg, level, set_irq, queue_data);
+ }
+ 
+ static void ps2_common_save (QEMUFile *f, PS2State *s)
+@@ -583,7 +605,7 @@ static int ps2_mouse_load(QEMUFile* f, void* opaque, int version_id)
+     return 0;
+ }
+ 
+-void *ps2_kbd_init(void (*update_irq)(void *, int), void *update_arg)
++void *ps2_kbd_init(void (*update_irq)(void *, int, int, int), void *update_arg)
+ {
+     PS2KbdState *s = (PS2KbdState *)qemu_mallocz(sizeof(PS2KbdState));
+ 
+@@ -597,7 +619,7 @@ void *ps2_kbd_init(void (*update_irq)(void *, int), void *update_arg)
+     return s;
+ }
+ 
+-void *ps2_mouse_init(void (*update_irq)(void *, int), void *update_arg)
++void *ps2_mouse_init(void (*update_irq)(void *, int, int, int), void *update_arg)
+ {
+     PS2MouseState *s = (PS2MouseState *)qemu_mallocz(sizeof(PS2MouseState));
+ 
+diff --git a/hw/ps2.h b/hw/ps2.h
+index 32a4231..e7cd351 100644
+--- a/hw/ps2.h
++++ b/hw/ps2.h
+@@ -1,9 +1,10 @@
+ /* ps2.c */
+-void *ps2_kbd_init(void (*update_irq)(void *, int), void *update_arg);
+-void *ps2_mouse_init(void (*update_irq)(void *, int), void *update_arg);
++void *ps2_kbd_init(void (*update_irq)(void *, int, int, int), void *update_arg);
++void *ps2_mouse_init(void (*update_irq)(void *, int, int, int), void *update_arg);
+ void ps2_write_mouse(void *, int val);
+ void ps2_write_keyboard(void *, int val);
+ uint32_t ps2_read_data(void *);
+ void ps2_queue(void *, int b);
+ void ps2_keyboard_set_translation(void *opaque, int mode);
+ void ps2_mouse_fake_event(void *opaque);
++int ps2_get_queue_size(void *opaque);

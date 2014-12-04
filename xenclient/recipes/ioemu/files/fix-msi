@@ -1,0 +1,39 @@
+diff --git a/hw/pass-through.c b/hw/pass-through.c
+index ff221b4..9f19eb8 100644
+--- a/hw/pass-through.c
++++ b/hw/pass-through.c
+@@ -3387,7 +3387,16 @@ static int pt_bar_reg_write(struct pt_dev *ptdev,
+     }
+ 
+     /* update the corresponding virtual region address */
+-    r->addr = cfg_entry->data;
++    /*
++     * When guest code tries to get block size of mmio, it will write all "1"s
++     * into pci bar register. In this case, cfg_entry->data == writable_mask.
++     * Especially for devices with large mmio, the value of writable_mask
++     * is likely to be a guest physical address that has been mapped to ram
++     * rather than mmio. Remapping this value to mmio should be prevented.
++     */
++
++    if ( cfg_entry->data != writable_mask )
++        r->addr = cfg_entry->data;
+ 
+ exit:
+     /* create value for writing to I/O device register */
+@@ -3439,7 +3448,15 @@ static int pt_exp_rom_bar_reg_write(struct pt_dev *ptdev,
+     cfg_entry->data = PT_MERGE_VALUE(*value, cfg_entry->data, writable_mask);
+ 
+     /* update the corresponding virtual region address */
+-    r->addr = cfg_entry->data;
++    /*
++     * When guest code tries to get block size of mmio, it will write all "1"s
++     * into pci bar register. In this case, cfg_entry->data == writable_mask.
++     * Especially for devices with large mmio, the value of writable_mask
++     * is likely to be a guest physical address that has been mapped to ram
++     * rather than mmio. Remapping this value to mmio should be prevented.
++     */
++    if ( cfg_entry->data != writable_mask )
++        r->addr = cfg_entry->data;
+ 
+     /* create value for writing to I/O device register */
+     throughable_mask = ~bar_emu_mask & valid_mask;

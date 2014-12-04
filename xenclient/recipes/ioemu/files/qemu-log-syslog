@@ -1,0 +1,107 @@
+diff --git a/Makefile b/Makefile
+index c395e77..5f4f4cf 100644
+--- a/Makefile
++++ b/Makefile
+@@ -10,6 +10,7 @@ VPATH=$(SRC_PATH):$(SRC_PATH)/hw
+ 
+ 
+ CFLAGS += $(OS_CFLAGS) $(ARCH_CFLAGS)
++CFLAGS+=-Dfprintf=__syslog_fprintf
+ LDFLAGS += $(OS_LDFLAGS) $(ARCH_LDFLAGS)
+ 
+ CPPFLAGS += -I. -I$(SRC_PATH) -MMD -MP -MT $@
+@@ -92,6 +93,7 @@ OBJS+=sd.o ssi-sd.o
+ OBJS+=bt.o bt-host.o bt-vhci.o bt-l2cap.o bt-sdp.o bt-hci.o bt-hid.o usb-bt.o
+ OBJS+=buffered_file.o migration.o migration-tcp.o net.o qemu-sockets.o
+ OBJS+=qemu-char.o aio.o net-checksum.o savevm.o cache-utils.o
++OBJS+=logging.o
+ 
+ ifdef CONFIG_BRLAPI
+ OBJS+= baum.o
+diff --git a/Makefile.target b/Makefile.target
+index 7cfb493..df3a68f 100644
+--- a/Makefile.target
++++ b/Makefile.target
+@@ -80,6 +80,9 @@ cc-option = $(shell if $(CC) $(1) $(2) -S -o /dev/null -xc /dev/null \
+ 
+ HELPER_CFLAGS=
+ 
++CFLAGS+=-Dfprintf=__syslog_fprintf
++CFLAGS+=-Dvfprintf=__syslog_vfprintf
++
+ ifeq ($(ARCH),i386)
+ HELPER_CFLAGS+=-fomit-frame-pointer
+ endif
+diff --git a/logging.c b/logging.c
+new file mode 100644
+index 0000000..6ae51b2
+--- /dev/null
++++ b/logging.c
+@@ -0,0 +1,25 @@
++#include "logging.h"
++
++void cpu_set_log_syslog(const char *ident)
++{
++    closelog();
++    openlog(ident, LOG_NOWAIT | LOG_PID, LOG_DAEMON);
++}
++
++int __syslog_fprintf(FILE *stream, const char *format, ...)
++{
++    va_list ap;
++
++    va_start(ap, format);
++    vsyslog(LOG_DAEMON | LOG_NOTICE, format, ap);
++    va_end(ap);
++
++    return 0;
++}
++
++int __syslog_vfprintf(FILE *stream, const char *format, va_list ap)
++{
++    vsyslog(LOG_DAEMON | LOG_NOTICE, format, ap);
++    return 0;
++}
++
+diff --git a/logging.h b/logging.h
+new file mode 100644
+index 0000000..95a756b
+--- /dev/null
++++ b/logging.h
+@@ -0,0 +1,11 @@
++#ifndef QEMU_LOGGING_H
++#define QEMU_LOGGING_H
++
++#include <syslog.h>
++#include <stdarg.h>
++#include <stdio.h>
++
++void cpu_set_log_syslog(const char *ident);
++
++#endif
++
+diff --git a/qemu-common.h b/qemu-common.h
+index 50dfb6b..18f8608 100644
+--- a/qemu-common.h
++++ b/qemu-common.h
+@@ -31,6 +31,7 @@
+ #include <fcntl.h>
+ #include <sys/stat.h>
+ #include "config-host.h"
++#include "logging.h"
+ 
+ #ifndef O_LARGEFILE
+ #define O_LARGEFILE 0
+diff --git a/vl.c b/vl.c
+index 85adc54..b9c6fa0 100644
+--- a/vl.c
++++ b/vl.c
+@@ -5406,6 +5406,8 @@ int main(int argc, char **argv, char **envp)
+                 snprintf(domain_name, sizeof(domain_name),
+                          "Xen-%s", optarg);
+                 qemu_name = optarg;
++                cpu_set_log_syslog(domain_name);
++                cpu_set_log(0);
+                 break;
+ #if defined(TARGET_SPARC) || defined(TARGET_PPC)
+             case QEMU_OPTION_prom_env:

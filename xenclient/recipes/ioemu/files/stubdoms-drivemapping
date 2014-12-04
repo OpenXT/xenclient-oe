@@ -1,0 +1,48 @@
+diff --git a/xenstore.c b/xenstore.c
+index 2cd7ffd..45e3c5c 100644
+--- a/xenstore.c
++++ b/xenstore.c
+@@ -455,6 +455,33 @@ void xenstore_init(void)
+ 
+ static void xenstore_process_vif_link_event(int vifid);
+ 
++static char *stubdom_dev_path(char *vdevice_str)
++{
++        int vdevice = atoi(vdevice_str);
++        int major = vdevice >> 8;
++        int minor = vdevice & 0xff;
++        int offset = 0;
++        char *path = NULL;
++
++        fprintf(stderr, "vdevice=%d, major=%d, minor=%d\n", vdevice, major, minor);
++
++        switch (major) {
++        case 3 /*XEN_IDE0_MAJOR*/:
++                offset = (minor / 64);
++                break;
++        case 22 /*XEN_IDE1_MAJOR*/:
++                offset = (minor / 64) + 2;
++                break;
++        default:
++                fprintf(stderr, "error: bad drive definition?\n");
++                return NULL;
++        }
++
++        pasprintf(&path, "/dev/xvd%c", 'a' + offset);
++        fprintf(stderr, "stubdom drive name for %s is %s\n", vdevice_str, path);
++        return path;
++}
++
+ static int get_my_domid(void)
+ {
+     unsigned int len;
+@@ -565,6 +592,9 @@ void xenstore_parse_domain_config(int hvm_domid)
+         params = xs_read(xsh, XBT_NULL, buf, &len);
+         if (params == NULL)
+             continue;
++        if (running_in_stubdomain)
++                params = stubdom_dev_path(e_danger[i]);
++
+         if (pasprintf(&buf, "%s/params", bpath_stubdom) == -1)
+             continue;
+         free(params_stubdom);

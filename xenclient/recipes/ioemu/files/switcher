@@ -1,0 +1,558 @@
+diff --git a/hw/piix4acpi.c b/hw/piix4acpi.c
+index 5220ccf..49590de 100644
+--- a/hw/piix4acpi.c
++++ b/hw/piix4acpi.c
+@@ -33,6 +33,8 @@
+ #include "xen_acpi_common.h"
+ #include "thermal_mgmt.h"
+ 
++#include "switcher.h"
++
+ #include <xen/hvm/ioreq.h>
+ #include <xen/hvm/params.h>
+ 
+@@ -222,15 +224,18 @@ static void acpi_shutdown(uint32_t val)
+         cmos_set_s3_resume();
+         xc_set_hvm_param(xc_handle, domid, HVM_PARAM_ACPI_S_STATE, 3);
+         xenstore_guest_pm_notification(GUEST_STATE_SLEEP);
++        switcher_shutdown(SWITCHER_SHUTDOWN_S3);
+         break;
+     case SLP_TYP_S4_V0:
+         qemu_system_shutdown_request();
+         xenstore_guest_pm_notification(GUEST_STATE_HIBERNATE);
++        switcher_shutdown(SWITCHER_SHUTDOWN_S4);
+         break;
+     case SLP_TYP_S5_V0:
+     case SLP_TYP_S5_V1:
+         qemu_system_shutdown_request();
+         xenstore_guest_pm_notification(GUEST_STATE_SHUTDOWN);
++        switcher_shutdown(SWITCHER_SHUTDOWN_S5);
+         break;
+     default:
+         break;
+diff --git a/i386-dm/helper2.c b/i386-dm/helper2.c
+index 6b1dcbc..166bef6 100644
+--- a/i386-dm/helper2.c
++++ b/i386-dm/helper2.c
+@@ -61,6 +61,8 @@
+ #include "sysemu.h"
+ #include "qemu-xen.h"
+ 
++#include "switcher.h"
++
+ //#define DEBUG_MMU
+ 
+ #ifdef USE_CODE_COPY
+@@ -182,6 +184,7 @@ void cpu_reset(CPUX86State *env)
+         else
+             fprintf(logfile, "Issued domain %d reboot\n", domid);
+         xc_interface_close(xcHandle);
++        switcher_shutdown(SWITCHER_SHUTDOWN_REBOOT);
+     }
+ }
+ 
+diff --git a/qemu-xen.h b/qemu-xen.h
+index 6577b5e..8a2ffeb 100644
+--- a/qemu-xen.h
++++ b/qemu-xen.h
+@@ -16,7 +16,7 @@ extern int vga_ram_size;
+ #if (defined(__i386__) || defined(__x86_64__)) && !defined(QEMU_TOOL)
+ #define MAPCACHE
+ 
+-#if defined(__i386__) 
++#if defined(__i386__)
+ #define MAX_MCACHE_SIZE    0x40000000 /* 1GB max for x86 */
+ #define MCACHE_BUCKET_SHIFT 16
+ #elif defined(__x86_64__)
+@@ -153,4 +153,6 @@ int has_tpm_device_danger(void);
+ static void vga_dirty_log_start(void *s) { }
+ static void vga_dirty_log_stop(void *s) { }
+ 
++void switcher_connect(void);
++
+ #endif /*QEMU_XEN_H*/
+diff --git a/switcher.c b/switcher.c
+new file mode 100644
+index 0000000..63a1b9e
+--- /dev/null
++++ b/switcher.c
+@@ -0,0 +1,368 @@
++/*
++ * QEMU dom0_driver
++ *
++ * Copyright (c) 2009 Citrix Systems
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining a copy
++ * of this software and associated documentation files (the "Software"), to deal
++ * in the Software without restriction, including without limitation the rights
++ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
++ * copies of the Software, and to permit persons to whom the Software is
++ * furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included in
++ * all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
++ * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
++ * THE SOFTWARE.
++ */
++
++#include "qemu-common.h"
++#include "console.h"
++#include "qemu-timer.h"
++#include "qemu-xen.h"
++
++#include "switcher.h"
++
++#include <stdio.h>
++#include <stdlib.h>
++#include <errno.h>
++#include <string.h>
++#include <sys/types.h>
++#include <sys/socket.h>
++#include <sys/un.h>
++#include <linux/input.h>
++#include <unistd.h>
++#include <time.h>
++
++extern int gfx_passthru;
++
++#define DOM0_INPUT_NONE           'N'
++#define DOM0_INPUT_DONE           'D'
++#define DOM0_INPUT_DOMID          'I'
++#define DOM0_INPUT_PVM_DOMID      'J'
++#define DOM0_INPUT_OPT            'O'
++#define DOM0_INPUT_SHUTDOWN       'S'
++
++#define DOM0_INPUT_EVENT          'E'
++#define DOM0_INPUT_PVM            'P'
++
++#define DOM0_INPUT_SOCKET       "/tmp/input.socket"
++
++int                      switcher_connected = 0;
++
++static struct sockaddr_un       remote;
++static QEMUTimer                *switcher_timer = NULL;
++static int                      switcher_socket = -1;
++
++static void switcher_recv(void *opaque);
++
++static void switcher_inject_pause_key(void)
++{
++    kbd_put_keycode(0xE1);
++    kbd_put_keycode(0x1D);
++    kbd_put_keycode(0x45);
++
++    kbd_put_keycode(0xE1);
++    kbd_put_keycode(0x9D);
++    kbd_put_keycode(0xC5);
++}
++
++static void switcher_key_inject (int code, uint32_t keycode)
++{
++    int first = 0;
++
++    if (keycode == KEY_PAUSE)
++    {
++        if (code != 0)
++            switcher_inject_pause_key();
++
++        return;
++    }
++
++    switch (keycode)
++    {
++        case KEY_YEN:
++            keycode = 0x7d;
++            break;
++        case KEY_RO:
++            keycode = 0x73;
++            break;
++        case KEY_F11:
++            keycode = 0X57;
++            break;                    /* F11 */
++        case KEY_F12:
++            keycode = 0X58;
++            break;                    /* F12 */
++        case KEY_INSERT:
++            keycode = 0X52;
++            first = 0xe0;
++            break;
++        case KEY_HOME:
++            keycode = 0X47;
++            first = 0xe0;
++            break;
++        case KEY_PAGEUP:
++            keycode = 0X49;
++            first = 0xe0;
++            break;
++        case KEY_DELETE:
++            keycode = 0X53;
++            first = 0xe0;
++            break;
++        case KEY_END:
++            keycode = 0X4F;
++            first = 0xe0;
++            break;
++        case KEY_PAGEDOWN:
++            keycode = 0x51;
++            first = 0xe0;
++            break;
++        case KEY_UP:
++            keycode = 0X48;
++            first = 0xe0;
++            break;
++        case KEY_LEFT:
++            keycode = 0X4B;
++            first = 0xe0;
++            break;
++        case KEY_DOWN:
++            keycode = 0X50;
++            first = 0xe0;
++            break;
++        case KEY_RIGHT:
++            keycode = 0X4D;
++            first = 0xe0;
++            break;
++        case KEY_RIGHTALT:
++            keycode = 0x38;
++            first = 0xe0;
++            break;
++        case KEY_LEFTMETA:
++            keycode = 0x5B;
++            first = 0xe0;
++            break;
++        case KEY_RIGHTMETA:
++            keycode = 0x5C;
++            first = 0xe0;
++            break;
++        case KEY_RIGHTCTRL:
++            keycode = 0x1d;
++            first = 0xe0;
++            break;
++        case KEY_PROG1:
++            keycode = 0x1;
++            first = 0xe0;
++            break;
++        case KEY_SYSRQ:
++            keycode = 0x37;
++            first = 0xe0;
++            break;
++        case KEY_MUTE:
++            keycode = 0x20;
++            first = 0xe0;
++            break;
++        case KEY_VOLUMEDOWN:
++            keycode = 0x2e;
++            first = 0xe0;
++            break;
++        case KEY_VOLUMEUP:
++            keycode = 0x30;
++            first = 0xe0;
++            break;
++        case KEY_COMPOSE:
++            keycode = 0x5D;
++            first = 0xe0;
++            break;
++        case KEY_KPENTER:
++            keycode = 0x1C;
++            first = 0xe0;
++            break;
++        case KEY_KPSLASH:
++            keycode = 0x35;
++            first = 0xe0;
++            break;
++    }
++
++    if (first)
++        kbd_put_keycode (first);
++
++    if (keycode < 0x80)
++    {
++        if (code == 0)
++            kbd_put_keycode (keycode | 0x80);
++        else
++            kbd_put_keycode (keycode & 0x7f);
++    }
++}
++
++static void switcher_event(struct input_event *e)
++{
++    static int  mouse_button_state = 0;
++
++    if (e->type == EV_KEY)
++    {
++        if (e->code >= BTN_MOUSE)
++        {
++            int         type = 0;
++
++            switch (e->code)
++            {
++                case BTN_LEFT:
++                    type = MOUSE_EVENT_LBUTTON;
++                    break;
++                case BTN_RIGHT:
++                    type = MOUSE_EVENT_RBUTTON;
++                    break;
++                case BTN_MIDDLE:
++                    type = MOUSE_EVENT_MBUTTON;
++                    break;
++            }
++
++            if (e->value)
++                mouse_button_state |= type;
++            else
++                mouse_button_state &= ~type;
++            kbd_mouse_event (0, 0, 0, mouse_button_state);
++        }
++        else
++            switcher_key_inject(e->value, e->code);
++    }
++
++    if (e->type == EV_REL || e->type == EV_ABS)
++    {
++        /* Mouse motion */
++        int x = 0, y = 0, z = 0;
++        if (e->type == EV_REL)
++            switch (e->code)
++            {
++                case REL_X:
++                    x = e->value;
++                    break;
++                case REL_Y:
++                    y = e->value;
++                    break;
++                case REL_WHEEL:
++                    z = -e->value;
++                    break;
++            }
++        kbd_mouse_event (x, y, z, mouse_button_state);
++    }
++}
++
++static void switcher_send(const char *format, ...)
++{
++    char        buff[128];
++    va_list     arg;
++
++    va_start(arg, format);
++    vsnprintf(buff, 128, format, arg);
++    va_end(arg);
++
++    fprintf(stderr, "send: %s\n", buff);
++    send(switcher_socket, buff, strlen(buff), 0);
++}
++
++void switcher_shutdown(int reason)
++{
++    switch (reason)
++    {
++        case SWITCHER_SHUTDOWN_REBOOT:
++        case SWITCHER_SHUTDOWN_S3:
++        case SWITCHER_SHUTDOWN_S4:
++        case SWITCHER_SHUTDOWN_S5:
++            switcher_send("%c%d", DOM0_INPUT_SHUTDOWN, reason);
++            break;
++        default:
++            break;
++    }
++}
++
++void switcher_connect(void)
++{
++    struct stat st;
++
++    if (switcher_connected)
++        goto out;
++
++    close(switcher_socket);
++    fprintf(stderr, "switcher: try to connect\n");
++    if ((switcher_socket = socket(AF_UNIX, SOCK_SEQPACKET, 0)) == -1)
++    {
++        fprintf(stderr, "switcher: socket %s\n", strerror(errno));
++        goto out;
++    }
++    qemu_set_fd_handler(switcher_socket, switcher_recv, NULL, NULL);
++    switcher_connected = 1;
++
++    memset(&remote, 0, sizeof (remote));
++    remote.sun_family = AF_UNIX;
++    strcpy(remote.sun_path, DOM0_INPUT_SOCKET);
++    if (connect(switcher_socket, (struct sockaddr *)&remote, SUN_LEN(&remote)) == -1)
++    {
++        fprintf(stderr, "switcher: connect %s, %s\n", strerror(errno), remote.sun_path);
++        goto out;
++    }
++
++    if (gfx_passthru)
++        switcher_send("%c%d", DOM0_INPUT_PVM_DOMID, domid);
++    else
++        switcher_send("%c%d", DOM0_INPUT_DOMID, domid);
++
++out:
++    if (!switcher_timer)
++        switcher_timer = qemu_new_timer(rt_clock, switcher_connect, NULL);
++    qemu_mod_timer(switcher_timer, qemu_get_clock(rt_clock) + 1000);
++}
++
++static void switcher_recv(void *opaque)
++{
++    char                buff[128];
++    char                *p = buff;
++    struct input_event  *e = NULL;
++    int                 ret;
++    int                 read_sz;
++
++    if ((read_sz = recv(switcher_socket, buff, 128, MSG_DONTWAIT)) <= 0)
++    {
++        switcher_connected = 0;
++        qemu_set_fd_handler(switcher_socket, NULL, NULL, NULL);
++        fprintf(stderr, "switcher: recv caused an error(%d)\n", errno);
++        return;
++    }
++    while (read_sz > 0 && p - buff < read_sz)
++    {
++        switch (*p)
++        {
++            case DOM0_INPUT_EVENT:
++                {
++                    p += 1;
++                    e = (struct input_event *)p;
++                    p += sizeof (struct input_event);
++                    switcher_event(e);
++                    break;
++                }
++            case DOM0_INPUT_PVM:
++                {
++                    char nb[10];
++
++                    memset(nb, 0, 10);
++                    memcpy(nb, p + 1, 8);
++                    p += 9;
++                    break;
++                }
++            default:
++                {
++                    fprintf(stderr, "switcher: recv wrong command\n");
++                    qemu_set_fd_handler(switcher_socket, NULL, NULL, NULL);
++                    return;
++                }
++        }
++    }
++}
++
+diff --git a/switcher.h b/switcher.h
+new file mode 100644
+index 0000000..3a89d55
+--- /dev/null
++++ b/switcher.h
+@@ -0,0 +1,35 @@
++/*
++ * QEMU switcher.h
++ *
++ * Copyright (c) 2009 Citrix Systems
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining a copy
++ * of this software and associated documentation files (the "Software"), to deal
++ * in the Software without restriction, including without limitation the rights
++ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
++ * copies of the Software, and to permit persons to whom the Software is
++ * furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included in
++ * all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
++ * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
++ * THE SOFTWARE.
++ */
++
++#ifndef SWITCHER_H_
++# define SWITCHER_H_
++
++#define SWITCHER_SHUTDOWN_REBOOT        0
++#define SWITCHER_SHUTDOWN_S3            3
++#define SWITCHER_SHUTDOWN_S4            4
++#define SWITCHER_SHUTDOWN_S5            5
++
++void switcher_shutdown(int reason);
++
++#endif
+diff --git a/vl.c b/vl.c
+index 6e3e022..aa8cf37 100644
+--- a/vl.c
++++ b/vl.c
+@@ -522,7 +522,7 @@ void hw_error(const char *fmt, ...)
+     va_end(ap);
+     abort();
+ }
+- 
++
+ /***************/
+ /* ballooning */
+ 
+@@ -3280,7 +3280,7 @@ static int ram_save_live(QEMUFile *f, int stage, void *opaque)
+             if (!cpu_physical_memory_get_dirty(addr, MIGRATION_DIRTY_FLAG))
+                 cpu_physical_memory_set_dirty(addr);
+         }
+-        
++
+         /* Enable dirty memory tracking */
+         cpu_physical_memory_set_dirty_tracking(1);
+ 
+@@ -3370,7 +3370,7 @@ static int ram_load(QEMUFile *f, void *opaque, int version_id)
+             if (ram_load_dead(f, opaque) < 0)
+                 return -EINVAL;
+         }
+-        
++
+         if (flags & RAM_SAVE_FLAG_COMPRESS) {
+             uint8_t ch = qemu_get_byte(f);
+             memset(phys_ram_base + addr, ch, TARGET_PAGE_SIZE);
+@@ -5120,7 +5120,7 @@ int main(int argc, char **argv, char **envp)
+                 {
+                     /* Could easily be extended to 64 devices if needed */
+                     const char *p;
+-                    
++
+                     boot_devices_bitmap = 0;
+                     for (p = boot_devices; *p != '\0'; p++) {
+                         /* Allowed boot devices are:
+@@ -5997,7 +5997,7 @@ int main(int argc, char **argv, char **envp)
+             fprintf(stderr, "fatal: -nographic can't be used with -curses\n");
+             exit(1);
+         }
+-    } else { 
++    } else {
+ #ifdef CONFIG_STUBDOM
+         if (xenfb_pv_display_init(ds) == 0) {
+         } else
+@@ -6173,6 +6173,8 @@ int main(int argc, char **argv, char **envp)
+         close(fd);
+     }
+ 
++    switcher_connect();
++
+     xenstore_dm_finished_startup();
+ 
+ #ifndef CONFIG_STUBDOM
+diff --git a/xen-hooks.mak b/xen-hooks.mak
+index db94d3c..22659e8 100644
+--- a/xen-hooks.mak
++++ b/xen-hooks.mak
+@@ -41,6 +41,7 @@ OBJS += battery_mgmt.o
+ OBJS += xen_acpi_wmi.o
+ OBJS += thermal_mgmt.o
+ OBJS += vbestate.o
++OBJS += switcher.o
+ 
+ CONFIG_AUDIO=1
+ 

@@ -1,0 +1,641 @@
+diff --git a/hw/battery_mgmt.c b/hw/battery_mgmt.c
+index 983fb9b..e40b5c8 100644
+--- a/hw/battery_mgmt.c
++++ b/hw/battery_mgmt.c
+@@ -29,7 +29,6 @@
+ #include "hw.h"
+ #include "pc.h"
+ #include "qemu-xen.h"
+-#include "qemu-log.h"
+ #include "isa.h" //register_ioport_read declaration
+ #include "battery_mgmt.h"
+ 
+@@ -40,9 +39,13 @@
+ //#define BATTERY_MGMT_DEBUG
+ //#define BATTERY_MGMT_DEBUG_EXT
+ 
++#define BATTERY_NUM_MAX 0x2
++
+ #define BATTERY_PORT_1 0xb2
+ #define BATTERY_PORT_2 0x86
+ #define BATTERY_PORT_3 0x88
++#define BATTERY_PORT_4 0x90
++#define BATTERY_PORT_5 0xb4
+ 
+ #define BATTERY_OP_INIT            0x7b
+ #define BATTERY_OP_SET_INFO_TYPE   0x7c /*BIF or BST */
+@@ -58,9 +61,13 @@
+ #endif
+ 
+ static enum POWER_MGMT_MODE power_mgmt_mode = PM_MODE_NONE;
+-static battery_state_info battery_info;
++/* Virtual firmware synchronizes the battery operations.  So, no need
++   for extra locks to handle the below. */
++static battery_state_info battery_info[BATTERY_NUM_MAX];
++static unsigned short battery_num = 0;
++extern FILE *logfile;
+ 
+-static int is_battery_pt_feasible(void)
++int is_battery_pt_feasible(void)
+ {
+     int val;
+ 
+@@ -82,7 +89,7 @@ static int is_battery_pt_feasible(void)
+     return val;
+ }
+ 
+-static void battery_mgmt_pt_mode_init(void)
++void battery_mgmt_pt_mode_init(void)
+ {
+     xc_interface *xc;
+ 
+@@ -128,46 +135,46 @@ static void battery_dbg_port_86_input(void *opaque, uint32_t addr, uint32_t val)
+ }
+ #endif //BATTERY_MGMT_DEBUG_EXT
+ 
+-static void get_battery_data_from_xenstore(void)
++void get_battery_data_from_xenstore(void)
+ {
+-    battery_info.battery_data = 0;
+-    battery_info.current_index = 0;
++    battery_info[battery_num].battery_data = 0;
++    battery_info[battery_num].current_index = 0;
+ 
+-    if ( battery_info.type == BIF ) 
+-        battery_info.battery_data = xenstore_read_battery_data(0/*battery info*/);
+-    else if ( battery_info.type == BST ) 
+-        battery_info.battery_data = xenstore_read_battery_data(1/*battery status*/);
++    if ( battery_info[battery_num].type == BIF )
++        battery_info[battery_num].battery_data = xenstore_read_battery_data(0/*battery info*/, battery_num);
++    else if ( battery_info[battery_num].type == BST )
++        battery_info[battery_num].battery_data = xenstore_read_battery_data(1/*battery status*/, battery_num);
+ }
+ 
+-static void write_battery_data_to_port(void)
++void write_battery_data_to_port(void)
+ {
+     char temp[3];
+     char *data;
+ 
+-    if ( battery_info.battery_data == NULL ) 
++    if ( battery_info[battery_num].battery_data == NULL )
+         return;
+ 
+-    data = battery_info.battery_data + battery_info.current_index;
++    data = battery_info[battery_num].battery_data + battery_info[battery_num].current_index;
+     //KN: @Todo - Revisit the hard coding below and add bounds checking
+     // for current index though the querying software is not likely to 
+     // ask for more than what we provide as initial data length.
+-    if ( ( battery_info.current_index <= 74 ) ||
+-         (( battery_info.current_index > 74 ) && (*(data - 1) == '\n' )) ) 
++    if ( ( battery_info[battery_num].current_index <= 74 ) ||
++         (( battery_info[battery_num].current_index > 74 ) && (*(data - 1) == '\n' )) )
+     {
+         snprintf(temp, 3, "%s", data);
+-        battery_info.port_86_val = (uint8_t)strtoull(temp, NULL, 16);
+-        battery_info.current_index+=2;
++        battery_info[battery_num].port_86_val = (uint8_t)strtoull(temp, NULL, 16);
++        battery_info[battery_num].current_index+=2;
+     } else 
+     {
+         if ( *data == '\n' )
+-            battery_info.port_86_val = 0;
++            battery_info[battery_num].port_86_val = 0;
+         else
+-            battery_info.port_86_val = *data;
+-        battery_info.current_index+=1;
++            battery_info[battery_num].port_86_val = *data;
++        battery_info[battery_num].current_index+=1;
+     }
+ 
+ #ifdef BATTERY_MGMT_DEBUG_EXT
+-        fprintf(logfile, "Wrote %d to port 0x86\n", battery_info.port_86_val);
++        fprintf(logfile, "Wrote %d to port 0x86\n", battery_info[battery_num].port_86_val);
+ #endif
+     return;
+ }  
+@@ -179,32 +186,32 @@ static void battery_port_1_writeb(void *opaque, uint32_t addr, uint32_t val)
+         case BATTERY_OP_GET_DATA_LENGTH:
+             get_battery_data_from_xenstore();
+             write_battery_data_to_port();
+-            battery_info.port_b2_val = 0;
++            battery_info[battery_num].port_b2_val = 0;
+             break;
+         case BATTERY_OP_INIT:
+-            battery_info.type = BATT_NONE;
+-            if ( battery_info.battery_data != 0 )
+-                free(battery_info.battery_data);
+-            battery_info.battery_data = 0; 
+-            battery_info.current_index = 0;
+-            battery_info.port_b2_val = 0;
++            battery_info[battery_num].type = BATT_NONE;
++            if ( battery_info[battery_num].battery_data != 0 )
++                free(battery_info[battery_num].battery_data);
++            battery_info[battery_num].battery_data = 0;
++            battery_info[battery_num].current_index = 0;
++            battery_info[battery_num].port_b2_val = 0;
+             break;
+         case BATTERY_OP_SET_INFO_TYPE:
+-            if ( battery_info.type == BATT_NONE ) 
++            if ( battery_info[battery_num].type == BATT_NONE )
+             {
+-                if ( battery_info.port_86_val == 1 ) 
+-                    battery_info.type = BIF; 
+-                else if ( battery_info.port_86_val == 2 ) 
++                if ( battery_info[battery_num].port_86_val == 1 )
++                    battery_info[battery_num].type = BIF;
++                else if ( battery_info[battery_num].port_86_val == 2 )
+                 {
+                     xenstore_refresh_battery_status();  
+-                    battery_info.type = BST;
++                    battery_info[battery_num].type = BST;
+                 }
+             }   
+-            battery_info.port_b2_val = 0;
++            battery_info[battery_num].port_b2_val = 0;
+             break;
+         case BATTERY_OP_GET_DATA:
+             write_battery_data_to_port();
+-            battery_info.port_b2_val = 0;
++            battery_info[battery_num].port_b2_val = 0;
+             break;
+         default:
+             break;
+@@ -214,38 +221,63 @@ static void battery_port_1_writeb(void *opaque, uint32_t addr, uint32_t val)
+ 
+ static uint32_t battery_port_1_readb(void *opaque, uint32_t addr)
+ {
+-    return battery_info.port_b2_val;
++    return battery_info[battery_num].port_b2_val;
+ }
+ 
+ static void battery_port_2_writeb(void *opaque, uint32_t addr, uint32_t val)
+ {
+-    battery_info.port_86_val = val;
++    battery_info[battery_num].port_86_val = val;
+ }
+ 
+ static uint32_t battery_port_2_readb(void *opaque, uint32_t addr)
+ {
+-    return battery_info.port_86_val;
++    return battery_info[battery_num].port_86_val;
+ }
+ 
+ static uint32_t battery_port_3_readb(void *opaque, uint32_t addr)
+ {
+-    if ( power_mgmt_mode == PM_MODE_PT || power_mgmt_mode == PM_MODE_NON_PT ) {
+-        if ( (power_mgmt_mode == PM_MODE_PT) && (is_battery_pt_feasible() == 0) )
+-            return 0x0F;
+-        return 0x1F;
+-    }
++    uint32_t system_state;
++
++    if ( power_mgmt_mode != PM_MODE_PT && power_mgmt_mode != PM_MODE_NON_PT )
++        return 0x0;
++
++    if ( (power_mgmt_mode == PM_MODE_PT) && (is_battery_pt_feasible() == 0) )
++        return 0x0;
++
++    system_state = xenstore_read_ac_adapter_state();
++    if ( xenstore_read_lid_state() == 1 )
++        system_state |= 0x4;
+ 
+-    return 0x0F;
++    if ( xenstore_read_battery_data(0/*battery info*/, 0) != NULL )
++        system_state |= 0x2;
++
++    return system_state;
+ }
+ 
++static uint32_t battery_port_4_readb(void *opaque, uint32_t addr)
++{
++    return xenstore_read_is_secondary_battery_present();
++}
+ 
+-static void battery_mgmt_non_pt_mode_init(PCIDevice *device)
++static void battery_port_5_writeb(void *opaque, uint32_t addr, uint32_t val)
+ {
+-    memset(&battery_info, 0, sizeof(battery_state_info));
++    if ( val > 0 && val <= BATTERY_NUM_MAX )
++    {
++        battery_num = val - 1;
++#ifdef BATTERY_MGMT_DEBUG
++        fprintf(logfile, "Current battery is - %d\n", val);
++#endif
++    }
++}
++
++void battery_mgmt_non_pt_mode_init(PCIDevice *device)
++{
++    memset(battery_info, 0, sizeof(battery_state_info) * BATTERY_NUM_MAX);
+     register_ioport_read(BATTERY_PORT_1, 2, 1, battery_port_1_readb, device);
+     register_ioport_write(BATTERY_PORT_1, 2, 1, battery_port_1_writeb, device);
+     register_ioport_read(BATTERY_PORT_2, 1, 1, battery_port_2_readb, device);
+     register_ioport_write(BATTERY_PORT_2, 1, 1, battery_port_2_writeb, device);
++    register_ioport_write(BATTERY_PORT_5, 2, 1, battery_port_5_writeb, device);
+ 
+ #ifdef BATTERY_MGMT_DEBUG_EXT
+     register_ioport_write(BATTERY_DBG_PORT_1, 1, 1, battery_dbg_monitor , device);
+@@ -259,6 +291,12 @@ void battery_mgmt_init(PCIDevice *device)
+ {
+     char *mode_buffer = NULL;
+ 
++    /* First check if battery is present; then enable extended power management support if
++     * requested for the guest
++     */
++    if ( xenstore_read_is_battery_present() == 0 )
++        return;
++
+     //xen_extended_power_mgmt xenstore entry indicates whether or not extended power
+     //management support is requested for the hvm guest.  Extended power management
+     //support includes power management support beyond S3, S4, S5.  A value of 1
+@@ -290,6 +328,8 @@ void battery_mgmt_init(PCIDevice *device)
+     }
+ 
+     register_ioport_read(BATTERY_PORT_3, 1, 1, battery_port_3_readb, device);
++    register_ioport_read(BATTERY_PORT_4, 1, 1, battery_port_4_readb, device);
++    xenstore_register_for_pm_events();
+ 
+ #ifdef BATTERY_MGMT_DEBUG
+     fprintf(logfile, "Power management mode set to - %d\n", power_mgmt_mode);
+diff --git a/hw/battery_mgmt.h b/hw/battery_mgmt.h
+index 4a4ac8e..19129b8 100644
+--- a/hw/battery_mgmt.h
++++ b/hw/battery_mgmt.h
+@@ -42,4 +42,12 @@ typedef struct battery_state_info {
+ 
+ void battery_mgmt_init(PCIDevice *device);
+ 
++#ifndef CONFIG_NO_BATTERY_MGMT
++int is_battery_pt_feasible(void);
++void battery_mgmt_pt_mode_init(void);
++void get_battery_data_from_xenstore(void);
++void write_battery_data_to_port(void);
++void battery_mgmt_non_pt_mode_init(PCIDevice *device);
++#endif
++
+ #endif
+diff --git a/hw/pc.h b/hw/pc.h
+index 8b71d48..c8429d2 100644
+--- a/hw/pc.h
++++ b/hw/pc.h
+@@ -106,6 +106,12 @@ int acpi_table_add(const char *table_desc);
+ 
+ void acpi_php_add(int);
+ void acpi_php_del(int);
++void acpi_ac_adapter_state_changed(void);
++void acpi_battery_status_changed(void);
++void acpi_battery_info_changed(void);
++void acpi_power_button_pressed(void);
++void acpi_sleep_button_pressed(void);
++void acpi_lid_state_changed(void);
+ 
+ /* hpet.c */
+ extern int no_hpet;
+diff --git a/hw/piix4acpi.c b/hw/piix4acpi.c
+index fb1e5c3..dec85e4 100644
+--- a/hw/piix4acpi.c
++++ b/hw/piix4acpi.c
+@@ -67,6 +67,13 @@
+ 
+ /* The bit in GPE0_STS/EN to notify the pci hotplug event */
+ #define ACPI_PHP_GPE_BIT 3
++#define ACPI_PHP_SLOT_NUM NR_PCI_DEV
++#define ACPI_AC_POWER_STATE_BIT 0x1C
++#define ACPI_BATTERY_STATUS_BIT 0x1D
++#define ACPI_BATTERY_INFO_BIT   0x1E
++#define ACPI_POWER_BUTTON_BIT   0x1
++#define ACPI_SLEEP_BUTTON_BIT   0x0
++#define ACPI_LID_STATE_BIT      0x17
+ 
+ #define NR_PHP_SLOT_REG (NR_PCI_DEVFN/2)
+ #define DEVFN_TO_PHP_SLOT_REG(devfn) (devfn >> 1)
+@@ -91,7 +98,7 @@ typedef struct GPEState {
+     uint8_t cpus_sts[32];
+ 
+     /* SCI IRQ level */
+-    uint8_t sci_asserted;
++    uint32_t sci_asserted;
+ 
+     uint32_t gpe0_blk_address;
+     uint32_t gpe0_blk_half_len;
+@@ -290,6 +297,58 @@ static void acpi_dbg_writel(void *opaque, uint32_t addr, uint32_t val)
+     PIIX4ACPI_LOG(PIIX4ACPI_LOG_INFO, "ACPI:debug: write addr=0x%x, val=0x%x.\n", addr, val);
+ }
+ 
++static void assert_gpe_sts_bit(int bit)
++{
++    GPEState *s = &gpe_state;
++    if ( !test_bit(&s->gpe0_sts[0], bit) &&
++          test_bit(&s->gpe0_en[0] , bit) )
++    {
++        set_bit(&s->gpe0_sts[0], bit);
++        s->sci_asserted |= 1 << bit;
++        qemu_irq_raise(sci_irq);
++    }
++}
++
++static void deassert_gpe_sts_bits(uint32_t mask)
++{
++    GPEState *s = &gpe_state;
++    if (s->sci_asserted & mask) {
++        s->sci_asserted &= ~mask;
++        if (!s->sci_asserted)
++            qemu_irq_lower(sci_irq);
++    }
++}
++
++void acpi_ac_adapter_state_changed(void)
++{
++    assert_gpe_sts_bit(ACPI_AC_POWER_STATE_BIT);
++}
++
++void acpi_battery_status_changed(void)
++{
++    assert_gpe_sts_bit(ACPI_BATTERY_STATUS_BIT);
++}
++
++void acpi_battery_info_changed(void)
++{
++    assert_gpe_sts_bit(ACPI_BATTERY_INFO_BIT);
++}
++
++void acpi_power_button_pressed(void)
++{
++    assert_gpe_sts_bit(ACPI_POWER_BUTTON_BIT);
++}
++
++void acpi_sleep_button_pressed(void)
++{
++    assert_gpe_sts_bit(ACPI_SLEEP_BUTTON_BIT);
++}
++
++void acpi_lid_state_changed(void)
++{
++    assert_gpe_sts_bit(ACPI_LID_STATE_BIT);
++}
++
+ #ifdef CONFIG_PASSTHROUGH
+ 
+ /*
+@@ -440,19 +499,13 @@ static uint32_t gpe_sts_read(void *opaque, uint32_t addr)
+ static void gpe_sts_write(void *opaque, uint32_t addr, uint32_t val)
+ {
+     GPEState *s = opaque;
+-    int hotplugged = 0;
+-
++    int reg_count;
++    
+     PIIX4ACPI_LOG(PIIX4ACPI_LOG_DEBUG, "gpe_sts_write: addr=0x%x, val=0x%x.\n", addr, val);
+ 
+-    hotplugged = test_bit(&s->gpe0_sts[0], ACPI_PHP_GPE_BIT);
+-    s->gpe0_sts[addr - s->gpe0_blk_address] &= ~val;
+-    if ( s->sci_asserted &&
+-         hotplugged &&
+-         !test_bit(&s->gpe0_sts[0], ACPI_PHP_GPE_BIT)) {
+-        PIIX4ACPI_LOG(PIIX4ACPI_LOG_INFO, "Clear the GPE0_STS bit for ACPI hotplug & deassert the IRQ.\n");
+-        qemu_irq_lower(sci_irq);
+-    }
+-
++    reg_count = addr - s->gpe0_blk_address;
++    s->gpe0_sts[reg_count] &= ~val;
++    deassert_gpe_sts_bits((val&0xFF) << (reg_count*8));
+ }
+ 
+ static uint32_t gpe_en_read(void *opaque, uint32_t addr)
+@@ -474,14 +527,7 @@ static void gpe_en_write(void *opaque, uint32_t addr, uint32_t val)
+     /* If disable GPE bit right after generating SCI on it, 
+      * need deassert the intr to avoid redundant intrs
+      */
+-    if ( s->sci_asserted &&
+-         reg_count == (ACPI_PHP_GPE_BIT / 8) &&
+-         !(val & (1 << (ACPI_PHP_GPE_BIT % 8))) ) {
+-        PIIX4ACPI_LOG(PIIX4ACPI_LOG_INFO, "deassert due to disable GPE bit.\n");
+-        s->sci_asserted = 0;
+-        qemu_irq_lower(sci_irq);
+-    }
+-
++    deassert_gpe_sts_bits(~((val&0xFF) << (reg_count*8)));
+ }
+ 
+ static void gpe_save(QEMUFile* f, void* opaque)
+@@ -494,7 +540,7 @@ static void gpe_save(QEMUFile* f, void* opaque)
+         qemu_put_8s(f, &s->gpe0_en[i]);
+     }
+ 
+-    qemu_put_8s(f, &s->sci_asserted);
++    qemu_put_be32s(f, &s->sci_asserted);
+     if ( s->sci_asserted ) {
+         PIIX4ACPI_LOG(PIIX4ACPI_LOG_INFO, "gpe_save with sci asserted!\n");
+     }
+@@ -518,7 +564,7 @@ static int gpe_load(QEMUFile* f, void* opaque, int version_id)
+         qemu_get_8s(f, &s->gpe0_en[i]);
+     }
+ 
+-    qemu_get_8s(f, &s->sci_asserted);
++    qemu_get_be32s(f, &s->sci_asserted);
+ 
+     gpe0_addr_assigned = s->gpe0_blk_address;
+     gpe0_half_len_assigned = s->gpe0_blk_half_len;
+@@ -624,14 +670,7 @@ static void gpe_acpi_init(void)
+ 
+ static void acpi_sci_intr(GPEState *s)
+ {
+-    if ( !test_bit(&s->gpe0_sts[0], ACPI_PHP_GPE_BIT) &&
+-         test_bit(&s->gpe0_en[0], ACPI_PHP_GPE_BIT) ) {
+-
+-        set_bit(&s->gpe0_sts[0], ACPI_PHP_GPE_BIT);
+-        s->sci_asserted = 1;
+-        qemu_irq_raise(sci_irq);
+-        PIIX4ACPI_LOG(PIIX4ACPI_LOG_INFO, "generate a sci for PHP.\n");
+-    }
++    assert_gpe_sts_bit(ACPI_PHP_GPE_BIT);
+ }
+ 
+ void acpi_php_del(int devfn)
+diff --git a/qemu-xen.h b/qemu-xen.h
+index 1b20c89..d46e7f0 100644
+--- a/qemu-xen.h
++++ b/qemu-xen.h
+@@ -124,8 +124,14 @@ void xenstore_dm_finished_startup(void);
+ int xenstore_vm_write(int domid, const char *key, const char *val);
+ char *xenstore_vm_read(int domid, const char *key, unsigned int *len);
+ char *xenstore_device_model_read(int domid, const char *key, unsigned int *len);
+-char *xenstore_read_battery_data(int battery_status);
++int xenstore_extended_power_mgmt_read_int(const char *key, int default_value);
++int xenstore_read_is_battery_present(void);
++int xenstore_read_is_secondary_battery_present(void);
++char *xenstore_read_battery_data(int battery_status, unsigned int battery_num);
+ int xenstore_refresh_battery_status(void);
++void xenstore_register_for_pm_events(void);
++int xenstore_read_ac_adapter_state(void);
++int xenstore_read_lid_state(void);
+ int xenstore_pv_driver_build_blacklisted(uint16_t product_number,
+                                          uint32_t build_nr);
+ void xenstore_do_eject(BlockDriverState *bs);
+diff --git a/xenstore.c b/xenstore.c
+index 8acca6f..a374395 100644
+--- a/xenstore.c
++++ b/xenstore.c
+@@ -20,6 +20,7 @@
+ 
+ #include "hw.h"
+ #include "pci.h"
++#include "pc.h"
+ #include "qemu-timer.h"
+ #include "qemu-xen.h"
+ 
+@@ -1063,11 +1064,41 @@ void xenstore_process_event(void *opaque)
+             xenstore_watch_callbacks[i].cb(vec[XS_WATCH_TOKEN],
+                                            xenstore_watch_callbacks[i].opaque);
+ 
++    if (!strcmp(vec[XS_WATCH_TOKEN], "acadapterstatechangeevt")) {
++        acpi_ac_adapter_state_changed();
++        goto out;
++    }
++
++    if (!strcmp(vec[XS_WATCH_TOKEN], "batterystatuschangeevt")) {
++        acpi_battery_status_changed();
++        goto out;
++    }
++
++    if (!strcmp(vec[XS_WATCH_TOKEN], "batteryinfochangeevt")) {
++        acpi_battery_info_changed();
++        goto out;
++    }
++
++    if (!strcmp(vec[XS_WATCH_TOKEN], "pwrbuttonpressedevt")) {
++        acpi_power_button_pressed();
++        goto out;
++    }
++
++    if (!strcmp(vec[XS_WATCH_TOKEN], "slpbuttonpressedevt")) {
++        acpi_sleep_button_pressed();
++        goto out;
++    }
++
++    if (!strcmp(vec[XS_WATCH_TOKEN], "lidstatechangeevt")) {
++        acpi_lid_state_changed();
++        goto out;
++    }
++
+     hd_index = drive_name_to_index(vec[XS_WATCH_TOKEN]);
+     if (hd_index == -1) {
+-	fprintf(stderr,"medium change watch on `%s' -"
+-		" unknown device, ignored\n", vec[XS_WATCH_TOKEN]);
+-	goto out;
++        fprintf(stderr,"medium change watch on `%s' -"
++                " unknown device, ignored\n", vec[XS_WATCH_TOKEN]);
++        goto out;
+     }
+ 
+     image = xs_read(xsh, XBT_NULL, vec[XS_WATCH_PATH], &len);
+@@ -1504,13 +1535,25 @@ static char *xenstore_extended_power_mgmt_read(const char *key, unsigned int *le
+         return NULL;
+ 
+     value = xs_read(xsh, XBT_NULL, path, len);
+-    if (value == NULL)
+-        fprintf(logfile, "xs_read(%s): read error\n", path);
+ 
+     free(path);
+     return value;
+ }
+ 
++int xenstore_extended_power_mgmt_read_int(const char *key, int default_value)
++{
++    int value = default_value;
++    char *buffer;
++
++    buffer = xenstore_extended_power_mgmt_read(key, NULL);
++    if ( buffer == NULL )
++        return value;
++
++    value = strtoull(buffer, NULL, 10);
++    free(buffer);
++    return value;
++}
++
+ static int xenstore_extended_power_mgmt_write(const char *key, const char *value)
+ {
+     int ret;
+@@ -1544,12 +1587,22 @@ xenstore_extended_power_mgmt_event_trigger(const char *key, const char *value)
+  * battery status information like charging/discharging rate
+  * under /pm/bst in xenstore.
+  */
+-char *xenstore_read_battery_data(int battery_status)
++char *xenstore_read_battery_data(int battery_status, unsigned int battery_num)
+ {
+     if ( battery_status == 1 )
+-        return xenstore_extended_power_mgmt_read("bst", NULL);
++    {
++        if ( battery_num == 1 )
++            return xenstore_extended_power_mgmt_read("bst1", NULL);
++        else
++            return xenstore_extended_power_mgmt_read("bst", NULL);
++    }
+     else
+-        return xenstore_extended_power_mgmt_read("bif", NULL);
++    {
++        if ( battery_num == 1 )
++            return xenstore_extended_power_mgmt_read("bif1", NULL);
++        else
++            return xenstore_extended_power_mgmt_read("bif", NULL);
++    }
+ }
+ 
+ /*
+@@ -1563,6 +1616,54 @@ int xenstore_refresh_battery_status(void)
+     return xenstore_extended_power_mgmt_event_trigger("refreshbatterystatus", "1");
+ }
+ 
++void xenstore_register_for_pm_events(void)
++{
++    char *inject_sci_buffer;
++    uint inject_sci = 0;
++
++    xs_watch(xsh, "/pm/ac_adapter", "acadapterstatechangeevt");
++    xs_watch(xsh, "/pm/events/batterystatuschanged", "batterystatuschangeevt");
++    xs_watch(xsh, "/pm/battery_present", "batteryinfochangeevt");
++
++    inject_sci_buffer = xenstore_device_model_read(domid, "inject-sci", NULL);
++    if ( inject_sci_buffer == NULL )
++        return;
++
++    inject_sci = strtoull(inject_sci_buffer, NULL, 10);
++    if ( inject_sci != 0 )
++    {
++        xs_watch(xsh, "/pm/lid_state", "lidstatechangeevt");
++        xs_watch(xsh, "/pm/events/powerbuttonpressed", "pwrbuttonpressedevt");
++        xs_watch(xsh, "/pm/events/sleepbuttonpressed", "slpbuttonpressedevt");
++    }
++
++    free(inject_sci_buffer);
++}
++
++int xenstore_read_is_battery_present(void)
++{
++    return xenstore_extended_power_mgmt_read_int("battery_present", 0);
++}
++
++int xenstore_read_is_secondary_battery_present(void)
++{
++    if ( xenstore_extended_power_mgmt_read("bst1", NULL) != NULL &&
++         xenstore_extended_power_mgmt_read("bif1", NULL) != NULL )
++        return 1;
++
++    return 0;
++}
++
++int xenstore_read_ac_adapter_state(void)
++{
++    return xenstore_extended_power_mgmt_read_int("ac_adapter", 1);
++}
++
++int xenstore_read_lid_state(void)
++{
++    return xenstore_extended_power_mgmt_read_int("lid_state", 1);
++}
++
+ /*
+  * Create a store entry for a device (e.g., monitor, serial/parallel lines).
+  * The entry is <domain-path><storeString>/tty and the value is the name

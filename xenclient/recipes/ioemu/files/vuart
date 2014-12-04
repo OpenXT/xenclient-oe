@@ -1,0 +1,1100 @@
+diff --git a/hw/pc.c b/hw/pc.c
+index ae5b774..2d27079 100644
+--- a/hw/pc.c
++++ b/hw/pc.c
+@@ -44,6 +44,7 @@
+ #include "virtio-console.h"
+ #include "hpet_emul.h"
+ #include "xenmou.h"
++#include "xen_uart_16550.h"
+ 
+ /* output Bochs bios info messages */
+ //#define DEBUG_BIOS
+@@ -1092,10 +1093,25 @@ vga_bios_error:
+     }
+ 
+     for(i = 0; i < MAX_SERIAL_PORTS; i++) {
+-        if (serial_hds[i]) {
+-            serial_init(serial_io[i], i8259[serial_irq[i]], 115200,
+-                        serial_hds[i]);
+-        }
++      if (serial_hds[i]) {
++	if (strncmp(serial_hds[i]->filename, "vuart", 5) == 0) {
++	  VUARTCharDriveState *s = serial_hds[i]->opaque;
++	  int interrupt_line =   s->interrupt_line;
++	  int base = s->base_port_address;
++#if 1
++	  syslog(LOG_DEBUG, "serial init: %s is a vuart\n", serial_hds[i]);
++#endif
++	  xen_uart_16550_init(base,
++			      i8259[interrupt_line],
++			      115200);
++	} else {
++#if 1
++	  syslog(LOG_DEBUG, "serial init: %s is not a vuart; pc.c calling serial_init\n", serial_hds[i]);
++#endif
++	  serial_init(serial_io[i], i8259[serial_irq[i]], 115200,
++		      serial_hds[i]);
++	}
++      }
+     }
+ 
+     for(i = 0; i < MAX_PARALLEL_PORTS; i++) {
+diff --git a/hw/serial.c b/hw/serial.c
+index 86d3d6e..379c3f3 100644
+--- a/hw/serial.c
++++ b/hw/serial.c
+@@ -739,6 +739,13 @@ SerialState *serial_init(int base, qemu_irq irq, int baudbase,
+ {
+     SerialState *s;
+ 
++#if 0				/* flag:null_old_serial_init */
++    syslog(LOG_DEBUG, "Skipping old serial initialization\n");
++    return NULL;
++#else
++    syslog(LOG_DEBUG, "Doing old serial initialization\n");
++#endif
++
+     s = qemu_mallocz(sizeof(SerialState));
+ 
+     serial_init_core(s, irq, baudbase, chr);
+diff --git a/hw/xen_uart_16550.c b/hw/xen_uart_16550.c
+new file mode 100644
+index 0000000..b8fed41
+--- /dev/null
++++ b/hw/xen_uart_16550.c
+@@ -0,0 +1,749 @@
++/*
++  xen_uart_16550.c -- shareable virtual UART
++ */
++
++#include <stdint.h>
++#include <sys/io.h>
++#include "hw.h"
++#include "isa.h"
++#include "qemu-timer.h"	  /* todo: might be able to take this out   */
++#include "qemu-char.h"	  /* todo: might be able to take this out   */
++#include "sysemu.h"
++#include "xen_uart_16550.h"
++
++// #define DEBUG_XEN_UART 1
++
++static const char *uart_reg_debug_names[] = {
++  "thr/rbr/dll",		/* 0 */
++  "ier",			/* 1 */
++  "fcr/iir",			/* 2 */
++  "lcr",			/* 3 */
++  "mcr",			/* 4 */
++  "lsr",			/* 5 */
++  "msr",			/* 6 */
++  "scr"				/* 7 */
++};
++
++#define XEN_UART_SWITCH_BY_XENSTORE 1
++
++static int n_initialized_UARTs = 0;
++
++XenUartState *initialized_UARTs[MAX_SERIAL_PORTS];
++
++#ifdef XEN_UART_SWITCH_BY_XENSTORE
++static volatile int xen_UART_switch_requested = 0;
++#endif
++static volatile int xen_UART_domid_owning_UART = 0;
++
++static int already_connected = 0;
++
++static void xen_UART_check_for_switching()
++{
++  int now_connected = (domid == xen_UART_domid_owning_UART);
++  int i;
++
++#ifdef XEN_UART_SWITCH_BY_XENSTORE
++  if (xen_UART_switch_requested) {
++    xen_UART_switch_requested = 0;
++#ifdef DEBUG_XEN_UART
++    syslog(LOG_DEBUG, "serial %d(%d %d): switch requested: new owner=%d, connected = %d, already connected=%d\n",
++	   domid, already_connected, xen_UART_domid_owning_UART, xen_UART_domid_owning_UART, now_connected, already_connected);
++#endif
++  }
++#endif
++
++#if 1				/* flag:always_connected */
++  /* for debugging only **************************************************************** */
++  now_connected = 1;
++#endif
++
++  if (now_connected != already_connected) {
++#if 1
++    syslog(LOG_DEBUG, "serial %d(%d %d): domid %d %s\n", domid, already_connected, xen_UART_domid_owning_UART, domid, now_connected ? "connecting" : "disconnecting");
++#endif
++    for (i = 0; i < n_initialized_UARTs; i++) {
++#ifdef DEBUG_XEN_UART
++      syslog(LOG_DEBUG, "serial %d(%d %d): [dis]connector handling UART %d (%d)\n", domid, already_connected, xen_UART_domid_owning_UART, i, now_connected);
++#endif
++      xen_uart_attach_hardware(initialized_UARTs[i], now_connected);
++    }
++    already_connected = now_connected;
++  }
++}
++
++static void xen_UART_fifo_clear(XenUartState *s, int fifo)
++{
++    XenUartFifo *f = (fifo) ? &s->recv_fifo : &s->xmit_fifo;
++#ifdef DEBUG_XEN_UART
++    syslog(LOG_DEBUG, "serial %d(%d %d): clearing fifo %d\n", domid, already_connected, xen_UART_domid_owning_UART, fifo);
++#endif
++    memset(f->data, 0, UART_FIFO_LENGTH);
++    f->count = 0;
++    f->head = 0;
++    f->tail = 0;
++}
++
++static void xen_UART_reset(void *opaque)
++{
++  XenUartState *s = opaque;
++
++  s->rbr = 0;
++  s->ier = 0;
++  s->iir = UART_IIR_NO_INT;
++  s->lcr = 0;
++  s->lsr = UART_LSR_TEMT | UART_LSR_THRE;
++  s->msr = UART_MSR_DCD | UART_MSR_DSR | UART_MSR_CTS;
++  /* Default to 9600 baud, no parity, one stop bit */
++  s->divider = 0x0C;
++  s->mcr = UART_MCR_OUT2;
++  s->scr = 0;
++  s->tsr_retry = 0;
++  s->char_transmit_time = (ticks_per_sec / 9600) * 9;
++  s->poll_msl = 0;
++
++  xen_UART_fifo_clear(s,UART_RECV_FIFO);
++  xen_UART_fifo_clear(s,UART_XMIT_FIFO);
++
++  s->last_xmit_ts = qemu_get_clock(vm_clock);
++
++  s->thr_ipending = 0;
++  s->last_break_enable = 0;
++#if 0
++  qemu_irq_lower(s->irq);
++#endif
++}
++
++static void xen_UART_update_irq(XenUartState *s)
++{
++    uint8_t tmp_iir = UART_IIR_NO_INT;
++
++#ifdef DEBUG_XEN_UART
++    syslog(LOG_DEBUG, "serial %d(%d %d): --> update irq\n", domid, already_connected, xen_UART_domid_owning_UART);
++#endif
++
++    if ((s->ier & UART_IER_RLSI) && (s->lsr & UART_LSR_INT_ANY)) {
++        tmp_iir = UART_IIR_RLSI;
++    } else if ((s->ier & UART_IER_RDI) && s->timeout_ipending) {
++        /* Note that(s->ier & UART_IER_RDI) can mask this interrupt,
++         * this is not in the specification but is observed on existing
++         * hardware.  */
++        tmp_iir = UART_IIR_CTI;
++    } else if ((s->ier & UART_IER_RDI) && (s->lsr & UART_LSR_DR) &&
++               (!(s->fcr & UART_FCR_ENABLE) ||
++                s->recv_fifo.count >= s->recv_fifo.itl)) {
++        tmp_iir = UART_IIR_RDI;
++    } else if ((s->ier & UART_IER_THRI) && s->thr_ipending) {
++        tmp_iir = UART_IIR_THRI;
++    } else if ((s->ier & UART_IER_MSI) && (s->msr & UART_MSR_ANY_DELTA)) {
++        tmp_iir = UART_IIR_MSI;
++    }
++
++    s->iir = tmp_iir | (s->iir & 0xF0);
++
++    if (tmp_iir != UART_IIR_NO_INT) {
++        qemu_irq_raise(s->irq);
++    } else {
++        qemu_irq_lower(s->irq);
++    }
++#ifdef DEBUG_XEN_UART
++    syslog(LOG_DEBUG, "serial %d(%d %d): <-- update irq\n", domid, already_connected, xen_UART_domid_owning_UART);
++#endif
++}
++
++static void xen_UART_ioport_write(void *opaque, uint32_t addr, uint32_t val)
++{
++  XenUartState *s = opaque;
++
++  xen_UART_check_for_switching();
++
++#ifdef DEBUG_XEN_UART
++  syslog(LOG_DEBUG, "serial %d(%d %d): --> write addr=0x%02x (%s) val=0x%02x, %s\n", domid, already_connected, xen_UART_domid_owning_UART, addr, uart_reg_debug_names[addr&7], val, s->connected ? "connected" : "virtual");
++#endif
++
++  switch (addr & 7) {
++  default:
++  case UART_THR:		/* 0 = transmit holding register */
++    // case UART_DLL:		/* 0 = divisor latch low */
++    if (s->lcr & UART_LCR_DLAB) {
++      s->divider = (s->divider & 0xff00) | val;
++#ifdef DEBUG_XEN_UART
++      syslog(LOG_DEBUG, "serial %d(%d %d):     write dll = %#x = %d\n", domid, already_connected, xen_UART_domid_owning_UART, val, val);
++#endif
++      if (s->connected) {
++	/* we assume that the hardware (s->lcr & UART_LCR_DLAB) is in step with our copy */
++	outb(val, s->base + UART_DLL);
++      }
++    } else {
++      s->thr = (uint8_t) val;
++      if (s->connected) {
++	/* we assume that the hardware (s->lcr & UART_LCR_DLAB) is in step with our copy */
++#ifdef DEBUG_XEN_UART
++	syslog(LOG_DEBUG, "serial %d(%d %d):     write thr = %#x = %c\n", domid, already_connected, xen_UART_domid_owning_UART, val, (char)val);
++#endif
++	outb(val, s->base + UART_THR);
++      } else {
++	if (s->fcr & UART_FCR_ENABLE) {
++	  if (s->connected) {
++	    outb(val, s->base + UART_THR);
++	  } else {
++	    /* pretend to send a character via the FIFO (but drop it on the floor) */
++	    s->thr_ipending = 0;
++	    s->lsr &= ~UART_LSR_TEMT;
++	    s->lsr &= ~UART_LSR_THRE;
++	    xen_UART_update_irq(s);
++	  }
++	} else {
++	  if (s->connected) {
++	    outb(val, s->base + UART_THR);
++	  } else {
++	    /* pretend to send a character directly (but drop it on the floor) */
++	    s->thr_ipending = 0;
++	    s->lsr &= ~UART_LSR_THRE;
++	    xen_UART_update_irq(s);
++	  }
++	}
++      }
++    }
++    break;
++  case UART_IER:		/* 1 = interrupt enable */
++    // case UART_DLH:           /* 1 = divisor latch high */
++    if (s->lcr & UART_LCR_DLAB) {
++      s->divider = (s->divider & 0x00ff) | (val << 8);
++#ifdef DEBUG_XEN_UART
++      syslog(LOG_DEBUG, "serial %d(%d %d):     write dlh = %#x = %d\n", domid, already_connected, xen_UART_domid_owning_UART, val, val);
++#endif
++      if (s->connected) {
++	outb(val, s->base + UART_DLH);
++      }
++    } else {
++      s->ier = val & 0x0f;
++
++      if (s->connected) {
++	outb(val, s->base + UART_THR);
++      } else {
++	if (s->lsr & UART_LSR_THRE) {
++	  s->thr_ipending = 1;
++	  xen_UART_update_irq(s);
++	}
++      }
++    }
++    break;
++
++  case UART_FCR: /* 2 = fifo control (w) (and interrupt identity (r)) */
++    val = val & 0xFF;
++
++    if (s->connected) {
++      outb(val, s->base+UART_FCR);
++    }
++
++    if (s->fcr == val)
++      break;
++
++    /* Did the enable/disable flag change? If so, make sure FIFOs get flushed */
++    if ((val ^ s->fcr) & UART_FCR_ENABLE)
++      val |= UART_FCR_CLTX | UART_FCR_CLRX;
++
++    /* FIFO clear */
++
++    if (val & UART_FCR_CLRX) {
++#ifdef VUART_USING_TIMERS
++      qemu_del_timer(s->fifo_timeout_timer);
++      s->timeout_ipending=0;
++#endif
++      xen_UART_fifo_clear(s, UART_RECV_FIFO);
++    }
++
++    if (val & UART_FCR_CLTX) {
++      xen_UART_fifo_clear(s, UART_XMIT_FIFO);
++    }
++
++    if (val & UART_FCR_ENABLE) {
++      s->iir |= UART_IIR_FE;
++      /* Set RECV_FIFO trigger Level */
++      switch (val & 0xC0) {
++      case UART_FCR_TRG1:
++	s->recv_fifo.itl = 1;
++	break;
++      case UART_FCR_TRG4:
++	s->recv_fifo.itl = 4;
++	break;
++      case UART_FCR_TRG8:
++	s->recv_fifo.itl = 8;
++	break;
++      case UART_FCR_TRG14:
++	s->recv_fifo.itl = 14;
++	break;
++      }
++    } else
++      s->iir &= ~UART_IIR_FE;
++
++    /* Set fcr - or at least the bits in it that are supposed to "stick" */
++    s->fcr = val & 0xC9;
++    xen_UART_update_irq(s);
++    break;
++
++  case UART_LCR:		/* 3 = line control register */
++    {
++      int break_enable = (val >> 6) & 1;
++      s->lcr = val;
++
++      if (s->connected) {
++	outb(val, s->base+UART_LCR);
++      }
++
++      if (break_enable != s->last_break_enable) {
++	s->last_break_enable = break_enable;
++      }
++    }
++    break;
++
++  case UART_MCR:		/* 4 = modem control register */
++    {
++      int flags;
++      int old_mcr = s->mcr;
++      s->mcr = val & 0x1f;
++
++      if (s->connected) {
++	outb(val, s->base+UART_MCR);
++      }
++
++      if (val & UART_MCR_LOOP)
++	break;
++
++      if (s->poll_msl >= 0 && old_mcr != s->mcr) {
++
++	/* todo: Update the modem status, since there may be a response
++	   from the device/computer at the other end of the serial line */
++      }
++    }
++    break;
++  case UART_LSR:		/* 5 = line status register */
++    /* read-only, do nothing */
++    break;
++  case UART_MSR:		/* 6 = modem status register */
++    /* read-only, do nothing */
++    break;
++  case UART_SCR:		/* 7 = scratch */
++    s->scr = val;
++    break;
++  }
++#ifdef DEBUG_XEN_UART
++  syslog(LOG_DEBUG, "serial %d(%d %d): <-- written %#x to %#x\n", domid, already_connected, xen_UART_domid_owning_UART, val, addr);
++#endif
++}
++
++static uint32_t xen_UART_serial_ioport_read(void *opaque, uint32_t addr)
++{
++  XenUartState *s = opaque;
++  uint32_t ret;
++
++  xen_UART_check_for_switching();
++
++#ifdef DEBUG_XEN_UART
++  syslog(LOG_DEBUG, "serial %d(%d %d): --> read addr=0x%02x (%s), %s\n", domid, already_connected, xen_UART_domid_owning_UART, addr, uart_reg_debug_names[addr&7], s->connected ? "connected" : "virtual");
++#endif
++
++  switch (addr & 7) {
++  default:
++  case UART_RBR:		/* 0 = receive buffer or divisor latch */
++    if (s->lcr & UART_LCR_DLAB) {
++      /* we assume that the hardware (s->lcr & UART_LCR_DLAB) and
++	 s->divider are in step with our copy, so we don't fetch from
++	 the hw UART */
++      ret = s->divider & 0xff; 
++#ifdef DEBUG_XEN_UART
++      syslog(LOG_DEBUG, "serial %d(%d %d):     divider low = %#x\n", domid, already_connected, xen_UART_domid_owning_UART, ret);
++#endif
++    } else {
++      if (s->fcr & UART_FCR_ENABLE) {
++	if (s->connected) {
++	  ret = inb(s->base + UART_RBR);
++#ifdef DEBUG_XEN_UART
++	  syslog(LOG_DEBUG, "serial %d(%d %d):     fcr=true read rbr = %#x = %c\n", domid, already_connected, xen_UART_domid_owning_UART, ret, (char)ret);
++#endif
++	} else {
++	  ret = 0;
++	  if (s->recv_fifo.count == 0) {
++	    s->lsr &= ~(UART_LSR_DR | UART_LSR_BI);
++	  } else {
++#ifdef VUART_USING_TIMERS
++	    qemu_mod_timer(s->fifo_timeout_timer, qemu_get_clock (vm_clock) + s->char_transmit_time * 4);
++#endif
++	  }
++#ifdef VUART_USING_TIMERS
++	  s->timeout_ipending = 0;
++#endif
++	  xen_UART_update_irq(s);
++	}
++      } else {
++	if (s->connected) {
++	  ret = inb(s->base + UART_RBR);
++#ifdef DEBUG_XEN_UART
++	  syslog(LOG_DEBUG, "serial %d(%d %d):     fcr=false read rbr = %#x = %c\n", domid, already_connected, xen_UART_domid_owning_UART, ret, (char)ret);
++#endif
++	} else {
++	  ret = s->rbr;
++	  s->lsr &= ~(UART_LSR_DR | UART_LSR_BI);
++	  xen_UART_update_irq(s);
++	}
++      }
++    }
++    break;
++  case UART_IER:		/* 1 = interrupt enable register */
++      /* we assume that the hardware (s->lcr & UART_LCR_DLAB) and
++	 s->divider are in step with our copy, so we don't fetch from
++	 the hw UART */
++    if (s->lcr & UART_LCR_DLAB) {
++      ret = (s->divider >> 8) & 0xff;
++    } else {
++      ret = s->ier;
++    }
++    break;
++  case UART_IIR:		/* 2 = interrupt identification register */
++    if (s->connected) {
++      ret = inb(s->base + UART_IIR);
++    } else {
++      ret = s->iir;
++      if (ret & UART_IIR_THRI) {
++	s->thr_ipending = 0;
++	xen_UART_update_irq(s);
++      }
++    }
++    break;
++
++  case UART_LCR:		/* 3 = line control register */
++    if (s->connected) {
++      ret = inb(s->base + UART_LCR);
++    } else {
++      ret = s->lcr;
++    }
++    break;
++
++  case UART_MCR:		/* 4 = modem control register */
++    if (s->connected) {
++      ret = inb(s->base + UART_MCR);
++    } else {
++      ret = s->mcr;
++    }
++    break;
++
++  case UART_LSR:		/* 5 = line status register */
++    if (s->connected) {
++      s->lsr = ret = inb(s->base + UART_LSR);
++    } else {
++      ret = s->lsr;
++      /* Clear break and overrun interrupts */
++      if (s->lsr & (UART_LSR_BI|UART_LSR_OE)) {
++	s->lsr &= ~(UART_LSR_BI|UART_LSR_OE);
++	xen_UART_update_irq(s);
++      }
++    }
++    break;
++
++  case UART_MSR:		/* 6 = modem status register */
++    if (s->mcr & UART_MCR_LOOP) {
++      if (s->connected) {
++	ret = s->msr = inb(s->base + UART_MSR);
++	syslog(LOG_DEBUG, "serial %d(%d %d):     got %#x from hardware MSR (loop)\n", domid, already_connected, xen_UART_domid_owning_UART, ret);
++      } else {
++	/* in loopback, the modem output pins are connected to the
++	   inputs */
++	ret = (s->mcr & 0x0c) << 4;
++	ret |= (s->mcr & 0x02) << 3;
++	ret |= (s->mcr & 0x01) << 5;
++      }
++    } else {
++      if (s->connected) {
++	s->msr = inb(s->base + UART_MSR);
++	syslog(LOG_DEBUG, "serial %d(%d %d):     update %#x from hardware MSR\n", domid, already_connected, xen_UART_domid_owning_UART, s->msr);
++      }
++      ret = s->msr;
++      /* Clear delta bits & msr int after read, if they were set */
++      /* TODO: what is this for, and should the "ret = s->msr" line come after it? It is currently before it, which looks a little odd.  JCGS 20110616 */
++      if (s->msr & UART_MSR_ANY_DELTA) {
++	s->msr &= 0xF0;
++	syslog(LOG_DEBUG, "serial %d(%d %d): clear delta to %#x\n", domid, already_connected, xen_UART_domid_owning_UART, s->msr);
++	xen_UART_update_irq(s);
++      }
++    }
++    break;
++  case UART_SCR:		/* 7 = scratch register */
++    ret = s->scr;
++    break;
++  }
++#ifdef DEBUG_XEN_UART
++  syslog(LOG_DEBUG, "serial %d(%d %d): <-- read addr=0x%02x val=0x%02x\n", domid, already_connected, xen_UART_domid_owning_UART, addr, ret);
++#endif
++  return ret;
++}
++
++#ifdef DEBUG_XEN_UART
++static void xen_uart_describe_state(FILE *str, const char *label, XenUartState *s)
++{
++  /* Interrupt Enable Register */
++  if (s->ier & UART_IER_MSI) fprintf(str, "%sEnable Modem status interrupt\n", label);
++  if (s->ier & UART_IER_RLSI) fprintf(str, "%sEnable receiver line status interrupt\n", label);
++  if (s->ier & UART_IER_THRI) fprintf(str, "%sEnable Transmitter holding register int.\n", label);
++  if (s->ier & UART_IER_RDI) fprintf(str, "%sEnable receiver data interrupt\n", label);
++
++  /* Interrupt Identification Register */
++  if (s->iir & UART_IIR_NO_INT) fprintf(str, "%sNo interrupts pending\n", label);
++  if (s->iir & UART_IIR_ID) fprintf(str, "%sMask for the interrupt ID\n", label);
++
++  if (s->iir & UART_IIR_MSI) fprintf(str, "%sModem status interrupt\n", label);
++  if (s->iir & UART_IIR_THRI) fprintf(str, "%sTransmitter holding register empty\n", label);
++  if (s->iir & UART_IIR_RDI) fprintf(str, "%sReceiver data interrupt\n", label);
++  if (s->iir & UART_IIR_RLSI) fprintf(str, "%sReceiver line status interrupt\n", label);
++  if (s->iir & UART_IIR_CTI) fprintf(str, "%sCharacter Timeout Indication\n", label);
++
++  if (s->iir & UART_IIR_FENF) fprintf(str, "%sFifo enabled, but not functioning\n", label);
++  if (s->iir & UART_IIR_FE) fprintf(str, "%sFifo enabled\n", label);
++
++  /* FIFO Control Register */
++  if (s->fcr & UART_FCR_ENABLE) fprintf(str, "%senable FIFO\n", label);
++  if (s->fcr & UART_FCR_CLRX) fprintf(str, "%sclear Rx FIFO\n", label);
++  if (s->fcr & UART_FCR_CLTX) fprintf(str, "%sclear Tx FIFO\n", label);
++  if (s->fcr & UART_FCR_DMA) fprintf(str, "%senter DMA mode\n", label);
++  if (s->fcr & UART_FCR_TRG1) fprintf(str, "%sRx FIFO trig lev 1\n", label);
++  if (s->fcr & UART_FCR_TRG4) fprintf(str, "%sRx FIFO trig lev 4\n", label);
++  if (s->fcr & UART_FCR_TRG8) fprintf(str, "%sRx FIFO trig lev 8\n", label);
++  if (s->fcr & UART_FCR_TRG14) fprintf(str, "%sRx FIFO trig lev 14\n", label);
++
++  /* Line Control Register */
++  if (s->lcr & UART_LCR_DLAB) fprintf(str, "%sDivisor Latch Access\n", label);
++
++  /* Modem Control Register */
++  if (s->mcr & UART_MCR_DTR) fprintf(str, "%sData Terminal Ready\n", label);
++  if (s->mcr & UART_MCR_RTS) fprintf(str, "%sRequest to Send\n", label);
++  if (s->mcr & UART_MCR_OUT2) fprintf(str, "%sOUT2: interrupt mask\n", label);
++  if (s->mcr & UART_MCR_LOOP) fprintf(str, "%sEnable loopback test mode\n", label);
++
++  /* Modem Status Register */
++  if (s->msr & UART_MSR_DCD) fprintf(str, "%sData Carrier Detect\n", label);
++  if (s->msr & UART_MSR_RI) fprintf(str, "%sRing Indicator\n", label);
++  if (s->msr & UART_MSR_DSR) fprintf(str, "%sData Set Ready\n", label);
++  if (s->msr & UART_MSR_CTS) fprintf(str, "%sClear to Send\n", label);
++  if (s->msr & UART_MSR_DDCD) fprintf(str, "%sDelta DCD\n", label);
++  if (s->msr & UART_MSR_TERI) fprintf(str, "%sTrailing edge ring indicator\n", label);
++  if (s->msr & UART_MSR_DDSR) fprintf(str, "%sDelta DSR\n", label);
++  if (s->msr & UART_MSR_DCTS) fprintf(str, "%sDelta CTS\n", label);
++  if (s->msr & UART_MSR_ANY_DELTA) fprintf(str, "%sAny of the delta bits!\n", label);
++
++  /* Line Status Register */
++  if (s->lsr & UART_LSR_DR) fprintf(str, "%sData ready\n", label);
++  if (s->lsr & UART_LSR_OE) fprintf(str, "%sOverrun\n", label);
++  if (s->lsr & UART_LSR_PE) fprintf(str, "%sParity error\n", label);
++  if (s->lsr & UART_LSR_FE) fprintf(str, "%sFraming error\n", label);
++  if (s->lsr & UART_LSR_BI) fprintf(str, "%sBreak\n", label);
++  if (s->lsr & UART_LSR_THRE) fprintf(str, "%sXmit hold reg empty\n", label);
++  if (s->lsr & UART_LSR_TEMT) fprintf(str, "%sXmitter empty\n", label);
++  if (s->lsr & UART_LSR_ERR) fprintf(str, "%sError\n", label);
++  if (s->lsr & UART_LSR_INT_ANY) fprintf(str, "%sAny of the lsr-interrupt-triggering status bits\n", label);
++
++  /* These parity settings can be ORed directly into the LCR. */
++  if (s->lcr &UART_PARITY_NONE) fprintf(str, "%sUART_PARITY_NONE\n", label);
++  if (s->lcr &UART_PARITY_ODD) fprintf(str, "%sUART_PARITY_ODD\n", label);
++  if (s->lcr &UART_PARITY_EVEN) fprintf(str, "%sUART_PARITY_EVEN\n", label);
++  if (s->lcr &UART_PARITY_MARK) fprintf(str, "%sUART_PARITY_MARK\n", label);
++  if (s->lcr &UART_PARITY_SPACE) fprintf(str, "%sUART_PARITY_SPACE\n", label);
++}
++#endif
++
++static void xen_uart_load_from_hardware(XenUartState *emulated)
++{
++  int base = emulated->base;
++#ifdef DEBUG_XEN_UART
++  syslog(LOG_DEBUG, "serial %d(%d %d): Loading vuart structure from hardware based at port %#x\n", domid, already_connected, xen_UART_domid_owning_UART, base);
++#endif
++  emulated->lcr = inb(base+UART_LCR); syslog(LOG_DEBUG, "serial %d(%d %d): %#x emulated->lcr = %#x\n", domid, already_connected, xen_UART_domid_owning_UART, base+UART_LCR, emulated->lcr);
++  /* Switch it to DLAB and read that */
++  outb(emulated->lcr | UART_LCR_DLAB, base+UART_LCR); syslog(LOG_DEBUG, "serial %d(%d %d): emulated->lcr = %#x\n", domid, already_connected, xen_UART_domid_owning_UART, emulated->lcr);
++  emulated->divider  = (inb(base+UART_DLL) & 0xff) | (0xff & (inb(base+UART_DLH) << 8)); syslog(LOG_DEBUG, "serial %d(%d %d): emulated->divider = %#x\n", domid, already_connected, xen_UART_domid_owning_UART, emulated->divider);
++  /* Switch it to receive buffer and read that */
++  outb(emulated->lcr & ~UART_LCR_DLAB, base+UART_LCR); syslog(LOG_DEBUG, "serial %d(%d %d): emulated->lcr = %#x\n", domid, already_connected, xen_UART_domid_owning_UART, emulated->lcr);
++  emulated->rbr = inb(base+UART_RBR); syslog(LOG_DEBUG, "serial %d(%d %d): %#x emulated->rbr = %#x\n", domid, already_connected, xen_UART_domid_owning_UART, base+UART_RBR, emulated->rbr);
++  /* restore it to whichever it was */
++  outb(emulated->lcr, base+UART_LCR); syslog(LOG_DEBUG, "serial %d(%d %d): emulated->lcr = %#x\n", domid, already_connected, xen_UART_domid_owning_UART, emulated->lcr);
++  /* the rest are plain reads */
++  emulated->rbr = inb(base+UART_RBR); syslog(LOG_DEBUG, "serial %d(%d %d): %#x emulated->rbr = %#x\n", domid, already_connected, xen_UART_domid_owning_UART, base+UART_RBR, emulated->rbr);
++  emulated->thr = inb(base+UART_THR); syslog(LOG_DEBUG, "serial %d(%d %d): %#x emulated->thr = %#x\n", domid, already_connected, xen_UART_domid_owning_UART, base+UART_THR, emulated->thr);
++  emulated->ier = inb(base+UART_IER); syslog(LOG_DEBUG, "serial %d(%d %d): %#x emulated->ier = %#x\n", domid, already_connected, xen_UART_domid_owning_UART, base+UART_IER, emulated->ier);
++  emulated->iir = inb(base+UART_IIR); syslog(LOG_DEBUG, "serial %d(%d %d): %#x emulated->iir = %#x\n", domid, already_connected, xen_UART_domid_owning_UART, base+UART_IIR, emulated->iir);
++  emulated->fcr = inb(base+UART_FCR); syslog(LOG_DEBUG, "serial %d(%d %d): %#x emulated->fcr = %#x\n", domid, already_connected, xen_UART_domid_owning_UART, base+UART_FCR, emulated->fcr);
++  emulated->lcr = inb(base+UART_LCR); syslog(LOG_DEBUG, "serial %d(%d %d): %#x emulated->lcr = %#x\n", domid, already_connected, xen_UART_domid_owning_UART, base+UART_LCR, emulated->lcr);
++  emulated->mcr = inb(base+UART_MCR); syslog(LOG_DEBUG, "serial %d(%d %d): %#x emulated->mcr = %#x\n", domid, already_connected, xen_UART_domid_owning_UART, base+UART_MCR, emulated->mcr);
++  emulated->lsr = inb(base+UART_LSR); syslog(LOG_DEBUG, "serial %d(%d %d): %#x emulated->lsr = %#x\n", domid, already_connected, xen_UART_domid_owning_UART, base+UART_LSR, emulated->lsr);
++  emulated->msr = inb(base+UART_MSR); syslog(LOG_DEBUG, "serial %d(%d %d): %#x emulated->msr = %#x\n", domid, already_connected, xen_UART_domid_owning_UART, base+UART_MSR, emulated->msr);
++  emulated->scr = inb(base+UART_SCR); syslog(LOG_DEBUG, "serial %d(%d %d): %#x emulated->scr = %#x\n", domid, already_connected, xen_UART_domid_owning_UART, base+UART_SCR, emulated->scr);
++  outb(0, base+UART_SCR);
++  emulated->scr = inb(base+UART_SCR); syslog(LOG_DEBUG, "serial %d(%d %d): emulated->scr now = %#x\n", domid, already_connected, xen_UART_domid_owning_UART, emulated->scr);
++#ifdef DEBUG_XEN_UART
++  xen_uart_describe_state(stderr, "serial: initial ", emulated);
++#endif
++}
++
++void xen_uart_attach_hardware(XenUartState *emulated, int connect_now)
++{
++  if (connect_now) {
++    if (!emulated->connected) {
++      int base = emulated->base;
++#ifdef DEBUG_XEN_UART
++      syslog(LOG_DEBUG, "serial %d(%d %d): connecting domid %d, base=%#x\n", domid, already_connected, xen_UART_domid_owning_UART, domid, base);
++#endif
++      /* connect: copy structure to hardware */
++      outb(emulated->lcr | UART_LCR_DLAB, base+UART_LCR);
++      outb(emulated->divider & 0xff, base+UART_DLL);
++      outb((emulated->divider >> 8) & 0xff, base+UART_DLH);
++      outb(emulated->lcr & ~UART_LCR_DLAB, base+UART_LCR);
++      outb(emulated->rbr, base+UART_RBR);
++      outb(emulated->thr, base+UART_THR);
++      outb(emulated->ier, base+UART_IER);
++      // outb(emulated->iir, base+UART_IIR); // read-only
++      outb(emulated->fcr, base+UART_FCR);
++      outb(emulated->lcr, base+UART_LCR);
++      outb(emulated->mcr, base+UART_MCR);
++      // outb(emulated->lsr, base+UART_LSR); // read-only
++      // outb(emulated->msr, base+UART_MSR); // read only
++    }
++  } else {
++    if (emulated->connected) {
++#ifdef DEBUG_XEN_UART
++      syslog(LOG_DEBUG, "serial %d(%d %d): disconnecting domid %d\n", domid, already_connected, xen_UART_domid_owning_UART, domid);
++#endif
++      /* disconnect: pick up volatile state from hardware; assume that
++	 the rest of the state is as we last left it: */
++      int base = emulated->base;
++      emulated->iir = inb(base+UART_IIR); // read-only
++      emulated->lsr = inb(base+UART_LSR); // read-only
++      emulated->msr = inb(base+UART_MSR); // read only
++    }
++  }
++
++  emulated->connected = connect_now;
++}
++
++#ifdef XEN_UART_SWITCH_BY_XENSTORE
++static void xen_uart_switching_detection_from_xenstore(const char *path, void *opaque)
++{
++  static struct xs_handle *xsh = NULL;
++
++  int holder_string_len;
++  char *holder_string;
++
++  if (xsh == NULL) {
++    xsh = xs_daemon_open();
++  }
++
++  holder_string = xs_read(xsh, XBT_NULL, path, &holder_string_len);
++
++  xen_UART_domid_owning_UART = atol(holder_string);
++
++#ifdef DEBUG_XEN_UART
++  syslog(LOG_DEBUG, "serial %d(%d %d): read %d from switcher element\n", domid, already_connected, xen_UART_domid_owning_UART, xen_UART_domid_owning_UART);
++#endif
++
++  xen_UART_switch_requested = 1;
++
++  free(holder_string);
++}
++#endif
++
++ /* If fd is zero, it means that the serial device uses the console */
++XenUartState *xen_uart_16550_init(int base, qemu_irq irq, int baudbase)
++{
++  XenUartState *s;
++  // return NULL;
++
++  if (n_initialized_UARTs >= MAX_SERIAL_PORTS) {
++    syslog(LOG_ERR, "Too many UARTs initialized\n");
++    return NULL;
++  }
++
++#if 0				/* flag:null_at_start */
++  return NULL;
++#endif
++
++#if 1
++  syslog(LOG_DEBUG, "serial %d(%d %d): initializing a virtual uart: base=%#x\n", domid, already_connected, xen_UART_domid_owning_UART, base);
++#endif
++
++#if 1				/* flag:alloc_uart_state */
++  s = qemu_mallocz(sizeof(XenUartState));
++
++  s->irq = irq;
++  s->baudbase = baudbase;
++  s->lcr &= ~UART_LCR_DLAB;	/* todo: probably set the whole register */
++  s->base = base;
++#endif
++
++
++#if 1
++  qemu_register_reset(xen_UART_reset, s);
++#endif
++  syslog(LOG_DEBUG, "serial: registered reset\n");
++  xen_UART_reset(s);
++  syslog(LOG_DEBUG, "serial: done reset\n");
++
++#if 0				/* flag:register_savevm */
++  /* todo: implement these functions if anyone really wants them */
++  register_savevm("vuart", base, 2, vuart_save, vuart_load, s);
++#endif
++
++#ifdef XEN_UART_SWITCH_BY_XENSTORE
++  {
++    static struct xs_handle *xsh = NULL;
++
++    if (xsh == NULL) {
++      xsh = xs_daemon_open();
++    }
++
++    int readback_len;
++    char *readback = xs_read(xsh, XBT_NULL, "/holding_uarts", &readback_len);
++      if (NULL == readback) {
++	char buf[1024];
++	snprintf(buf, 1023, "%d", domid);
++	xs_write(xsh, XBT_NULL, "/holding_uarts", buf, strlen(buf));
++      }
++  }
++  xenstore_watch_new_callback( "/holding_uarts", xen_uart_switching_detection_from_xenstore, 0);
++#ifdef DEBUG_XEN_UART
++  syslog(LOG_DEBUG, "serial %d(%d %d): watching /holding_uarts\n", domid, already_connected, xen_UART_domid_owning_UART);
++#endif
++#endif
++#if 0
++  return NULL;
++#endif
++
++#if 1				/* flag: iopl3 */
++  iopl(3);
++#endif
++
++  syslog(LOG_DEBUG, "serial: done iopl\n");
++
++#if 1				/* flag: enable_load_from_hardware */
++  xen_uart_load_from_hardware(s);
++  syslog(LOG_DEBUG, "serial: loaded base=%#x from hardware\n", base);
++#endif
++
++#if 1				/* flag: enable_ioport_read */
++  register_ioport_read(base, 8, 1, xen_UART_serial_ioport_read, s); /* works OK with just this one in (yes) */
++  syslog(LOG_DEBUG, "serial: register_ioport_read done\n");
++#endif
++#if 1							       /* flag: enable_ioport_write */
++  register_ioport_write(base, 8, 1, xen_UART_ioport_write, s); /* works OK with just this one in (yes) */
++  syslog(LOG_DEBUG, "serial: register_ioport_write done\n");
++#endif
++
++#if 1
++  initialized_UARTs[n_initialized_UARTs++] = s;
++#endif
++
++#if 1
++  syslog(LOG_DEBUG, "serial %d(%d %d): initialized uarts: %d\n", domid, already_connected, xen_UART_domid_owning_UART, n_initialized_UARTs);
++#endif
++
++
++  return s;
++}
++
++/* xen_uart_16550 ends here */
+diff --git a/hw/xen_uart_16550.h b/hw/xen_uart_16550.h
+new file mode 100644
+index 0000000..a683c90
+--- /dev/null
++++ b/hw/xen_uart_16550.h
+@@ -0,0 +1,165 @@
++#ifndef XEN_UART_16550_H
++#define XEN_UART_16550_H
++/*
++  xen_uart_16550.h -- definitions for shareable virtual UART
++ */
++
++/* Register offsets */
++#define UART_RBR             0x00    /* receive buffer (DLAB=0)            */
++#define UART_THR             0x00    /* transmit holding (DLAB=0)          */
++#define UART_IER             0x01    /* interrupt enable                   */
++#define UART_IIR             0x02    /* interrupt identity                 */
++#define UART_FCR             0x02    /* FIFO control                       */
++#define UART_LCR             0x03    /* line control                       */
++#define UART_MCR             0x04    /* modem control                      */
++#define UART_LSR             0x05    /* line status                        */
++#define UART_MSR             0x06    /* modem status                       */
++#define UART_SCR             0x07    /* scratch register                   */
++#define UART_DLL             0x00    /* divisor latch (low byte) (DLAB=1)  */
++#define UART_DLH             0x01    /* divisor latch (high byte) (DLAB=1) */
++
++/* Interrupt Enable Register */
++#define UART_IER_MSI	0x08	/* Enable Modem status interrupt */
++#define UART_IER_RLSI	0x04	/* Enable receiver line status interrupt */
++#define UART_IER_THRI	0x02	/* Enable Transmitter holding register int. */
++#define UART_IER_RDI	0x01	/* Enable receiver data interrupt */
++
++/* Interrupt Identification Register */
++#define UART_IIR_NO_INT	0x01	/* No interrupts pending */
++#define UART_IIR_ID	0x06	/* Mask for the interrupt ID */
++
++#define UART_IIR_MSI	0x00	/* Modem status interrupt */
++#define UART_IIR_THRI	0x02	/* Transmitter holding register empty */
++#define UART_IIR_RDI	0x04	/* Receiver data interrupt */
++#define UART_IIR_RLSI	0x06	/* Receiver line status interrupt */
++#define UART_IIR_CTI    0x0C    /* Character Timeout Indication */
++
++#define UART_IIR_FENF   0x80    /* Fifo enabled, but not functioning */
++#define UART_IIR_FE     0xC0    /* Fifo enabled */
++
++/* FIFO Control Register */
++#define UART_FCR_ENABLE      0x01    /* enable FIFO          */
++#define UART_FCR_CLRX        0x02    /* clear Rx FIFO        */
++#define UART_FCR_CLTX        0x04    /* clear Tx FIFO        */
++#define UART_FCR_DMA         0x10    /* enter DMA mode       */
++#define UART_FCR_TRG1        0x00    /* Rx FIFO trig lev 1   */
++#define UART_FCR_TRG4        0x40    /* Rx FIFO trig lev 4   */
++#define UART_FCR_TRG8        0x80    /* Rx FIFO trig lev 8   */
++#define UART_FCR_TRG14       0xc0    /* Rx FIFO trig lev 14  */
++
++/* Line Control Register */
++#define UART_LCR_DLAB        0x80    /* Divisor Latch Access */
++
++/* Modem Control Register */
++#define UART_MCR_DTR         0x01    /* Data Terminal Ready  */
++#define UART_MCR_RTS         0x02    /* Request to Send      */
++#define UART_MCR_OUT2        0x08    /* OUT2: interrupt mask */
++#define UART_MCR_LOOP        0x10    /* Enable loopback test mode */
++
++/* Modem Status Register */
++#define UART_MSR_DCD	0x80	/* Data Carrier Detect */
++#define UART_MSR_RI	0x40	/* Ring Indicator */
++#define UART_MSR_DSR	0x20	/* Data Set Ready */
++#define UART_MSR_CTS	0x10	/* Clear to Send */
++#define UART_MSR_DDCD	0x08	/* Delta DCD */
++#define UART_MSR_TERI	0x04	/* Trailing edge ring indicator */
++#define UART_MSR_DDSR	0x02	/* Delta DSR */
++#define UART_MSR_DCTS	0x01	/* Delta CTS */
++#define UART_MSR_ANY_DELTA 0x0F	/* Any of the delta bits! */
++
++#define UART_LSR_TEMT	0x40	/* Transmitter empty */
++#define UART_LSR_THRE	0x20	/* Transmit-hold-register empty */
++#define UART_LSR_BI	0x10	/* Break interrupt indicator */
++#define UART_LSR_FE	0x08	/* Frame error indicator */
++#define UART_LSR_PE	0x04	/* Parity error indicator */
++#define UART_LSR_OE	0x02	/* Overrun error indicator */
++#define UART_LSR_DR	0x01	/* Receiver data ready */
++#define UART_LSR_INT_ANY 0x1E	/* Any of the lsr-interrupt-triggering status bits */
++
++/* Line Status Register */
++#define UART_LSR_DR          0x01    /* Data ready           */
++#define UART_LSR_OE          0x02    /* Overrun              */
++#define UART_LSR_PE          0x04    /* Parity error         */
++#define UART_LSR_FE          0x08    /* Framing error        */
++#define UART_LSR_BI          0x10    /* Break                */
++#define UART_LSR_THRE        0x20    /* Xmit hold reg empty  */
++#define UART_LSR_TEMT        0x40    /* Xmitter empty        */
++#define UART_LSR_ERR         0x80    /* Error                */
++
++/* These parity settings can be ORed directly into the LCR. */
++#define UART_PARITY_NONE     (0<<3)
++#define UART_PARITY_ODD      (1<<3)
++#define UART_PARITY_EVEN     (3<<3)
++#define UART_PARITY_MARK     (5<<3)
++#define UART_PARITY_SPACE    (7<<3)
++
++/* Frequency of external clock source. This definition assumes PC platform. */
++#define UART_CLOCK_HZ   1843200
++
++#define UART_FIFO_LENGTH    16      /* 16550A Fifo Length */
++
++#define UART_XMIT_FIFO           0
++#define UART_RECV_FIFO           1
++#define UART_MAX_XMIT_RETRY      4
++
++typedef struct VUARTCharDriveState {
++  unsigned int base_port_address;
++  unsigned int interrupt_line;
++  unsigned int baud_rate;
++} VUARTCharDriveState;
++
++typedef struct XenUartFifo {
++  uint8_t data[UART_FIFO_LENGTH];
++  uint8_t count;                      
++  uint8_t itl;                        /* Interrupt Trigger Level */
++  uint8_t tail;
++  uint8_t head;
++} XenUartFifo;
++
++typedef struct XenUartState {
++  uint16_t divider;
++  uint8_t rbr; /* receive register */
++  uint8_t thr; /* transmit holding register */
++  uint8_t tsr; /* transmit shift register */
++  uint8_t ier;
++  uint8_t iir; /* read only */
++  uint8_t lcr;
++  uint8_t mcr;
++  uint8_t lsr; /* read only */
++  uint8_t msr; /* read only */
++  uint8_t scr;
++  uint8_t fcr;
++  /* NOTE: this hidden state is necessary for tx irq generation as
++     it can be reset while reading iir */
++  int thr_ipending;
++  qemu_irq irq;
++  CharDriverState *chr;		/* todo: not sure we need this */
++  int last_break_enable;
++  int it_shift;
++  int baudbase;
++  int tsr_retry;
++
++  uint64_t last_xmit_ts;              /* Time when the last byte was successfully sent out of the tsr */
++  XenUartFifo recv_fifo;
++  XenUartFifo xmit_fifo;
++
++  struct QEMUTimer *fifo_timeout_timer;
++  int timeout_ipending;                   /* timeout interrupt pending state */
++  struct QEMUTimer *transmit_timer;
++
++
++  uint64_t char_transmit_time;               /* time to transmit a char in ticks*/
++  int poll_msl;
++
++  struct QEMUTimer *modem_status_poll;
++
++  unsigned int base;		/* ioport base for underlying UART */
++  int connected;
++} XenUartState;
++
++
++extern XenUartState *xen_uart_16550_init(int base, qemu_irq irq, int baudbase);
++extern void xen_uart_attach_hardware(XenUartState *emulated, int connect_now);
++
++#endif
++/* xen_uart_16550 ends here */
+diff --git a/qemu-char.c b/qemu-char.c
+index c2f118e..4495d76 100644
+--- a/qemu-char.c
++++ b/qemu-char.c
+@@ -31,6 +31,7 @@
+ #include "hw/usb.h"
+ #include "hw/baum.h"
+ #include "hw/msmouse.h"
++#include "hw/xen_uart_16550.h"
+ 
+ #include <unistd.h>
+ #include <fcntl.h>
+@@ -2105,6 +2106,35 @@ static CharDriverState *qemu_chr_open_tcp(const char *host_str,
+     return NULL;
+ }
+ 
++CharDriverState *qemu_chr_open_vuart(const char *uart_details)
++{
++  CharDriverState *chr = qemu_mallocz(sizeof(CharDriverState));
++  VUARTCharDriveState *s = qemu_mallocz(sizeof(VUARTCharDriveState));
++
++  chr->opaque = s;
++
++  chr->chr_write = null_chr_write;
++  // chr->chr_open = NULL;
++  chr->chr_ioctl = NULL;
++  chr->chr_close = NULL;
++
++  unsigned int base_port_address = 0x3f8, interrupt_line = 4, baud_rate = 9600;
++
++  /* ignore the return value, we use defaults if things not given */
++  sscanf(uart_details, "vuart:%x,%d,%d", &base_port_address, &interrupt_line, &baud_rate);
++
++#if 0
++  syslog(LOG_DEBUG, "serial: qemu_chr_open_vuart %p with structure=%p: base_port_address=%#x, interrupt_line=%d, baud_rate=%d\n", chr, s, base_port_address, interrupt_line, baud_rate);
++#endif
++
++  s->base_port_address = base_port_address;
++  s->interrupt_line = interrupt_line;
++  s->baud_rate = baud_rate;
++
++  chr->filename = qemu_strdup(uart_details);
++  return chr;
++}
++
+ CharDriverState *qemu_chr_open(const char *label, const char *filename, void (*init)(struct CharDriverState *s))
+ {
+     const char *p;
+@@ -2138,7 +2168,9 @@ CharDriverState *qemu_chr_open(const char *label, const char *filename, void (*i
+         }
+     } else if (!strcmp(filename, "msmouse")) {
+         chr = qemu_chr_open_msmouse();
+-    } else
++    } else if (strstart(filename, "vuart:", &p) && (p != NULL)) {
++	chr = qemu_chr_open_vuart(filename);
++      } else
+ #ifndef _WIN32
+     if (strstart(filename, "unix:", &p)) {
+ 	chr = qemu_chr_open_tcp(p, 0, 1);
+diff --git a/vl.c b/vl.c
+index 3080720..7d7dbaf 100644
+--- a/vl.c
++++ b/vl.c
+@@ -4948,10 +4948,22 @@ int main(int argc, char **argv, char **envp)
+     translation = BIOS_ATA_TRANSLATION_AUTO;
+     monitor_device = "vc:80Cx24C";
+ 
+-    serial_devices[0] = "vc:80Cx24C";
+-    for(i = 1; i < MAX_SERIAL_PORTS; i++)
+-        serial_devices[i] = NULL;
+     serial_device_index = 0;
++    serial_devices[serial_device_index++] = "vc:80Cx24C";
++#if 0
++    serial_devices[serial_device_index++] = "vuart:3F8,4";
++#if 0
++    serial_devices[serial_device_index++] = "vuart:2F8,3";
++#if 0
++    serial_devices[serial_device_index++] = "vuart:3E8,4";
++#if 0
++    serial_devices[serial_device_index++] = "vuart:2E8,3";
++#endif
++#endif
++#endif
++#endif
++    for(i = serial_device_index; i < MAX_SERIAL_PORTS; i++)
++        serial_devices[i] = NULL;
+ 
+     parallel_devices[0] = "vc:80Cx24C";
+     for(i = 1; i < MAX_PARALLEL_PORTS; i++)
+@@ -5368,8 +5380,10 @@ int main(int argc, char **argv, char **envp)
+                     fprintf(stderr, "qemu: too many serial ports\n");
+                     exit(1);
+                 }
+-                serial_devices[serial_device_index] = optarg;
+-                serial_device_index++;
++#if 1
++		syslog(LOG_DEBUG, "serial: adding [%d] --> %s from options\n", serial_device_index, optarg);
++#endif
++                serial_devices[serial_device_index++] = optarg;
+                 break;
+             case QEMU_OPTION_virtiocon:
+                 if (virtio_console_index >= MAX_VIRTIO_CONSOLES) {
+diff --git a/xen-hooks.mak b/xen-hooks.mak
+index 1409459..b5da080 100644
+--- a/xen-hooks.mak
++++ b/xen-hooks.mak
+@@ -36,6 +36,7 @@ OBJS += xen_machine_fv.o
+ OBJS += xen_machine_pv.o
+ OBJS += xen_backend.o
+ OBJS += xenmou.o
++OBJS += xen_uart_16550.o
+ OBJS += xenfb.o
+ OBJS += xen_console.o
+ OBJS += xen_machine_fv.o

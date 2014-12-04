@@ -1,0 +1,1039 @@
+diff --git a/hw/pass-through.c b/hw/pass-through.c
+index e271063..be10cac 100644
+--- a/hw/pass-through.c
++++ b/hw/pass-through.c
+@@ -111,7 +111,7 @@ struct php_dev {
+ };
+ struct dpci_infos {
+ 
+-    struct php_dev php_devs[NR_PCI_DEV];
++    struct php_dev php_devs[NR_PCI_DEVFN];
+ 
+     PCIBus *e_bus;
+     struct pci_access *pci_access;
+@@ -153,6 +153,8 @@ static uint32_t pt_msgdata_reg_init(struct pt_dev *ptdev,
+     struct pt_reg_info_tbl *reg, uint32_t real_offset);
+ static uint32_t pt_msixctrl_reg_init(struct pt_dev *ptdev,
+     struct pt_reg_info_tbl *reg, uint32_t real_offset);
++static uint32_t pt_header_type_reg_init(struct pt_dev *ptdev,
++    struct pt_reg_info_tbl *reg, uint32_t real_offset);
+ static uint8_t pt_reg_grp_size_init(struct pt_dev *ptdev,
+     struct pt_reg_grp_info_tbl *grp_reg, uint32_t base_offset);
+ static uint8_t pt_pm_size_init(struct pt_dev *ptdev,
+@@ -332,7 +334,7 @@ static struct pt_reg_info_tbl pt_emu_reg_header0_tbl[] = {
+         .init_val   = 0x00,
+         .ro_mask    = 0x00,
+         .emu_mask   = 0xFF,
+-        .init       = pt_common_reg_init,
++        .init       = pt_header_type_reg_init,
+         .u.b.read   = pt_byte_reg_read,
+         .u.b.write  = pt_byte_reg_write,
+         .u.b.restore  = pt_byte_reg_restore,
+@@ -837,41 +839,50 @@ static int token_value(char *token)
+ }
+ 
+ static int next_bdf(char **str, int *seg, int *bus, int *dev, int *func,
+-                    char **opt, int *vslot)
++                    char **opt, int *vdevfn)
+ {
+-    char *token, *token2, *endptr;
+-    const char *delim = ":.-", *delim_at = ":.-@";
+-
++    char *iter, *iter2, *desc, *tmp, *alloced, *token;
+     if ( !(*str) ||
+           ( !strchr(*str, ':') && !strchr(*str, '.')) )
+         return 0;
++    desc = strdup(strsep(str, "-"));
++    iter = desc;
+ 
+-    token  = strsep(str, delim);
++    tmp = strsep(&iter, "@");
++    alloced = strdup(tmp);
++    iter2 = alloced;
++    token = strsep(&iter2, ":.");
+     *seg = token_value(token);
++    token = strsep(&iter2, ":.");
++    *bus = token_value(token);
++    token = strsep(&iter2, ":.");
++    *dev = token_value(token);
++    token = strsep(&iter2, ":.");
++    *func = token_value(token);
++    free(alloced);
++
++    tmp = strsep(&iter, "@");
++    alloced = (tmp && *tmp != '\0') ? strdup(tmp) : NULL;
++
++    free(desc);
++
++    *vdevfn = AUTO_PHP_SLOT;
++    if (alloced) {
++        iter2 = alloced;
++
++        token = strsep(&iter2, ".");
++        if (*token != '\0') {
++            *vdevfn = token_value(token) << 3;
++        }
++        token = strsep(&iter2, ".");
++        if (token && *token != '\0') {
++            *vdevfn |= token_value(token);
++        }
++        free(alloced);
++     }
++     *opt = NULL;
+ 
+-    token  = strsep(str, delim);
+-    *bus  = token_value(token);
+-
+-    token  = strsep(str, delim);
+-    *dev  = token_value(token);
+-
+-    token  = strsep(str, delim);
+-    if (strchr(token, '@'))
+-    {
+-        token2  = strsep(&token, delim_at);
+-        *func  = token_value(token2);
+-
+-        token2 = strsep(&token, delim);
+-        *vslot = token_value(token2);
+-    }
+-    else
+-    {
+-        *func  = token_value(token);
+-        *vslot = AUTO_PHP_SLOT;
+-    }
+-    *opt = NULL;
+-
+-    return 1;
++     return 1;
+ }
+ 
+ static int get_next_keyval(char **option, char **key, char **val)
+@@ -894,105 +905,138 @@ static int get_next_keyval(char **option, char **key, char **val)
+     return 0;
+ }
+ 
+-static int pci_slot_match(int bus, int dev, int func, int slot)
++static int pci_devfn_match(int bus, int dev, int func, int devfn)
+ {
+-    if (test_pci_slot(slot) == 1 &&
+-        dpci_infos.php_devs[slot].r_bus == bus &&
+-        dpci_infos.php_devs[slot].r_dev  == dev &&
+-        dpci_infos.php_devs[slot].r_func == func )
++    if (test_pci_devfn(devfn) == 1 &&
++        dpci_infos.php_devs[devfn].r_bus == bus &&
++        dpci_infos.php_devs[devfn].r_dev  == dev &&
++        dpci_infos.php_devs[devfn].r_func == func )
+         return 1;
+     return 0;
+ }
+ 
+-/* Insert a new pass-through device into a specific pci slot.
+- * input  dom:bus:dev.func@slot, chose free one if slot == AUTO_PHP_SLOT
+- * return -2: requested slot not available
+- *        -1: no free slots
+- *        >=0: the new hotplug slot
+- */
+-static int __insert_to_pci_slot(int bus, int dev, int func, int slot,
+-                                char *opt)
++static int find_free_vslot(void)
+ {
+     PCIBus *e_bus = dpci_infos.e_bus;
++    int slot, func, devfn;
+ 
+-    /* preferred virt pci slot */
+-    if ( slot != AUTO_PHP_SLOT)
++    for ( slot = 0; slot < NR_PCI_DEV; slot++ )
+     {
+-        if ( !test_pci_slot(slot) && !pci_devfn_in_use(e_bus, slot << 3) )
+-            goto found;
+-        if ( pci_slot_match(bus, dev, func, slot) )
+-            /* The slot is already here, just return */
++        for ( func = 0; func < NR_PCI_FUNC; func++ )
++        {
++            devfn = PCI_DEVFN(slot, func);
++            if ( test_pci_devfn(devfn) || pci_devfn_in_use(e_bus, devfn) )
++            {
++                break;
++            }
++        }
++        if (func == NR_PCI_FUNC)
+             return slot;
+-        return -2;
+     }
+ 
+-    /* slot == 0, pick up a free one */
++    /* not found */
++    return -1;
++}
++
++static int find_device0_slot(int bus, int dev)
++{
++    int slot;
+     for ( slot = 0; slot < NR_PCI_DEV; slot++ )
+     {
+-        if ( !test_pci_slot(slot) && !pci_devfn_in_use(e_bus, slot << 3) )
+-            goto found;
++        if ( pci_devfn_match(bus, dev, 0, slot << 3) )
++            return slot;
+     }
+-
+-    /* not found */
+     return -1;
++}
++
++/* Insert a new pass-through device into a specific pci devfn.
++ * input  dom:bus:dev.func@devfn, chose free one if devfn & AUTO_PHP_SLOT
++ * return -2: requested devfn not available
++ *        -1: no free devfns
++ *        >=0: the new hotplug devfn
++ */
++static int __insert_to_pci_devfn(int bus, int dev, int func, int devfn,
++                                 char *opt)
++{
++    PCIBus *e_bus = dpci_infos.e_bus;
++    int vslot;
++
++    if ( devfn & AUTO_PHP_SLOT )
++    {
++        int vslot = (func > 0) ? find_device0_slot(bus, dev) : -1;
++        if (vslot < 0) {
++            vslot = find_free_vslot();
++            if (vslot < 0)
++                return -1;
++            /* The vfunc is provided in the devfn paramter */
++            devfn = PCI_DEVFN(vslot, PCI_FUNC(devfn));
++        } else
++            devfn = PCI_DEVFN(vslot, func);
++    }
++    else
++    {
++        /* Prefered devfn */
++        if ( test_pci_devfn(devfn) || pci_devfn_in_use(e_bus, devfn) )
++            return -2;
++    }
+ 
+ found:
+-    dpci_infos.php_devs[slot].valid  = 1;
+-    dpci_infos.php_devs[slot].r_bus  = bus;
+-    dpci_infos.php_devs[slot].r_dev  = dev;
+-    dpci_infos.php_devs[slot].r_func = func;
+-    dpci_infos.php_devs[slot].opt = opt;
+-    return slot;
++    dpci_infos.php_devs[devfn].valid  = 1;
++    dpci_infos.php_devs[devfn].r_bus  = bus;
++    dpci_infos.php_devs[devfn].r_dev  = dev;
++    dpci_infos.php_devs[devfn].r_func = func;
++    dpci_infos.php_devs[devfn].opt = opt;
++    return devfn;
+ }
+ 
+-/* Insert a new pass-through device into a specific pci slot.
+- * input  dom:bus:dev.func@slot
++/* Insert a new pass-through device into a specific pci devfn.
++ * input  dom:bus:dev.func@devfn
+  */
+-int insert_to_pci_slot(char *bdf_slt)
++int insert_to_pci_devfn(char *bdf_slt)
+ {
+-    int seg, bus, dev, func, slot;
++    int seg, bus, dev, func, devfn;
+     char *opt;
+ 
+-    if ( !next_bdf(&bdf_slt, &seg, &bus, &dev, &func, &opt, &slot) )
++    if ( !next_bdf(&bdf_slt, &seg, &bus, &dev, &func, &opt, &devfn) )
+     {
+         return -1;
+     }
+ 
+-    return __insert_to_pci_slot(bus, dev, func, slot, opt);
++    return __insert_to_pci_devfn(bus, dev, func, devfn, opt);
+ 
+ }
+ 
+-/* Test if a pci slot has a PHP device
++/* Test if a pci devfn has a PHP device
+  * 1:  present
+  * 0:  not present
+- * -1: invalid pci slot input
++ * -1: invalid pci devfn input
+  */
+-int test_pci_slot(int slot)
++int test_pci_devfn(int devfn)
+ {
+-    if ( slot < 0 || slot >= NR_PCI_DEV )
++    if ( devfn < 0 || devfn >= NR_PCI_DEVFN )
+         return -1;
+ 
+-    if ( dpci_infos.php_devs[slot].valid )
++    if ( dpci_infos.php_devs[devfn].valid )
+         return 1;
+ 
+     return 0;
+ }
+ 
+-/* find the pci slot for pass-through dev with specified BDF */
+-int bdf_to_slot(char *bdf_str)
++/* find the pci devfn for pass-through dev with specified BDF */
++int bdf_to_devfn(char *bdf_str)
+ {
+-    int seg, bus, dev, func, slot, i;
++    int seg, bus, dev, func, devfn, i;
+     char *opt;
+ 
+-    if ( !next_bdf(&bdf_str, &seg, &bus, &dev, &func, &opt, &slot))
++    if ( !next_bdf(&bdf_str, &seg, &bus, &dev, &func, &opt, &devfn))
+     {
+         return -1;
+     }
+ 
+-    /* locate the virtual pci slot for this VTd device */
+-    for ( i = 0; i < NR_PCI_DEV; i++ )
++    /* locate the virtual pci devfn for this VTd device */
++    for ( i = 0; i < NR_PCI_DEVFN; i++ )
+     {
+-        if ( pci_slot_match(bus, dev, func, i) )
++        if ( pci_devfn_match(bus, dev, func, i) )
+             return i;
+     }
+ 
+@@ -2231,9 +2275,8 @@ static int pt_init_pci_config(struct pt_dev *ptdev)
+     /* rebind machine_irq to device */
+     if (ret < 0 && ptdev->machine_irq != 0)
+     {
+-        uint8_t e_device = (ptdev->dev.devfn >> 3) & 0x1f;
+-        /* fix virtual interrupt pin to INTA# */
+-        uint8_t e_intx = 0;
++        uint8_t e_device = PCI_SLOT(ptdev->dev.devfn);
++        uint8_t e_intx = pci_intx(ptdev);
+ 
+         ret = xc_domain_bind_pt_pci_irq(xc_handle, domid, ptdev->machine_irq,
+                                        0, e_device, e_intx);
+@@ -2960,6 +3003,13 @@ static uint8_t pt_pcie_size_init(struct pt_dev *ptdev,
+     return pcie_size;
+ }
+ 
++/* read PCI_HEADER_TYPE */
++static uint32_t pt_header_type_reg_init(struct pt_dev *ptdev,
++    struct pt_reg_info_tbl *reg, uint32_t real_offset)
++{
++    return reg->init_val | 0x80;
++}
++
+ /* read byte size emulate register */
+ static int pt_byte_reg_read(struct pt_dev *ptdev,
+         struct pt_reg_tbl *cfg_entry,
+@@ -3552,7 +3602,6 @@ static int pt_msgctrl_reg_write(struct pt_dev *ptdev,
+     uint16_t writable_mask = 0;
+     uint16_t throughable_mask = 0;
+     uint16_t old_ctrl = cfg_entry->data;
+-    uint8_t e_device, e_intx;
+     PCIDevice *pd = (PCIDevice *)ptdev;
+     uint16_t val;
+ 
+@@ -3918,7 +3967,7 @@ static int pt_pmcsr_reg_restore(struct pt_dev *ptdev,
+ }
+ 
+ static struct pt_dev * register_real_device(PCIBus *e_bus,
+-        const char *e_dev_name, int e_slot, uint8_t r_bus, uint8_t r_dev,
++        const char *e_dev_name, int e_devfn, uint8_t r_bus, uint8_t r_dev,
+         uint8_t r_func, uint32_t machine_irq, struct pci_access *pci_access,
+         char *opt)
+ {
+@@ -3931,7 +3980,7 @@ static struct pt_dev * register_real_device(PCIBus *e_bus,
+     int msi_translate, power_mgmt;
+ 
+     PT_LOG("Assigning real physical device %02x:%02x.%x -> %d...\n",
+-        r_bus, r_dev, r_func, e_slot);
++        r_bus, r_dev, r_func, e_devfn);
+ 
+     /* Find real device structure */
+     for (pci_dev = pci_access->devices; pci_dev != NULL;
+@@ -3949,8 +3998,8 @@ static struct pt_dev * register_real_device(PCIBus *e_bus,
+     pci_fill_info(pci_dev, PCI_FILL_IRQ | PCI_FILL_BASES | PCI_FILL_ROM_BASE | PCI_FILL_SIZES);
+     pt_libpci_fixup(pci_dev);
+ 
+-    e_slot = __insert_to_pci_slot(r_bus, r_dev, r_func, e_slot, NULL);
+-    if ( e_slot < 0 ) {
++    e_devfn = __insert_to_pci_devfn(r_bus, r_dev, r_func, e_devfn, NULL);
++    if ( e_devfn < 0 ) {
+         PT_LOG("Error: no free virtual PCI slot\n");
+         return NULL;
+     }
+@@ -4001,7 +4050,7 @@ static struct pt_dev * register_real_device(PCIBus *e_bus,
+ 
+     /* Register device */
+     assigned_device = (struct pt_dev *) pci_register_device(e_bus, e_dev_name,
+-                                sizeof(struct pt_dev), PCI_DEVFN(e_slot, 0),
++                                sizeof(struct pt_dev), e_devfn,
+                                 pt_pci_read_config, pt_pci_write_config);
+     if ( assigned_device == NULL )
+     {
+@@ -4009,7 +4058,7 @@ static struct pt_dev * register_real_device(PCIBus *e_bus,
+         return NULL;
+     }
+ 
+-    dpci_infos.php_devs[e_slot].pt_dev = assigned_device;
++    dpci_infos.php_devs[e_devfn].pt_dev = assigned_device;
+ 
+     assigned_device->pci_dev = pci_dev;
+     assigned_device->msi_trans_cap = msi_translate;
+@@ -4078,7 +4127,7 @@ static struct pt_dev * register_real_device(PCIBus *e_bus,
+     {
+         e_device = (assigned_device->dev.devfn >> 3) & 0x1f;
+         /* fix virtual interrupt pin to INTA# */
+-        e_intx = 0;
++        e_intx = pci_intx(assigned_device);
+ 
+         rc = xc_domain_bind_pt_pci_irq(xc_handle, domid, machine_irq, 0,
+                                        e_device, e_intx);
+@@ -4110,7 +4159,7 @@ out:
+     return assigned_device;
+ }
+ 
+-static int unregister_real_device(int slot)
++static int unregister_real_device(int devfn)
+ {
+     struct php_dev *php_dev;
+     struct pci_dev *pci_dev;
+@@ -4120,10 +4169,10 @@ static int unregister_real_device(int slot)
+     uint32_t bdf = 0;
+     int rc = -1;
+ 
+-    if ( test_pci_slot(slot) != 1 )
++    if ( test_pci_devfn(devfn) != 1 )
+        return -1;
+ 
+-    php_dev = &dpci_infos.php_devs[slot];
++    php_dev = &dpci_infos.php_devs[devfn];
+     assigned_device = php_dev->pt_dev;
+ 
+     if ( !assigned_device )
+@@ -4135,9 +4184,9 @@ static int unregister_real_device(int slot)
+     pci_hide_device((PCIDevice*)assigned_device);
+ 
+     /* Unbind interrupt */
+-    e_device = (assigned_device->dev.devfn >> 3) & 0x1f;
++    e_device = PCI_SLOT(assigned_device->dev.devfn);
+     /* fix virtual interrupt pin to INTA# */
+-    e_intx = 0;
++    e_intx = pci_intx(assigned_device);
+     machine_irq = assigned_device->machine_irq;
+ 
+     if ( assigned_device->msi_trans_en == 0 && machine_irq ) {
+@@ -4173,7 +4222,7 @@ static int unregister_real_device(int slot)
+     /* unregister real device's MMIO/PIO BARs */
+     pt_unregister_regions(assigned_device);
+ 
+-    /* mark this slot as free */
++    /* mark this devfn as free */
+     php_dev->valid = 0;
+     php_dev->pt_dev = NULL;
+     qemu_free(assigned_device);
+@@ -4181,14 +4230,14 @@ static int unregister_real_device(int slot)
+     return 0;
+ }
+ 
+-int power_on_php_slot(int slot)
++int power_on_php_devfn(int devfn)
+ {
+-    struct php_dev *php_dev = &dpci_infos.php_devs[slot];
++    struct php_dev *php_dev = &dpci_infos.php_devs[devfn];
+     struct pt_dev *pt_dev;
+     pt_dev =
+         register_real_device(dpci_infos.e_bus,
+             "DIRECT PCI",
+-            slot,
++            devfn,
+             php_dev->r_bus,
+             php_dev->r_dev,
+             php_dev->r_func,
+@@ -4202,9 +4251,9 @@ int power_on_php_slot(int slot)
+ 
+ }
+ 
+-int power_off_php_slot(int php_slot)
++int power_off_php_devfn(int php_devfn)
+ {
+-    return unregister_real_device(php_slot);
++    return unregister_real_device(php_devfn);
+ }
+ 
+ int pt_init(PCIBus *e_bus, const char *direct_pci)
+@@ -4363,3 +4412,61 @@ int pt_pci_host_write(int bus, int dev, int fn, u32 addr, u32 val, int len)
+     ret = pci_write_block(pci_dev, addr, (u8 *) &val, len);
+     return ret;
+ }
++  
++/* The PCI Local Bus Specification, Rev. 3.0,
++ * Section 6.2.4 Miscellaneous Registers, pp 223
++ * outlines 5 valid values for the intertupt pin (intx).
++ *  0: For devices (or device functions) that don't use an interrupt in
++ *  1: INTA#
++ *  2: INTB#
++ *  3: INTC#
++ *  4: INTD#
++ *
++ * Xen uses the following 4 values for intx
++ *  0: INTA#
++ *  1: INTB#
++ *  2: INTC#
++ *  3: INTD#
++ *
++ * Observing that these list of values are not the same, pci_read_intx()
++ * uses the following mapping from hw to xen values.
++ * This seems to reflect the current usage within Xen.
++ *
++ * PCI hardware    | Xen | Notes
++ * ----------------+-----+----------------------------------------------------
++ * 0               | 0   | No interrupt
++ * 1               | 0   | INTA#
++ * 2               | 1   | INTB#
++ * 3               | 2   | INTC#
++ * 4               | 3   | INTD#
++ * any other value | 0   | This should never happen, log error message
++ */
++static uint8_t pci_read_intx(struct pt_dev *ptdev)
++{
++    uint8_t r_val = pci_read_byte(ptdev->pci_dev, PCI_INTERRUPT_PIN);
++
++    PT_LOG("intx=%i\n", r_val);
++    if (r_val < 1 || r_val > 4)
++    {
++        PT_LOG("Interrupt pin read from hardware is out of range: "
++               "value=%i, acceptable range is 1 - 4\n", r_val);
++        r_val = 0;
++    }
++    else
++    {
++        r_val -= 1;
++    }
++
++    return r_val;
++}
++
++/*
++ * For virtual function 0, always use INTA#,
++ * otherwise use the hardware value
++ */
++uint8_t pci_intx(struct pt_dev *ptdev)
++{
++    if (!PCI_FUNC(ptdev->dev.devfn))
++        return 0;
++    return pci_read_intx(ptdev);
++}
+diff --git a/hw/pass-through.h b/hw/pass-through.h
+index 4d69048..6fb6594 100644
+--- a/hw/pass-through.h
++++ b/hw/pass-through.h
+@@ -396,5 +396,7 @@ static inline pciaddr_t pt_pci_base_addr(pciaddr_t base)
+ u32 pt_pci_host_read(int bus, int dev, int fn, u32 addr, int len);
+ int pt_pci_host_write(int bus, int dev, int fn, u32 addr, u32 val, int len);
+ 
++uint8_t pci_intx(struct pt_dev *ptdev);
++
+ #endif /* __PASSTHROUGH_H__ */
+ 
+diff --git a/hw/pci.c b/hw/pci.c
+index c6604ee..5f64892 100644
+--- a/hw/pci.c
++++ b/hw/pci.c
+@@ -865,7 +865,7 @@ void pci_unplug_netifs(void)
+                dev->config[0xa] == 0 &&
+                dev->config[0xb] == 2
+ #ifdef CONFIG_PASSTHROUGH
+-               && test_pci_slot(x >> 3) != 1
++               && test_pci_devfn(x) != 1
+ #endif
+                ) {
+                /* Found a netif.  Remove it from the bus.  Note that
+diff --git a/hw/pci.h b/hw/pci.h
+index e65b2a5..bf24136 100644
+--- a/hw/pci.h
++++ b/hw/pci.h
+@@ -264,14 +264,16 @@ PCIBus *intel_pci_bridge_init(PCIBus *bus, int devfn, uint16_t vid, uint16_t did
+ PCIBus *pci_bridge_init(PCIBus *bus, int devfn, uint16_t vid, uint16_t did,
+                         pci_map_irq_fn map_irq, const char *name);
+ 
+-#define NR_PCI_DEV 32
+-#define AUTO_PHP_SLOT NR_PCI_DEV
+-
+-int insert_to_pci_slot(char*);
+-int test_pci_slot(int);
+-int bdf_to_slot(char*);
+-int power_on_php_slot(int);
+-int power_off_php_slot(int);
++#define NR_PCI_FUNC          8
++#define NR_PCI_DEV           32
++#define NR_PCI_DEVFN         (NR_PCI_FUNC * NR_PCI_DEV)
++#define AUTO_PHP_SLOT        0x100
++
++int insert_to_pci_devfn(char *bdf_devfn);
++int test_pci_devfn(int devfn);
++int bdf_to_devfn(char *bdf_str);
++int power_on_php_devfn(int devfn);
++int power_off_php_devfn(int devfn);
+ 
+ /* pci_emulation.c */
+ #include "hw/pci_emulation.h"
+diff --git a/hw/piix4acpi.c b/hw/piix4acpi.c
+index b576dd0..663aee0 100644
+--- a/hw/piix4acpi.c
++++ b/hw/piix4acpi.c
+@@ -42,6 +42,8 @@
+ #define GUEST_STATE_HIBERNATE 4
+ #define GUEST_STATE_SHUTDOWN  5
+ 
++#include <pci/header.h>
++
+ /* PM1a_CNT bits, as defined in the ACPI specification. */
+ #define SCI_EN            (1 <<  0)
+ #define GBL_RLS           (1 <<  2)
+@@ -72,8 +74,9 @@
+ #define ACPI_OEM_EVENT_BIT      0x18
+ #define ACPI_BCL_EVENT_BIT     0x2
+ 
+-typedef struct AcpiDeviceState AcpiDeviceState;
+-AcpiDeviceState *acpi_device_table;
++#define NR_PHP_SLOT_REG (NR_PCI_DEVFN/2)
++#define DEVFN_TO_PHP_SLOT_REG(devfn) (devfn >> 1)
++#define PHP_SLOT_REG_TO_DEVFN(reg, hilo) ((reg << 1) | hilo)
+ 
+ typedef struct PCIAcpiState {
+     PCIDevice dev;
+@@ -92,18 +95,47 @@ typedef struct GPEState {
+ 
+ static GPEState gpe_state;
+ 
+-typedef struct PHPSlots {
+-    uint8_t status[NR_PCI_DEV]; /* Apaptor stats */
+-    uint8_t plug_evt;           /* PHP_EVT_ADD or PHP_EVT_REMOVE
+-                                 * PSTA in ASL */
+-    uint8_t plug_slot;          /* Slot number
+-                                 * PSTB in ASL */
+-} PHPSlots;
++typedef struct PHPDevFn {
++    uint8_t status[NR_PHP_SLOT_REG]; /* Apaptor n stats | Adaptor n+1 status */
++    uint8_t plug_evt;                /* PHP_EVT_ADD or PHP_EVT_REMOVE
++                                      * PSTA in ASL */
++    uint8_t plug_devfn;              /* DevFn number
++                                      * PSTB in ASL */
++} PHPDevFn;
+ 
+-static PHPSlots php_slots;
++static PHPDevFn php_devfn;
+ int s3_shutdown_flag;
+ static qemu_irq sci_irq;
+ 
++static void php_reg_set(PHPDevFn *hotplug_devfn, int devfn, uint8_t val)
++{
++    uint8_t *reg = &(hotplug_devfn->status[DEVFN_TO_PHP_SLOT_REG(devfn)]);
++
++    /* Value may only use a nibble */
++    val &= 0xf;
++
++    if (devfn & 0x1)
++        *reg = (*reg & 0x0f) | (val << 4);
++    else
++        *reg = (*reg & 0xf0) | val;
++}
++
++
++static uint8_t php_reg_get(PHPDevFn *hotplug_devfn, int devfn)
++{
++    uint8_t reg = hotplug_devfn->status[DEVFN_TO_PHP_SLOT_REG(devfn)];
++    uint8_t val;
++
++    if (devfn & 0x1)
++        val = (reg & 0xf0) >> 4;
++    else
++        val = reg & 0x0f;
++
++    return val;
++}
++
++typedef struct AcpiDeviceState AcpiDeviceState;
++AcpiDeviceState *acpi_device_table;
+ static void piix4acpi_save(QEMUFile *f, void *opaque)
+ {
+     PCIAcpiState *s = opaque;
+@@ -349,32 +381,32 @@ static void acpi_dbg_writel(void *opaque, uint32_t addr, uint32_t val)
+  * simple PCI hotplug controller IO
+  * ACPI_PHP_IO_ADDR + :
+  * 0 - the hotplug event
+- * 1 - the slot that has a hotplug event
+- * 2 - 1st php slot ctr/sts reg
+- * 3 - 2nd php slot ctr/sts reg
++ * 1 - the devfn that has a hotplug event
++ * 2 - 1st php devfn ctr/sts reg|2nd php devfn ctr/sts reg
++ * 3 - 3rd php devfn ctr/sts reg|4th php devfn ctr/sts reg
+  * ...
+  */
+ static uint32_t acpi_php_readb(void *opaque, uint32_t addr)
+ {
+-    PHPSlots *hotplug_slots = opaque;
++    PHPDevFn *hotplug_devfn = opaque;
+     int num;
+     uint32_t val; 
+ 
+     switch (addr)
+     {
+     case ACPI_PHP_IO_ADDR:
+-        val = hotplug_slots->plug_evt;
++        val = hotplug_devfn->plug_evt;
+         break;
+     case ACPI_PHP_IO_ADDR + 1:
+-        val = hotplug_slots->plug_slot;
++        val = hotplug_devfn->plug_devfn;
+         break;
+     default:
+         num = addr - ACPI_PHP_IO_ADDR - 2;
+-        val = hotplug_slots->status[num];
++        val = hotplug_devfn->status[num];
+     }
+ 
+ #if defined(DEBUG)
+-    fprintf(logfile, "ACPI PCI hotplug: read addr=0x%x, val=0x%x.\n",
++    fprintf(logfile, "ACPI PCI hotplug: read addr=0x%x, val=0x%02x.\n",
+             addr, val);
+ #endif
+ 
+@@ -383,11 +415,11 @@ static uint32_t acpi_php_readb(void *opaque, uint32_t addr)
+ 
+ static void acpi_php_writeb(void *opaque, uint32_t addr, uint32_t val)
+ {
+-    PHPSlots *hotplug_slots = opaque;
+-    int slot;
++    PHPDevFn *hotplug_devfn = opaque;
++    int devfn, num, func, i;
+ 
+ #if defined(DEBUG)
+-    fprintf(logfile, "ACPI PCI hotplug: write addr=0x%x, val=0x%x.\n",
++    fprintf(logfile, "ACPI PCI hotplug: write addr=0x%x, val=0x%02x.\n",
+             addr, val);
+ #endif
+ 
+@@ -397,17 +429,39 @@ static void acpi_php_writeb(void *opaque, uint32_t addr, uint32_t val)
+     case ACPI_PHP_IO_ADDR + 1:
+         break;
+     default:
+-        slot = addr - ACPI_PHP_IO_ADDR - 2;
+-        if ( val == 0x1 ) { /* Eject command */
+-            /* make _STA of the slot 0 */
+-            hotplug_slots->status[slot] = 0;
++        num = addr - ACPI_PHP_IO_ADDR - 2;
++        if ( val == 0x01 || val == 0x10 ) { /* Eject command */
++            if ( val == 0x01 )
++                devfn = PHP_SLOT_REG_TO_DEVFN(num, 0);
++            else
++                devfn = PHP_SLOT_REG_TO_DEVFN(num, 1);
++
++            fprintf(logfile, "ACPI PCI hotplug: write devfn=0x%02x.\n",
++                    devfn);
++
++            if (hotplug_devfn->plug_evt != PHP_EVT_REMOVE ||
++                hotplug_devfn->plug_devfn!= devfn )
++            {
++                fprintf(logfile, "ACPI PCI hotplug: not expecting "
++                        "devfn 0x%02x to be removed. Expected event 0x%x "
++                        "for devfn 0x%02x\n", devfn,
++                        hotplug_devfn->plug_evt, hotplug_devfn->plug_devfn);
++                return;
++            }
+ 
+             /* clear the hotplug event */
+-            hotplug_slots->plug_evt = 0;
+-            hotplug_slots->plug_slot = 0;
++            hotplug_devfn->plug_evt = 0;
++
++            for ( func = NR_PCI_FUNC - 1; func >= 0; func-- )
++            {
++                i = PCI_DEVFN(PCI_SLOT(devfn), func);
+ 
+-            /* power off the slot */
+-            power_off_php_slot(slot);
++                /* make _STA of the devfn 0 */
++                php_reg_set(hotplug_devfn, i, 0);
++
++                /* power off the slot */
++                power_off_php_devfn(i);
++            }
+ 
+             /* signal the CP ACPI hot remove done. */
+             xenstore_record_dm_state("pci-removed");
+@@ -415,49 +469,49 @@ static void acpi_php_writeb(void *opaque, uint32_t addr, uint32_t val)
+     }
+ }
+ 
+-static void pcislots_save(QEMUFile* f, void* opaque)
++static void pci_devfn_save(QEMUFile* f, void* opaque)
+ {
+-    PHPSlots *hotplug_slots = opaque;
++    PHPDevFn *hotplug_devfn = opaque;
+     int i;
+-    for ( i = 0; i < NR_PCI_DEV; i++ ) {
+-        qemu_put_8s( f, &hotplug_slots->status[i]);
++    for ( i = 0; i < NR_PHP_SLOT_REG; i++ ) {
++        qemu_put_8s( f, &hotplug_devfn->status[i]);
+     }
+-    qemu_put_8s(f, &hotplug_slots->plug_evt);
+-    qemu_put_8s(f, &hotplug_slots->plug_slot);
++    qemu_put_8s(f, &hotplug_devfn->plug_evt);
++    qemu_put_8s(f, &hotplug_devfn->plug_devfn);
+ }
+ 
+-static int pcislots_load(QEMUFile* f, void* opaque, int version_id)
++static int pci_devfn_load(QEMUFile* f, void* opaque, int version_id)
+ {
+-    PHPSlots *hotplug_slots = opaque;
++    PHPDevFn *hotplug_devfn = opaque;
+     int i;
+     if (version_id != 1)
+         return -EINVAL;
+-    for ( i = 0; i < NR_PCI_DEV; i++ ) {
+-        qemu_get_8s( f, &hotplug_slots->status[i]);
++    for ( i = 0; i < NR_PHP_SLOT_REG; i++ ) {
++        qemu_get_8s( f, &hotplug_devfn->status[i]);
+     }
+-    qemu_get_8s(f, &hotplug_slots->plug_evt);
+-    qemu_get_8s(f, &hotplug_slots->plug_slot);
++    qemu_get_8s(f, &hotplug_devfn->plug_evt);
++    qemu_get_8s(f, &hotplug_devfn->plug_devfn);
+     return 0;
+ }
+ 
+-static void php_slots_init(void)
++static void php_devfn_init(void)
+ {
+     int i;
+-    memset(&php_slots, 0, sizeof(PHPSlots));
++    memset(&php_devfn, 0, sizeof(PHPDevFn));
+ 
+-    /* update the pci slot status */
+-    for ( i = 0; i < NR_PCI_DEV; i++ ) {
+-        if ( test_pci_slot(i) )
+-            php_slots.status[i] = 0xf;
++    /* update the pci devfn status */
++    for ( i = 0; i < NR_PCI_DEVFN; i++ ) {
++        if ( test_pci_devfn(i) )
++            php_reg_set(&php_devfn, i, 0xf);
+     }
+ 
+     /* ACPI PCI hotplug controller */
+-    register_ioport_read(ACPI_PHP_IO_ADDR, NR_PCI_DEV + 2, 1,
+-                         acpi_php_readb, &php_slots);
+-    register_ioport_write(ACPI_PHP_IO_ADDR, NR_PCI_DEV + 2, 1,
+-                          acpi_php_writeb, &php_slots);
+-    register_savevm("pcislots", 0, 1, pcislots_save, pcislots_load,
+-                    &php_slots);
++    register_ioport_read(ACPI_PHP_IO_ADDR, NR_PHP_SLOT_REG + 2, 1,
++                         acpi_php_readb, &php_devfn);
++    register_ioport_write(ACPI_PHP_IO_ADDR, NR_PHP_SLOT_REG + 2, 1,
++                          acpi_php_writeb, &php_devfn);
++    register_savevm("pci_devfn", 0, 1, pci_devfn_save, pci_devfn_load,
++                    &php_devfn);
+ }
+ 
+ /* GPEx_STS occupy 1st half of the block, while GPEx_EN 2nd half */
+@@ -590,37 +644,53 @@ static void acpi_sci_intr(GPEState *s)
+     }
+ }
+ 
+-void acpi_php_del(int slot)
++void acpi_php_del(int devfn)
+ {
+     GPEState *s = &gpe_state;
++    int slot, func;
++
++    slot = PCI_SLOT(devfn);
++    func = PCI_FUNC(devfn);
+ 
+-    if ( test_pci_slot(slot) < 0 ) {
+-        fprintf(logfile, "hot remove: pci slot %d "
+-                "is not used by a hotplug device.\n", slot);
++    if ( test_pci_devfn(devfn) < 0 ) {
++        fprintf(logfile, "hot remove: pci slot 0x%02x, function 0x%x "
++                "is not used by a hotplug device.\n", slot, func);
+ 
+         return;
+     }
+ 
++    /* ACPI PHP can only work on slots
++     * So only remove zero-functions -
++     * which will remove all other fucntions of the same device in the
++     * guest.
++     */
++    if ( func ) {
++        fprintf(logfile, "hot remove: Attempt to remove non-zero function "
++                "slot=0x%02x func=0x%0x.\n", slot, func);
++        return;
++    }
++
+     /* update the php controller status */
+-    php_slots.plug_evt = PHP_EVT_REMOVE;
+-    php_slots.plug_slot = slot;
++    php_devfn.plug_evt = PHP_EVT_REMOVE;
++    php_devfn.plug_devfn = devfn;
+ 
+     /* generate a SCI interrupt */
+     acpi_sci_intr(s);
+ }
+ 
+-void acpi_php_add(int slot)
++void acpi_php_add(int devfn)
+ {
+     GPEState *s = &gpe_state;
+     char ret_str[30];
++    int slot, func;
+ 
+-    if ( slot < 0 ) {
+-        fprintf(logfile, "hot add pci slot %d exceed.\n", slot);
++    if ( devfn < 0 ) {
++        fprintf(logfile, "hot add pci devfn %d exceed.\n", devfn);
+ 
+-        if ( slot == -1 )
+-            sprintf(ret_str, "no free hotplug slots");
+-        else if ( slot == -2 )
+-            sprintf(ret_str, "wrong bdf or vslot");
++        if ( devfn == -1 )
++            sprintf(ret_str, "no free hotplug devfn");
++        else if ( devfn == -2 )
++            sprintf(ret_str, "wrong bdf or vdevfn");
+ 
+         if ( strlen(ret_str) > 0 )
+             xenstore_record_dm("parameter", ret_str);
+@@ -628,25 +698,40 @@ void acpi_php_add(int slot)
+         return;
+     }
+ 
+-    /* update the php controller status */
+-    php_slots.plug_evt = PHP_EVT_ADD;
+-    php_slots.plug_slot = slot;
++    /* ACPI PHP can only work on slots
++     * For function 0 we do a full hot-add.
++     * For other functions we just register the device with the hypervisor.
++     * Assuming that function 0 is added after non-zero functions,
++     * its ACPI PHP event will cause all previously registered functions
++     * to be added to the guest.
++     */
++  
++    slot = PCI_SLOT(devfn);
++    func = PCI_FUNC(devfn);
++  
++    if ( !func )
++    {
++        /* update the php controller status */
++        php_devfn.plug_evt = PHP_EVT_ADD;
++        php_devfn.plug_devfn = devfn;
++    }
+ 
+-    /* update the slot status as present */
+-    php_slots.status[slot] = 0xf;
++    /* update the devfn status as present */
++    php_reg_set(&php_devfn, devfn, 0xf);
+ 
+-    /* power on the slot */
+-    power_on_php_slot(slot);
++    /* power on the function */
++    power_on_php_devfn(devfn);
+ 
+-    /* tell Control panel which slot for the new pass-throgh dev */
+-    sprintf(ret_str, "0x%x", slot);
++    /* tell Control panel which devfn for the new pass-throgh dev */
++    sprintf(ret_str, "0x%2x", devfn);
+     xenstore_record_dm("parameter", ret_str);
+ 
+     /* signal the CP ACPI hot insert done */
+     xenstore_record_dm_state("pci-inserted");
+ 
+     /* generate a SCI interrupt */
+-    acpi_sci_intr(s);
++    if ( !func )
++        acpi_sci_intr(s);
+ }
+ 
+ #endif /* CONFIG_PASSTHROUGH */
+@@ -697,7 +782,7 @@ i2c_bus *piix4_pm_init(PCIBus *bus, int devfn, uint32_t smb_io_base,
+ 
+ #ifdef CONFIG_PASSTHROUGH
+     gpe_acpi_init();
+-    php_slots_init();
++    php_devfn_init();
+     register_ioport_write(ACPI_DBG_IO_ADDR, 4, 4, acpi_dbg_writel, d);
+ #endif
+ 
+@@ -707,7 +792,7 @@ i2c_bus *piix4_pm_init(PCIBus *bus, int devfn, uint32_t smb_io_base,
+ }
+ 
+ void qemu_system_hot_add_init() { }
+-void qemu_system_device_hot_add(int bus, int slot, int state) {
++void qemu_system_device_hot_add(int bus, int devfn, int state) {
+     fputs("qemu-upstream PCI hotplug not supported in qemu-dm\n",stderr);
+     exit(-1);
+ }
+diff --git a/hw/pt-msi.c b/hw/pt-msi.c
+index 9f4a3b3..45048fd 100644
+--- a/hw/pt-msi.c
++++ b/hw/pt-msi.c
+@@ -151,9 +151,9 @@ void pt_msi_disable(struct pt_dev *dev)
+ 
+     msi_set_enable(dev, 0);
+ 
+-    e_device = (dev->dev.devfn >> 3) & 0x1f;
++    e_device = PCI_SLOT(dev->dev.devfn);
+     /* fix virtual interrupt pin to INTA# */
+-    e_intx = 0;
++    e_intx = pci_intx(dev);
+ 
+     if (dev->msi_trans_en)
+     {
+@@ -225,7 +225,7 @@ int pt_enable_msi_translate(struct pt_dev* dev)
+ 
+     e_device = (dev->dev.devfn >> 3) & 0x1f;
+     /* fix virtual interrupt pin to INTA# */
+-    e_intx = 0;
++    e_intx = pci_intx(dev);
+ 
+     if (xc_domain_bind_pt_irq(xc_handle, domid, dev->msi->pirq,
+                                PT_IRQ_TYPE_MSI_TRANSLATE, 0,
+@@ -253,9 +253,8 @@ void pt_disable_msi_translate(struct pt_dev *dev)
+     /* MSI_ENABLE bit should be disabed until the new handler is set */
+     msi_set_enable(dev, 0);
+ 
+-    e_device = (dev->dev.devfn >> 3) & 0x1f;
+-    /* fix virtual interrupt pin to INTA# */
+-    e_intx = 0;
++    e_device = PCI_SLOT(dev->dev.devfn);
++    e_intx = pci_intx(dev);
+ 
+     if (xc_domain_unbind_pt_irq(xc_handle, domid, dev->msi->pirq,
+                                  PT_IRQ_TYPE_MSI_TRANSLATE, 0,
+diff --git a/xen-vl-extra.c b/xen-vl-extra.c
+index 3d13583..a81de64 100644
+--- a/xen-vl-extra.c
++++ b/xen-vl-extra.c
+@@ -102,19 +102,19 @@ struct qemu_alarm_timer;
+ #ifdef CONFIG_PASSTHROUGH
+ void do_pci_del(char *devname)
+ {
+-    int pci_slot;
+-    pci_slot = bdf_to_slot(devname);
++    int devfn;
++    devfn = bdf_to_devfn(devname);
+ 
+-    acpi_php_del(pci_slot);
++    acpi_php_del(devfn);
+ }
+ 
+ void do_pci_add(char *devname)
+ {
+-    int pci_slot;
++    int devfn;
+ 
+-    pci_slot = insert_to_pci_slot(devname);
++    devfn = insert_to_pci_devfn(devname);
+ 
+-    acpi_php_add(pci_slot);
++    acpi_php_add(devfn);
+ }
+ 
+ int pci_emulation_add(char *config_text)

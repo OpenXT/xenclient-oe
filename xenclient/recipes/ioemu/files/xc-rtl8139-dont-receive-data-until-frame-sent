@@ -1,0 +1,45 @@
+diff --git a/hw/rtl8139.c b/hw/rtl8139.c
+index 34b98f0..c63e931 100644
+--- a/hw/rtl8139.c
++++ b/hw/rtl8139.c
+@@ -497,6 +497,7 @@ typedef struct RTL8139State {
+     /* PCI interrupt timer */
+     QEMUTimer *timer;
+ 
++    uint8_t    receive_enabled;
+ } RTL8139State;
+ 
+ static void prom9346_decode_command(EEprom9346 *eeprom, uint8_t command)
+@@ -839,6 +840,11 @@ static void rtl8139_do_receive(void *opaque, const uint8_t *buf, int size, int d
+         return;
+     }
+ 
++    /* avoid lockup in windows network driver if interrupts about received data are being
++     * toggled before windows installed a handler for them */
++    if (!s->receive_enabled) {
++        return;
++    }
+     /* XXX: check this */
+     if (s->RxConfig & AcceptAllPhys) {
+         /* promiscuous: receive all */
+@@ -1257,6 +1263,8 @@ static void rtl8139_reset(RTL8139State *s)
+     s->TimerInt = 0;
+     s->TCTR_base = 0;
+ 
++    s->receive_enabled = 0;
++
+     /* reset tally counters */
+     RTL8139TallyCounters_clear(&s->tally_counters);
+ }
+@@ -1772,6 +1780,11 @@ static void rtl8139_transfer_frame(RTL8139State *s, const uint8_t *buf, int size
+         return;
+     }
+ 
++    if (!s->receive_enabled) {
++        fprintf(stderr, "RTL8139: enabling data receive\n");
++        s->receive_enabled = 1;
++    }
++
+     if (TxLoopBack == (s->TxConfig & TxLoopBack))
+     {
+         DEBUG_PRINT(("RTL8139: +++ transmit loopback mode\n"));

@@ -1,0 +1,33 @@
+diff --git a/hw/pass-through.c b/hw/pass-through.c
+index 0f28d3b..14dc469 100644
+--- a/hw/pass-through.c
++++ b/hw/pass-through.c
+@@ -3419,6 +3419,28 @@ static int pt_cmd_reg_write(struct pt_dev *ptdev,
+     uint16_t wr_value = *value;
+     uint16_t emu_mask = reg->emu_mask;
+ 
++    /* HACK: Prevent the VM to clear cmd reg bits for IGD */
++    if (ptdev->pci_dev->bus == 0 &&
++        ptdev->pci_dev->dev == 2 &&
++        ptdev->pci_dev->func == 0) {
++        uint16_t oldval;
++        int ret;
++
++        ret = pci_read_block(ptdev->pci_dev, 0x4, (uint8_t *)&oldval, sizeof(oldval));
++
++        if (!ret)
++            oldval = 0;
++
++        fprintf(stderr, "IGD PCI config space command register write "
++                         "old=%x new=%x\n", (int)oldval, (int)*value);
++
++        oldval &= 7;
++        *value |= oldval;
++
++        fprintf(stderr, "IGD PCI config space command register write "
++                        "fixup=%x\n", (int)*value);
++    }
++
+     if ( ptdev->is_virtfn )
+         emu_mask |= PCI_COMMAND_MEMORY;
+     if ( pt_is_iomul(ptdev) )

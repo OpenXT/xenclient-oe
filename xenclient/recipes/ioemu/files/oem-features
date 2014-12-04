@@ -1,0 +1,1141 @@
+diff --git a/hw/pc.h b/hw/pc.h
+index c8429d2..9dc8d71 100644
+--- a/hw/pc.h
++++ b/hw/pc.h
+@@ -113,6 +113,8 @@ void acpi_power_button_pressed(void);
+ void acpi_sleep_button_pressed(void);
+ void acpi_lid_state_changed(void);
+ 
++void acpi_oem_event(void);
++
+ /* hpet.c */
+ extern int no_hpet;
+ 
+diff --git a/hw/piix4acpi.c b/hw/piix4acpi.c
+index dec85e4..a6031d0 100644
+--- a/hw/piix4acpi.c
++++ b/hw/piix4acpi.c
+@@ -30,6 +30,7 @@
+ #include "qemu-xen.h"
+ #include "battery_mgmt.h"
+ #include "qemu-log.h"
++#include "xen_acpi_common.h"
+ 
+ #include <xen/hvm/ioreq.h>
+ #include <xen/hvm/params.h>
+@@ -74,6 +75,7 @@
+ #define ACPI_POWER_BUTTON_BIT   0x1
+ #define ACPI_SLEEP_BUTTON_BIT   0x0
+ #define ACPI_LID_STATE_BIT      0x17
++#define ACPI_OEM_EVENT_BIT      0x18
+ 
+ #define NR_PHP_SLOT_REG (NR_PCI_DEVFN/2)
+ #define DEVFN_TO_PHP_SLOT_REG(devfn) (devfn >> 1)
+@@ -274,6 +276,7 @@ static void acpi_map(PCIDevice *pci_dev, int region_num,
+     register_ioport_read(addr + 4, 2, 2, acpiPm1Control_readw, d);
+ 
+     battery_mgmt_init(pci_dev);
++    xen_acpi_wmi_init(pci_dev);
+ }
+ 
+ static inline int test_bit(uint8_t *map, int bit)
+@@ -349,6 +352,11 @@ void acpi_lid_state_changed(void)
+     assert_gpe_sts_bit(ACPI_LID_STATE_BIT);
+ }
+ 
++void acpi_oem_event(void)
++{
++    assert_gpe_sts_bit(ACPI_OEM_EVENT_BIT);
++}
++
+ #ifdef CONFIG_PASSTHROUGH
+ 
+ /*
+diff --git a/hw/xen_acpi_common.h b/hw/xen_acpi_common.h
+new file mode 100644
+index 0000000..f442350
+--- /dev/null
++++ b/hw/xen_acpi_common.h
+@@ -0,0 +1,35 @@
++/*
++ * xen_acpi_common.h
++ *
++ * Copyright (c) 2009 Kamala Narasimhan <kamala.narasimhan@citrix.com>
++ * Copyright (c) 2011 Ross Philipson <ross.philipson@citrix.com>
++ * Copyright (c) 2011 Citrix Systems, Inc.
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
++ */
++
++#ifndef _XEN_ACPI_COMMON_H
++#define _XEN_ACPI_COMMON_H
++
++/* ACPI WMI */
++#ifdef CONFIG_STUBDOM
++#define CONFIG_NO_XEN_ACPI_WMI
++#endif
++
++void xen_acpi_wmi_init(PCIDevice *device);
++void xen_acpi_wmi_cleanup(void);
++
++#endif /* _XEN_ACPI_COMMON_H */
++
+diff --git a/hw/xen_acpi_wmi.c b/hw/xen_acpi_wmi.c
+new file mode 100644
+index 0000000..dcc7ee1
+--- /dev/null
++++ b/hw/xen_acpi_wmi.c
+@@ -0,0 +1,980 @@
++/*
++ * xen_acpi_wmi.c
++ *
++ * Copyright (c) 2009 Kamala Narasimhan <kamala.narasimhan@citrix.com>
++ * Copyright (c) 2011 Ross Philipson <ross.philipson@citrix.com>
++ * Copyright (c) 2011 Citrix Systems, Inc.
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
++ */
++
++/* Xen ACPI WMI implementation -
++ * OEMs expose their value add functionalites through firmware level WMI
++ * acpi objects.  To support the underlying OEM value add within guest
++ * space, we expose a WMI psuedo device object at our vACPI layer.  That
++ * vACPI layer relies on the below implementation to communication to the
++ * base firmware (through xen wmi module and linux acpi wmi wrapper
++ * driver) either it be to execute a WMI method or query or set
++ * data or recieve wmi event data.
++ */
++
++/* NOTE:  As the vACPI layer is written to send request and take response in a
++ * synchronized way, there isn't a need to add synchronization logic here.
++ */
++
++#include "hw.h"
++#include "pc.h"
++#include "qemu-log.h"
++#include "qemu-xen.h"
++#include "isa.h"
++#include "xen_acpi_common.h"
++#include <sys/ioctl.h>
++#include <xenacpi.h>
++
++#ifndef CONFIG_NO_XEN_ACPI_WMI
++
++/* #define XEN_ACPI_WMI_DEBUG */
++/* #define XEN_ACPI_WMI_DEBUG_EXT */
++
++#define WMI_LOG(fmt, ...) qemu_log("XEN WMI: " fmt, ## __VA_ARGS__)
++
++/* Internal structure for tracking ACPI WMI command state */
++typedef struct xen_acpi_wmi_cmd_info {
++    enum XENACPI_WMI_COMMAND cmd_type;
++    enum XENACPI_WMI_OBJ_INVOCATION_TYPE invocation_type;
++    struct xenacpi_wmi_invocation_data invocation_data;
++    uint32_t current_index;
++    uint8_t *input_buffer;
++    uint32_t input_length;
++    uint8_t *output_buffer;
++    uint32_t output_length;
++} xen_acpi_wmi_cmd_info_t;
++
++typedef struct xen_acpi_wmi_ssdt_info {
++    enum XENACPI_WMI_SSDT_DMA dma_state;
++    uint32_t dma_phys32;
++    uint32_t dma_length;
++    uint8_t *ssdt_data;
++} xen_acpi_wmi_ssdt_info_t;
++
++static xen_acpi_wmi_cmd_info_t cmd_info = {0};
++static xen_acpi_wmi_ssdt_info_t ssdt_info = {0};
++static uint32_t gpe_info = 0;
++
++/*
++ * xen_acpi_wmi_print_guid
++ */
++static void xen_acpi_wmi_print_guid(void)
++{
++    uint8_t *g = &cmd_info.invocation_data.guid[0];
++
++    WMI_LOG("GUID: %02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x\n",
++            g[0], g[1], g[2], g[3], g[4], g[5], g[6], g[7], g[8], g[9], g[10], g[11], g[12], g[13], g[14], g[15]);
++}
++
++/*
++ * xen_acpi_read_file
++ */
++static uint32_t xen_acpi_read_file(const char *fname, uint8_t **buf_out)
++{
++    FILE *fs = NULL;
++    struct stat st;
++    uint8_t *buf = NULL;
++    uint32_t length = 0;
++    int read;
++
++    *buf_out = NULL;
++
++    if ( stat(fname, &st) )
++    {
++        WMI_LOG("%s error, failed to stat file - %s, errno: %d\n",
++                __func__, fname, errno);
++        goto out;
++    }
++
++    buf = malloc(st.st_size);
++    if ( buf == NULL )
++    {
++        WMI_LOG("%s error, failed to allocate read buffer for file - %s\n",
++                __func__, fname);
++        goto out;
++    }
++
++    fs = fopen(fname, "r");
++    if ( fs == NULL )
++    {
++        WMI_LOG("%s error, failed to open file - %s, errno: %d\n",
++                __func__, fname, errno);
++        goto out;
++    }
++
++    read = fread(buf, st.st_size, 1, fs);
++    if ( read < 1 )
++    {
++        WMI_LOG("%s error, failed to read file - %s, error: %d\n",
++                __func__, fname, errno);
++        goto out;
++    }
++
++    *buf_out = buf;
++    buf = NULL;
++    length = st.st_size;
++
++out:
++    if ( fs != NULL )
++        fclose(fs);
++    if ( buf != NULL )
++        free(buf);
++
++    return length;
++}
++
++/*
++ * xen_acpi_wmi_set_init
++ */
++static void xen_acpi_wmi_set_init(uint8_t val)
++{
++    memset(&cmd_info, 0, sizeof(cmd_info));
++    cmd_info.invocation_type = val;
++    cmd_info.current_index = 0;
++
++#ifdef XEN_ACPI_WMI_DEBUG
++    WMI_LOG("%s: invocation type - %d\n", __func__, val);
++#endif
++}
++
++/*
++ * xen_acpi_wmi_set_guid
++ */
++static void xen_acpi_wmi_set_guid(uint8_t val)
++{
++    if ( cmd_info.invocation_type == XENACPI_WMI_INV_UNDEFINED )
++    {
++        WMI_LOG("error, set GUID with invalid invocation type: %d\n",
++                cmd_info.invocation_type);
++        return;
++    }
++
++    if ( cmd_info.current_index >= XENACPI_WMI_GUID_SIZE )
++    {
++        WMI_LOG("error, GUID array index out of range - %d\n",
++                cmd_info.current_index);
++        cmd_info.invocation_type = XENACPI_WMI_INV_UNDEFINED;
++        return;
++    }
++
++    cmd_info.invocation_data.guid[cmd_info.current_index] = val;
++    cmd_info.current_index++;
++
++#ifdef XEN_ACPI_WMI_DEBUG
++    if ( cmd_info.current_index == XENACPI_WMI_GUID_SIZE )
++    {
++        WMI_LOG("%s: set...\n", __func__);
++        xen_acpi_wmi_print_guid();
++    }
++#endif
++}
++
++/*
++ * xen_acpi_wmi_set_cmd_instance
++ */
++static void xen_acpi_wmi_set_cmd_instance(uint32_t val)
++{
++    switch( cmd_info.invocation_type )
++    {
++        case XENACPI_WMI_INV_EXEC_METHOD:
++        case XENACPI_WMI_INV_QUERY_OBJECT:
++        case XENACPI_WMI_INV_SET_OBJECT:
++            cmd_info.invocation_data.instance = val;
++            break;
++        default:
++            WMI_LOG("error, set cmd instance with invalid invocation type - %d\n",
++                    cmd_info.invocation_type);
++            break;
++    }
++
++#ifdef XEN_ACPI_WMI_DEBUG
++    WMI_LOG("%s: instance - %d\n", __func__, val);
++#endif
++}
++
++/*
++ * xen_acpi_wmi_set_method_id
++ */
++static void xen_acpi_wmi_set_method_id(uint32_t val)
++{
++    if ( cmd_info.invocation_type != XENACPI_WMI_INV_EXEC_METHOD )
++    {
++        WMI_LOG("error, set method id for invalid invocation type - %d\n",
++                cmd_info.invocation_type);
++        return;
++    }
++
++    cmd_info.invocation_data.method_id = val;
++
++#ifdef XEN_ACPI_WMI_DEBUG
++    WMI_LOG("%s: method id - %d\n", __func__, val);
++#endif
++}
++
++/*
++ * xen_acpi_wmi_set_event_id
++ */
++static void xen_acpi_wmi_set_event_id(uint8_t event_id)
++{
++    if ( cmd_info.invocation_type != XENACPI_WMI_INV_GET_EVENT_DATA )
++    {
++        WMI_LOG("error, set event ID with incorrect invocation type - %d\n",
++                cmd_info.invocation_type);
++        return;
++    }
++
++    cmd_info.invocation_data.event_id = event_id;
++
++#ifdef XEN_ACPI_WMI_DEBUG
++    WMI_LOG("%s: event id - %d\n", __func__, event_id);
++#endif
++}
++
++/*
++ * xen_acpi_wmi_set_objid_hint
++ */
++static void xen_acpi_wmi_set_objid_hint(uint8_t val)
++{
++    if ( cmd_info.invocation_data.objid[0] == 0 )
++    {
++        /* First one, need one more */
++        cmd_info.invocation_data.objid[0] = val;
++        return;
++    }
++
++    /* Second one, set the flag too */
++    cmd_info.invocation_data.objid[1] = val;
++    cmd_info.invocation_data.flags |= XENACPI_WMI_FLAG_USE_OBJID;
++
++#ifdef XEN_ACPI_WMI_DEBUG
++    WMI_LOG("%s: objid - %c %c\n", __func__,
++            cmd_info.invocation_data.objid[0], cmd_info.invocation_data.objid[1]);
++#endif
++}
++
++/*
++ * xen_acpi_wmi_set_wmiid_hint
++ */
++static void xen_acpi_wmi_set_wmiid_hint(uint8_t val)
++{
++    cmd_info.invocation_data.wmiid = val;
++    cmd_info.invocation_data.flags |= XENACPI_WMI_FLAG_USE_WMIID;
++
++#ifdef XEN_ACPI_WMI_DEBUG
++    WMI_LOG("%s: wmiid - %d\n", __func__, val);
++#endif
++}
++
++/*
++ * xen_acpi_wmi_set_buffer_size
++ * Guest vACPI layer passes to us the size of the input buffer it is
++ * about to transfer to ioemu and this method stores the passed in size
++ * apart from allocating a buffer with the provided size.
++ */
++static void xen_acpi_wmi_set_in_buffer_size(uint32_t val)
++{
++    /* Reset index for input transfer */
++    cmd_info.current_index = 0;
++
++    cmd_info.input_length = val;
++    cmd_info.input_buffer = malloc(val);
++    if ( cmd_info.input_buffer == NULL )
++    {
++        WMI_LOG("error, input buffer allocation failed\n");
++        return;
++    }
++
++#ifdef XEN_ACPI_WMI_DEBUG
++    WMI_LOG("%s: input buffer - %p size - 0x%x\n",
++            __func__, cmd_info.input_buffer, cmd_info.current_index);
++#endif
++}
++
++/*
++ * xen_acpi_wmi_set_in_buffer
++ */
++static void xen_acpi_wmi_set_in_buffer(uint8_t val)
++{
++    if ( (cmd_info.input_buffer == NULL)&&(cmd_info.current_index == 0) )
++    {
++        /* Log it once so it does not flood the log */
++        WMI_LOG("error, writing input to a NULL input buffer\n");
++        return;
++    }
++
++    if ( cmd_info.current_index >= cmd_info.input_length )
++    {
++        WMI_LOG("error, writing beyond allocated input buffer length - %d, index - %d\n",
++                cmd_info.input_length, cmd_info.current_index);
++        return;
++    }
++
++    cmd_info.input_buffer[cmd_info.current_index] = val;
++    cmd_info.current_index++;
++}
++
++/*
++ * xen_acpi_wmi_free_input_buffer
++ */
++static void xen_acpi_wmi_free_input_buffer(void)
++{
++    if ( cmd_info.input_buffer != NULL )
++    {
++#ifdef XEN_ACPI_WMI_DEBUG
++        WMI_LOG("%s: freeing input buffer - %p\n",
++                __func__, cmd_info.input_buffer);
++#endif
++        free(cmd_info.input_buffer);
++        cmd_info.input_buffer = NULL;
++    }
++    cmd_info.input_length = 0;
++}
++
++/*
++ * xen_acpi_wmi_free_output_buffer
++ */
++static void xen_acpi_wmi_free_output_buffer(void)
++{
++    if ( cmd_info.output_buffer != NULL )
++    {
++#ifdef XEN_ACPI_WMI_DEBUG
++        WMI_LOG("%s: freeing output buffer - %p\n",
++                __func__, cmd_info.output_buffer);
++#endif
++        xenacpi_free_buffer(cmd_info.output_buffer);
++        cmd_info.output_buffer = NULL;
++    }
++    cmd_info.output_length = 0;
++}
++
++#ifdef XEN_ACPI_WMI_DEBUG
++
++/*
++ * xen_acpi_wmi_print_buffer
++ */
++static void xen_acpi_wmi_print_buffer(void *buf, int len)
++{
++    int i, j, k;
++    uint8_t *b = (uint8_t*)buf;
++    char line[256];
++    char *p;
++
++    for ( i = 0; i < (len + 15); i += 16 )
++    {
++        p = line;
++        sprintf(p, "[%08x]: ", i);
++        p += 12;
++        for ( j = 0; j < 16; ++j )
++        {
++            k = i + j;
++            if ( j == 8 )
++                sprintf(p++, " ");
++
++            if ( (k >= 0) && (k < len) )
++                sprintf(p, "%02x ", b[k]);
++            else
++                sprintf(p, "   ");
++            p += 3;
++        }
++
++        sprintf(p, "  ");
++        p += 2;
++
++        for ( j = 0; j < 16; ++j )
++        {
++            k = i + j;
++            if (j == 8)
++                sprintf(p++, " ");
++
++            if ( (k >= 0) && (k < len) )
++                sprintf(p++, "%c", ((b[k] > 32) && (b[k] < 127)) ? b[k] : '.');
++            else
++                sprintf(p++, " ");
++        }
++        *p = '\0';
++        fprintf(logfile, line);
++    }
++}
++
++/*
++ * xen_acpi_wmi_print_input_buffer
++ */
++static void xen_acpi_wmi_print_input_buffer(void)
++{
++    if ( (cmd_info.input_length == 0)||(cmd_info.input_buffer == NULL) )
++        return;
++
++    WMI_LOG("=== WMI BEGIN-INPUT-BUFFER ===\n");
++    fprintf(logfile, "Length: %d (0x%x)\n", (int)cmd_info.input_length, cmd_info.input_length);
++    fprintf(logfile, "Data:\n");
++    xen_acpi_wmi_print_buffer(cmd_info.input_buffer, (int)cmd_info.input_length);
++    WMI_LOG("=== WMI END-INPUT-BUFFER ===\n");
++}
++
++/*
++ * xen_acpi_wmi_print_input_info
++ */
++static void xen_acpi_wmi_print_input_info(void)
++{
++    WMI_LOG("=== WMI BEGIN-COMMAND ==\n");
++    WMI_LOG("Invocation Type: %d\n", (int)cmd_info.invocation_type);
++    xen_acpi_wmi_print_guid();    
++    fprintf(logfile, "\n");
++
++    if ( cmd_info.invocation_type == XENACPI_WMI_INV_EXEC_METHOD )
++    {
++        fprintf(logfile, "Instance ID: %d (0x%x)\n",
++                (int)cmd_info.invocation_data.instance,
++                cmd_info.invocation_data.instance);
++        fprintf(logfile, "Method ID: %d (0x%x)\n",
++                (int)cmd_info.invocation_data.method_id,
++                cmd_info.invocation_data.method_id);
++        xen_acpi_wmi_print_input_buffer();
++    }
++    else if ( cmd_info.invocation_type == XENACPI_WMI_INV_QUERY_OBJECT )
++    {
++        fprintf(logfile, "Instance ID: %d (0x%x)\n",
++                (int)cmd_info.invocation_data.instance,
++                cmd_info.invocation_data.instance);
++    }
++    else if ( cmd_info.invocation_type == XENACPI_WMI_INV_SET_OBJECT )
++    {
++        fprintf(logfile, "Instance ID: %d (0x%x)\n",
++                (int)cmd_info.invocation_data.instance,
++                cmd_info.invocation_data.instance);
++        xen_acpi_wmi_print_input_buffer();
++    }
++    else if ( cmd_info.invocation_type == XENACPI_WMI_INV_GET_EVENT_DATA )
++    {
++        fprintf(logfile, "Event ID: %d (0x%x)\n",
++                (int)cmd_info.invocation_data.event_id,
++                cmd_info.invocation_data.event_id);
++    }
++    WMI_LOG("=== WMI END-COMMAND ===\n");
++}
++
++/*
++ * xen_acpi_wmi_print_output_buffer
++ */
++static void xen_acpi_wmi_print_output_buffer(void)
++{
++    int count;
++
++    if ( (cmd_info.output_length == 0)||(cmd_info.output_buffer == NULL) )
++        return;
++
++    WMI_LOG("=== WMI BEGIN-OUTPUT-BUFFER ===\n");
++    fprintf(logfile, "Length: %d (0x%x)\n", (int)cmd_info.output_length, cmd_info.output_length);
++    fprintf(logfile, "Data:\n");
++    xen_acpi_wmi_print_buffer(cmd_info.output_buffer, (int)cmd_info.output_length);
++    WMI_LOG("=== WMI END-OUTPUT-BUFFER ===\n");
++
++}
++
++#endif /* XEN_ACPI_WMI_DEBUG */
++
++/*
++ * xen_acpi_wmi_execute
++ */
++static void xen_acpi_wmi_execute(void)
++{
++    int ret, err = 0;
++
++#ifdef XEN_ACPI_WMI_DEBUG
++    WMI_LOG("invoking libxenacpi routine for invocation type - %d\n",
++            cmd_info.invocation_type);
++    xen_acpi_wmi_print_input_info();
++#endif
++
++    /* Everything is setup for the call at this point. If anything
++     * is incorrect, the call will fail. */
++    if ( cmd_info.invocation_type == XENACPI_WMI_INV_EXEC_METHOD )
++    {
++        ret = xenacpi_wmi_invoke_method(&cmd_info.invocation_data,
++                                        cmd_info.input_buffer,
++                                        cmd_info.input_length,
++                                        (void**)&cmd_info.output_buffer,
++                                        &cmd_info.output_length,
++                                        &err);
++    }
++    else if ( cmd_info.invocation_type == XENACPI_WMI_INV_QUERY_OBJECT )
++    {
++        ret = xenacpi_wmi_query_object(&cmd_info.invocation_data,
++                                       (void**)&cmd_info.output_buffer,
++                                       &cmd_info.output_length,
++                                       &err);
++    }
++    else if ( cmd_info.invocation_type == XENACPI_WMI_INV_SET_OBJECT )
++    {
++        ret = xenacpi_wmi_set_object(&cmd_info.invocation_data,
++                                     cmd_info.input_buffer,
++                                     cmd_info.input_length,
++                                     &err);
++    }
++    else if ( cmd_info.invocation_type == XENACPI_WMI_INV_GET_EVENT_DATA )
++    {
++        ret = xenacpi_wmi_get_event_data(&cmd_info.invocation_data,
++                                         (void**)&cmd_info.output_buffer,
++                                         &cmd_info.output_length,
++                                         &err);
++    }
++    else
++    {
++        WMI_LOG("error, execute command for invalid invocation type - %d\n",
++                cmd_info.invocation_type);
++        return;
++    }
++
++    if ( ret == -1 )
++    {
++        WMI_LOG("error, execute command failed for invocation type - %d, errno - %d\n",
++                cmd_info.invocation_type, err);
++    }
++
++#ifdef XEN_ACPI_WMI_DEBUG
++    if ( cmd_info.output_buffer != NULL )
++    {      
++        WMI_LOG("output buffer returned - %p\n", cmd_info.output_buffer);
++        xen_acpi_wmi_print_output_buffer();
++    }
++#endif
++
++    xen_acpi_wmi_free_input_buffer();
++}
++
++/*
++ * xen_acpi_wmi_cmd_port_read
++ */
++static uint32_t xen_acpi_wmi_cmd_port_read(void *opaque, uint32_t addr)
++{
++#ifdef XEN_ACPI_WMI_DEBUG_EXT
++    WMI_LOG("%s: enter\n", __func__);
++#endif
++
++    return cmd_info.cmd_type;
++}
++
++/*
++ * xen_acpi_wmi_cmd_port_write
++ */
++static void xen_acpi_wmi_cmd_port_write(void *opaque, uint32_t addr, uint32_t val)
++{
++#ifdef XEN_ACPI_WMI_DEBUG_EXT
++    WMI_LOG("%s: enter, value - %d\n", __func__, val);
++#endif
++
++    cmd_info.cmd_type = val;
++    if ( val < XENACPI_WMI_CMD_INIT || val >= XENACPI_WMI_CMD_UNDEFINED )
++    {
++        WMI_LOG("error, unknown xen acpi wmi command - %d\n", val);
++        cmd_info.invocation_type = XENACPI_WMI_INV_UNDEFINED;
++        cmd_info.current_index = 0;
++        return;
++    }
++
++    if ( val == XENACPI_WMI_CMD_EXECUTE )
++        xen_acpi_wmi_execute();
++}
++
++/*
++ * xen_acpi_wmi_data_port_readb
++ */
++static uint32_t xen_acpi_wmi_data_port_readb(void *opaque, uint32_t addr)
++{
++    uint8_t ret;
++
++#ifdef XEN_ACPI_WMI_DEBUG_EXT
++    WMI_LOG("%s: enter\n", __func__);
++#endif
++
++    if ( cmd_info.cmd_type == XENACPI_WMI_CMD_OUT_BUFFER )
++    {
++        if ( (cmd_info.current_index == 0)&&
++             ((cmd_info.output_length == 0)||(cmd_info.output_buffer == NULL)) )
++        {
++            /* SNO but do this just once if it ever did */
++            WMI_LOG("error, invalid state, NULL or empty output buffer being read.\n");
++            xen_acpi_wmi_free_output_buffer();
++            return 0;
++        }
++
++        if ( cmd_info.current_index >= cmd_info.output_length )
++        {
++            WMI_LOG("error, output buffer index overflow. current - %d max - %d\n",
++                    cmd_info.current_index, cmd_info.output_length);
++            cmd_info.cmd_type = XENACPI_WMI_CMD_UNDEFINED;
++            return 0;
++        }
++
++        ret = cmd_info.output_buffer[cmd_info.current_index];
++        if ( cmd_info.current_index == cmd_info.output_length - 1 )
++        {
++            /* We expect that the firmware would read all of
++             * the output buffer before releasing it.  This
++             * could result in a leak if the firmware chooses
++             * to ignore the return buffer. It might make sense to
++             * introduce a cleanup command. */
++            /* Since we are talking about our WMI firmware bits
++             * in the guest, we just make sure we read all the
++             * output so a leak will not occur */
++            cmd_info.cmd_type = XENACPI_WMI_CMD_UNDEFINED;
++            xen_acpi_wmi_free_output_buffer();
++        }
++
++#ifdef XEN_ACPI_WMI_DEBUG_EXT
++        WMI_LOG("%s: data port read returned - %d\n", __func__, ret);
++#endif
++        cmd_info.current_index++;
++        return ret;
++    }
++
++    WMI_LOG("%s: error, should not reach here!!\n", __func__);
++    return 0;
++}
++
++/*
++ * xen_acpi_wmi_data_port_writeb
++ */
++static void xen_acpi_wmi_data_port_writeb(void *opaque, uint32_t addr, uint32_t val)
++{
++#ifdef XEN_ACPI_WMI_DEBUG_EXT
++    WMI_LOG("%s: enter, value - %d\n", __func__, val);
++#endif
++
++    switch( cmd_info.cmd_type )
++    {
++        case XENACPI_WMI_CMD_INIT:
++            xen_acpi_wmi_set_init(val);            
++            break;
++        case XENACPI_WMI_CMD_GUID:
++            xen_acpi_wmi_set_guid(val);
++            break;
++        case XENACPI_WMI_CMD_IN_BUFFER:
++            xen_acpi_wmi_set_in_buffer(val);
++            break;
++        case XENACPI_WMI_CMD_EVENT_ID:
++            xen_acpi_wmi_set_event_id(val);
++            break;
++        case XENACPI_WMI_CMD_OBJID_HINT:
++            xen_acpi_wmi_set_objid_hint(val);            
++            break;
++        case XENACPI_WMI_CMD_WMIID_HINT:
++            xen_acpi_wmi_set_wmiid_hint(val);            
++            break;
++        default:
++            WMI_LOG("%s: error, incompatible cmd type - %d\n",
++                    __func__, cmd_info.cmd_type);
++            break;
++    }
++}
++
++/*
++ * xen_acpi_wmi_data_port_readl
++ */
++static uint32_t xen_acpi_wmi_data_port_readl(void *opaque, uint32_t addr)
++{
++#ifdef XEN_ACPI_WMI_DEBUG_EXT
++    WMI_LOG("%s: enter\n", __func__);
++#endif
++
++    if ( cmd_info.cmd_type == XENACPI_WMI_CMD_OUT_BUFFER_SIZE )
++    {
++        /* Reset for output buffer read */
++        cmd_info.current_index = 0;
++
++        if ( cmd_info.output_length == 0 )
++        {
++            WMI_LOG("error, preparing to read 0 length buffer\n");
++            return 0;
++        }        
++
++#ifdef XEN_ACPI_WMI_DEBUG_EXT
++        WMI_LOG("output buffer length is - %d\n", (int)cmd_info.output_length);
++#endif
++        return cmd_info.output_length;
++    }
++
++    WMI_LOG("%s: error, should not reach here!!\n", __func__);
++    return 0;
++}
++
++/*
++ * xen_acpi_wmi_data_port_writel
++ */
++static void xen_acpi_wmi_data_port_writel(void *opaque, uint32_t addr, uint32_t val)
++{
++#ifdef XEN_ACPI_WMI_DEBUG_EXT
++    WMI_LOG("%s: enter, value - %d\n", __func__, val);
++#endif
++
++    switch( cmd_info.cmd_type )
++    {
++        case XENACPI_WMI_CMD_OBJ_INSTANCE:
++            xen_acpi_wmi_set_cmd_instance(val);
++            break;
++        case XENACPI_WMI_CMD_METHOD_ID:
++            xen_acpi_wmi_set_method_id(val);
++            break;
++        case XENACPI_WMI_CMD_IN_BUFFER_SIZE:
++            xen_acpi_wmi_set_in_buffer_size(val);
++            break;
++        default:
++            WMI_LOG("%s: error, incompatible cmd type - %d\n",
++                    __func__, cmd_info.cmd_type);
++            break;
++    }
++}
++
++/*
++ * xen_acpi_wmi_gpe_eport_read
++ */
++static uint32_t xen_acpi_wmi_gpe_eport_read(void *opaque, uint32_t addr)
++{
++    char *evstr;
++    uint16_t ev;
++
++#ifdef XEN_ACPI_WMI_DEBUG_EXT
++    WMI_LOG("%s: enter\n", __func__);
++#endif
++
++    evstr = xenstore_read(XENACPI_XS_OEM_WMI_NOTIFY_PATH);
++    if ( evstr == NULL )
++        return 0;
++
++    gpe_info = (uint32_t)strtol(evstr, NULL, 16);
++
++    qemu_free(evstr);
++
++    ev = (0x000000FF & gpe_info);
++
++#ifdef XEN_ACPI_WMI_DEBUG
++    WMI_LOG("%s: GPE event - %04x\n", __func__, ev);
++#endif
++
++    return ev;
++}
++
++/*
++ * xen_acpi_wmi_gpe_dport_read
++ */
++static uint32_t xen_acpi_wmi_gpe_dport_read(void *opaque, uint32_t addr)
++{
++    uint16_t dev;
++
++#ifdef XEN_ACPI_WMI_DEBUG_EXT
++    WMI_LOG("%s: enter\n", __func__);
++#endif
++
++    dev = (0x000000FF & (gpe_info >> 16));
++
++#ifdef XEN_ACPI_WMI_DEBUG
++    WMI_LOG("%s: GPE device - %04x\n", __func__, dev);
++#endif
++
++    return dev;
++}
++
++static void xen_acpi_wmi_ssdt_initialize(void)
++{
++    char *ssdt_fn = NULL;
++    uint8_t *ssdt_buf = NULL;    
++
++    /* Init prepares for DMA transfer. In the init state, reading the data
++     * port returns the length of the data to be written. The data port must
++     * also be written with the 32b physical DMA base address. Reading a length
++     * of zero would indicate an error occured and the DMA transfer could not
++     * happen.
++     */
++    ssdt_info.dma_length = 0;
++
++    ssdt_fn = xenstore_read(XENACPI_XS_OEM_WMI_SSDT_PATH);
++    if ( ssdt_fn == NULL )
++    {
++        WMI_LOG("%s: warning, no WMI SSDT file path at: %s\n",
++                __func__, XENACPI_XS_OEM_WMI_SSDT_PATH);
++        return;
++    }
++
++    ssdt_info.dma_length = xen_acpi_read_file(ssdt_fn, &ssdt_info.ssdt_data);
++    ssdt_info.dma_phys32 = 0;
++    ssdt_info.dma_state = XENACPI_WMI_SSDT_DMA_INIT;
++
++    WMI_LOG("%s: WMI DMA initialized, file: %s data length: 0x%x buffer: %p\n",
++            __func__, ssdt_fn, ssdt_info.dma_length, ssdt_info.ssdt_data);
++
++    qemu_free(ssdt_fn);
++}
++
++static void xen_acpi_wmi_ssdt_free_resources(void)
++{
++    if ( ssdt_info.ssdt_data != NULL )
++        free(ssdt_info.ssdt_data);
++    memset(&ssdt_info, 0, sizeof(xen_acpi_wmi_ssdt_info_t));
++    ssdt_info.dma_state = XENACPI_WMI_SSDT_DMA_UNDEFINED;
++}
++
++static void xen_acpi_wmi_ssdt_complete(void)
++{
++    /* Complete writes the contents of the SSDT buffer to the guest physical
++     * address set through the data port and cleans up.
++     */
++    if ( (ssdt_info.ssdt_data == NULL)||(ssdt_info.dma_length == 0)||
++         (ssdt_info.dma_phys32 == 0) )
++    {
++        WMI_LOG("%s error, invalid state to complete DMA length: 0x%x addr: 0x%x buffer: %p\n",
++                __func__, ssdt_info.dma_length, ssdt_info.dma_phys32, ssdt_info.ssdt_data);
++        xen_acpi_wmi_ssdt_free_resources();
++        return;
++    }
++
++    cpu_physical_memory_write(ssdt_info.dma_phys32, ssdt_info.ssdt_data, ssdt_info.dma_length);
++
++    WMI_LOG("%s: WMI DMA complete, data length: 0x%x buffer: %p guest physaddr: 0x%x\n",
++            __func__, ssdt_info.dma_length, ssdt_info.ssdt_data, ssdt_info.dma_phys32);
++
++    xen_acpi_wmi_ssdt_free_resources();
++}
++
++/*
++ * xen_acpi_wmi_ssdt_cmd_port_writel
++ */
++static void xen_acpi_wmi_ssdt_cmd_port_writel(void *opaque, uint32_t addr, uint32_t val)
++{
++#ifdef XEN_ACPI_WMI_DEBUG_EXT
++    WMI_LOG("%s: enter, value - %d\n", __func__, val);
++#endif
++    if ( val == XENACPI_WMI_SSDT_DMA_INIT )
++    {
++        if ( ssdt_info.dma_state != XENACPI_WMI_SSDT_DMA_UNDEFINED )
++            goto invalid;
++
++        xen_acpi_wmi_ssdt_initialize();        
++        return;
++    }
++    else if ( val == XENACPI_WMI_SSDT_DMA_COMPLETE )
++    {
++        if ( ssdt_info.dma_state != XENACPI_WMI_SSDT_DMA_INIT )
++            goto invalid;
++
++        xen_acpi_wmi_ssdt_complete();
++        return;
++    }
++    /* Else fall through to invalid block */
++
++invalid:
++    WMI_LOG("%s: error, invalid DMA state write %d when in state %d\n",
++            __func__, val, ssdt_info.dma_state);
++    xen_acpi_wmi_ssdt_free_resources();
++}
++
++/*
++ * xen_acpi_wmi_ssdt_data_port_readl
++ */
++static uint32_t xen_acpi_wmi_ssdt_data_port_readl(void *opaque, uint32_t addr)
++{
++#ifdef XEN_ACPI_WMI_DEBUG_EXT
++    WMI_LOG("%s: enter\n", __func__);
++#endif
++
++    if ( ssdt_info.dma_state == XENACPI_WMI_SSDT_DMA_INIT )
++    {
++        /* Indicates an error occured during init, so reset */
++        if ( ssdt_info.dma_length == 0 )
++            xen_acpi_wmi_ssdt_free_resources();
++
++        return ssdt_info.dma_length;
++    }
++
++    WMI_LOG("%s: error, invalid DMA state %d for reading\n",
++            __func__, ssdt_info.dma_state);
++    return 0;
++}
++
++/*
++ * xen_acpi_wmi_ssdt_data_port_writel
++ */
++static void xen_acpi_wmi_ssdt_data_port_writel(void *opaque, uint32_t addr, uint32_t val)
++{
++#ifdef XEN_ACPI_WMI_DEBUG_EXT
++    WMI_LOG("%s: enter, value - %d\n", __func__, val);
++#endif
++
++    if ( ssdt_info.dma_state == XENACPI_WMI_SSDT_DMA_INIT )
++    {
++        ssdt_info.dma_phys32 = val;
++        return;
++    }
++
++    WMI_LOG("%s: error, invalid DMA state %d for writing\n",
++            __func__, ssdt_info.dma_state);
++}
++
++/*
++ * xen_acpi_wmi_init
++ */
++void xen_acpi_wmi_init(PCIDevice *device)
++{
++    char *oem_buffer;
++
++    cmd_info.cmd_type = XENACPI_WMI_CMD_UNDEFINED;
++    cmd_info.invocation_type = XENACPI_WMI_INV_UNDEFINED;
++    cmd_info.current_index = 0;
++
++    ssdt_info.dma_state = XENACPI_WMI_SSDT_DMA_UNDEFINED;
++
++    oem_buffer = xenstore_device_model_read(domid, "oem_features", NULL);
++    if ( oem_buffer == NULL )
++    {
++        WMI_LOG("OEM value add disabled.\n");
++        return;
++    }
++
++    register_ioport_read(XENACPI_WMI_CMD_PORT, 1, 1, xen_acpi_wmi_cmd_port_read, device);
++    register_ioport_write(XENACPI_WMI_CMD_PORT, 1, 1, xen_acpi_wmi_cmd_port_write, device);
++    register_ioport_read(XENACPI_WMI_DATA_PORTB, 1, 1, xen_acpi_wmi_data_port_readb, device);
++    register_ioport_write(XENACPI_WMI_DATA_PORTB, 1, 1, xen_acpi_wmi_data_port_writeb, device);
++    register_ioport_read(XENACPI_WMI_DATA_PORTL, 4, 4, xen_acpi_wmi_data_port_readl, device);
++    register_ioport_write(XENACPI_WMI_DATA_PORTL, 4, 4, xen_acpi_wmi_data_port_writel, device);
++    register_ioport_read(XENACPI_WMI_GPE_EPORT, 1, 1, xen_acpi_wmi_gpe_eport_read, device);
++    register_ioport_read(XENACPI_WMI_GPE_DPORT, 1, 1, xen_acpi_wmi_gpe_dport_read, device);
++
++    register_ioport_write(XENACPI_WMI_SSDT_CMD_PORTL, 4, 4, xen_acpi_wmi_ssdt_cmd_port_writel, device);
++    register_ioport_read(XENACPI_WMI_SSDT_DATA_PORTL, 4, 4, xen_acpi_wmi_ssdt_data_port_readl, device);
++    register_ioport_write(XENACPI_WMI_SSDT_DATA_PORTL, 4, 4, xen_acpi_wmi_ssdt_data_port_writel, device);
++
++    xenstore_register_for_oem_events();
++
++    WMI_LOG("%s: registration succeeded\n", __func__);
++}
++
++/*
++ * xen_acpi_wmi_cleanup(void)
++ */
++void xen_acpi_wmi_cleanup(void)
++{
++}
++
++#else
++
++void xen_acpi_wmi_init(PCIDevice *device) { }
++void xen_acpi_wmi_cleanup(void) { }
++
++#endif /* CONFIG_NO_XEN_ACPI_WMI */
+diff --git a/qemu-xen.h b/qemu-xen.h
+index d46e7f0..a733b1b 100644
+--- a/qemu-xen.h
++++ b/qemu-xen.h
+@@ -132,6 +132,7 @@ int xenstore_refresh_battery_status(void);
+ void xenstore_register_for_pm_events(void);
+ int xenstore_read_ac_adapter_state(void);
+ int xenstore_read_lid_state(void);
++void xenstore_register_for_oem_events(void);
+ int xenstore_pv_driver_build_blacklisted(uint16_t product_number,
+                                          uint32_t build_nr);
+ void xenstore_do_eject(BlockDriverState *bs);
+diff --git a/xen-hooks.mak b/xen-hooks.mak
+index 061d124..2c295a6 100644
+--- a/xen-hooks.mak
++++ b/xen-hooks.mak
+@@ -18,7 +18,7 @@ endif
+ CFLAGS += $(CMDLINE_CFLAGS)
+ 
+ LIBS += -L$(XEN_ROOT)/tools/libxc -lxenctrl -lxenguest
+-LIBS += -L$(XEN_ROOT)/tools/xenstore -lxenstore -lpthread 
++LIBS += -L$(XEN_ROOT)/tools/xenstore -lxenstore -lpthread -lxenacpi
+ 
+ LDFLAGS := $(CFLAGS) $(LDFLAGS)
+ 
+@@ -38,6 +38,7 @@ OBJS += exec-dm.o
+ OBJS += pci_emulation.o
+ OBJS += helper2.o
+ OBJS += battery_mgmt.o
++OBJS += xen_acpi_wmi.o
+ 
+ CONFIG_AUDIO=1
+ 
+diff --git a/xenstore.c b/xenstore.c
+index a374395..39efa8f 100644
+--- a/xenstore.c
++++ b/xenstore.c
+@@ -1094,6 +1094,11 @@ void xenstore_process_event(void *opaque)
+         goto out;
+     }
+ 
++    if (!strcmp(vec[XS_WATCH_TOKEN], "oemevt")) {
++        acpi_oem_event();
++        goto out;
++    }
++
+     hd_index = drive_name_to_index(vec[XS_WATCH_TOKEN]);
+     if (hd_index == -1) {
+         fprintf(stderr,"medium change watch on `%s' -"
+@@ -1654,6 +1659,11 @@ int xenstore_read_is_secondary_battery_present(void)
+     return 0;
+ }
+ 
++void xenstore_register_for_oem_events(void)
++{
++   xs_watch(xsh, "/oem/event", "oemevt");
++}
++
+ int xenstore_read_ac_adapter_state(void)
+ {
+     return xenstore_extended_power_mgmt_read_int("ac_adapter", 1);

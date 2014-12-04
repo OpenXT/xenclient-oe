@@ -1,0 +1,288 @@
+diff --git a/switcher.c b/switcher.c
+index 1bb9c5b..e61632f 100644
+--- a/switcher.c
++++ b/switcher.c
+@@ -28,6 +28,7 @@
+ #include "qemu-xen.h"
+ 
+ #include "switcher.h"
++#include "dmbus.h"
+ 
+ #include <stdio.h>
+ #include <stdlib.h>
+@@ -42,21 +43,9 @@
+ 
+ extern int gfx_passthru;
+ 
+-#define DOM0_INPUT_NONE           'N'
+-#define DOM0_INPUT_DONE           'D'
+-#define DOM0_INPUT_DOMID          'I'
+-#define DOM0_INPUT_PVM_DOMID      'J'
+-#define DOM0_INPUT_OPT            'O'
+-#define DOM0_INPUT_SHUTDOWN       'S'
+-#define DOM0_INPUT_LEDS           'L'
+-
+-#define DOM0_INPUT_EVENT          'E'
+-#define DOM0_INPUT_PVM            'P'
+-
+-#define DOM0_INPUT_ABS            'A'
+-
+ #define DOM0_INPUT_SOCKET       "/tmp/input.socket"
+ 
++dmbus_service_t          dmbus_service = NULL;
+ int                      switcher_connected = 0;
+ 
+ static struct sockaddr_un       remote;
+@@ -64,8 +53,6 @@ static QEMUTimer                *switcher_timer = NULL;
+ static int                      switcher_socket = -1;
+ static int                      is_abs_enabled = 0;
+ 
+-static void switcher_recv(void *opaque);
+-
+ static void switcher_inject_pause_key(void)
+ {
+     kbd_put_keycode(0xE1);
+@@ -216,18 +203,18 @@ static void switcher_key_inject (int code, uint32_t keycode)
+ }
+ 
+ 
+-static void switcher_event(struct input_event *e)
++static void switcher_event(void *opaque, uint16_t type, uint16_t code, int32_t value)
+ {
+     static int mouse_button_state = 0;
+     static int absolute_x=0, absolute_y=0, absolute_z=0, absolute=0;
+     static int relative_x=0, relative_y=0, relative_z=0, relative=0;
+     static int use_abs=0, mousekey=0;
+ 
+-    if (e->type == EV_KEY)
++    if (type == EV_KEY)
+     {
+-        if (e->code >= BTN_MOUSE)
++        if (code >= BTN_MOUSE)
+         {
+-            switch (e->code)
++            switch (code)
+             {
+                 case BTN_LEFT:
+                     mousekey = MOUSE_EVENT_LBUTTON;
+@@ -240,54 +227,54 @@ static void switcher_event(struct input_event *e)
+                     break;
+             }
+ 
+-            if (e->value)
++            if (value)
+                 mouse_button_state |= mousekey;
+             else
+                 mouse_button_state &= ~mousekey;
+         }
+         else
+-            switcher_key_inject(e->value, e->code);
++            switcher_key_inject(value, code);
+     }
+ 
+     /* Mouse motion */
+-    if (e->type == EV_REL)
++    if (type == EV_REL)
+     {
+ 	use_abs=0;
+-        switch (e->code)
++        switch (code)
+         {
+             case REL_X:
+-                relative_x = e->value;
++                relative_x = value;
+                 break;
+             case REL_Y:
+-                relative_y = e->value;
++                relative_y = value;
+                 break;
+             case REL_WHEEL:
+-                relative_z = -e->value;
++                relative_z = -value;
+                 break;
+         }
+ 	relative++;
+     }
+ 
+-    if (e->type == EV_ABS)
++    if (type == EV_ABS)
+     {
+ 	use_abs = 1;
+-        switch (e->code)
++        switch (code)
+         {
+             case ABS_X:
+-                absolute_x = e->value;
++                absolute_x = value;
+                 break;
+             case ABS_Y:
+-                absolute_y = e->value;
++                absolute_y = value;
+                 break;
+             case ABS_WHEEL:
+-                absolute_z = -e->value;
++                absolute_z = -value;
+                 break;
+         }
+ 	absolute++;
+ 
+     }
+ 
+-    if (e->type == EV_SYN && e->code == SYN_REPORT)
++    if (type == EV_SYN && code == SYN_REPORT)
+     {
+         if ((relative) || (!absolute && !use_abs && mousekey))
+         {
+@@ -303,28 +290,22 @@ static void switcher_event(struct input_event *e)
+     }
+ }
+ 
+-static void switcher_send(const char *format, ...)
+-{
+-    char        buff[128];
+-    va_list     arg;
+-
+-    va_start(arg, format);
+-    vsnprintf(buff, 128, format, arg);
+-    va_end(arg);
+-
+-    fprintf(stderr, "send: %s\n", buff);
+-    send(switcher_socket, buff, strlen(buff), 0);
+-}
++struct dmbus_ops switcher_ops = {
++  .dom0_input_event = switcher_event,
++};
+ 
+ void switcher_shutdown(int reason)
+ {
++    struct msg_switcher_shutdown msg;
++
+     switch (reason)
+     {
+         case SWITCHER_SHUTDOWN_REBOOT:
+         case SWITCHER_SHUTDOWN_S3:
+         case SWITCHER_SHUTDOWN_S4:
+         case SWITCHER_SHUTDOWN_S5:
+-            switcher_send("%c%d", DOM0_INPUT_SHUTDOWN, reason);
++            msg.reason = reason;
++            dmbus_send(dmbus_service, DMBUS_MSG_SWITCHER_SHUTDOWN, &msg, sizeof(msg));
+             break;
+         default:
+             break;
+@@ -333,13 +314,24 @@ void switcher_shutdown(int reason)
+ 
+ void switcher_send_led_code(int led_code)
+ {
+-    switcher_send("%c%d", DOM0_INPUT_LEDS, led_code);
++    struct msg_switcher_leds msg;
++
++    msg.led_code = led_code;
++    dmbus_send(dmbus_service, DMBUS_MSG_SWITCHER_LEDS, &msg, sizeof(msg));
+ }
+ 
+ void switcher_abs_enabled(int enabled)
+ {
++    struct msg_switcher_abs msg;
++
+     is_abs_enabled = enabled;
+-    switcher_send("%c%d", DOM0_INPUT_ABS, enabled);
++    msg.enabled = enabled;
++    dmbus_send(dmbus_service, DMBUS_MSG_SWITCHER_ABS, &msg, sizeof(msg));
++}
++
++static void switcher_initialize_connection(dmbus_service_t s, void *opaque)
++{
++    switcher_abs_enabled(is_abs_enabled);
+ }
+ 
+ void switcher_connect(void)
+@@ -349,30 +341,17 @@ void switcher_connect(void)
+     if (switcher_connected)
+         goto out;
+ 
+-    close(switcher_socket);
+-    fprintf(stderr, "switcher: try to connect\n");
+-    if ((switcher_socket = socket(AF_UNIX, SOCK_SEQPACKET, 0)) == -1)
+-    {
+-        fprintf(stderr, "switcher: socket %s\n", strerror(errno));
++    fprintf(stderr, "switcher_connect\n");
++    dmbus_service = dmbus_service_connect(DMBUS_SERVICE_INPUT,
++					  gfx_passthru ? DEVICE_TYPE_INPUT_PVM : DEVICE_TYPE_INPUT,
++					  &switcher_ops,
++                                          switcher_initialize_connection,
++					  NULL);
++    if (dmbus_service == NULL)
+         goto out;
+-    }
+-    qemu_set_fd_handler(switcher_socket, switcher_recv, NULL, NULL);
+-    switcher_connected = 1;
+ 
+-    memset(&remote, 0, sizeof (remote));
+-    remote.sun_family = AF_UNIX;
+-    strcpy(remote.sun_path, DOM0_INPUT_SOCKET);
+-    if (connect(switcher_socket, (struct sockaddr *)&remote, SUN_LEN(&remote)) == -1)
+-    {
+-        fprintf(stderr, "switcher: connect %s, %s\n", strerror(errno), remote.sun_path);
+-        goto out;
+-    }
+-
+-    if (gfx_passthru)
+-        switcher_send("%c%d", DOM0_INPUT_PVM_DOMID, domid);
+-    else
+-        switcher_send("%c%d", DOM0_INPUT_DOMID, domid);
+-    switcher_abs_enabled(is_abs_enabled);
++    switcher_initialize_connection(dmbus_service, NULL);
++    switcher_connected = 1;
+ 
+ out:
+     if (!switcher_timer)
+@@ -380,49 +359,3 @@ out:
+     qemu_mod_timer(switcher_timer, qemu_get_clock(rt_clock) + 1000);
+ }
+ 
+-static void switcher_recv(void *opaque)
+-{
+-    char                buff[128];
+-    char                *p = buff;
+-    struct input_event  *e = NULL;
+-    int                 ret;
+-    int                 read_sz;
+-
+-    if ((read_sz = recv(switcher_socket, buff, 128, MSG_DONTWAIT)) <= 0)
+-    {
+-        switcher_connected = 0;
+-        qemu_set_fd_handler(switcher_socket, NULL, NULL, NULL);
+-        fprintf(stderr, "switcher: recv caused an error(%d)\n", errno);
+-        return;
+-    }
+-    while (read_sz > 0 && p - buff < read_sz)
+-    {
+-        switch (*p)
+-        {
+-            case DOM0_INPUT_EVENT:
+-                {
+-                    p += 1;
+-                    e = (struct input_event *)p;
+-                    p += sizeof (struct input_event);
+-                    switcher_event(e);
+-                    break;
+-                }
+-            case DOM0_INPUT_PVM:
+-                {
+-                    char nb[10];
+-
+-                    memset(nb, 0, 10);
+-                    memcpy(nb, p + 1, 8);
+-                    p += 9;
+-                    break;
+-                }
+-            default:
+-                {
+-                    fprintf(stderr, "switcher: recv wrong command\n");
+-                    qemu_set_fd_handler(switcher_socket, NULL, NULL, NULL);
+-                    return;
+-                }
+-        }
+-    }
+-}
+-

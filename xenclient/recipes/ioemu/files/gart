@@ -1,0 +1,554 @@
+diff --git a/hw/gart.c b/hw/gart.c
+new file mode 100644
+index 0000000..d953c94
+--- /dev/null
++++ b/hw/gart.c
+@@ -0,0 +1,446 @@
++/*
++ * Copyright (C) 2010 Citrix Systems
++ *
++ * written by Jean Guyader <jean.guyader@citrix.com>
++ *
++ * This program is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU General Public License as
++ * published by the Free Software Foundation; either version 2 or
++ * (at your option) version 3 of the License.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, see <http://www.gnu.org/licenses/>.
++ */
++
++#include "hw.h"
++#include "qemu-timer.h"
++#include "qemu-xen.h"
++#include "gart.h"
++#include <sys/syslog.h>
++#include <sys/mman.h>
++
++#define GART_LOG(level, format, args...)                                                        \
++    syslog ((level), "gart.c:%d:%s " format , __LINE__, __func__, ## args);
++
++//#define DEBUG
++#ifdef DEBUG
++# define GART_DEBUG(format, args...) GART_LOG(LOG_DEBUG, format, ## args)
++# define GART_INFO(format, args...) GART_LOG(LOG_INFO, format, ## args)
++#else
++# define GART_DEBUG(format, args...) ((void)0)
++# define GART_INFO(format, args...) ((void)0)
++#endif
++
++struct gart_entry
++{
++    xen_pfn_t   pfn;
++    uint8_t     used;
++    uint8_t     in_aperture;
++};
++
++struct gart
++{
++    unsigned int        entry;
++    struct gart_entry   *gart;
++    uint32_t            *gart_map;
++    unsigned int        gart_size;
++
++    int                 aperture_handle;
++    uint32_t            aperture_base;
++    unsigned int        aperture_size;
++
++    uint32_t            stolen_base_pfn;
++    unsigned int        stolen_size_fn;
++
++    GartUsedFromGart    *used_from_gart;
++    GartPfnFromGart     *pfn_from_gart;
++    GartPfnToGart       *pfn_to_gart;
++};
++
++static struct gart *mmio_trap_gart = NULL;
++
++static int
++used_from_gart(struct gart *g, uint32_t entry)
++{
++    return g->used_from_gart(entry);
++}
++
++static uint32_t
++pfn_from_gart(struct gart *g, uint32_t entry)
++{
++    return g->pfn_from_gart(entry);
++}
++
++static uint32_t
++pfn_to_gart(struct gart *g, uint32_t pfn)
++{
++    return g->pfn_to_gart(pfn);
++}
++
++static inline void
++clear_gart_entry(struct gart_entry *entry, uint32_t *mapped_entry)
++{
++    entry->used = 0;
++    entry->pfn = -1;
++    entry->in_aperture = 0;
++    if (mapped_entry)
++        *mapped_entry = 0;
++}
++
++static void set_caching(uint32_t pfn)
++{
++    uint32_t addr = pfn * TARGET_PAGE_SIZE;
++
++    (void)xc_domain_pin_memory_cacheattr(
++            xc_handle, domid,
++            addr >> TARGET_PAGE_BITS,
++            addr >> TARGET_PAGE_BITS,
++            XEN_DOMCTL_MEM_CACHEATTR_WC);
++}
++
++static void unset_caching(uint32_t pfn)
++{
++    uint32_t addr = pfn * TARGET_PAGE_SIZE;
++
++    (void)xc_domain_unpin_memory_cacheattr(
++            xc_handle, domid,
++            addr >> TARGET_PAGE_BITS,
++            addr >> TARGET_PAGE_BITS,
++            XEN_DOMCTL_MEM_CACHEATTR_WC);
++}
++
++void
++gart_update(struct gart *x, int move_in_aperture)
++{
++    int i;
++
++    for (i = 0; i < x->entry; i++)
++    {
++        uint32_t aperture_pfn = x->aperture_base / TARGET_PAGE_SIZE + i;
++        int moved = 0;
++
++        /* Move the page back to where it belongs */
++        if (x->gart[i].used && !used_from_gart(x, x->gart_map[i]))
++        {
++            GART_DEBUG("Move back memory from aperture aperture:%x pfn:%x entry:%d map_gart:%x\n",
++                    aperture_pfn, (uint32_t)x->gart[i].pfn, i, x->gart_map[i]);
++            if (x->gart[i].in_aperture)
++            {
++                xen_move_page(aperture_pfn, x->gart[i].pfn);
++                unset_caching(x->gart[i].pfn);
++            }
++            clear_gart_entry(&x->gart[i], NULL);
++        }
++
++        /* Move system page to apperture */
++        else if (!x->gart[i].used && used_from_gart(x, x->gart_map[i]))
++        {
++            GART_DEBUG("GART: Move system page to aperture aperture:%x pfn:%x entry:%d\n",
++                    aperture_pfn, pfn_from_gart(x, x->gart_map[i]), i);
++
++            if (move_in_aperture)
++                moved = xen_move_page(pfn_from_gart(x, x->gart_map[i]), aperture_pfn);
++
++            if (!move_in_aperture || moved)
++            {
++                x->gart[i].used = 1;
++                x->gart[i].pfn = pfn_from_gart(x, x->gart_map[i]);
++                x->gart[i].in_aperture = move_in_aperture;
++                set_caching(moved ? x->gart[i].pfn : aperture_pfn);
++            }
++            else
++            {
++                clear_gart_entry(&x->gart[i], &x->gart_map[i]);
++            }
++        }
++
++        /* page changed in the gart */
++        else if (x->gart[i].used && used_from_gart(x, x->gart_map[i]) &&
++                x->gart[i].pfn != pfn_from_gart(x, x->gart_map[i]))
++        {
++            GART_DEBUG("GART: Page change aperture:%x pfn:%x -> new_pfn:%x entry:%d map_gart:%x\n",
++                    aperture_pfn, (uint32_t)x->gart[i].pfn, pfn_from_gart(x, x->gart_map[i]), i,
++                    x->gart_map[i]);
++
++            if (x->gart[i].in_aperture)
++            {
++                xen_move_page(aperture_pfn, x->gart[i].pfn);
++                unset_caching(x->gart[i].pfn);
++            }
++
++            if (move_in_aperture)
++                moved = xen_move_page(pfn_from_gart(x, x->gart_map[i]), aperture_pfn);
++
++            if (!move_in_aperture || moved)
++            {
++                x->gart[i].pfn = pfn_from_gart(x, x->gart_map[i]);
++                x->gart[i].in_aperture = moved;
++                set_caching(moved ? x->gart[i].pfn : aperture_pfn);
++            }
++            else
++            {
++                clear_gart_entry(&x->gart[i], &x->gart_map[i]);
++            }
++        }
++    }
++
++    qemu_invalidate_map_cache();
++    xc_shadow_blow_tables(xc_handle, domid);
++}
++
++static void
++gart_enable_stolen(struct gart *g)
++{
++    int i;
++    uint32_t entry = 0;
++
++    GART_DEBUG("Setup stolen memory stolen_base:%x size_fn:%x\n",
++            g->stolen_base_pfn, g->stolen_size_fn);
++    for (i = 0; i < g->stolen_size_fn; i++)
++    {
++        g->gart_map[i] = pfn_to_gart(g, g->stolen_base_pfn + i);
++    }
++}
++
++void
++gart_aperture_map(struct gart *g, uint32_t old_addr, uint32_t addr, unsigned int size)
++{
++    if (g->aperture_base == addr)
++        return;
++    g->aperture_base = addr;
++
++    cpu_register_physical_memory (addr, g->aperture_size, g->aperture_handle);
++
++    (void)xc_domain_pin_memory_cacheattr(
++            xc_handle, domid,
++            addr >> TARGET_PAGE_BITS,
++            ((addr + size) >> TARGET_PAGE_BITS),
++            XEN_DOMCTL_MEM_CACHEATTR_WC);
++
++    GART_DEBUG("aperture BAR mapped addr:%x size:%x\n", addr, size);
++}
++
++
++void
++gart_region_map(struct gart *g, uint32_t old_addr, uint32_t addr, unsigned int size)
++{
++    GART_DEBUG("setting up GART offset:%x old_addr:%x gart_size:%x\n",
++            addr, old_addr, g->gart_size);
++
++    g->gart_map = xen_populate_pages((addr) / TARGET_PAGE_SIZE,
++            old_addr / TARGET_PAGE_SIZE,
++            g->gart_map, g->gart_size / TARGET_PAGE_SIZE, 1);
++
++    if (old_addr == 0) /* First mapping clear the GART */
++    {
++        g->gart = malloc(g->entry * sizeof (struct gart_entry));
++        memset(g->gart_map, 0, g->gart_size);
++        memset(g->gart, 0, g->entry * sizeof (struct gart_entry));
++        gart_enable_stolen(g);
++    }
++}
++
++void
++gart_setup_stolen_memory(struct gart *g,
++                         uint32_t base_pfn, unsigned int size_fn)
++{
++    //xen_populate_pages(base_pfn, 0, NULL, size_fn, 0);
++
++    g->stolen_base_pfn = base_pfn;
++    g->stolen_size_fn = size_fn;
++}
++
++uint32_t
++gart_get_pfn(struct gart *g, uint32_t gart_addr)
++{
++    uint32_t gart_base = gart_addr / TARGET_PAGE_SIZE;
++
++    if (gart_base >= g->entry)
++    {
++        GART_DEBUG("Can't get pfn for %x, out of range\n", gart_addr);
++        return -1;
++    }
++
++    if (!g->gart[gart_base].used)
++    {
++        GART_DEBUG("Can't get pfn for %x, invalid entry (not used)\n", gart_addr);
++        return -1;
++    }
++
++    if (g->gart[gart_base].in_aperture)
++        return (g->aperture_base + gart_addr) / TARGET_PAGE_SIZE;
++    else
++        return g->gart[gart_base].pfn;
++}
++
++static int
++is_in_gart(struct gart *g, uint32_t addr)
++{
++    int i = 0;
++
++    if (!g->gart)
++        return -1;
++
++    for (i = 0; i < g->entry; i++)
++    {
++        if (g->gart[i].used && g->gart[i].pfn == (addr / TARGET_PAGE_SIZE))
++        {
++            GART_DEBUG("is_in_gart: found addr:%x gart[i].pfn:%x=:%x entry:%d\n",
++                    addr, (uint32_t)g->gart[i].pfn, (addr / TARGET_PAGE_SIZE), i);
++            return i;
++        }
++    }
++    return -1;
++}
++
++static void
++gart_remove_from_aperture(struct gart *x, int i)
++{
++    uint32_t aperture_pfn = x->aperture_base / TARGET_PAGE_SIZE + i;
++
++    // Move the page out of the aperture
++    xen_move_page(aperture_pfn, x->gart[i].pfn);
++    x->gart[i].in_aperture = 0;
++}
++
++static void gart_add_in_aperture(struct gart *x, int i)
++{
++    uint32_t aperture_pfn = x->aperture_base / TARGET_PAGE_SIZE + i;
++
++    // Move the page back in the aperture
++    xen_move_page(x->gart[i].pfn, aperture_pfn);
++    x->gart[i].in_aperture = 1;
++}
++
++int
++gart_unknown_mmio(uint32_t addr)
++{
++    struct gart *g = mmio_trap_gart;
++    int gart_entry;
++
++    if (!g)
++        return 0;
++
++    gart_entry = is_in_gart(g, addr);
++    if (gart_entry != -1)
++    {
++        GART_DEBUG("Unknown MMIO addr:%x in_gart:%d\n",
++                addr, gart_entry);
++        gart_remove_from_aperture(g, gart_entry);
++        return 1;
++    }
++
++    return 0;
++}
++
++static uint32_t
++aperture_access(struct gart *g, target_phys_addr_t addr, int len, uint32_t data, int is_write)
++{
++    int gart_entry = is_in_gart(g, addr);
++
++    GART_DEBUG("Unknown MMIO %s addr:%llx len:%d in_gart:%d\n",
++            is_write ? "write" : "read",
++            (uint64_t)addr, len, gart_entry);
++
++    if (gart_entry != -1)
++    {
++        uint32_t tmp = data;
++
++        gart_add_in_aperture(g, gart_entry);
++        cpu_physical_memory_rw(addr, (uint8_t*)&tmp, len, is_write);
++        return tmp;
++    }
++
++    return ~0;
++}
++
++static uint32_t
++aperture_read_8(void *opaque, target_phys_addr_t addr)
++{
++    struct gart *g = (struct gart *)opaque;
++    return aperture_access(g, addr, 1, 0, 0);
++}
++
++static uint32_t
++aperture_read_16(void *opaque, target_phys_addr_t addr)
++{
++    struct gart *g = (struct gart *)opaque;
++    return aperture_access(g, addr, 2, 0, 0);
++}
++
++static uint32_t
++aperture_read_32(void *opaque, target_phys_addr_t addr)
++{
++    struct gart *g = (struct gart *)opaque;
++    return aperture_access(g, addr, 4, 0, 0);
++}
++
++static void
++aperture_write_8(void *opaque, target_phys_addr_t addr, uint32_t val)
++{
++    struct gart *g = (struct gart *)opaque;
++    aperture_access(g, addr, 1, val, 1);
++}
++
++static void
++aperture_write_16(void *opaque, target_phys_addr_t addr, uint32_t val)
++{
++    struct gart *g = (struct gart *)opaque;
++    aperture_access(g, addr, 2, val, 1);
++}
++
++static void
++aperture_write_32(void *opaque, target_phys_addr_t addr, uint32_t val)
++{
++    struct gart *g = (struct gart *)opaque;
++    aperture_access(g, addr, 4, val, 1);
++}
++
++static CPUReadMemoryFunc *aperture_read[3] = {
++  aperture_read_8,
++  aperture_read_16,
++  aperture_read_32,
++};
++
++static CPUWriteMemoryFunc *aperture_write[3] = {
++  aperture_write_8,
++  aperture_write_16,
++  aperture_write_32,
++};
++
++struct gart *
++gart_init(unsigned int nb_entry,
++          GartUsedFromGart *used_from_gart,
++          GartPfnFromGart *pfn_from_gart,
++          GartPfnToGart *pfn_to_gart)
++{
++    struct gart *g;
++
++    g = malloc(sizeof (struct gart));
++    if (!g)
++    {
++        GART_DEBUG("malloc failed: %s\n", strerror(errno));
++        return NULL;
++    }
++    memset(g, 0, sizeof (struct gart));
++
++    GART_DEBUG("Init gart entry:%d\n", nb_entry);
++    g->entry = nb_entry; /* Number of entry in the gart */
++    g->gart_size = g->entry * 4; /* Each entry is 4 bytes */
++    g->aperture_size = g->entry * XC_PAGE_SIZE; /* Each entry can map a page */
++
++    g->used_from_gart = used_from_gart;
++    g->pfn_from_gart = pfn_from_gart;
++    g->pfn_to_gart = pfn_to_gart;
++
++    g->aperture_handle = cpu_register_io_memory(0, aperture_read, aperture_write, g);
++
++    mmio_trap_gart = g;
++
++    return g;
++}
+diff --git a/hw/gart.h b/hw/gart.h
+new file mode 100644
+index 0000000..a819a3b
+--- /dev/null
++++ b/hw/gart.h
+@@ -0,0 +1,42 @@
++/*
++ * Copyright (C) 2010 Citrix Systems
++ *
++ * written by Jean Guyader <jean.guyader@citrix.com>
++ *
++ * This program is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU General Public License as
++ * published by the Free Software Foundation; either version 2 or
++ * (at your option) version 3 of the License.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, see <http://www.gnu.org/licenses/>.
++ */
++
++#ifndef GART_H_
++# define GART_H_
++
++struct gart;
++
++typedef int GartUsedFromGart(uint32_t entry);
++typedef uint32_t GartPfnFromGart(uint32_t entry);
++typedef uint32_t GartPfnToGart(uint32_t pfn);
++
++void gart_update(struct gart *g, int move_in_the_aperture);
++int gart_unknown_mmio(uint32_t addr);
++uint32_t gart_get_pfn(struct gart *g, uint32_t gart_addr);
++void gart_region_map(struct gart *g, uint32_t old_addr, uint32_t addr, unsigned int size);
++void gart_aperture_map(struct gart *g, uint32_t old_addr, uint32_t addr, unsigned int size);
++void gart_setup_stolen_memory(struct gart *g, uint32_t pfn_base, unsigned int size_fn);
++
++struct gart *
++gart_init(unsigned int nb_entry,
++          GartUsedFromGart *used_from_gart,
++          GartPfnFromGart *pfn_from_gart,
++          GartPfnToGart *pfn_to_gart);
++
++#endif /* !GART_H_ */
+diff --git a/i386-dm/exec-dm.c b/i386-dm/exec-dm.c
+index c9061b0..71aa753 100644
+--- a/i386-dm/exec-dm.c
++++ b/i386-dm/exec-dm.c
+@@ -40,6 +40,7 @@
+ #include "pc.h"
+ #include "disas.h"
+ #include "qemu-xen.h"
++#include "gart.h"
+ 
+ //#define DEBUG_TB_INVALIDATE
+ //#define DEBUG_FLUSH
+@@ -606,6 +607,12 @@ void cpu_physical_memory_rw(target_phys_addr_t _addr, uint8_t *buf,
+ #ifdef __ia64__
+                 sync_icache(ptr, l);
+ #endif 
++            } else {
++                if (gart_unknown_mmio(addr))
++                {
++                    qemu_invalidate_map_cache();
++                    cpu_physical_memory_rw(addr, buf, len, is_write);
++                }
+             }
+         } else {
+             if (io_index) {
+@@ -630,7 +637,15 @@ void cpu_physical_memory_rw(target_phys_addr_t _addr, uint8_t *buf,
+                 memcpy_words(buf, ptr, l);
+             } else {
+                 /* Neither RAM nor known MMIO space */
+-                memset(buf, 0xff, len); 
++                if (gart_unknown_mmio(addr))
++                {
++                    qemu_invalidate_map_cache();
++                    cpu_physical_memory_rw(addr, buf, len, is_write);
++                }
++                else
++                {
++                    memset(buf, 0xff, len); 
++                }
+             }
+         }
+         len -= l;
+diff --git a/xen-hooks.mak b/xen-hooks.mak
+index b9240e8..f40bce5 100644
+--- a/xen-hooks.mak
++++ b/xen-hooks.mak
+@@ -45,6 +45,7 @@ OBJS += thermal_mgmt.o
+ OBJS += vbestate.o
+ OBJS += switcher.o
+ OBJS += xen_acpi_video.o
++OBJS += gart.o
+ 
+ CONFIG_AUDIO=1
+ 
