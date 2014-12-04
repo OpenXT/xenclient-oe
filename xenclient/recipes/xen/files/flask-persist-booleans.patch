@@ -1,0 +1,60 @@
+diff --git a/tools/flask/utils/set-bool.c b/tools/flask/utils/set-bool.c
+index 4b847c5..555e8e0 100644
+--- a/tools/flask/utils/set-bool.c
++++ b/tools/flask/utils/set-bool.c
+@@ -16,6 +16,7 @@
+ #include <string.h>
+ #include <unistd.h>
+ #include <inttypes.h>
++#define XSM_BOOLEAN_CONFIG_PATH "/config/xsm/boolean/"
+ 
+ static void usage(char **argv)
+ {
+@@ -35,6 +36,35 @@ static int str2bool(const char *str)
+ 	exit(1);
+ }
+ 
++static int persistbool(char *name, int value)
++{
++	int fd, len, ret;
++	char buf[2], *fname;
++	
++	if (value < 0 || value > 1) {
++		return -1;
++	}
++
++	len = strlen(name) + strlen(XSM_BOOLEAN_CONFIG_PATH) + 1;
++	fname = (char *)malloc(sizeof(char) *len);
++	if (!fname)
++		return -1;
++	snprintf(fname, len, "%s%s", XSM_BOOLEAN_CONFIG_PATH, name);
++	fd = open(fname, O_WRONLY | O_CREAT | O_TRUNC, 0666);
++	if (fd < 0) {
++		fprintf(stderr, "\nxc_flask_setbool: Failed to write boolean file : %s, %s\n", fname,strerror(errno));
++		free(fname);
++		return -1;
++	}
++	// write the new bool value to file.
++	snprintf(buf, sizeof(buf), "%d", value);
++	
++	ret = write(fd, buf, sizeof(buf));
++	close(fd);
++	free(fname);
++	return ret;
++}
++
+ int main(int argc, char **argv)
+ {
+ 	int err = 0;
+@@ -62,6 +92,11 @@ int main(int argc, char **argv)
+ 		err = 2;
+ 		goto done;
+ 	}
++	err = persistbool(argv[1], value);
++	if(err < 0){ 
++		 fprintf(stderr, "xc_flask_setbool: Unable to persist boolean %s=%s: %s (%d)",
++                        argv[1], argv[2], strerror(errno), err);
++	}
+ 
+  done:
+ 	if ( xch )

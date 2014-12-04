@@ -1,0 +1,84 @@
+diff --git a/hw/pt-graphics.c b/hw/pt-graphics.c
+index 225c1b2..ef9c2a7 100644
+--- a/hw/pt-graphics.c
++++ b/hw/pt-graphics.c
+@@ -206,6 +206,47 @@ static uint32_t ati_legacy_io_read(void *opaque, uint32_t addr)
+     return val;
+ }
+ 
++extern int running_in_stubdomain;
++
++static int is_boot_vga(struct pci_dev *dev)
++{
++    char name[256];
++    char reply[3];
++    int fd, bytes_read;
++    int ret = 0;
++
++    /**
++     * FIXME: for the moment in case of stubdomain we consider that only video 
++     * card is given to the VM
++     */
++    if (running_in_stubdomain) {
++        return 1;
++    }
++
++    /* This code is part copy from libpciaccess */
++    snprintf(name, 255, "/sys/bus/pci/devices/%04x:%02x:%02x.%1u/boot_vga",
++             dev->domain, dev->bus, dev->dev, dev->func);
++
++    fd = open(name, O_RDONLY);
++    if (fd == -1) {
++        fprintf(stderr, "is_boot_vga: Unable to open %s\n", name);
++        return 0;
++    }
++
++    bytes_read = read(fd, reply, 1);
++    if (bytes_read != 1) {
++        goto out_boot_vga;
++    }
++
++    if (reply[0] == '1') {
++        ret = 1;
++    }
++
++out_boot_vga:
++    close(fd);
++    return ret;
++}
++
+ static void ati_legacy_io_write(void *opaque, uint32_t addr, uint32_t val)
+ {
+     PT_LOG("ERROR: port 0x%x I/O write not handled\n", addr);
+@@ -216,6 +257,11 @@ int ati_register_vga_regions(struct pt_dev *real_device)
+     PCIDevice *dev = (PCIDevice *)&real_device->dev;
+     int ret = 0;
+ 
++    /* Only register vga regions on the primary display */
++    if (!is_boot_vga(real_device->pci_dev)) {
++        return;
++    }
++
+     /* We need to intercept VBIOS accesses to port 0x3C3, which returns 
+      * device port I/O BAR. For the rest of legacy I/O ports, we allow direct
+      * accesses.
+@@ -457,7 +503,7 @@ int register_vga_regions(struct pt_dev *real_device)
+             break;
+     }
+ 
+-    if (!ret && surfman) {
++    if (!ret && surfman && is_boot_vga(real_device->pci_dev)) {
+         PT_LOG("Passing device to surfman\n");
+         surfman_passthrough_init(real_device);
+     }
+@@ -589,6 +635,10 @@ int setup_vga_pt(struct pt_dev *real_device)
+     if ( !gfx_passthru || real_device->pci_dev->device_class != 0x0300 )
+         return rc;
+ 
++    if (!is_boot_vga(real_device->pci_dev)) {
++        return rc;
++    }
++
+     /* Allocated 64K for the vga bios */
+     if ( !(bios = malloc(64 * 1024)) )
+         return -1;

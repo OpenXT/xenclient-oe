@@ -1,0 +1,377 @@
+diff --git a/hw/pc.h b/hw/pc.h
+index 9dc8d71..05dd031 100644
+--- a/hw/pc.h
++++ b/hw/pc.h
+@@ -115,6 +115,8 @@ void acpi_lid_state_changed(void);
+ 
+ void acpi_oem_event(void);
+ 
++void acpi_bcl_event(void);
++
+ /* hpet.c */
+ extern int no_hpet;
+ 
+diff --git a/hw/piix4acpi.c b/hw/piix4acpi.c
+index c724f9b..8f05506 100644
+--- a/hw/piix4acpi.c
++++ b/hw/piix4acpi.c
+@@ -33,6 +33,7 @@
+ #include "xen_acpi_common.h"
+ #include "thermal_mgmt.h"
+ 
++
+ #include "switcher.h"
+ 
+ #include <xen/hvm/ioreq.h>
+@@ -83,6 +84,7 @@
+ #define ACPI_SLEEP_BUTTON_BIT   0x0
+ #define ACPI_LID_STATE_BIT      0x17
+ #define ACPI_OEM_EVENT_BIT      0x18
++#define ACPI_BCL_EVENT_BIT      0x2
+ 
+ #define NR_PHP_SLOT_REG (NR_PCI_DEVFN/2)
+ #define DEVFN_TO_PHP_SLOT_REG(devfn) (devfn >> 1)
+@@ -293,6 +295,7 @@ static void acpi_map(PCIDevice *pci_dev, int region_num,
+     battery_mgmt_init(pci_dev);
+     xen_acpi_wmi_init(pci_dev);
+     thermal_mgmt_init(pci_dev);
++    xen_acpi_video_init(pci_dev);
+ }
+ 
+ static inline int test_bit(uint8_t *map, int bit)
+@@ -373,6 +376,11 @@ void acpi_oem_event(void)
+     assert_gpe_sts_bit(ACPI_OEM_EVENT_BIT);
+ }
+ 
++void acpi_bcl_event(void)
++{
++    assert_gpe_sts_bit(ACPI_BCL_EVENT_BIT);
++}
++
+ #ifdef CONFIG_PASSTHROUGH
+ 
+ /*
+diff --git a/hw/xen_acpi_common.h b/hw/xen_acpi_common.h
+index f442350..6c9b98b 100644
+--- a/hw/xen_acpi_common.h
++++ b/hw/xen_acpi_common.h
+@@ -31,5 +31,13 @@
+ void xen_acpi_wmi_init(PCIDevice *device);
+ void xen_acpi_wmi_cleanup(void);
+ 
++/* ACPI Video */
++#ifdef CONFIG_STUBDOM
++#define CONFIG_NO_XEN_ACPI_VIDEO
++#endif
++
++void xen_acpi_video_init(PCIDevice *device);
++void xen_acpi_video_cleanup(void);
++
+ #endif /* _XEN_ACPI_COMMON_H */
+ 
+diff --git a/hw/xen_acpi_video.c b/hw/xen_acpi_video.c
+new file mode 100644
+index 0000000..ce54424
+--- /dev/null
++++ b/hw/xen_acpi_video.c
+@@ -0,0 +1,235 @@
++/*
++ * xen_acpi_video.c
++ *
++ * Copyright (c) 2009 Kamala Narasimhan <kamala.narasimhan@citrix.com>
++ * Copyright (c) 2011 Ross Philipson <ross.philipson@citrix.com>
++ * Copyright (c) 2011 Citrix Systems, Inc.
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
++ */
++
++/* When well known output device object methods in virtual ACPI space are called,
++ * the guest delegate those requests to qemu and the below implementation in qemu
++ * talks to the actual firmware through dom0 kernel xen/acpi driver implementation 
++ * to cater to those guest level acpi requests.
++ */
++
++#include "hw.h"
++#include "pc.h"
++#include "qemu-log.h"
++#include "qemu-xen.h"
++#include "isa.h"
++#include "xen_acpi_common.h"
++#include <sys/ioctl.h>
++#include <xenacpi.h>
++
++#ifndef CONFIG_NO_XEN_ACPI_VIDEO
++
++/* #define XEN_ACPI_VIDEO_DEBUG */
++
++#define VID_LOG(fmt, ...) qemu_log("XEN ACPI-VIDEO: " fmt, ## __VA_ARGS__)
++
++static enum XENACPI_VIDEO_COMMAND video_cmd_type = XENACPI_VIDEO_CMD_NONE;
++static enum XENACPI_VIDEO_BCL_COMMAND bcl_command = XENACPI_BCL_NONE; 
++static struct xenacpi_vid_brightness_levels *brightness_levels = NULL;
++static uint32_t num_brightness_levels = 0;
++static uint32_t current_index = 0;
++
++/*
++ * xen_acpi_video_get_num_brightness_levels
++ */
++static uint32_t xen_acpi_video_get_num_brightness_levels(void)
++{
++    /* The BCL support has been enhanced to allow the DSDT in the guests to be
++     * updated with the BCL count required to accept the BCL values that will be
++     * provided through this interface. The xcpmd places the BCL count in xenstore
++     * where it is read by the ACPI setup code in hvmloader and the BCL package
++     * size is updated when then guest starts.
++     *
++     * The code to truncate the list has been removed. The BCL count returned
++     * by this routine is now just the value read from firmware. The ASL code
++     * for ODEV will match this value. In the case where this interface is not
++     * present, the port read will return an unmapped value that will cause
++     * a default BCL package to be returned. It is also possible that the
++     * xcpmd/hvmloader work was not done. In that case the size in here will
++     * either fit in the default size or will be bigger and cause the default
++     * package to be returned in ODEV._BCL which is no worse than the original code.
++     */
++    /* Original Comment:
++     * Our virtual acpi layer can only accomodate a package of 11 elements
++     * at this point which appear to be enough with the firmwares we have
++     * checked so far.  If that should change it is easy enough to 
++     * accomodate more and if such change become common place, we can then
++     * make asl package creation dynamic too.
++     */
++
++#ifdef XEN_ACPI_VIDEO_DEBUG
++    VID_LOG("Number of brightness levels - %d\n", num_brightness_levels);
++#endif
++
++    return num_brightness_levels;
++}
++
++/*
++ * xen_acpi_video_get_next_brightness_level
++ */
++static uint32_t xen_acpi_video_get_next_brightness_level(void)
++{
++    if ( brightness_levels == NULL )
++    {
++        VID_LOG("error, brightness levels array empty!\n");
++        return 0;
++    }
++
++    if ( current_index >= num_brightness_levels )
++    {
++        VID_LOG("error, index overflow getting next brightness level.\n");
++        return 0;
++    }
++
++#ifdef XEN_ACPI_VIDEO_DEBUG
++    VID_LOG("returning next level - %d\n", brightness_levels->levels[current_index]);
++#endif
++
++    return brightness_levels->levels[current_index++];
++}
++
++/*
++ * xen_acpi_video_port_readb
++ */
++static uint32_t xen_acpi_video_port_readb(void *opaque, uint32_t addr)
++{
++#ifdef XEN_ACPI_VIDEO_DEBUG
++    VID_LOG("%s: enter\n", __func__);
++#endif
++
++    switch ( video_cmd_type )
++    {
++        case XENACPI_VIDEO_GET_NUM_LEVELS:
++            return xen_acpi_video_get_num_brightness_levels();
++        case XENACPI_VIDEO_GET_LEVELS:
++            return xen_acpi_video_get_next_brightness_level();
++        case XENACPI_VIDEO_CMD_NONE:
++        default:
++            VID_LOG("%s: error, unknown request - %d\n",
++                    __func__, video_cmd_type);            
++            break;
++    }
++
++    return 0;
++}
++
++/*
++ * xen_acpi_video_port_writeb
++ */
++static void xen_acpi_video_port_writeb(void *opaque, uint32_t addr, uint32_t val)
++{
++#ifdef XEN_ACPI_VIDEO_DEBUG
++    VID_LOG("%s: enter, value - %d\n", __func__, val);
++#endif
++
++    video_cmd_type = val;
++    if ( val == XENACPI_VIDEO_CMD_NONE )
++        current_index = 0;
++}
++
++/*
++ * xen_acpi_video_bcl_cmd_port_readb,
++ */
++static uint32_t xen_acpi_video_bcl_cmd_port_readb(void *opaque, uint32_t addr)
++{
++    bcl_command = (enum XENACPI_VIDEO_BCL_COMMAND)xenstore_read_bcl_cmd();
++#ifdef XEN_ACPI_VIDEO_DEBUG
++    VID_LOG("%s: bcl_command - %d\n", __func__, bcl_command);
++#endif    
++    return bcl_command;
++}
++
++/*
++ * xen_acpi_video_initialize_brightness_info
++ */
++static void xen_acpi_video_initialize_brightness_info(void)
++{
++    int ret, err;    
++
++    /* num_brightness_levels == 0 until levels are safely gotten - this
++     * value will cause the BCL ASL code to use the default package.
++     */
++    ret = xenacpi_vid_brightness_levels(&brightness_levels, &err);
++    if ( ret == -1 )
++    {
++        VID_LOG("error, failed to get BCL information from the firmware - %d\n", err);
++        return;
++    }
++    if ( brightness_levels->level_count < 4 )
++    {
++        VID_LOG("error, invalid BCL count: %d\n", brightness_levels->level_count);
++        xenacpi_free_buffer(brightness_levels);
++        brightness_levels = NULL;
++        return;
++    }
++
++    num_brightness_levels = brightness_levels->level_count;
++
++#ifdef XEN_ACPI_VIDEO_DEBUG
++    {
++        uint32_t i;
++
++        VID_LOG("Initialize brightness info succeeded!\n");
++        VID_LOG("Number of brightness levels - %d\n", num_brightness_levels);
++        VID_LOG("Brightness levels -");
++        for (i = 0; i < num_brightness_levels; i++)
++            VID_LOG("  %d", brightness_levels->levels[i]);
++        VID_LOG("\n");
++    }
++#endif
++}
++
++/*
++ * xen_acpi_video_init
++ */
++void xen_acpi_video_init(PCIDevice *device)
++{
++    xenstore_register_for_bcl_events();
++
++    register_ioport_read(XENACPI_VIDEO_PORTB, 1, 1, xen_acpi_video_port_readb, device);
++    register_ioport_write(XENACPI_VIDEO_PORTB, 1, 1, xen_acpi_video_port_writeb, device);
++    register_ioport_read(XENACPI_BCL_CMD_PORT, 1, 1, xen_acpi_video_bcl_cmd_port_readb, device);
++
++    xen_acpi_video_initialize_brightness_info();
++
++    VID_LOG("Xen ACPI Video registration succeeded.\n");
++}
++
++/*
++ * xen_acpi_video_cleanup(void)
++ */
++void xen_acpi_video_cleanup(void)
++{
++    num_brightness_levels = 0;
++    if ( brightness_levels != NULL )
++    {
++        xenacpi_free_buffer(brightness_levels);
++        brightness_levels = NULL;
++    }
++}
++
++#else
++
++void xen_acpi_video_init(PCIDevice *device) { }
++void xen_acpi_video_cleanup(void) { }
++
++#endif /* CONFIG_NO_XEN_ACPI_VIDEO */
++
+diff --git a/qemu-xen.h b/qemu-xen.h
+index 8a2ffeb..d84d05e 100644
+--- a/qemu-xen.h
++++ b/qemu-xen.h
+@@ -137,6 +137,8 @@ int xenstore_read_lid_state(void);
+ int xenstore_read_current_temperature(void);
+ int xenstore_read_critical_temperature(void);
+ void xenstore_register_for_oem_events(void);
++int xenstore_read_bcl_cmd(void);
++void xenstore_register_for_bcl_events(void);
+ int xenstore_pv_driver_build_blacklisted(uint16_t product_number,
+                                          uint32_t build_nr);
+ void xenstore_do_eject(BlockDriverState *bs);
+diff --git a/xen-hooks.mak b/xen-hooks.mak
+index 22659e8..0e456bb 100644
+--- a/xen-hooks.mak
++++ b/xen-hooks.mak
+@@ -42,6 +42,7 @@ OBJS += xen_acpi_wmi.o
+ OBJS += thermal_mgmt.o
+ OBJS += vbestate.o
+ OBJS += switcher.o
++OBJS += xen_acpi_video.o
+ 
+ CONFIG_AUDIO=1
+ 
+diff --git a/xenstore.c b/xenstore.c
+index aa76981..c9b6e27 100644
+--- a/xenstore.c
++++ b/xenstore.c
+@@ -1099,6 +1099,11 @@ void xenstore_process_event(void *opaque)
+         goto out;
+     }
+ 
++    if (!strcmp(vec[XS_WATCH_TOKEN], "bclevt")) {
++        acpi_bcl_event();
++        goto out;
++    }
++
+     hd_index = drive_name_to_index(vec[XS_WATCH_TOKEN]);
+     if (hd_index == -1) {
+         fprintf(stderr,"medium change watch on `%s' -"
+@@ -1681,6 +1686,11 @@ void xenstore_register_for_oem_events(void)
+    xs_watch(xsh, "/oem/event", "oemevt");
+ }
+ 
++void xenstore_register_for_bcl_events(void)
++{
++    xs_watch(xsh, "/pm/events/bclevent", "bclevt");
++}
++
+ int xenstore_read_ac_adapter_state(void)
+ {
+     return xenstore_extended_power_mgmt_read_int("ac_adapter", 1);
+@@ -1701,6 +1711,11 @@ int xenstore_read_critical_temperature(void)
+     return xenstore_extended_power_mgmt_read_int("critical_temperature", 100);
+ }
+ 
++int xenstore_read_bcl_cmd(void)
++{
++    return xenstore_extended_power_mgmt_read_int("bcl_cmd", 0);
++}
++
+ /*
+  * Create a store entry for a device (e.g., monitor, serial/parallel lines).
+  * The entry is <domain-path><storeString>/tty and the value is the name

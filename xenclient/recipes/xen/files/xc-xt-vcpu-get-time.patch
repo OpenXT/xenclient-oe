@@ -1,0 +1,70 @@
+diff --git a/xen/arch/x86/hvm/hvm.c b/xen/arch/x86/hvm/hvm.c
+index 76e6078..8950c50 100644
+--- a/xen/arch/x86/hvm/hvm.c
++++ b/xen/arch/x86/hvm/hvm.c
+@@ -3193,6 +3193,7 @@ static long hvm_vcpu_op(
+     case VCPUOP_stop_singleshot_timer:
+     case VCPUOP_register_vcpu_info:
+     case VCPUOP_register_vcpu_time_memory_area:
++    case VCPUOP_get_time:
+         rc = do_vcpu_op(cmd, vcpuid, arg);
+         break;
+     default:
+@@ -3252,6 +3253,7 @@ static long hvm_vcpu_op_compat32(
+     case VCPUOP_stop_singleshot_timer:
+     case VCPUOP_register_vcpu_info:
+     case VCPUOP_register_vcpu_time_memory_area:
++    case VCPUOP_get_time:
+         rc = compat_vcpu_op(cmd, vcpuid, arg);
+         break;
+     default:
+diff --git a/xen/common/compat/domain.c b/xen/common/compat/domain.c
+index e756f54..c478276 100644
+--- a/xen/common/compat/domain.c
++++ b/xen/common/compat/domain.c
+@@ -74,6 +74,7 @@ int compat_vcpu_op(int cmd, int vcpuid, XEN_GUEST_HANDLE_PARAM(void) arg)
+     case VCPUOP_stop_singleshot_timer:
+     case VCPUOP_register_vcpu_info:
+     case VCPUOP_send_nmi:
++    case VCPUOP_get_time:
+         rc = do_vcpu_op(cmd, vcpuid, arg);
+         break;
+ 
+diff --git a/xen/common/domain.c b/xen/common/domain.c
+index 3497376..afb6e76 100644
+--- a/xen/common/domain.c
++++ b/xen/common/domain.c
+@@ -1149,6 +1149,16 @@ long do_vcpu_op(int cmd, int vcpuid, XEN_GUEST_HANDLE_PARAM(void) arg)
+         break;
+ #endif
+ 
++	case VCPUOP_get_time:
++	{
++		struct vcpu_get_time now_t;
++		now_t.now = NOW();
++		rc = 0;
++		if (copy_to_guest(arg, &now_t, 1))
++			rc = -EFAULT;
++		break;
++	}
++
+     default:
+         rc = arch_do_vcpu_op(cmd, v, arg);
+         break;
+diff --git a/xen/include/public/vcpu.h b/xen/include/public/vcpu.h
+index e888daf..a8f2122 100644
+--- a/xen/include/public/vcpu.h
++++ b/xen/include/public/vcpu.h
+@@ -227,6 +227,12 @@ struct vcpu_register_time_memory_area {
+ typedef struct vcpu_register_time_memory_area vcpu_register_time_memory_area_t;
+ DEFINE_XEN_GUEST_HANDLE(vcpu_register_time_memory_area_t);
+ 
++#define VCPUOP_get_time           14 /* arg == vcpu_get_time_t */
++struct vcpu_get_time {
++    uint64_t now;
++};
++typedef struct vcpu_get_time vcpu_get_time_t;
++DEFINE_XEN_GUEST_HANDLE(vcpu_get_time_t);
+ #endif /* __XEN_PUBLIC_VCPU_H__ */
+ 
+ /*

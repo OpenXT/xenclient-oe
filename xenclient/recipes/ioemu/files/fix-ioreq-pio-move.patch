@@ -1,0 +1,75 @@
+base on upstream commit:
+commit 14d40183725361e6350166099556c7661063921b
+Author: Dongxiao Xu <dongxiao.xu@intel.com>
+Date:   Wed Aug 22 10:17:43 2012 +0000
+
+    xen-all.c: fix multiply issue for int and uint types
+    
+    If the two multiply operands are int and uint types separately,
+    the int type will be transformed to uint firstly, which is not the
+    intent in our code piece. The fix is to add (int64_t) transform
+    for the uint type before the multiply.
+    
+    Signed-off-by: Dongxiao Xu <dongxiao.xu@intel.com>
+    Signed-off-by: Stefano Stabellini <stefano.stabellini@eu.citrix.com>
+
+diff --git a/i386-dm/helper2.c b/i386-dm/helper2.c
+index b094d4a..860b2cd 100644
+--- a/i386-dm/helper2.c
++++ b/i386-dm/helper2.c
+@@ -346,7 +346,7 @@ static void cpu_ioreq_pio(CPUState *env, ioreq_t *req)
+             for (i = 0; i < req->count; i++) {
+                 tmp = do_inp(env, req->addr, req->size);
+                 write_physical((target_phys_addr_t) req->data
+-                  + (sign * i * req->size),
++                  + (sign * i * (int64_t)req->size),
+                   req->size, &tmp);
+             }
+         }
+@@ -358,7 +358,7 @@ static void cpu_ioreq_pio(CPUState *env, ioreq_t *req)
+                 unsigned long tmp = 0;
+ 
+                 read_physical((target_phys_addr_t) req->data
+-                  + (sign * i * req->size),
++                  + (sign * i * (int64_t)req->size),
+                   req->size, &tmp);
+                 do_outp(env, req->addr, req->size, tmp);
+             }
+@@ -376,13 +376,13 @@ static void cpu_ioreq_move(CPUState *env, ioreq_t *req)
+         if (req->dir == IOREQ_READ) {
+             for (i = 0; i < req->count; i++) {
+                 read_physical(req->addr
+-                  + (sign * i * req->size),
++                  + (sign * i * (int64_t)req->size),
+                   req->size, &req->data);
+             }
+         } else if (req->dir == IOREQ_WRITE) {
+             for (i = 0; i < req->count; i++) {
+                 write_physical(req->addr
+-                  + (sign * i * req->size),
++                  + (sign * i * (int64_t)req->size),
+                   req->size, &req->data);
+             }
+         }
+@@ -392,7 +392,7 @@ static void cpu_ioreq_move(CPUState *env, ioreq_t *req)
+         if (req->dir == IOREQ_READ) {
+             for (i = 0; i < req->count; i++) {
+                 read_physical(req->addr
+-                  + (sign * i * req->size),
++                  + (sign * i * (int64_t)req->size),
+                   req->size, &tmp);
+                 write_physical((target_phys_addr_t )req->data
+                   + (sign * i * req->size),
+@@ -401,10 +401,10 @@ static void cpu_ioreq_move(CPUState *env, ioreq_t *req)
+         } else if (req->dir == IOREQ_WRITE) {
+             for (i = 0; i < req->count; i++) {
+                 read_physical((target_phys_addr_t) req->data
+-                  + (sign * i * req->size),
++                  + (sign * i * (int64_t)req->size),
+                   req->size, &tmp);
+                 write_physical(req->addr
+-                  + (sign * i * req->size),
++                  + (sign * i * (int64_t)req->size),
+                   req->size, &tmp);
+             }
+         }

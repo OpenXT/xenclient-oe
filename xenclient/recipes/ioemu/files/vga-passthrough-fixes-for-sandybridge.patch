@@ -1,0 +1,171 @@
+diff --git a/hw/pass-through.c b/hw/pass-through.c
+index a1f8616..24a2401 100644
+--- a/hw/pass-through.c
++++ b/hw/pass-through.c
+@@ -1651,7 +1651,7 @@ static int pt_register_regions(struct pt_dev *assigned_device)
+         ret |= xc_domain_memory_mapping(xc_handle, domid, 0xa0, 0xa0, 32,
+                                        DPCI_ADD_MAPPING);
+         // Read opregion address from 0xfc
+-        opregion = pt_pci_host_read_long(0, 2, 0, 0xfc) & 0xffffff00;
++        opregion = pt_pci_host_read(0, 2, 0, 0xfc, 4) & 0xffffff00;
+         ret |= xc_domain_memory_mapping(xc_handle, domid,
+                 GUEST_OPREGION_MAPPED >> XC_PAGE_SHIFT,
+                 opregion >> XC_PAGE_SHIFT,
+@@ -1732,7 +1732,7 @@ static void pt_unregister_regions(struct pt_dev *assigned_device)
+         ret |= xc_domain_memory_mapping(xc_handle, domid, 0xa0, 0xa0, 32,
+                                         DPCI_REMOVE_MAPPING);
+         // Read opregion address from 0xfc
+-        opregion = pt_pci_host_read_long(0, 2, 0, 0xfc) & 0xffffff00;
++        opregion = pt_pci_host_read(0, 2, 0, 0xfc, 4) & 0xffffff00;
+         ret |= xc_domain_memory_mapping(xc_handle, domid,
+                 GUEST_OPREGION_MAPPED >> XC_PAGE_SHIFT,
+                 opregion >> XC_PAGE_SHIFT,
+@@ -4227,41 +4227,50 @@ err:
+     return status;
+ }
+ 
+-u8      pt_pci_host_read_byte(int bus, int dev, int fn, u32 addr)
++static void pci_access_init(void)
+ {
+-    struct pci_dev*     pci_dev;
+-    u8                  val;
++    struct pci_access *pci_access;
+ 
+-    pci_dev = pci_get_dev(dpci_infos.pci_access, 0, bus, dev, fn);
+-    if (!pci_dev)
+-        return 0;
+-    val = pci_read_byte(pci_dev, addr);
+-    pci_free_dev(pci_dev);
+-    return val;
++    if (dpci_infos.pci_access)
++	return;
++
++    /* Initialize libpci */
++    pci_access = pci_alloc();
++    if ( pci_access == NULL ) {
++	PT_LOG("Error: pci_access is NULL\n");
++	return;
++    }
++    pci_init(pci_access);
++    pci_scan_bus(pci_access);
++    dpci_infos.pci_access = pci_access;
+ }
+ 
+-u16     pt_pci_host_read_word(int bus, int dev, int fn, u32 addr)
++u32 pt_pci_host_read(int bus, int dev, int fn, u32 addr, int len)
+ {
+-    struct pci_dev*     pci_dev;
+-    u16                 val;
++    struct pci_dev *pci_dev;
++    u32 val = -1;
++    u32 ret = 0;
+ 
++    pci_access_init();
+     pci_dev = pci_get_dev(dpci_infos.pci_access, 0, bus, dev, fn);
+-    if (!pci_dev)
+-        return 0;
+-    val = pci_read_word(pci_dev, addr);
+-    pci_free_dev(pci_dev);
+-    return val;
++    if ( !pci_dev )
++	return 0;
++
++    pci_read_block(pci_dev, addr, (u8 *) &val, len);
++    memcpy((u8 *)&ret, (u8 *)&val, len);
++    return ret;
+ }
+ 
+-u32     pt_pci_host_read_long(int bus, int dev, int fn, u32 addr)
++int pt_pci_host_write(int bus, int dev, int fn, u32 addr, u32 val, int len)
+ {
+-    struct pci_dev*     pci_dev;
+-    u32                 val;
++    struct pci_dev *pci_dev;
++    int ret = 0;
+ 
++    pci_access_init();
+     pci_dev = pci_get_dev(dpci_infos.pci_access, 0, bus, dev, fn);
+-    if (!pci_dev)
++    if ( !pci_dev )
+         return 0;
+-    val = pci_read_long(pci_dev, addr);
+-    pci_free_dev(pci_dev);
+-    return val;
++
++    ret = pci_write_block(pci_dev, addr, (u8 *) &val, len);
++    return ret;
+ }
+diff --git a/hw/pass-through.h b/hw/pass-through.h
+index 1752e8d..5bb3329 100644
+--- a/hw/pass-through.h
++++ b/hw/pass-through.h
+@@ -392,9 +392,8 @@ static inline pciaddr_t pt_pci_base_addr(pciaddr_t base)
+     return base & PCI_ADDR_MEM_MASK;
+ }
+ 
+-u8 pt_pci_host_read_byte(int bus, int dev, int fn, u32 addr);
+-u16 pt_pci_host_read_word(int bus, int dev, int fn, u32 addr);
+-u32 pt_pci_host_read_long(int bus, int dev, int fn, u32 addr);
++u32 pt_pci_host_read(int bus, int dev, int fn, u32 addr, int len);
++int pt_pci_host_write(int bus, int dev, int fn, u32 addr, u32 val, int len);
+ 
+ #endif /* __PASSTHROUGH_H__ */
+ 
+diff --git a/hw/pc.c b/hw/pc.c
+index 09adc5b..28945de 100644
+--- a/hw/pc.c
++++ b/hw/pc.c
+@@ -979,8 +979,13 @@ vga_bios_error:
+         pci_bus = NULL;
+     }
+ 
+-    (void)intel_pci_bridge_init(pci_bus, 0x1f << 3, 0x8086, 0x124b, "intel_bridge_1f", 0x4);
+-
++    if (vga_passthrough) {
++	    uint16_t vid, did, rid;
++	    vid = pt_pci_host_read(0, 0x1f, 0, 0, 2);
++	    did = pt_pci_host_read(0, 0x1f, 0, 2, 2);
++	    rid = pt_pci_host_read(0, 0x1f, 0, 8, 1);
++	    (void)intel_pci_bridge_init(pci_bus, 0x1f << 3, vid, did, "intel_bridge_1f", rid);
++    }
+ 
+     /* init basic PC hardware */
+     register_ioport_write(0x80, 1, 1, ioport80_write, NULL);
+diff --git a/hw/pci.c b/hw/pci.c
+index ba2e1d2..5cfae23 100644
+--- a/hw/pci.c
++++ b/hw/pci.c
+@@ -646,24 +646,15 @@ uint32_t pci_data_read(void *opaque, uint32_t addr, int len)
+ 
+             switch (config_addr)
+             {
+-                case PCI_DEVICE_ID:
+-                case PCI_VENDOR_ID:
+-                case PCI_CLASS_DEVICE:
+-                case 0xa2:
+-                case 0xb0:
+-                case 0x52: // GMCH
+-                    switch (len)
+-                    {
+-                        case 1:
+-                            val = pt_pci_host_read_byte(0, 0, 0, config_addr);
+-                            break;
+-                        case 2:
+-                            val = pt_pci_host_read_word(0, 0, 0, config_addr);
+-                            break;
+-                        case 4:
+-                            val = pt_pci_host_read_long(0, 0, 0, config_addr);
+-                            break;
+-                    }
++                case 0x00:        /* vendor id */
++                case 0x02:        /* device id */
++                case 0x52:        /* processor graphics control register */
++                case 0xa0:        /* top of memory */
++                case 0xb0:        /* ILK: BSM: should read from dev 2 offset 0x5c */
++                case 0x58:        /* SNB: PAVPC Offset */
++                case 0xa4:        /* SNB: graphics base of stolen memory */
++                case 0xa8:        /* SNB: base of GTT stolen memory */
++                    val = pt_pci_host_read(0, 0, 0, config_addr, len);
+                     break;
+             }
+         }

@@ -1,0 +1,144 @@
+diff --git a/hw/pass-through.c b/hw/pass-through.c
+index 6dd0208..73c2f23 100644
+--- a/hw/pass-through.c
++++ b/hw/pass-through.c
+@@ -828,8 +828,8 @@ static int token_value(char *token)
+ static int next_bdf(char **str, int *seg, int *bus, int *dev, int *func,
+                     char **opt, int *vslot)
+ {
+-    char *token, *endptr;
+-    const char *delim = ":.-";
++    char *token, *token2, *endptr;
++    const char *delim = ":.-", *delim_at = ":.-@";
+ 
+     if ( !(*str) ||
+           ( !strchr(*str, ':') && !strchr(*str, '.')) )
+@@ -845,24 +845,20 @@ static int next_bdf(char **str, int *seg, int *bus, int *dev, int *func,
+     *dev  = token_value(token);
+ 
+     token  = strsep(str, delim);
+-
+-    *opt = strchr(token, '@');
+-    if (*opt)
++    if (strchr(token, '@'))
+     {
+-        *(*opt)++ = '\0';
+-        *vslot = token_value(*opt);
++        token2  = strsep(&token, delim_at);
++        *func  = token_value(token2);
++
++        token2 = strsep(&token, delim);
++        *vslot = token_value(token2);
+     }
+     else
+     {
++        *func  = token_value(token);
+         *vslot = AUTO_PHP_SLOT;
+-        *opt = token;
+     }
+-
+-    *opt = strchr(*opt, ',');
+-    if (*opt)
+-        *(*opt)++ = '\0';
+-
+-    *func  = token_value(token);
++    *opt = NULL;
+ 
+     return 1;
+ }
+@@ -3784,8 +3780,8 @@ static struct pt_dev * register_real_device(PCIBus *e_bus,
+     char *key, *val;
+     int msi_translate, power_mgmt;
+ 
+-    PT_LOG("Assigning real physical device %02x:%02x.%x ...\n",
+-        r_bus, r_dev, r_func);
++    PT_LOG("Assigning real physical device %02x:%02x.%x -> %d...\n",
++        r_bus, r_dev, r_func, e_slot);
+ 
+     /* Find real device structure */
+     for (pci_dev = pci_access->devices; pci_dev != NULL;
+@@ -4068,7 +4064,9 @@ int pt_init(PCIBus *e_bus, const char *direct_pci)
+     char slot_str[8];
+     char *direct_pci_head = NULL;
+     char *direct_pci_p = NULL;
+-    char *opt;
++    char *direct_pci_head2 = NULL;
++    char *direct_pci_p2 = NULL;
++    char *opt = NULL;
+ 
+     /* Initialize libpci */
+     pci_access = pci_alloc();
+@@ -4090,6 +4088,8 @@ int pt_init(PCIBus *e_bus, const char *direct_pci)
+ 
+     if ( !(direct_pci_head = direct_pci_p = strdup(direct_pci)) )
+         return 0;
++    if ( !(direct_pci_head2 = direct_pci_p2 = strdup(direct_pci)) )
++        return 0;
+ 
+     /* The minimal format of direct_pci: xxxx:xx:xx.x-xxxx:xx:xx.x-... It may
+      * be even longer considering the per-device opts(see the parsing for
+@@ -4108,22 +4108,44 @@ int pt_init(PCIBus *e_bus, const char *direct_pci)
+         goto err;
+     }
+ 
++    PT_LOG("pt_init direct_pci=%s\n", direct_pci);
+     /* Assign given devices to guest */
+-    while ( next_bdf(&direct_pci_p, &seg, &b, &d, &f, &opt, &s) )
+-    {
+-        /* Register real device with the emulated bus */
+-        pt_dev = register_real_device(e_bus, "DIRECT PCI", s,
+-            b, d, f, PT_MACHINE_IRQ_AUTO, pci_access, opt);
+-        if ( pt_dev == NULL )
+-        {
+-            PT_LOG("Error: Registration failed (%02x:%02x.%x)\n", b, d, f);
+-            goto err;
++    /* Devices with fixed vslot first */
++    while ( next_bdf(&direct_pci_p2, &seg, &b, &d, &f, &opt, &s) )
++    {
++        if (s != AUTO_PHP_SLOT) {
++            /* Register real device with the emulated bus */
++            pt_dev = register_real_device(e_bus, "DIRECT PCI", s,
++              b, d, f, PT_MACHINE_IRQ_AUTO, pci_access, opt);
++            if ( pt_dev == NULL )
++            {
++                PT_LOG("Error: Registration failed (%02x:%02x.%x)\n", b, d, f);
++                goto err;
++            }
++
++            /* Record the virtual slot info */
++            sprintf(slot_str, "0x%02x;", PCI_SLOT(pt_dev->dev.devfn));
++            strcat(vslots, slot_str);
+         }
++    }
+ 
+-        /* Record the virtual slot info */
+-        sprintf(slot_str, "0x%02x;", PCI_SLOT(pt_dev->dev.devfn));
++    /* Devices with auto assigned vslot next */
++    while ( next_bdf(&direct_pci_p, &seg, &b, &d, &f, &opt, &s) )
++    {
++        if (s == AUTO_PHP_SLOT) {
++            /* Register real device with the emulated bus */
++            pt_dev = register_real_device(e_bus, "DIRECT PCI", s,
++              b, d, f, PT_MACHINE_IRQ_AUTO, pci_access, opt);
++            if ( pt_dev == NULL )
++            {
++                PT_LOG("Error: Registration failed (%02x:%02x.%x)\n", b, d, f);
++                goto err;
++            }
+ 
+-        strcat(vslots, slot_str);
++            /* Record the virtual slot info */
++            sprintf(slot_str, "0x%02x;", PCI_SLOT(pt_dev->dev.devfn));
++            strcat(vslots, slot_str);
++        }
+     }
+ 
+     /* Write virtual slots info to xenstore for Control panel use */
+@@ -4133,6 +4155,7 @@ int pt_init(PCIBus *e_bus, const char *direct_pci)
+ err:
+     qemu_free(vslots);
+     free(direct_pci_head);
++    free(direct_pci_head2);
+ 
+     return status;
+ }

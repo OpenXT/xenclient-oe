@@ -1,0 +1,2323 @@
+Refactor dirty VRAM code
+
+diff --git a/xen/arch/x86/hvm/Makefile b/xen/arch/x86/hvm/Makefile
+index eea5555..f37736b 100644
+--- a/xen/arch/x86/hvm/Makefile
++++ b/xen/arch/x86/hvm/Makefile
+@@ -2,6 +2,7 @@ subdir-y += svm
+ subdir-y += vmx
+ 
+ obj-y += asid.o
++obj-y += dirty_vram.o
+ obj-y += emulate.o
+ obj-y += hpet.o
+ obj-y += hvm.o
+@@ -22,4 +23,4 @@ obj-y += vlapic.o
+ obj-y += vmsi.o
+ obj-y += vpic.o
+ obj-y += vpt.o
+-obj-y += vpmu.o
+\ No newline at end of file
++obj-y += vpmu.o
+diff --git a/xen/arch/x86/hvm/dirty_vram.c b/xen/arch/x86/hvm/dirty_vram.c
+new file mode 100644
+index 0000000..22375c2
+--- /dev/null
++++ b/xen/arch/x86/hvm/dirty_vram.c
+@@ -0,0 +1,878 @@
++/*
++ * arch/x86/hvm/dirty_vram.c: Bookkeep/query dirty VRAM pages
++ * with support for multiple frame buffers.
++ *
++ * Copyright (c) 2012, Citrix Systems, Inc. (Robert Phillips)
++ * 
++ * This program is free software; you can redistribute it and/or modify it
++ * under the terms and conditions of the GNU General Public License,
++ * version 2, as published by the Free Software Foundation.
++ *
++ * This program is distributed in the hope it will be useful, but WITHOUT
++ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
++ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
++ * more details.
++ *
++ * You should have received a copy of the GNU General Public License along with
++ * this program; if not, write to the Free Software Foundation, Inc., 59 Temple
++ * Place - Suite 330, Boston, MA 02111-1307 USA.
++ */
++
++
++#include <xen/types.h>
++#include <xen/sched.h>
++#include <xen/guest_access.h>
++#include <asm/shadow.h>
++#include <asm/hvm/dirty_vram.h>
++#include "../mm/mm-locks.h"
++
++#define DEBUG_stop_tracking_all_vram          1
++#define DEBUG_allocating_dirty_vram_range     1
++#define DEBUG_high_water_mark_for_vram_ranges 1
++#define DEBUG_freeing_dirty_vram_range        1
++#define DEBUG_allocate_paddr_links_page       0
++#define DEBUG_update_vram_mapping             0
++
++/* Allocates domain's dirty_vram structure */
++dv_dirty_vram_t *
++dirty_vram_alloc(struct domain *d)
++{
++    dv_dirty_vram_t *dirty_vram;
++    ASSERT( paging_locked_by_me(d) );
++    dirty_vram = d->arch.hvm_domain.dirty_vram = xmalloc(dv_dirty_vram_t);
++    if ( dirty_vram )
++    {
++        memset(dirty_vram, 0, sizeof(*dirty_vram));
++        INIT_LIST_HEAD(&dirty_vram->range_head);
++        INIT_LIST_HEAD(&dirty_vram->ext_head);
++    }
++    return dirty_vram;
++}
++
++/* Returns domain's dirty_vram structure,
++ * allocating it if necessary */
++dv_dirty_vram_t *
++dirty_vram_find_or_alloc(struct domain *d)
++{
++    dv_dirty_vram_t *dirty_vram = d->arch.hvm_domain.dirty_vram;
++    ASSERT( paging_locked_by_me(d) );
++    if ( !dirty_vram )
++        dirty_vram = dirty_vram_alloc(d);
++    return dirty_vram;
++}
++
++
++/* Free domain's dirty_vram structure */
++void dirty_vram_free(struct domain *d)
++{
++    dv_dirty_vram_t *dirty_vram = d->arch.hvm_domain.dirty_vram;
++    ASSERT( paging_locked_by_me(d) );
++    if ( dirty_vram )
++    {
++        struct list_head *curr, *next;
++        /* Free all the ranges */
++        list_for_each_safe(curr, next, &dirty_vram->range_head)
++        {
++            dv_range_t *range = list_entry(curr, dv_range_t, range_link);
++#if DEBUG_stop_tracking_all_vram
++            gdprintk(XENLOG_DEBUG, "[%05lx:%05lx] stop tracking all vram\n",
++                     range->begin_pfn, range->end_pfn);
++#endif
++            xfree(range->pl_tab);
++            xfree(range);
++        }
++        /* Free all the extension pages */
++        list_for_each_safe(curr, next, &dirty_vram->ext_head)
++        {
++            xfree(curr);            
++        }
++        xfree(dirty_vram);
++        d->arch.hvm_domain.dirty_vram = NULL;
++    }
++}
++
++/* Returns dirty vram range containing gfn, NULL if none */
++struct dv_range *
++dirty_vram_range_find_gfn(struct domain *d,
++                          unsigned long gfn)
++{
++    struct dv_dirty_vram *dirty_vram = d->arch.hvm_domain.dirty_vram;
++    ASSERT( paging_locked_by_me(d) );
++    if ( dirty_vram )
++    {
++        struct list_head *curr;
++        list_for_each(curr, &dirty_vram->range_head)
++        {
++            dv_range_t *range = list_entry(curr, dv_range_t, range_link);
++            if ( gfn >= range->begin_pfn &&
++                 gfn <  range->end_pfn )
++            {
++                return range;
++            }
++        }
++    }
++    return NULL;
++}
++
++/* Returns pointer to dirty vram range matching [begin_pfn .. end_pfn ), NULL if none. */
++dv_range_t *
++dirty_vram_range_find(struct domain *d,
++                      unsigned long begin_pfn,
++                      unsigned long nr)
++{
++    unsigned long end_pfn = begin_pfn + nr;
++    dv_dirty_vram_t *dirty_vram = d->arch.hvm_domain.dirty_vram;
++    ASSERT( paging_locked_by_me(d) );
++    if ( dirty_vram )
++    {
++        struct list_head *curr;
++        list_for_each(curr, &dirty_vram->range_head)
++        {
++            dv_range_t *range = list_entry(curr, dv_range_t, range_link);
++            if ( begin_pfn == range->begin_pfn &&
++                 end_pfn   == range->end_pfn )
++            {
++                return range;
++            }
++        }
++    }
++    return NULL;
++}
++
++/* Allocate specified dirty_vram range */
++static dv_range_t *
++_dirty_vram_range_alloc(struct domain *d,
++                        unsigned long begin_pfn,
++                        unsigned long nr)
++{
++    dv_dirty_vram_t *dirty_vram = d->arch.hvm_domain.dirty_vram;
++    dv_range_t *range = NULL;
++    unsigned long end_pfn = begin_pfn + nr;
++    dv_paddr_link_t *pl_tab = NULL;
++    int i;
++    
++    ASSERT( paging_locked_by_me(d) );
++    ASSERT( dirty_vram != NULL );
++    
++#if DEBUG_allocating_dirty_vram_range
++    gdprintk(XENLOG_DEBUG,
++             "[%05lx:%05lx] Allocating dirty vram range hap:%d\n",
++             begin_pfn, end_pfn,
++             d->arch.hvm_domain.hap_enabled);
++#endif
++    
++    range = xmalloc(dv_range_t);
++    if (range == NULL)
++        goto err_out;
++    
++    memset(range, 0, sizeof(dv_range_t));
++    INIT_LIST_HEAD(&range->range_link);
++    
++    range->begin_pfn = begin_pfn;
++    range->end_pfn = end_pfn;
++
++    if (!hap_enabled(d))
++    {
++        if ( (pl_tab = xmalloc_array(dv_paddr_link_t, nr)) == NULL )
++        {
++            goto err_out;
++        }
++        for (i = 0; i != nr; i++)
++        {
++            pl_tab[i].sl1ma = INVALID_PADDR;
++            pl_tab[i].pl_next = NULL;
++        }
++    }    
++    
++    range->pl_tab = pl_tab;
++    range->mappings_hwm = 1;
++
++    list_add(&range->range_link, &dirty_vram->range_head);
++    if ( ++dirty_vram->nr_ranges > dirty_vram->ranges_hwm )
++    {
++        dirty_vram->ranges_hwm = dirty_vram->nr_ranges;
++#if DEBUG_high_water_mark_for_vram_ranges
++        gdprintk(XENLOG_DEBUG,
++                 "High water mark for number of vram ranges is now:%d\n",
++                 dirty_vram->ranges_hwm);
++#endif
++    }
++    return range;
++    
++ err_out:
++    xfree(pl_tab);
++    xfree(range);
++    return NULL;
++}
++
++
++/* Frees specified dirty_vram range */
++void dirty_vram_range_free(struct domain *d,
++                           dv_range_t *range)
++{
++    dv_dirty_vram_t *dirty_vram = d->arch.hvm_domain.dirty_vram;
++    ASSERT( paging_locked_by_me(d) );
++    if ( dirty_vram )
++    {
++        int i, nr = range->end_pfn - range->begin_pfn;
++        
++#if DEBUG_freeing_dirty_vram_range
++        gdprintk(XENLOG_DEBUG,
++                 "[%05lx:%05lx] Freeing dirty vram range\n",
++                 range->begin_pfn, range->end_pfn);
++#endif
++        
++        if (range->pl_tab)
++        {
++            for (i = 0; i != nr; i++)
++            {
++                dv_paddr_link_t *plx;
++                plx = range->pl_tab[i].pl_next;
++                /* Does current FB page have multiple mappings? */
++                if (plx) /* yes */
++                {
++                    /* Find the last element in singly-linked list */
++                    while (plx->pl_next != NULL)
++                        plx = plx->pl_next;
++                    /* Prepend whole list to the free list */
++                    plx->pl_next = dirty_vram->pl_free;
++                    dirty_vram->pl_free = range->pl_tab[i].pl_next;
++                }
++            }
++            xfree(range->pl_tab);
++            range->pl_tab = NULL;
++        }
++        
++        /* Remove range from the linked list, free it, and adjust count*/
++        list_del(&range->range_link);
++        xfree(range);
++        dirty_vram->nr_ranges--;
++    }
++}
++
++/* dirty_vram_range_alloc()
++ * This function ensures that the new range does not overlap any existing
++ * ranges -- deleting them if necessary -- and then calls _dirty_vram_range_alloc
++ * to actually allocate the new range.
++ */
++dv_range_t *
++dirty_vram_range_alloc(struct domain *d,
++                        unsigned long begin_pfn,
++                        unsigned long nr)
++{
++    unsigned long end_pfn = begin_pfn + nr;
++    dv_dirty_vram_t *dirty_vram = d->arch.hvm_domain.dirty_vram;
++    dv_range_t *range;
++    struct list_head *curr, *next;
++    
++    ASSERT( paging_locked_by_me(d) );
++    ASSERT( dirty_vram != NULL );
++    
++    /* Ranges cannot overlap so
++     * free any range that overlaps [ begin_pfn .. end_pfn ) */
++    list_for_each_safe(curr, next, &dirty_vram->range_head)
++    {
++        dv_range_t *rng = list_entry(curr, dv_range_t, range_link);
++        if ( ((rng->begin_pfn <= begin_pfn) && (begin_pfn <  rng->end_pfn)) ||
++             ((begin_pfn <= rng->begin_pfn) && (rng->begin_pfn < end_pfn)) )
++        {
++            /* Different tracking, tear the previous down. */
++            dirty_vram_range_free(d, rng);
++        }
++    }
++        
++    range = _dirty_vram_range_alloc(d, begin_pfn, nr);
++    if ( !range )
++        goto out;
++
++ out:
++    return range;
++}
++
++/* dirty_vram_range_find_or_alloc()
++ * Find the range for [begin_pfn:begin_pfn+nr).
++ * If it doesn't exists, create it.
++ */
++dv_range_t *
++dirty_vram_range_find_or_alloc(struct domain *d,
++                                unsigned long begin_pfn,
++                                unsigned long nr)
++{
++    dv_range_t *range;
++    ASSERT( paging_locked_by_me(d) );
++    range = dirty_vram_range_find(d, begin_pfn, nr);
++    if ( !range )
++        range = dirty_vram_range_alloc(d, begin_pfn, nr);
++    return range;
++}
++
++
++
++/* Allocate a dv_paddr_link struct */
++static dv_paddr_link_t *
++alloc_paddr_link(struct domain *d)
++{
++    dv_paddr_link_t * pl = NULL;
++    dv_dirty_vram_t *dirty_vram = d->arch.hvm_domain.dirty_vram;
++    
++    ASSERT( paging_locked_by_me(d) );
++    BUILD_BUG_ON(sizeof(dv_paddr_link_ext_t) > PAGE_SIZE);
++    /* Is the list of free pl's empty? */
++    if (dirty_vram->pl_free == NULL) /* yes */
++    {
++        /* Allocate another page of pl's.
++         * Link them all together and point the free list head at them */
++        int i;
++        dv_paddr_link_ext_t *ext = xmalloc(dv_paddr_link_ext_t);
++        if (ext == NULL)
++            goto out;
++
++#if DEBUG_allocate_paddr_links_page
++        gdprintk(XENLOG_DEBUG, "Allocated another page of paddr_links\n");
++#endif
++        list_add(&ext->ext_link, &dirty_vram->ext_head);
++
++        /* initialize and link together the new pl entries */
++        for (i = 0; i != ARRAY_SIZE(ext->entries); i++)
++        {
++            ext->entries[i].sl1ma = INVALID_PADDR;
++            ext->entries[i].pl_next = &ext->entries[i+1];
++        }
++        ext->entries[ARRAY_SIZE(ext->entries) - 1].pl_next = NULL;
++        dirty_vram->pl_free = &ext->entries[0];
++    }
++    pl = dirty_vram->pl_free;
++    dirty_vram->pl_free = pl->pl_next;
++
++    pl->sl1ma = INVALID_PADDR;
++    pl->pl_next = NULL;
++ out:
++    return pl;
++}
++
++
++/* Free a paddr_link struct, given address of its predecessor in linked list */
++dv_paddr_link_t *
++free_paddr_link(struct domain *d,
++                dv_paddr_link_t **ppl,
++                dv_paddr_link_t *pl)
++{
++    dv_dirty_vram_t *dirty_vram = d->arch.hvm_domain.dirty_vram;
++    dv_paddr_link_t *npl; /* next pl */
++
++    ASSERT( paging_locked_by_me(d) );
++    /* extension mapping? */
++    if (ppl) /* yes. free it */
++    {
++        pl = (*ppl);
++        (*ppl) = npl = pl->pl_next;
++    }
++    else  /* main table */
++    {
++        /* move 2nd mapping to main table.
++         * and free 2nd mapping */
++        dv_paddr_link_t * spl;
++        spl = pl->pl_next;
++        if (spl == NULL)
++        {
++            pl->sl1ma = INVALID_PADDR;
++            return pl;
++        }
++        pl->sl1ma = spl->sl1ma;
++        pl->pl_next = spl->pl_next;
++        npl = pl; /* reprocess main table entry again */
++        pl = spl;
++    }
++    pl->sl1ma = INVALID_PADDR;
++    pl->pl_next = dirty_vram->pl_free;
++    dirty_vram->pl_free = pl;
++    return npl;
++}
++
++
++/* dirty_vram_range_update()
++ * This is called whenever a level 1 page table entry is modified.
++ * If the L1PTE is being cleared, the function removes any paddr_links
++ * that refer to it.
++ * If the L1PTE is being set to a frame buffer page, a paddr_link is
++ * created for that page's entry in pl_tab.
++ * Returns 1 iff entry found and set or cleared.
++ */
++int dirty_vram_range_update(struct domain *d,
++                            unsigned long gfn,
++                            paddr_t sl1ma,
++                            int set)
++{
++    int effective = 0;
++    dv_range_t *range;
++
++    ASSERT(paging_locked_by_me(d));
++    range = dirty_vram_range_find_gfn(d, gfn);
++    if ( range )
++    {
++        unsigned long i = gfn - range->begin_pfn;
++        dv_paddr_link_t *pl = &range->pl_tab[ i ];
++        dv_paddr_link_t **ppl = NULL;
++        int len = 0;
++
++        /* find matching entry (pl), if any, and its predecessor
++         * in linked list (ppl) */
++        while (pl != NULL)
++        {
++            if (pl->sl1ma == sl1ma || pl->sl1ma == INVALID_PADDR )
++                break;
++            ppl = &pl->pl_next;
++            pl = *ppl;
++            len++;
++        }
++            
++        if (set)
++        {
++            /* Did we find sl1ma in either the main table or the linked list? */
++            if (pl == NULL) /* no, so we'll need to alloc a link */
++            {
++                ASSERT(ppl != NULL);
++                /* alloc link and append it to list */
++                (*ppl) = pl = alloc_paddr_link(d);
++                if (pl == NULL)
++                    goto out;
++            }
++            if ( pl->sl1ma != sl1ma )
++            {
++                pl->sl1ma = sl1ma;
++                range->nr_mappings++;
++            }
++            effective = 1;
++            if (len > range->mappings_hwm)
++            {
++                range->mappings_hwm = len;
++#if DEBUG_update_vram_mapping
++                gdprintk(XENLOG_DEBUG,
++                         "[%lx] set      sl1ma:%lx hwm:%d mappings:%d freepages:%d\n",
++                         gfn, sl1ma,
++                         range->mappings_hwm,
++                         range->nr_mappings,
++                         d->arch.paging.shadow.free_pages);
++#endif
++            }
++        }
++        else /* clear */
++        {
++            if (pl && pl->sl1ma == sl1ma )
++            {
++#if DEBUG_update_vram_mapping
++                gdprintk(XENLOG_DEBUG,
++                         "[%lx] clear    sl1ma:%lx mappings:%d\n",
++                         gfn, sl1ma,
++                         range->nr_mappings-1);
++#endif
++                free_paddr_link(d, ppl, pl);
++                if ( --range->nr_mappings == 0 )
++                {
++                    dirty_vram_range_free(d, range);
++                }
++                effective = 1;
++            }
++        }
++    }
++ out:
++    return effective;
++}
++
++
++/* shadow_scan_dirty_flags()
++ * This produces a dirty bitmap for the range by examining every
++ * L1PTE referenced by some dv_paddr_link in the range's pl_tab table.
++ * It tests and clears each such L1PTE's dirty flag.
++ */
++static int shadow_scan_dirty_flags(struct domain *d,
++                                   dv_range_t *range,
++                                   uint8_t *dirty_bitmap)
++{
++    int flush_tlb = 0;
++    unsigned long i;
++    unsigned long nr = range->end_pfn - range->begin_pfn;
++#ifdef __i386__
++    unsigned long map_mfn = INVALID_MFN;
++    void *map_sl1p = NULL;
++#endif
++
++    ASSERT( paging_locked_by_me(d) );
++    /* Iterate over VRAM to track dirty bits. */
++    for ( i = 0; i < nr; i++ )
++    {
++        int dirty = 0, len = 1;
++        dv_paddr_link_t *pl;
++        for (pl = &range->pl_tab[i]; pl; pl = pl->pl_next, len++)
++        {
++#ifdef __i386__
++            void *sl1p;
++            unsigned long sl1mfn;
++#endif
++            l1_pgentry_t *sl1e;
++            paddr_t sl1ma = pl->sl1ma;
++            if (sl1ma == INVALID_PADDR) /* FB page is unmapped */
++                continue;
++#ifdef __i386__
++            sl1p = map_sl1p;
++            sl1mfn = paddr_to_pfn(sl1ma);
++
++            if ( sl1mfn != map_mfn )
++            {
++                if ( map_sl1p )
++                    sh_unmap_domain_page(map_sl1p);
++                map_sl1p = sl1p = sh_map_domain_page(_mfn(sl1mfn));
++                map_mfn = sl1mfn;
++            }
++            sl1e = sl1p + (sl1ma & ~PAGE_MASK);
++#else
++            sl1e = maddr_to_virt(sl1ma);
++#endif
++            if ( l1e_get_flags(*sl1e) & _PAGE_DIRTY )
++            {
++                dirty = 1;
++                /* Clear dirty so we can detect if page gets re-dirtied */
++                /* Note: this is atomic, so we may clear a
++                 * _PAGE_ACCESSED set by another processor. */
++                l1e_remove_flags(*sl1e, _PAGE_DIRTY);
++                flush_tlb = 1;
++            }
++        } /* for */
++        if ( dirty )
++        {
++            dirty_bitmap[i >> 3] |= (1 << (i & 7));
++        }
++    }
++
++#ifdef __i386__
++    if ( map_sl1p )
++        sh_unmap_domain_page(map_sl1p);
++#endif
++    return flush_tlb;
++}
++
++
++/* shadow_track_dirty_vram()
++ * This is the API called by the guest to determine which pages in the range
++ * from [begin_pfn:begin_pfn+nr) have been dirtied since the last call.
++ * It creates the domain's dv_dirty_vram on demand. 
++ * It creates ranges on demand when some [begin_pfn:nr) is first encountered.
++ * To collect the dirty bitmask it calls shadow_scan_dirty_flags().
++ * It copies the dirty bitmask into guest storage.
++ */
++int shadow_track_dirty_vram(struct domain *d,
++                            unsigned long begin_pfn,
++                            unsigned long nr,
++                            XEN_GUEST_HANDLE_64(uint8) guest_dirty_bitmap)
++{
++    int rc = 0;
++    unsigned long end_pfn = begin_pfn + nr;
++    int flush_tlb = 0;
++    dv_range_t *range;
++    struct p2m_domain *p2m = p2m_get_hostp2m(d);
++
++    if (end_pfn < begin_pfn
++            || begin_pfn > p2m->max_mapped_pfn
++            || end_pfn >= p2m->max_mapped_pfn)
++        return -EINVAL;
++
++    paging_lock(d);
++
++    if ( !nr || guest_handle_is_null(guest_dirty_bitmap) )
++    {
++        goto out;
++    }
++
++    if ( !dirty_vram_find_or_alloc(d))
++    {
++        rc = -ENOMEM;
++        goto out;
++    }
++    
++    range = dirty_vram_range_find(d, begin_pfn, nr);
++    if ( !range )
++    {
++        range = dirty_vram_range_alloc(d, begin_pfn, nr);
++        if ( range )    
++            sh_find_all_vram_mappings(d->vcpu[0], range);
++    }
++    if ( range )
++    {
++        int size = (nr + BITS_PER_LONG - 1) / BITS_PER_LONG;
++        unsigned long dirty_bitmap[size];
++        
++        memset(dirty_bitmap, 0x00, size * BYTES_PER_LONG);
++
++	flush_tlb |= shadow_scan_dirty_flags(d, range, (uint8_t*)dirty_bitmap);
++        
++        rc = -EFAULT;
++        if ( copy_to_guest(guest_dirty_bitmap,
++                           (uint8_t*)dirty_bitmap,
++                           size * BYTES_PER_LONG) == 0 )
++            rc = 0;
++    }
++    if ( flush_tlb )
++        flush_tlb_mask(d->domain_dirty_cpumask);
++
++out:
++    paging_unlock(d);
++    return rc;
++}
++
++
++/************************************************/
++/*          HAP VRAM TRACKING SUPPORT           */
++/************************************************/
++
++/* hap_enable_vram_tracking()
++ * For all ranges, mark all vram pages in range as logdirty read-only.
++ */
++static int hap_enable_vram_tracking(struct domain *d)
++{
++    int rc = 0;
++    dv_dirty_vram_t *dirty_vram;
++    struct list_head *curr;
++
++    /* turn on PG_log_dirty bit in paging mode */
++    paging_lock(d);
++    d->arch.paging.mode |= PG_log_dirty;
++    paging_unlock(d);
++
++    p2m_lock(p2m_get_hostp2m(d));
++    paging_lock(d);
++    
++    dirty_vram = d->arch.hvm_domain.dirty_vram;
++
++    /* dirty_vram != NULL iff we're tracking dirty vram.
++     * If we start tracking dirty pages for all memory then
++     * the dirty_vram structure is freed. */
++    if ( !dirty_vram )
++    {
++        rc = -EINVAL;
++        goto out;
++    }
++
++    /* set l1e entries of P2M table to be read-only. */
++    list_for_each(curr, &dirty_vram->range_head)
++      {
++	dv_range_t *range = list_entry(curr, dv_range_t, range_link);
++	gdprintk(XENLOG_DEBUG, "[%05lx:%05lx] enable  vram tracking\n",
++		 range->begin_pfn, range->end_pfn);
++	p2m_change_type_range(d, range->begin_pfn, range->end_pfn, 
++			      p2m_ram_rw, p2m_ram_logdirty);
++      }
++        
++    flush_tlb_mask(d->domain_dirty_cpumask);
++ out:
++    paging_unlock(d);
++    p2m_unlock(p2m_get_hostp2m(d));
++    if (rc) 
++    {
++        paging_lock(d);
++        d->arch.paging.mode &= ~PG_log_dirty;
++        paging_unlock(d);
++    }
++    return rc;
++}
++
++/* hap_disable_vram_tracking()
++ * For all ranges, mark all vram pages in range as logdirty read-write.
++ */
++static int hap_disable_vram_tracking(struct domain *d)
++{
++    int rc = 0;
++    dv_dirty_vram_t *dirty_vram;
++    struct list_head *curr;
++
++    paging_lock(d);
++    d->arch.paging.mode &= ~PG_log_dirty;
++    paging_unlock(d);
++
++    p2m_lock(p2m_get_hostp2m(d));
++    paging_lock(d);
++    
++    dirty_vram = d->arch.hvm_domain.dirty_vram;
++    if ( !dirty_vram )
++    {
++        rc = -EINVAL;
++        goto out;
++    }
++    
++    /* set l1e entries of P2M table with normal mode */
++    list_for_each(curr, &dirty_vram->range_head)
++      {
++	dv_range_t *range = list_entry(curr, dv_range_t, range_link);
++	gdprintk(XENLOG_DEBUG, "[%05lx:%05lx] disable vram tracking\n",
++		 range->begin_pfn, range->end_pfn);
++	p2m_change_type_range(d, range->begin_pfn, range->end_pfn, 
++			      p2m_ram_logdirty, p2m_ram_rw);
++      }
++    flush_tlb_mask(d->domain_dirty_cpumask);
++ out:
++    paging_unlock(d);
++    p2m_unlock(p2m_get_hostp2m(d));
++    if (rc) 
++    {
++        paging_lock(d);
++        d->arch.paging.mode |= PG_log_dirty;
++        paging_unlock(d);
++    }
++    return rc;
++}
++
++/* hap_clean_vram_tracking_range()
++ * For all the pages in the range specified by [begin_pfn,nr),
++ * note in the dirty bitmap any page that has been marked as read-write,
++ * which signifies that the page has been dirtied, and reset the page
++ * to ram_logdirty. 
++ */
++void hap_clean_vram_tracking_range(struct domain *d,
++                                   unsigned long begin_pfn,
++                                   unsigned long nr,
++                                   uint8_t *dirty_bitmap)
++{
++    int i;
++    unsigned long pfn;
++    dv_dirty_vram_t *dirty_vram = d->arch.hvm_domain.dirty_vram;
++    dv_range_t *range;
++
++    ASSERT(p2m_locked_by_me(p2m_get_hostp2m(d)));
++    ASSERT(paging_locked_by_me(d));
++    
++    if ( !dirty_vram )
++    {
++        gdprintk(XENLOG_DEBUG, "Should only be called while tracking dirty vram.\n");
++        return;
++    }
++
++    range = dirty_vram_range_find(d, begin_pfn, nr);
++    if (!range)
++        return;
++
++    /* set l1e entries of P2M table to be read-only. */
++    /* On first write, it page faults, its entry is changed to read-write,
++     * its bit in the dirty bitmap is set, and on retry the write succeeds. */
++    for (i = 0, pfn = range->begin_pfn; pfn < range->end_pfn; i++, pfn++)
++    {
++        p2m_type_t pt;
++        pt = p2m_change_type(d, pfn, p2m_ram_rw, p2m_ram_logdirty);
++        if (pt == p2m_ram_rw)
++            dirty_bitmap[i >> 3] |= (1 << (i & 7));
++    }
++    flush_tlb_mask(d->domain_dirty_cpumask);
++}
++
++static void hap_vram_tracking_init(struct domain *d)
++{
++    paging_log_dirty_init(d, hap_enable_vram_tracking,
++                          hap_disable_vram_tracking,
++                          NULL);
++}
++
++/* hap_track_dirty_vram()
++ * Create the domain's dv_dirty_vram struct on demand.
++ * Create a dirty vram range on demand when some [begin_pfn:begin_pfn+nr] is first encountered.
++ * Collect the guest_dirty bitmask, a bit mask of the dirties vram pages, by
++ * calling paging_log_dirty_range().
++ */
++int hap_track_dirty_vram(struct domain *d,
++                         unsigned long begin_pfn,
++                         unsigned long nr,
++                         XEN_GUEST_HANDLE_64(uint8) guest_dirty_bitmap)
++{
++    long rc = 0;
++    dv_dirty_vram_t *dirty_vram;
++    int restart_log_dirty = 0;
++
++    paging_lock(d);
++    dirty_vram = d->arch.hvm_domain.dirty_vram;
++    if ( nr )
++    {
++        dv_range_t *range = NULL;
++        int size = (nr + BITS_PER_LONG - 1) / BITS_PER_LONG;
++        unsigned long dirty_bitmap[size];
++
++        /* Already tracking dirty vram? */
++        if ( paging_mode_log_dirty(d) && dirty_vram ) /* yes */
++        {
++            /* Handle the addition of another range */
++            range = dirty_vram_range_find(d, begin_pfn, nr);
++            if ( !range )
++            {
++                rc = -ENOMEM;
++                if ( !(range = dirty_vram_range_alloc(d, begin_pfn, nr)) )
++                    goto param_fail;
++                restart_log_dirty = 1;
++            }
++        }
++        /* Just starting to track dirty vram? */
++        else if ( !paging_mode_log_dirty(d) && !dirty_vram ) /* yes */
++        {
++            rc = -ENOMEM;
++            if ( !(dirty_vram = dirty_vram_alloc(d)) )
++                goto param_fail;
++            
++            if ( !(range = dirty_vram_range_find_or_alloc(d, begin_pfn, nr)) )
++                goto param_fail;
++
++            restart_log_dirty = 1;
++            /* Initialize callbacks for vram tracking */
++            hap_vram_tracking_init(d);
++        }
++        else
++        {
++            /* Test for invalid combination */
++            if ( !paging_mode_log_dirty(d) && dirty_vram )
++                rc = -EINVAL;
++            else /* logging dirty of all memory, not tracking dirty vram */
++                rc = -ENODATA;
++            goto param_fail;
++        }
++        
++        if (restart_log_dirty) 
++        {
++            /* disable then enable log dirty */
++            paging_unlock(d);
++            if (paging_mode_log_dirty(d))
++                paging_log_dirty_disable(d);
++                    
++            rc = paging_log_dirty_enable(d);
++            paging_lock(d);
++            if (rc != 0)
++                goto param_fail;
++        }
++        
++        paging_unlock(d);
++        memset(dirty_bitmap, 0x00, size * BYTES_PER_LONG);
++	paging_log_dirty_range(d, begin_pfn, nr, (uint8_t*)dirty_bitmap);
++        rc = -EFAULT;
++        if ( copy_to_guest(guest_dirty_bitmap,
++                           (uint8_t*)dirty_bitmap,
++                           size * BYTES_PER_LONG) == 0 )
++        {
++            rc = 0;
++        }
++    }
++    else
++    {
++        /* If zero pages specified while already tracking dirty vram
++         * then stop tracking */
++        if ( paging_mode_log_dirty(d) && dirty_vram ) {
++            paging_unlock(d);
++            rc = paging_log_dirty_disable(d);
++            paging_lock(d);
++            dirty_vram_free(d);
++        } else /* benign no-op */
++        {
++            rc = 0;
++        }
++        paging_unlock(d);
++    }
++
++    return rc;
++
++param_fail:
++    dirty_vram_free(d);
++    paging_unlock(d);
++    return rc;
++}
+diff --git a/xen/arch/x86/hvm/hvm.c b/xen/arch/x86/hvm/hvm.c
+index ba71597..c4ea2ff 100644
+--- a/xen/arch/x86/hvm/hvm.c
++++ b/xen/arch/x86/hvm/hvm.c
+@@ -57,6 +57,7 @@
+ #include <asm/hvm/cacheattr.h>
+ #include <asm/hvm/trace.h>
+ #include <asm/hvm/nestedhvm.h>
++#include <asm/hvm/dirty_vram.h>
+ #include <asm/mtrr.h>
+ #include <asm/apic.h>
+ #include <public/sched.h>
+@@ -1437,8 +1438,7 @@ int hvm_hap_nested_page_fault(paddr_t gpa,
+          */
+         if ( access_w )
+         {
+-            paging_mark_dirty(v->domain, mfn_x(mfn));
+-            p2m_change_type(v->domain, gfn, p2m_ram_logdirty, p2m_ram_rw);
++            paging_mark_dirty_hap(v->domain, gfn, mfn_x(mfn));
+         }
+         rc = 1;
+         goto out_put_gfn;
+diff --git a/xen/arch/x86/mm/hap/hap.c b/xen/arch/x86/mm/hap/hap.c
+index d2637d3..f31e4e5 100644
+--- a/xen/arch/x86/mm/hap/hap.c
++++ b/xen/arch/x86/mm/hap/hap.c
+@@ -41,6 +41,7 @@
+ #include <asm/domain.h>
+ #include <xen/numa.h>
+ #include <asm/hvm/nestedhvm.h>
++#include <asm/hvm/dirty_vram.h>
+ 
+ #include "private.h"
+ 
+@@ -53,139 +54,6 @@
+ #define page_to_mfn(_pg) _mfn(__page_to_mfn(_pg))
+ 
+ /************************************************/
+-/*          HAP VRAM TRACKING SUPPORT           */
+-/************************************************/
+-
+-static int hap_enable_vram_tracking(struct domain *d)
+-{
+-    struct sh_dirty_vram *dirty_vram = d->arch.hvm_domain.dirty_vram;
+-
+-    if ( !dirty_vram )
+-        return -EINVAL;
+-
+-    /* turn on PG_log_dirty bit in paging mode */
+-    paging_lock(d);
+-    d->arch.paging.mode |= PG_log_dirty;
+-    paging_unlock(d);
+-
+-    /* set l1e entries of P2M table to be read-only. */
+-    p2m_change_type_range(d, dirty_vram->begin_pfn, dirty_vram->end_pfn, 
+-                          p2m_ram_rw, p2m_ram_logdirty);
+-
+-    flush_tlb_mask(d->domain_dirty_cpumask);
+-    return 0;
+-}
+-
+-static int hap_disable_vram_tracking(struct domain *d)
+-{
+-    struct sh_dirty_vram *dirty_vram = d->arch.hvm_domain.dirty_vram;
+-
+-    if ( !dirty_vram )
+-        return -EINVAL;
+-
+-    paging_lock(d);
+-    d->arch.paging.mode &= ~PG_log_dirty;
+-    paging_unlock(d);
+-
+-    /* set l1e entries of P2M table with normal mode */
+-    p2m_change_type_range(d, dirty_vram->begin_pfn, dirty_vram->end_pfn, 
+-                          p2m_ram_logdirty, p2m_ram_rw);
+-
+-    flush_tlb_mask(d->domain_dirty_cpumask);
+-    return 0;
+-}
+-
+-static void hap_clean_vram_tracking(struct domain *d)
+-{
+-    struct sh_dirty_vram *dirty_vram = d->arch.hvm_domain.dirty_vram;
+-
+-    if ( !dirty_vram )
+-        return;
+-
+-    /* set l1e entries of P2M table to be read-only. */
+-    p2m_change_type_range(d, dirty_vram->begin_pfn, dirty_vram->end_pfn, 
+-                          p2m_ram_rw, p2m_ram_logdirty);
+-
+-    flush_tlb_mask(d->domain_dirty_cpumask);
+-}
+-
+-static void hap_vram_tracking_init(struct domain *d)
+-{
+-    paging_log_dirty_init(d, hap_enable_vram_tracking,
+-                          hap_disable_vram_tracking,
+-                          hap_clean_vram_tracking);
+-}
+-
+-int hap_track_dirty_vram(struct domain *d,
+-                         unsigned long begin_pfn,
+-                         unsigned long nr,
+-                         XEN_GUEST_HANDLE_64(uint8) dirty_bitmap)
+-{
+-    long rc = 0;
+-    struct sh_dirty_vram *dirty_vram = d->arch.hvm_domain.dirty_vram;
+-
+-    if ( nr )
+-    {
+-        if ( paging_mode_log_dirty(d) && dirty_vram )
+-        {
+-            if ( begin_pfn != dirty_vram->begin_pfn ||
+-                 begin_pfn + nr != dirty_vram->end_pfn )
+-            {
+-                paging_log_dirty_disable(d);
+-                dirty_vram->begin_pfn = begin_pfn;
+-                dirty_vram->end_pfn = begin_pfn + nr;
+-                rc = paging_log_dirty_enable(d);
+-                if (rc != 0)
+-                    goto param_fail;
+-            }
+-        }
+-        else if ( !paging_mode_log_dirty(d) && !dirty_vram )
+-        {
+-            rc = -ENOMEM;
+-            if ( (dirty_vram = xmalloc(struct sh_dirty_vram)) == NULL )
+-                goto param_fail;
+-
+-            dirty_vram->begin_pfn = begin_pfn;
+-            dirty_vram->end_pfn = begin_pfn + nr;
+-            d->arch.hvm_domain.dirty_vram = dirty_vram;
+-            hap_vram_tracking_init(d);
+-            rc = paging_log_dirty_enable(d);
+-            if (rc != 0)
+-                goto param_fail;
+-        }
+-        else
+-        {
+-            if ( !paging_mode_log_dirty(d) && dirty_vram )
+-                rc = -EINVAL;
+-            else
+-                rc = -ENODATA;
+-            goto param_fail;
+-        }
+-        /* get the bitmap */
+-        rc = paging_log_dirty_range(d, begin_pfn, nr, dirty_bitmap);
+-    }
+-    else
+-    {
+-        if ( paging_mode_log_dirty(d) && dirty_vram ) {
+-            rc = paging_log_dirty_disable(d);
+-            xfree(dirty_vram);
+-            dirty_vram = d->arch.hvm_domain.dirty_vram = NULL;
+-        } else
+-            rc = 0;
+-    }
+-
+-    return rc;
+-
+-param_fail:
+-    if ( dirty_vram )
+-    {
+-        xfree(dirty_vram);
+-        dirty_vram = d->arch.hvm_domain.dirty_vram = NULL;
+-    }
+-    return rc;
+-}
+-
+-/************************************************/
+ /*            HAP LOG DIRTY SUPPORT             */
+ /************************************************/
+ 
+@@ -223,14 +91,12 @@ static void hap_clean_dirty_bitmap(struct domain *d)
+ 
+ void hap_logdirty_init(struct domain *d)
+ {
+-    struct sh_dirty_vram *dirty_vram = d->arch.hvm_domain.dirty_vram;
++    struct dv_dirty_vram *dirty_vram = d->arch.hvm_domain.dirty_vram;
+     if ( paging_mode_log_dirty(d) && dirty_vram )
+     {
+         paging_log_dirty_disable(d);
+-        xfree(dirty_vram);
+-        dirty_vram = d->arch.hvm_domain.dirty_vram = NULL;
++        dirty_vram_free(d);
+     }
+-
+     /* Reinitialize logdirty mechanism */
+     paging_log_dirty_init(d, hap_enable_log_dirty,
+                           hap_disable_log_dirty,
+diff --git a/xen/arch/x86/mm/paging.c b/xen/arch/x86/mm/paging.c
+index ca879f9..7464b07 100644
+--- a/xen/arch/x86/mm/paging.c
++++ b/xen/arch/x86/mm/paging.c
+@@ -27,6 +27,7 @@
+ #include <asm/p2m.h>
+ #include <asm/hap.h>
+ #include <asm/hvm/nestedhvm.h>
++#include <asm/hvm/dirty_vram.h>
+ #include <xen/numa.h>
+ #include <xsm/xsm.h>
+ 
+@@ -278,6 +279,46 @@ out:
+ }
+ 
+ 
++/* paging_mark_dirty_hap()
++ * Make a hap page writeable and mark it as dirty.
++ * This done atomically under the p2m and paging locks to avoid leaving
++ * a window where the page might be modified without being marked as dirty.
++ */
++void paging_mark_dirty_hap(struct domain *d,
++                           unsigned long pfn,
++                           unsigned long guest_mfn)
++{
++    mfn_t gmfn;
++    p2m_type_t pt;
++    struct p2m_domain *p2m = p2m_get_hostp2m(d);
++    
++    if ( !paging_mode_log_dirty(d) )
++        return;
++
++    gmfn = _mfn(guest_mfn);
++
++    ASSERT( mfn_valid(gmfn) &&
++            page_get_owner(mfn_to_page(gmfn)) == d );
++
++    p2m_lock(p2m);
++    pt = p2m_change_type(d, pfn, p2m_ram_logdirty, p2m_ram_rw);
++    paging_lock(d);
++    if ( pt == p2m_ram_logdirty )
++    {
++        dv_range_t *range;
++        PAGING_DEBUG(LOGDIRTY,
++                     "marked mfn %" PRI_mfn " (pfn=%lx), dom %d\n",
++                     mfn_x(gmfn), pfn, d->domain_id);
++        d->arch.paging.log_dirty.dirty_count++;
++        range = dirty_vram_range_find_gfn(d, pfn);
++        if (range)
++            range->dirty_count++;
++    }
++    paging_mark_dirty(d, guest_mfn); 
++    paging_unlock(d);
++    p2m_unlock(p2m);
++}
++
+ /* Is this guest page dirty? */
+ int paging_mfn_is_dirty(struct domain *d, mfn_t gmfn)
+ {
+@@ -333,8 +374,11 @@ int paging_log_dirty_op(struct domain *d, struct xen_domctl_shadow_op *sc)
+     mfn_t *l4, *l3, *l2;
+     unsigned long *l1;
+     int i4, i3, i2;
++    struct p2m_domain *p2m = p2m_get_hostp2m(d);
+ 
+     domain_pause(d);
++    /* Locking hierarchy requires p2m lock to be taken first */
++    p2m_lock(p2m);
+     paging_lock(d);
+ 
+     clean = (sc->op == XEN_DOMCTL_SHADOW_OP_CLEAN);
+@@ -345,6 +389,14 @@ int paging_log_dirty_op(struct domain *d, struct xen_domctl_shadow_op *sc)
+                  d->arch.paging.log_dirty.fault_count,
+                  d->arch.paging.log_dirty.dirty_count);
+ 
++    if (hap_enabled(d) && d->arch.hvm_domain.dirty_vram)
++    {
++        /* If we're cleaning/peeking all guest memory, we should not be tracking
++         * dirty vram. */
++        rv = -EINVAL;
++        goto out;
++    }
++
+     sc->stats.fault_count = d->arch.paging.log_dirty.fault_count;
+     sc->stats.dirty_count = d->arch.paging.log_dirty.dirty_count;
+ 
+@@ -424,170 +476,60 @@ int paging_log_dirty_op(struct domain *d, struct xen_domctl_shadow_op *sc)
+ 
+     if ( clean )
+     {
+-        /* We need to further call clean_dirty_bitmap() functions of specific
+-         * paging modes (shadow or hap).  Safe because the domain is paused. */
+-        d->arch.paging.log_dirty.clean_dirty_bitmap(d);
++        /* Is null if tracking dirty vram */
++        if (d->arch.paging.log_dirty.clean_dirty_bitmap)
++        {
++            /* We need to further call clean_dirty_bitmap() functions of specific
++             * paging modes (shadow or hap).  Safe because the domain is paused. */
++            d->arch.paging.log_dirty.clean_dirty_bitmap(d);
++        }
+     }
+     domain_unpause(d);
+     return rv;
+ 
+  out:
+     paging_unlock(d);
++    p2m_unlock(p2m);
+     domain_unpause(d);
+     return rv;
+ }
+ 
+-int paging_log_dirty_range(struct domain *d,
+-                            unsigned long begin_pfn,
+-                            unsigned long nr,
+-                            XEN_GUEST_HANDLE_64(uint8) dirty_bitmap)
++void paging_log_dirty_range(struct domain *d,
++                           unsigned long begin_pfn,
++                           unsigned long nr,
++                           uint8_t *dirty_bitmap)
+ {
+-    int rv = 0;
+-    unsigned long pages = 0;
+-    mfn_t *l4, *l3, *l2;
+-    unsigned long *l1;
+-    int b1, b2, b3, b4;
+-    int i2, i3, i4;
+-
+-    d->arch.paging.log_dirty.clean_dirty_bitmap(d);
++    struct p2m_domain *p2m = p2m_get_hostp2m(d);
++    dv_range_t *range;
++    unsigned int range_dirty_count = 0;
++    
++    p2m_lock(p2m);
+     paging_lock(d);
+ 
+-    PAGING_DEBUG(LOGDIRTY, "log-dirty-range: dom %u faults=%u dirty=%u\n",
+-                 d->domain_id,
+-                 d->arch.paging.log_dirty.fault_count,
+-                 d->arch.paging.log_dirty.dirty_count);
+-
+-    if ( unlikely(d->arch.paging.log_dirty.failed_allocs) ) {
+-        printk("%s: %d failed page allocs while logging dirty pages\n",
+-               __FUNCTION__, d->arch.paging.log_dirty.failed_allocs);
+-        rv = -ENOMEM;
+-        goto out;
+-    }
+-
+-    if ( !d->arch.paging.log_dirty.fault_count &&
+-         !d->arch.paging.log_dirty.dirty_count ) {
+-        unsigned int size = BITS_TO_LONGS(nr);
+-
+-        if ( clear_guest(dirty_bitmap, size * BYTES_PER_LONG) != 0 )
+-            rv = -EFAULT;
+-        goto out;
+-    }
+-    d->arch.paging.log_dirty.fault_count = 0;
+-    d->arch.paging.log_dirty.dirty_count = 0;
+-
+-    b1 = L1_LOGDIRTY_IDX(begin_pfn);
+-    b2 = L2_LOGDIRTY_IDX(begin_pfn);
+-    b3 = L3_LOGDIRTY_IDX(begin_pfn);
+-    b4 = L4_LOGDIRTY_IDX(begin_pfn);
+-    l4 = paging_map_log_dirty_bitmap(d);
+-
+-    for ( i4 = b4;
+-          (pages < nr) && (i4 < LOGDIRTY_NODE_ENTRIES);
+-          i4++ )
++    /* Only called when tracking dirty vram in HAP mode */
++    ASSERT(hap_enabled(d) && d->arch.hvm_domain.dirty_vram);
++    
++    range = dirty_vram_range_find_gfn(d, begin_pfn);
++    if (range)
+     {
+-        l3 = (l4 && mfn_valid(l4[i4])) ? map_domain_page(mfn_x(l4[i4])) : NULL;
+-        for ( i3 = b3;
+-              (pages < nr) && (i3 < LOGDIRTY_NODE_ENTRIES);
+-              i3++ )
+-        {
+-            l2 = ((l3 && mfn_valid(l3[i3])) ?
+-                  map_domain_page(mfn_x(l3[i3])) : NULL);
+-            for ( i2 = b2;
+-                  (pages < nr) && (i2 < LOGDIRTY_NODE_ENTRIES);
+-                  i2++ )
+-            {
+-                unsigned int bytes = PAGE_SIZE;
+-                uint8_t *s;
+-                l1 = ((l2 && mfn_valid(l2[i2])) ?
+-                      map_domain_page(mfn_x(l2[i2])) : NULL);
+-
+-                s = ((uint8_t*)l1) + (b1 >> 3);
+-                bytes -= b1 >> 3;
+-
+-                if ( likely(((nr - pages + 7) >> 3) < bytes) )
+-                    bytes = (unsigned int)((nr - pages + 7) >> 3);
+-
+-                if ( !l1 )
+-                {
+-                    if ( clear_guest_offset(dirty_bitmap, pages >> 3,
+-                                            bytes) != 0 )
+-                    {
+-                        rv = -EFAULT;
+-                        goto out;
+-                    }
+-                }
+-                /* begin_pfn is not 32K aligned, hence we have to bit
+-                 * shift the bitmap */
+-                else if ( b1 & 0x7 )
+-                {
+-                    int i, j;
+-                    uint32_t *l = (uint32_t*) s;
+-                    int bits = b1 & 0x7;
+-                    int bitmask = (1 << bits) - 1;
+-                    int size = (bytes + BYTES_PER_LONG - 1) / BYTES_PER_LONG;
+-                    unsigned long bitmap[size];
+-                    static unsigned long printed = 0;
+-
+-                    if ( printed != begin_pfn )
+-                    {
+-                        dprintk(XENLOG_DEBUG, "%s: begin_pfn %lx is not 32K aligned!\n",
+-                                __FUNCTION__, begin_pfn);
+-                        printed = begin_pfn;
+-                    }
+-
+-                    for ( i = 0; i < size - 1; i++, l++ ) {
+-                        bitmap[i] = ((*l) >> bits) |
+-                            (((*((uint8_t*)(l + 1))) & bitmask) << (sizeof(*l) * 8 - bits));
+-                    }
+-                    s = (uint8_t*) l;
+-                    size = BYTES_PER_LONG - ((b1 >> 3) & 0x3);
+-                    bitmap[i] = 0;
+-                    for ( j = 0; j < size; j++, s++ )
+-                        bitmap[i] |= (*s) << (j * 8);
+-                    bitmap[i] = (bitmap[i] >> bits) | (bitmask << (size * 8 - bits));
+-                    if ( copy_to_guest_offset(dirty_bitmap, (pages >> 3),
+-                                (uint8_t*) bitmap, bytes) != 0 )
+-                    {
+-                        rv = -EFAULT;
+-                        goto out;
+-                    }
+-                }
+-                else
+-                {
+-                    if ( copy_to_guest_offset(dirty_bitmap, pages >> 3,
+-                                              s, bytes) != 0 )
+-                    {
+-                        rv = -EFAULT;
+-                        goto out;
+-                    }
+-                }
+-
+-                pages += bytes << 3;
+-                if ( l1 )
+-                {
+-                    clear_page(l1);
+-                    unmap_domain_page(l1);
+-                }
+-                b1 = b1 & 0x7;
+-            }
+-            b2 = 0;
+-            if ( l2 )
+-                unmap_domain_page(l2);
+-        }
+-        b3 = 0;
+-        if ( l3 )
+-            unmap_domain_page(l3);
++        range_dirty_count = range->dirty_count;
++        range->dirty_count = 0;
+     }
+-    if ( l4 )
+-        unmap_domain_page(l4);
+-
+-    paging_unlock(d);
++    
++    if ( !range_dirty_count)
++        goto out;
+ 
+-    return rv;
++    PAGING_DEBUG(LOGDIRTY, "log-dirty-range: dom %u [%05lx:%05lx] range_dirty=%u\n",
++                 d->domain_id,
++                 begin_pfn,
++                 range->end_pfn,
++                 range_dirty_count);
+ 
++    hap_clean_vram_tracking_range(d, begin_pfn, nr, dirty_bitmap);
+  out:
+     paging_unlock(d);
+-    return rv;
++    p2m_unlock(p2m);
++    return;
+ }
+ 
+ /* Note that this function takes three function pointers. Callers must supply
+diff --git a/xen/arch/x86/mm/shadow/common.c b/xen/arch/x86/mm/shadow/common.c
+index 3f8ad88..c9f3495 100644
+--- a/xen/arch/x86/mm/shadow/common.c
++++ b/xen/arch/x86/mm/shadow/common.c
+@@ -36,6 +36,7 @@
+ #include <asm/current.h>
+ #include <asm/flushtlb.h>
+ #include <asm/shadow.h>
++#include <asm/hvm/dirty_vram.h>
+ #include <xen/numa.h>
+ #include "private.h"
+ 
+@@ -3121,12 +3122,7 @@ void shadow_teardown(struct domain *d)
+      * calls now that we've torn down the bitmap */
+     d->arch.paging.mode &= ~PG_log_dirty;
+ 
+-    if (d->arch.hvm_domain.dirty_vram) {
+-        xfree(d->arch.hvm_domain.dirty_vram->sl1ma);
+-        xfree(d->arch.hvm_domain.dirty_vram->dirty_bitmap);
+-        xfree(d->arch.hvm_domain.dirty_vram);
+-        d->arch.hvm_domain.dirty_vram = NULL;
+-    }
++    dirty_vram_free(d);
+ 
+     paging_unlock(d);
+ 
+@@ -3463,179 +3459,212 @@ void shadow_clean_dirty_bitmap(struct domain *d)
+ 
+ 
+ /**************************************************************************/
+-/* VRAM dirty tracking support */
+-int shadow_track_dirty_vram(struct domain *d,
+-                            unsigned long begin_pfn,
+-                            unsigned long nr,
+-                            XEN_GUEST_HANDLE_64(uint8) dirty_bitmap)
+-{
+-    int rc;
+-    unsigned long end_pfn = begin_pfn + nr;
+-    unsigned long dirty_size = (nr + 7) / 8;
+-    int flush_tlb = 0;
+-    unsigned long i;
+-    p2m_type_t t;
+-    struct sh_dirty_vram *dirty_vram = d->arch.hvm_domain.dirty_vram;
+-    struct p2m_domain *p2m = p2m_get_hostp2m(d);
+-
+-    if (end_pfn < begin_pfn
+-            || begin_pfn > p2m->max_mapped_pfn
+-            || end_pfn >= p2m->max_mapped_pfn)
+-        return -EINVAL;
+-
+-    /* We perform p2m lookups, so lock the p2m upfront to avoid deadlock */
+-    p2m_lock(p2m_get_hostp2m(d));
+-    paging_lock(d);
++/* Support functions for shadow-based dirty VRAM code */
+ 
+-    if ( dirty_vram && (!nr ||
+-             ( begin_pfn != dirty_vram->begin_pfn
+-            || end_pfn   != dirty_vram->end_pfn )) )
+-    {
+-        /* Different tracking, tear the previous down. */
+-        gdprintk(XENLOG_INFO, "stopping tracking VRAM %lx - %lx\n", dirty_vram->begin_pfn, dirty_vram->end_pfn);
+-        xfree(dirty_vram->sl1ma);
+-        xfree(dirty_vram->dirty_bitmap);
+-        xfree(dirty_vram);
+-        dirty_vram = d->arch.hvm_domain.dirty_vram = NULL;
+-    }
++#define DEBUG_unshadow_sl1ma                  0          
++#define DEBUG_unshadow_sl1ma_detail           0
++#define DEBUG_count_initial_mappings          1
+ 
+-    if ( !nr )
++/* smfn is no longer a shadow page.  Remove it from any
++ * dirty vram range mapping. */
++void
++dirty_vram_delete_shadow(struct vcpu *v,
++                         unsigned long gfn,
++                         unsigned int shadow_type, 
++                         mfn_t smfn)
++{
++    static unsigned int l1_shadow_mask = 
++          1 << SH_type_l1_32_shadow
++        | 1 << SH_type_fl1_32_shadow
++        | 1 << SH_type_l1_pae_shadow
++        | 1 << SH_type_fl1_pae_shadow
++        | 1 << SH_type_l1_64_shadow
++        | 1 << SH_type_fl1_64_shadow
++        ;
++    struct domain *d = v->domain;
++    dv_dirty_vram_t *dirty_vram;
++    struct list_head *curr, *next;
++    
++    ASSERT(paging_locked_by_me(d));
++    /* Ignore all but level 1 shadows */
++    
++    if ((l1_shadow_mask & (1 << shadow_type)) == 0)
+     {
+-        rc = 0;
+         goto out;
+     }
+ 
+-    /* This should happen seldomly (Video mode change),
+-     * no need to be careful. */
++    dirty_vram = d->arch.hvm_domain.dirty_vram;
+     if ( !dirty_vram )
+     {
+-        /* Throw away all the shadows rather than walking through them 
+-         * up to nr times getting rid of mappings of each pfn */
+-        shadow_blow_tables(d);
+-
+-        gdprintk(XENLOG_INFO, "tracking VRAM %lx - %lx\n", begin_pfn, end_pfn);
+-
+-        rc = -ENOMEM;
+-        if ( (dirty_vram = xmalloc(struct sh_dirty_vram)) == NULL )
+-            goto out;
+-        dirty_vram->begin_pfn = begin_pfn;
+-        dirty_vram->end_pfn = end_pfn;
+-        d->arch.hvm_domain.dirty_vram = dirty_vram;
+-
+-        if ( (dirty_vram->sl1ma = xmalloc_array(paddr_t, nr)) == NULL )
+-            goto out_dirty_vram;
+-        memset(dirty_vram->sl1ma, ~0, sizeof(paddr_t) * nr);
+-
+-        if ( (dirty_vram->dirty_bitmap = xzalloc_array(uint8_t, dirty_size)) == NULL )
+-            goto out_sl1ma;
+-
+-        dirty_vram->last_dirty = NOW();
+-
+-        /* Tell the caller that this time we could not track dirty bits. */
+-        rc = -ENODATA;
+-    }
+-    else if (dirty_vram->last_dirty == -1)
+-    {
+-        /* still completely clean, just copy our empty bitmap */
+-        rc = -EFAULT;
+-        if ( copy_to_guest(dirty_bitmap, dirty_vram->dirty_bitmap, dirty_size) == 0 )
+-            rc = 0;
++        goto out;
+     }
+-    else
++        
++    list_for_each_safe(curr, next, &dirty_vram->range_head)
+     {
+-        /* Iterate over VRAM to track dirty bits. */
+-        for ( i = 0; i < nr; i++ ) {
+-            mfn_t mfn = get_gfn_query_unlocked(d, begin_pfn + i, &t);
+-            struct page_info *page;
+-            int dirty = 0;
+-            paddr_t sl1ma = dirty_vram->sl1ma[i];
+-
+-            if (mfn_x(mfn) == INVALID_MFN)
+-            {
+-                dirty = 1;
+-            }
+-            else
++        dv_range_t *range = list_entry(curr, dv_range_t, range_link);
++        unsigned long i;
++        int max_mappings = 1, mappings = 0;
++        int unshadowed = 0;
++        for (i = 0; i != range->end_pfn - range->begin_pfn; i++)
++        {
++            dv_paddr_link_t *pl = &range->pl_tab[ i ];
++            dv_paddr_link_t **ppl = NULL;
++            mappings = 0;
++            
++            while (pl != NULL)
+             {
+-                page = mfn_to_page(mfn);
+-                switch (page->u.inuse.type_info & PGT_count_mask)
+-                {
+-                case 0:
+-                    /* No guest reference, nothing to track. */
+-                    break;
+-                case 1:
+-                    /* One guest reference. */
+-                    if ( sl1ma == INVALID_PADDR )
+-                    {
+-                        /* We don't know which sl1e points to this, too bad. */
+-                        dirty = 1;
+-                        /* TODO: Heuristics for finding the single mapping of
+-                         * this gmfn */
+-                        flush_tlb |= sh_remove_all_mappings(d->vcpu[0], mfn);
+-                    }
+-                    else
+-                    {
+-                        /* Hopefully the most common case: only one mapping,
+-                         * whose dirty bit we can use. */
+-                        l1_pgentry_t *sl1e = maddr_to_virt(sl1ma);
+-
+-                        if ( l1e_get_flags(*sl1e) & _PAGE_DIRTY )
+-                        {
+-                            dirty = 1;
+-                            /* Note: this is atomic, so we may clear a
+-                             * _PAGE_ACCESSED set by another processor. */
+-                            l1e_remove_flags(*sl1e, _PAGE_DIRTY);
+-                            flush_tlb = 1;
+-                        }
+-                    }
+-                    break;
+-                default:
+-                    /* More than one guest reference,
+-                     * we don't afford tracking that. */
+-                    dirty = 1;
++                paddr_t sl1ma = pl->sl1ma;
++                unsigned long sl1mn;
++                
++                if (sl1ma == INVALID_PADDR )
+                     break;
++                
++                sl1mn = sl1ma >> PAGE_SHIFT;
++                if (sl1mn == mfn_x(smfn)) {
++#if DEBUG_unshadow_sl1ma_detail
++                    gdprintk(XENLOG_DEBUG,
++                             "[%lx] gfn[%lx] unshadow sl1ma:%lx\n",
++                             mfn_x(smfn),
++                             range->begin_pfn + i,
++                             sl1ma);
++#endif
++                    unshadowed++;
++                    pl = free_paddr_link(d, ppl, pl);
++                    --range->nr_mappings;
++                }
++                else
++                {
++                    ppl = &pl->pl_next;
++                    pl = *ppl;
++                    mappings++;
+                 }
+             }
+-
+-            if ( dirty )
++        }
++        if (mappings > max_mappings)
++            max_mappings = mappings;
++        
++        if (unshadowed) {
++#if DEBUG_unshadow_sl1ma
++            gdprintk(XENLOG_DEBUG,
++                     "[%lx] gfn[%05lx:%05lx] unshadowed:%d mappings:0x%x max_mappings:%d\n",
++                     mfn_x(smfn),
++                     range->begin_pfn, range->end_pfn,
++                     unshadowed, range->nr_mappings, max_mappings);
++#endif
++            if ( range->nr_mappings == 0 )
+             {
+-                dirty_vram->dirty_bitmap[i / 8] |= 1 << (i % 8);
+-                dirty_vram->last_dirty = NOW();
++                dirty_vram_range_free(d, range);                    
+             }
+         }
++    }
++ out:
++    return;
++}
++
++
++typedef int (*hash_pfn_callback_t)(struct vcpu *v,
++                                   mfn_t smfn,
++                                   unsigned long begin_pfn,
++                                   unsigned long end_pfn,
++                                   int *removed);
++
++static int hash_pfn_foreach(struct vcpu *v, 
++                            unsigned int callback_mask, 
++                            hash_pfn_callback_t callbacks[], 
++                            unsigned long begin_pfn,
++                            unsigned long end_pfn)
++/* Walk the hash table looking at the types of the entries and 
++ * calling the appropriate callback function for each entry. 
++ * The mask determines which shadow types we call back for, and the array
++ * of callbacks tells us which function to call.
++ * Any callback may return non-zero to let us skip the rest of the scan. 
++ *
++ * WARNING: Callbacks MUST NOT add or remove hash entries unless they 
++ * then return non-zero to terminate the scan. */
++{
++    int i, done = 0, removed = 0;
++    struct domain *d = v->domain;
++    struct page_info *x;
++
++    /* Say we're here, to stop hash-lookups reordering the chains */
++    ASSERT(paging_locked_by_me(d));
++    ASSERT(d->arch.paging.shadow.hash_walking == 0);
++    d->arch.paging.shadow.hash_walking = 1;
+ 
+-        rc = -EFAULT;
+-        if ( copy_to_guest(dirty_bitmap, dirty_vram->dirty_bitmap, dirty_size) == 0 ) {
+-            memset(dirty_vram->dirty_bitmap, 0, dirty_size);
+-            if (dirty_vram->last_dirty + SECONDS(2) < NOW())
++    for ( i = 0; i < SHADOW_HASH_BUCKETS; i++ ) 
++    {
++        /* WARNING: This is not safe against changes to the hash table.
++         * The callback *must* return non-zero if it has inserted or
++         * deleted anything from the hash (lookups are OK, though). */
++        for ( x = d->arch.paging.shadow.hash_table[i]; x; x = next_shadow(x) )
++        {
++            if ( callback_mask & (1 << x->u.sh.type) )
+             {
+-                /* was clean for more than two seconds, try to disable guest
+-                 * write access */
+-                for ( i = begin_pfn; i < end_pfn; i++ ) {
+-                    mfn_t mfn = get_gfn_query_unlocked(d, i, &t);
+-                    if (mfn_x(mfn) != INVALID_MFN)
+-                        flush_tlb |= sh_remove_write_access(d->vcpu[0], mfn, 1, 0);
+-                }
+-                dirty_vram->last_dirty = -1;
++                ASSERT(x->u.sh.type <= 15);
++                ASSERT(callbacks[x->u.sh.type] != NULL);
++                done = callbacks[x->u.sh.type](v, page_to_mfn(x), 
++                                               begin_pfn, end_pfn,
++                                               &removed);
++                if ( done ) break;
+             }
+-            rc = 0;
+         }
++        if ( done ) break; 
+     }
+-    if ( flush_tlb )
+-        flush_tlb_mask(d->domain_dirty_cpumask);
+-    goto out;
++    d->arch.paging.shadow.hash_walking = 0;
++    return removed;
++}
+ 
+-out_sl1ma:
+-    xfree(dirty_vram->sl1ma);
+-out_dirty_vram:
+-    xfree(dirty_vram);
+-    dirty_vram = d->arch.hvm_domain.dirty_vram = NULL;
++void sh_find_all_vram_mappings(struct vcpu *v,
++                               dv_range_t *range)
++{
++    /* Dispatch table for getting per-type functions */
++    static hash_pfn_callback_t callbacks[SH_type_unused] = {
++        NULL, /* none    */
++        SHADOW_INTERNAL_NAME(sh_find_vram_mappings_in_l1, 2), /* l1_32   */
++        SHADOW_INTERNAL_NAME(sh_find_vram_mappings_in_l1, 2), /* fl1_32  */
++        NULL, /* l2_32   */
++        SHADOW_INTERNAL_NAME(sh_find_vram_mappings_in_l1, 3), /* l1_pae  */
++        SHADOW_INTERNAL_NAME(sh_find_vram_mappings_in_l1, 3), /* fl1_pae */
++        NULL, /* l2_pae  */
++        NULL, /* l2h_pae */
++#if CONFIG_PAGING_LEVELS >= 4
++        SHADOW_INTERNAL_NAME(sh_find_vram_mappings_in_l1, 4), /* l1_64   */
++        SHADOW_INTERNAL_NAME(sh_find_vram_mappings_in_l1, 4), /* fl1_64  */
++#else
++        NULL, /* l1_64   */
++        NULL, /* fl1_64  */
++#endif
++        NULL, /* l2_64   */
++        NULL, /* l2h_64  */
++        NULL, /* l3_64   */
++        NULL, /* l4_64   */
++        NULL, /* p2m     */
++        NULL  /* unused  */
++    };
+ 
+-out:
+-    paging_unlock(d);
+-    p2m_unlock(p2m_get_hostp2m(d));
+-    return rc;
++    static unsigned int callback_mask = 
++          1 << SH_type_l1_32_shadow
++        | 1 << SH_type_fl1_32_shadow
++        | 1 << SH_type_l1_pae_shadow
++        | 1 << SH_type_fl1_pae_shadow
++        | 1 << SH_type_l1_64_shadow
++        | 1 << SH_type_fl1_64_shadow
++        ;
++
++    perfc_incr(shadow_mappings);
++
++    hash_pfn_foreach(v, callback_mask, callbacks,
++                     range->begin_pfn,
++                     range->end_pfn);
++
++#if DEBUG_count_initial_mappings
++    gdprintk(XENLOG_DEBUG, "[%05lx:%05lx] count of initial mappings:%d\n",
++             range->begin_pfn, range->end_pfn,
++             range->nr_mappings);
++#endif
+ }
+ 
++
+ /**************************************************************************/
+ /* Shadow-control XEN_DOMCTL dispatcher */
+ 
+diff --git a/xen/arch/x86/mm/shadow/multi.c b/xen/arch/x86/mm/shadow/multi.c
+index b0e6d72..f4d0603 100644
+--- a/xen/arch/x86/mm/shadow/multi.c
++++ b/xen/arch/x86/mm/shadow/multi.c
+@@ -35,6 +35,7 @@
+ #include <asm/flushtlb.h>
+ #include <asm/hvm/hvm.h>
+ #include <asm/hvm/cacheattr.h>
++#include <asm/hvm/dirty_vram.h>
+ #include <asm/mtrr.h>
+ #include <asm/guest_pt.h>
+ #include <public/sched.h>
+@@ -149,6 +150,10 @@ delete_fl1_shadow_status(struct vcpu *v, gfn_t gfn, mfn_t smfn)
+     SHADOW_PRINTK("gfn=%"SH_PRI_gfn", type=%08x, smfn=%05lx\n",
+                    gfn_x(gfn), SH_type_fl1_shadow, mfn_x(smfn));
+     ASSERT(mfn_to_page(smfn)->u.sh.head);
++
++    /* Removing any dv_paddr_links to the erstwhile shadow page */
++    dirty_vram_delete_shadow(v, gfn_x(gfn), SH_type_fl1_shadow, smfn);
++    
+     shadow_hash_delete(v, gfn_x(gfn), SH_type_fl1_shadow, smfn);
+ }
+ 
+@@ -160,6 +165,10 @@ delete_shadow_status(struct vcpu *v, mfn_t gmfn, u32 shadow_type, mfn_t smfn)
+                    v->domain->domain_id, v->vcpu_id,
+                    mfn_x(gmfn), shadow_type, mfn_x(smfn));
+     ASSERT(mfn_to_page(smfn)->u.sh.head);
++    
++    /* Removing any dv_paddr_links to the erstwhile shadow page */
++    dirty_vram_delete_shadow(v, mfn_x(gmfn), shadow_type, smfn);
++    
+     shadow_hash_delete(v, mfn_x(gmfn), shadow_type, smfn);
+     /* 32-on-64 PV guests don't own their l4 pages; see set_shadow_status */
+     if ( !is_pv_32on64_vcpu(v) || shadow_type != SH_type_l4_64_shadow )
+@@ -516,7 +525,6 @@ _sh_propagate(struct vcpu *v,
+     guest_l1e_t guest_entry = { guest_intpte };
+     shadow_l1e_t *sp = shadow_entry_ptr;
+     struct domain *d = v->domain;
+-    struct sh_dirty_vram *dirty_vram = d->arch.hvm_domain.dirty_vram;
+     gfn_t target_gfn = guest_l1e_get_gfn(guest_entry);
+     u32 pass_thru_flags;
+     u32 gflags, sflags;
+@@ -663,17 +671,6 @@ _sh_propagate(struct vcpu *v,
+         }
+     }
+ 
+-    if ( unlikely((level == 1) && dirty_vram
+-            && dirty_vram->last_dirty == -1
+-            && gfn_x(target_gfn) >= dirty_vram->begin_pfn
+-            && gfn_x(target_gfn) < dirty_vram->end_pfn) )
+-    {
+-        if ( ft & FETCH_TYPE_WRITE )
+-            dirty_vram->last_dirty = NOW();
+-        else
+-            sflags &= ~_PAGE_RW;
+-    }
+-
+     /* Read-only memory */
+     if ( p2m_is_readonly(p2mt) ||
+          (p2mt == p2m_mmio_direct &&
+@@ -1072,101 +1069,57 @@ static int shadow_set_l2e(struct vcpu *v,
+     return flags;
+ }
+ 
+-static inline void shadow_vram_get_l1e(shadow_l1e_t new_sl1e,
++/* shadow_vram_fix_l1e()
++ * Testing L1PTEs as they are modified, look for when they start to (or cease to)
++ * point to frame buffer pages.  If the old and new gfns differ, calls
++ * dirty_vram_range_update() to updates the dirty_vram structures
++ */
++static inline void shadow_vram_fix_l1e(shadow_l1e_t old_sl1e,
++                                       shadow_l1e_t new_sl1e,
+                                        shadow_l1e_t *sl1e,
+                                        mfn_t sl1mfn,
+                                        struct domain *d)
+ { 
+-    mfn_t mfn = shadow_l1e_get_mfn(new_sl1e);
+-    int flags = shadow_l1e_get_flags(new_sl1e);
+-    unsigned long gfn;
+-    struct sh_dirty_vram *dirty_vram = d->arch.hvm_domain.dirty_vram;
++    mfn_t new_mfn, old_mfn;
++    unsigned long new_gfn = INVALID_M2P_ENTRY, old_gfn = INVALID_M2P_ENTRY;
++    paddr_t sl1ma;
++    dv_dirty_vram_t *dirty_vram = d->arch.hvm_domain.dirty_vram;
+ 
+-    if ( !dirty_vram         /* tracking disabled? */
+-         || !(flags & _PAGE_RW) /* read-only mapping? */
+-         || !mfn_valid(mfn) )   /* mfn can be invalid in mmio_direct */
++    if ( !dirty_vram )
+         return;
+ 
+-    gfn = mfn_to_gfn(d, mfn);
+-    /* Page sharing not supported on shadow PTs */
+-    BUG_ON(SHARED_M2P(gfn));
++    sl1ma = pfn_to_paddr(mfn_x(sl1mfn)) | ((unsigned long)sl1e & ~PAGE_MASK);
+ 
+-    if ( (gfn >= dirty_vram->begin_pfn) && (gfn < dirty_vram->end_pfn) )
++    old_mfn = shadow_l1e_get_mfn(old_sl1e);
++
++    if ( !sh_l1e_is_magic(old_sl1e) &&
++         (l1e_get_flags(old_sl1e) & _PAGE_PRESENT) &&
++         mfn_valid(old_mfn))
+     {
+-        unsigned long i = gfn - dirty_vram->begin_pfn;
+-        struct page_info *page = mfn_to_page(mfn);
+-        
+-        if ( (page->u.inuse.type_info & PGT_count_mask) == 1 )
+-            /* Initial guest reference, record it */
+-            dirty_vram->sl1ma[i] = pfn_to_paddr(mfn_x(sl1mfn))
+-                | ((unsigned long)sl1e & ~PAGE_MASK);
++        old_gfn = mfn_to_gfn(d, old_mfn);
+     }
+-}
+-
+-static inline void shadow_vram_put_l1e(shadow_l1e_t old_sl1e,
+-                                       shadow_l1e_t *sl1e,
+-                                       mfn_t sl1mfn,
+-                                       struct domain *d)
+-{
+-    mfn_t mfn = shadow_l1e_get_mfn(old_sl1e);
+-    int flags = shadow_l1e_get_flags(old_sl1e);
+-    unsigned long gfn;
+-    struct sh_dirty_vram *dirty_vram = d->arch.hvm_domain.dirty_vram;
+-
+-    if ( !dirty_vram         /* tracking disabled? */
+-         || !(flags & _PAGE_RW) /* read-only mapping? */
+-         || !mfn_valid(mfn) )   /* mfn can be invalid in mmio_direct */
+-        return;
+-
+-    gfn = mfn_to_gfn(d, mfn);
+-    /* Page sharing not supported on shadow PTs */
+-    BUG_ON(SHARED_M2P(gfn));
+-
+-    if ( (gfn >= dirty_vram->begin_pfn) && (gfn < dirty_vram->end_pfn) )
++    
++    new_mfn = shadow_l1e_get_mfn(new_sl1e);
++    if ( !sh_l1e_is_magic(new_sl1e) &&
++         (l1e_get_flags(new_sl1e) & _PAGE_PRESENT) &&
++         mfn_valid(new_mfn))
+     {
+-        unsigned long i = gfn - dirty_vram->begin_pfn;
+-        struct page_info *page = mfn_to_page(mfn);
+-        int dirty = 0;
+-        paddr_t sl1ma = pfn_to_paddr(mfn_x(sl1mfn))
+-            | ((unsigned long)sl1e & ~PAGE_MASK);
++        new_gfn = mfn_to_gfn(d, new_mfn);
++    }
+ 
+-        if ( (page->u.inuse.type_info & PGT_count_mask) == 1 )
+-        {
+-            /* Last reference */
+-            if ( dirty_vram->sl1ma[i] == INVALID_PADDR ) {
+-                /* We didn't know it was that one, let's say it is dirty */
+-                dirty = 1;
+-            }
+-            else
+-            {
+-                ASSERT(dirty_vram->sl1ma[i] == sl1ma);
+-                dirty_vram->sl1ma[i] = INVALID_PADDR;
+-                if ( flags & _PAGE_DIRTY )
+-                    dirty = 1;
+-            }
+-        }
+-        else
++    if (old_gfn == new_gfn) return;
++
++    if (VALID_M2P(old_gfn))
++        if (dirty_vram_range_update(d, old_gfn, sl1ma, 0/*clear*/))
+         {
+-            /* We had more than one reference, just consider the page dirty. */
+-            dirty = 1;
+-            /* Check that it's not the one we recorded. */
+-            if ( dirty_vram->sl1ma[i] == sl1ma )
+-            {
+-                /* Too bad, we remembered the wrong one... */
+-                dirty_vram->sl1ma[i] = INVALID_PADDR;
+-            }
+-            else
+-            {
+-                /* Ok, our recorded sl1e is still pointing to this page, let's
+-                 * just hope it will remain. */
+-            }
++            SHADOW_PRINTK("gfn %lx (mfn %lx) cleared vram pte\n", old_gfn, mfn_x(old_mfn));
+         }
+-        if ( dirty )
++
++    if (VALID_M2P(new_gfn))
++        if (dirty_vram_range_update(d, new_gfn, sl1ma, 1/*set*/))
+         {
+-            dirty_vram->dirty_bitmap[i / 8] |= 1 << (i % 8);
+-            dirty_vram->last_dirty = NOW();
++            SHADOW_PRINTK("gfn %lx (mfn %lx) set vram pte\n", new_gfn, mfn_x(new_mfn));
+         }
+-    }
+ }
+ 
+ static int shadow_set_l1e(struct vcpu *v, 
+@@ -1211,12 +1164,14 @@ static int shadow_set_l1e(struct vcpu *v,
+                 shadow_l1e_remove_flags(new_sl1e, _PAGE_RW);
+                 /* fall through */
+             case 0:
+-                shadow_vram_get_l1e(new_sl1e, sl1e, sl1mfn, d);
++                shadow_vram_fix_l1e(old_sl1e, new_sl1e, sl1e, sl1mfn, d);
+                 break;
+             }
+         }
+     } 
+ 
++    shadow_vram_fix_l1e(old_sl1e, new_sl1e, sl1e, sl1mfn, d);
++
+     /* Write the new entry */
+     shadow_write_entries(sl1e, &new_sl1e, 1, sl1mfn);
+     flags |= SHADOW_SET_CHANGED;
+@@ -1231,7 +1186,6 @@ static int shadow_set_l1e(struct vcpu *v,
+          * trigger a flush later. */
+         if ( shadow_mode_refcounts(d) ) 
+         {
+-            shadow_vram_put_l1e(old_sl1e, sl1e, sl1mfn, d);
+             shadow_put_page_from_l1e(old_sl1e, d);
+             TRACE_SHADOW_PATH_FLAG(TRCE_SFLAG_SHADOW_L1_PUT_REF);
+         } 
+@@ -2018,7 +1972,6 @@ void sh_destroy_l1_shadow(struct vcpu *v, mfn_t smfn)
+         SHADOW_FOREACH_L1E(sl1mfn, sl1e, 0, 0, {
+             if ( (shadow_l1e_get_flags(*sl1e) & _PAGE_PRESENT)
+                  && !sh_l1e_is_magic(*sl1e) ) {
+-                shadow_vram_put_l1e(*sl1e, sl1e, sl1mfn, d);
+                 shadow_put_page_from_l1e(*sl1e, d);
+             }
+         });
+@@ -4336,6 +4289,34 @@ int sh_rm_mappings_from_l1(struct vcpu *v, mfn_t sl1mfn, mfn_t target_mfn)
+     return done;
+ }
+ 
++
++int sh_find_vram_mappings_in_l1(struct vcpu *v,
++                                mfn_t sl1mfn,
++                                unsigned long begin_pfn,
++                                unsigned long end_pfn,
++                                int *removed)
++/* Find all VRAM mappings in this shadow l1 table */
++{
++    struct domain *d = v->domain;
++    shadow_l1e_t *sl1e;
++    int done = 0;
++    
++    SHADOW_FOREACH_L1E(sl1mfn, sl1e, 0, done, /* only returns _PAGE_PRESENT entries */
++    {
++        unsigned long gfn;
++        mfn_t gmfn = shadow_l1e_get_mfn(*sl1e);
++        if (!mfn_valid(gmfn))
++            continue;
++        gfn = mfn_to_gfn(d, gmfn);
++        if (VALID_M2P(gfn) && (begin_pfn <= gfn) && (gfn < end_pfn)) 
++        {
++            paddr_t sl1ma = pfn_to_paddr(mfn_x(sl1mfn)) | ((unsigned long)sl1e & ~PAGE_MASK);
++            dirty_vram_range_update(v->domain, gfn, sl1ma, 1/*set*/);
++        }
++    });
++    return 0;
++}
++
+ /**************************************************************************/
+ /* Functions to excise all pointers to shadows from higher-level shadows. */
+ 
+diff --git a/xen/arch/x86/mm/shadow/multi.h b/xen/arch/x86/mm/shadow/multi.h
+index 835121e..436a4ac 100644
+--- a/xen/arch/x86/mm/shadow/multi.h
++++ b/xen/arch/x86/mm/shadow/multi.h
+@@ -66,7 +66,12 @@ SHADOW_INTERNAL_NAME(sh_rm_write_access_from_l1, GUEST_LEVELS)
+ extern int
+ SHADOW_INTERNAL_NAME(sh_rm_mappings_from_l1, GUEST_LEVELS)
+     (struct vcpu *v, mfn_t sl1mfn, mfn_t target_mfn);
+-
++extern int
++SHADOW_INTERNAL_NAME(sh_find_vram_mappings_in_l1, GUEST_LEVELS)
++     (struct vcpu *v, mfn_t sl1mfn, 
++      unsigned long begin_pfn,
++      unsigned long end_pfn,
++      int *removed);
+ extern void
+ SHADOW_INTERNAL_NAME(sh_clear_shadow_entry, GUEST_LEVELS)
+     (struct vcpu *v, void *ep, mfn_t smfn);
+diff --git a/xen/arch/x86/mm/shadow/types.h b/xen/arch/x86/mm/shadow/types.h
+index 43ce1db..5b0f9f7 100644
+--- a/xen/arch/x86/mm/shadow/types.h
++++ b/xen/arch/x86/mm/shadow/types.h
+@@ -229,6 +229,7 @@ static inline shadow_l4e_t shadow_l4e_from_mfn(mfn_t mfn, u32 flags)
+ #define sh_update_cr3              INTERNAL_NAME(sh_update_cr3)
+ #define sh_rm_write_access_from_l1 INTERNAL_NAME(sh_rm_write_access_from_l1)
+ #define sh_rm_mappings_from_l1     INTERNAL_NAME(sh_rm_mappings_from_l1)
++#define sh_find_vram_mappings_in_l1 INTERNAL_NAME(sh_find_vram_mappings_in_l1)
+ #define sh_remove_l1_shadow        INTERNAL_NAME(sh_remove_l1_shadow)
+ #define sh_remove_l2_shadow        INTERNAL_NAME(sh_remove_l2_shadow)
+ #define sh_remove_l3_shadow        INTERNAL_NAME(sh_remove_l3_shadow)
+diff --git a/xen/include/asm-x86/hap.h b/xen/include/asm-x86/hap.h
+index a2532a4..82e20c7 100644
+--- a/xen/include/asm-x86/hap.h
++++ b/xen/include/asm-x86/hap.h
+@@ -57,10 +57,6 @@ void  hap_final_teardown(struct domain *d);
+ void  hap_teardown(struct domain *d);
+ void  hap_vcpu_init(struct vcpu *v);
+ void  hap_logdirty_init(struct domain *d);
+-int   hap_track_dirty_vram(struct domain *d,
+-                           unsigned long begin_pfn,
+-                           unsigned long nr,
+-                           XEN_GUEST_HANDLE_64(uint8) dirty_bitmap);
+ 
+ extern const struct paging_mode *hap_paging_get_mode(struct vcpu *);
+ 
+diff --git a/xen/include/asm-x86/hvm/dirty_vram.h b/xen/include/asm-x86/hvm/dirty_vram.h
+new file mode 100644
+index 0000000..b8b92cc
+--- /dev/null
++++ b/xen/include/asm-x86/hvm/dirty_vram.h
+@@ -0,0 +1,157 @@
++/******************************************************************************
++ * include/asm-x86/hvm/dirty_vram.h
++ *
++ * Interface for tracking dirty VRAM pages
++ *
++ * Copyright (c) 2012 Citrix Systems, Inc. (Robert Phillips)
++ * Parts of this code are Copyright (c) 2006 by XenSource Inc.
++ * Parts of this code are Copyright (c) 2006 by Michael A Fetterman
++ * Parts based on earlier work by Michael A Fetterman, Ian Pratt et al.
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
++ */
++
++#ifndef _DIRTY_VRAM_H
++#define _DIRTY_VRAM_H
++
++/* In shadow mode we need to bookkeep all the L1 page table entries that
++ * map a frame buffer page.  Struct dv_paddr_link does this
++ * by recording the address of a L1 page table entry for some frame buffer page.
++ * Also has a link to additional pl entries if the frame buffer page
++ * has multiple mappings */
++typedef struct dv_paddr_link {
++    paddr_t sl1ma;
++    struct dv_paddr_link *pl_next;
++} dv_paddr_link_t;
++
++/* This defines an extension page of pl entries for FB pages with multiple
++ * mappings. All such pages (of a domain) are linked together. */
++typedef struct dv_paddr_link_ext {
++    struct list_head ext_link;
++    dv_paddr_link_t entries[(PAGE_SIZE-sizeof(struct list_head))/sizeof(dv_paddr_link_t)];
++} dv_paddr_link_ext_t;
++
++/* This defines a single frame buffer range.  It bookkeeps all the level 1 PTEs
++ * that map guest pages within that range.
++ * All such ranges (of a domain) are linked together. */
++typedef struct dv_range {
++    struct list_head range_link; /* the several ranges form a linked list */
++    unsigned long begin_pfn;
++    unsigned long end_pfn;
++    dv_paddr_link_t *pl_tab; /* table has 1 pl entry per pfn in range */
++    int nr_mappings;  /* total number of mappings in this range */
++    int mappings_hwm; /* high water mark of max mapping count */
++    unsigned int dirty_count;
++} dv_range_t;
++
++/* This contains all the data structures required by a domain to
++ * bookkeep the dirty pages within its frame buffers. */
++typedef struct dv_dirty_vram {
++    struct list_head range_head; /* head of the linked list of ranges */
++    struct list_head ext_head; /* head of list of extension pages */
++    dv_paddr_link_t *pl_free; /* free list of pl's within extension pages */
++    int nr_ranges; /* bookkeeps number of ranges */
++    int ranges_hwm; /* high water mark of max number of ranges */
++} dv_dirty_vram_t;
++
++/* Allocates domain's dirty_vram structure */
++dv_dirty_vram_t *
++dirty_vram_alloc(struct domain *d);
++
++/* Returns domain's dirty_vram structure,
++ * allocating it if necessary */
++dv_dirty_vram_t *
++dirty_vram_find_or_alloc(struct domain *d);
++
++/* Frees domain's dirty_vram structure */
++void dirty_vram_free(struct domain *d);
++
++/* Returns dirty vram range containing gfn, NULL if none */
++struct dv_range *
++dirty_vram_range_find_gfn(struct domain *d,
++                          unsigned long gfn);
++
++/* Returns dirty vram range matching [ begin_pfn .. begin_pfn+nr ), NULL if none */
++dv_range_t *
++dirty_vram_range_find(struct domain *d,
++                      unsigned long begin_pfn,
++                      unsigned long nr);
++
++/* Allocate dirty vram range containing [ begin_pfn .. begin_pfn+nr ),
++ * freeing any existing range that overlaps the new range. */
++dv_range_t *
++dirty_vram_range_alloc(struct domain *d,
++                       unsigned long begin_pfn,
++                       unsigned long nr);
++
++/* Returns dirty vram range matching [ begin_pfn .. begin_pfn+nr ),
++ * creating a range if none already exists and
++ * freeing any existing range that overlaps the new range. */
++dv_range_t *
++dirty_vram_range_find_or_alloc(struct domain *d,
++                               unsigned long begin_pfn,
++                               unsigned long nr);
++
++void dirty_vram_range_free(struct domain *d,
++                           dv_range_t *range);
++
++/* Bookkeep PTE address of a frame buffer page */
++int dirty_vram_range_update(struct domain *d,
++                            unsigned long gfn,
++                            paddr_t sl1ma,
++                            int set);
++
++/* smfn is no longer a shadow page.  Remove it from any
++ * dirty vram range mapping. */
++void
++dirty_vram_delete_shadow(struct vcpu *v,
++                         unsigned long gfn,
++                         unsigned int shadow_type, 
++                         mfn_t smfn);
++
++
++/* Scan all the L1 tables looking for VRAM mappings.
++ * Record them in the domain's dv_dirty_vram structure */
++void sh_find_all_vram_mappings(struct vcpu *v,
++                               dv_range_t *range);
++
++/* Free a paddr_link struct, given address of its
++ * predecessor in singly-linked list */
++dv_paddr_link_t *
++free_paddr_link(struct domain *d,
++                dv_paddr_link_t **ppl,
++                dv_paddr_link_t *pl);
++
++
++/* Enable VRAM dirty tracking. */
++int
++shadow_track_dirty_vram(struct domain *d,
++			unsigned long first_pfn,
++			unsigned long nr,
++			XEN_GUEST_HANDLE_64(uint8) dirty_bitmap);
++
++int
++hap_track_dirty_vram(struct domain *d,
++		     unsigned long begin_pfn,
++		     unsigned long nr,
++		     XEN_GUEST_HANDLE_64(uint8) dirty_bitmap);
++
++void
++hap_clean_vram_tracking_range(struct domain *d,
++			      unsigned long begin_pfn,
++			      unsigned long nr,
++			      uint8_t *dirty_bitmap);
++
++#endif /* _DIRTY_VRAM_H */
+diff --git a/xen/include/asm-x86/hvm/domain.h b/xen/include/asm-x86/hvm/domain.h
+index 27b3de5..6146542 100644
+--- a/xen/include/asm-x86/hvm/domain.h
++++ b/xen/include/asm-x86/hvm/domain.h
+@@ -74,7 +74,7 @@ struct hvm_domain {
+     struct list_head       pinned_cacheattr_ranges;
+ 
+     /* VRAM dirty support. */
+-    struct sh_dirty_vram *dirty_vram;
++    struct dv_dirty_vram * dirty_vram;
+ 
+     /* If one of vcpus of this domain is in no_fill_mode or
+      * mtrr/pat between vcpus is not the same, set is_in_uc_mode
+diff --git a/xen/include/asm-x86/paging.h b/xen/include/asm-x86/paging.h
+index d9b6950..fba06b0 100644
+--- a/xen/include/asm-x86/paging.h
++++ b/xen/include/asm-x86/paging.h
+@@ -137,10 +137,10 @@ struct paging_mode {
+ void paging_free_log_dirty_bitmap(struct domain *d);
+ 
+ /* get the dirty bitmap for a specific range of pfns */
+-int paging_log_dirty_range(struct domain *d,
+-                           unsigned long begin_pfn,
+-                           unsigned long nr,
+-                           XEN_GUEST_HANDLE_64(uint8) dirty_bitmap);
++void paging_log_dirty_range(struct domain *d,
++                            unsigned long begin_pfn,
++                            unsigned long nr,
++                            uint8_t *dirty_bitmap);
+ 
+ /* enable log dirty */
+ int paging_log_dirty_enable(struct domain *d);
+@@ -161,6 +161,11 @@ void paging_mark_dirty(struct domain *d, unsigned long guest_mfn);
+  * This is called from inside paging code, with the paging lock held. */
+ int paging_mfn_is_dirty(struct domain *d, mfn_t gmfn);
+ 
++/* mark a page as dirty, from hap page fault handler */
++void paging_mark_dirty_hap(struct domain *d,
++                           unsigned long pfn,
++                           unsigned long guest_mfn);
++
+ /*
+  * Log-dirty radix tree indexing:
+  *   All tree nodes are PAGE_SIZE bytes, mapped on-demand.
+@@ -183,15 +188,6 @@ int paging_mfn_is_dirty(struct domain *d, mfn_t gmfn);
+ #define L4_LOGDIRTY_IDX(pfn) 0
+ #endif
+ 
+-/* VRAM dirty tracking support */
+-struct sh_dirty_vram {
+-    unsigned long begin_pfn;
+-    unsigned long end_pfn;
+-    paddr_t *sl1ma;
+-    uint8_t *dirty_bitmap;
+-    s_time_t last_dirty;
+-};
+-
+ /*****************************************************************************
+  * Entry points into the paging-assistance code */
+ 
+diff --git a/xen/include/asm-x86/shadow.h b/xen/include/asm-x86/shadow.h
+index 88a8cd2..bdb8dcd 100644
+--- a/xen/include/asm-x86/shadow.h
++++ b/xen/include/asm-x86/shadow.h
+@@ -62,12 +62,6 @@ void shadow_vcpu_init(struct vcpu *v);
+ /* Enable an arbitrary shadow mode.  Call once at domain creation. */
+ int shadow_enable(struct domain *d, u32 mode);
+ 
+-/* Enable VRAM dirty bit tracking. */
+-int shadow_track_dirty_vram(struct domain *d,
+-                            unsigned long first_pfn,
+-                            unsigned long nr,
+-                            XEN_GUEST_HANDLE_64(uint8) dirty_bitmap);
+-
+ /* Handler for shadow control ops: operations from user-space to enable
+  * and disable ephemeral shadow modes (test mode and log-dirty mode) and
+  * manipulate the log-dirty bitmap. */

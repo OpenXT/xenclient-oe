@@ -1,0 +1,247 @@
+diff --git a/block.c b/block.c
+index d27bfe3..e835bbd 100644
+--- a/block.c
++++ b/block.c
+@@ -404,6 +404,9 @@ int bdrv_open2(BlockDriverState *bs, const char *filename, int flags,
+         filename = tmp_filename;
+         bs->is_temporary = 1;
+     }
++    if (flags & BDRV_O_EXCLUSIVE) {
++	 bs->exclusive = 1;
++    }
+ 
+     pstrcpy(bs->filename, sizeof(bs->filename), filename);
+     if (flags & BDRV_O_FILE) {
+@@ -982,6 +985,11 @@ int bdrv_is_read_only(BlockDriverState *bs)
+     return bs->read_only;
+ }
+ 
++int bdrv_is_exclusive(BlockDriverState *bs)
++{
++    return bs->exclusive;
++}
++
+ int bdrv_is_sg(BlockDriverState *bs)
+ {
+     return bs->sg;
+@@ -1159,6 +1167,7 @@ void bdrv_info(void)
+ 		term_print_filename(bs->backing_file);
+ 	    }
+             term_printf(" ro=%d", bs->read_only);
++            term_printf(" exclusive=%d", bs->exclusive);
+             term_printf(" drv=%s", bs->drv->format_name);
+             term_printf(" encrypted=%d", bdrv_is_encrypted(bs));
+         } else {
+diff --git a/block.h b/block.h
+index 6b1215a..4e58d9c 100644
+--- a/block.h
++++ b/block.h
+@@ -51,6 +51,7 @@ typedef struct QEMUSnapshotInfo {
+ #define BDRV_O_NOCACHE     0x0020 /* do not use the host page cache */
+ #define BDRV_O_CACHE_WB    0x0040 /* use write-back caching */
+ #define BDRV_O_CACHE_DEF   0x0080 /* use default caching */
++#define BDRV_O_EXCLUSIVE   0x0200 /* exclusive access to media (cdrom-pt) */
+ 
+ #define BDRV_O_CACHE_MASK  (BDRV_O_NOCACHE | BDRV_O_CACHE_WB | BDRV_O_CACHE_DEF)
+ 
+@@ -131,6 +132,7 @@ int bdrv_get_type_hint(BlockDriverState *bs);
+ int bdrv_get_translation_hint(BlockDriverState *bs);
+ int bdrv_is_removable(BlockDriverState *bs);
+ int bdrv_is_read_only(BlockDriverState *bs);
++int bdrv_is_exclusive(BlockDriverState *bs);
+ int bdrv_is_sg(BlockDriverState *bs);
+ int bdrv_is_inserted(BlockDriverState *bs);
+ int bdrv_media_changed(BlockDriverState *bs);
+diff --git a/block_int.h b/block_int.h
+index 6d2c2fc..92a709c 100644
+--- a/block_int.h
++++ b/block_int.h
+@@ -109,6 +109,7 @@ struct BlockDriverState {
+     int64_t total_sectors; /* if we are reading a disk image, give its
+                               size in sectors */
+     int read_only; /* if true, the media is read only */
++    int exclusive; /* if true, acess to the media is exclusive */
+     int removable; /* if true, the media can be removed */
+     int locked;    /* if true, the media cannot temporarily be ejected */
+     int encrypted; /* if true, the media is encrypted */
+diff --git a/hw/atapi-pt.c b/hw/atapi-pt.c
+index 1876b53..f0b622e 100644
+--- a/hw/atapi-pt.c
++++ b/hw/atapi-pt.c
+@@ -28,6 +28,7 @@ static int debug_enabled=-1;
+ # define DEBUG_HEXDUMP(addr, count)
+ #endif /* DEBUG_IDE_ATAPI_PT */
+ 
++static int exclusive_ro_access=-1;
+ 
+ #define IDE_ATAPI_PT_SHM_NAME_TEMPLATE "/xen-atapi-pt-status-%04x:%04x"
+ #define IDE_ATAPI_PT_DEBUG_ENABLE_FILE   "/etc/debugcdrom"
+@@ -1061,14 +1062,18 @@ static void ide_atapi_pt_cmd_complete(void *arg) /* Mop up result*/
+ 		    s->io_buffer[5] = 1;
+ 		    s->io_buffer[6] = 0;
+ 		    s->io_buffer[7] = 0;
++		    release_atapi_pt_lock();
+ 		} else {
+ 		    DEBUG_PRINTF("[ATAPI] new media message spotted\n");
+-
+-		    s->io_buffer[2] = 4;
+-		    s->io_buffer[4] = 2;
+-		    s->io_buffer[5] = 2;
+-		    s->io_buffer[6] = 0;
+-		    s->io_buffer[7] = 0;
++		    if (s->bs->exclusive != 1 ||
++			(s->bs->exclusive == 1 && get_atapi_pt_lock_state() != ATAPI_PT_LOCK_STATE_LOCKED_BY_ME))
++		    {
++			s->io_buffer[2] = 4;
++			s->io_buffer[4] = 2;
++			s->io_buffer[5] = 2;
++			s->io_buffer[6] = 0;
++			s->io_buffer[7] = 0;
++		    }
+ 		}
+ 	    }
+ 	}
+@@ -1435,12 +1440,55 @@ static void ide_atapi_pt_cmd(IDEState *s)
+     uint8_t cmd_code;
+     FILE *fp;
+     int block_size;
++    char *tmp;
++    static ATAPIPTMediaState laststate = MEDIA_STATE_UNKNOWN;
+ 
+     memcpy(s->atapi_pt.request, s->io_buffer, ATAPI_PACKET_SIZE);
+     cmd_code = s->atapi_pt.request[0];
+     s->atapi_pt.timeout = 15000;
+     s->status |= BUSY_STAT;
+ 
++    /* Check if we want exclusive read access */
++    if (s->bs->exclusive == 1)
++    {
++	if (laststate != MEDIA_PRESENT &&
++	    s->atapi_pt.shm->mediastate == MEDIA_PRESENT)
++	{
++	    /* We just inserted a CD, try to get the lock if we're
++	     * focused */
++	    tmp = xenstore_read("/local/domain/0/switcher/focus");
++	    if (strtol(tmp, NULL, 0) == domid)
++		get_atapi_pt_lock();
++	}
++	laststate = s->atapi_pt.shm->mediastate;
++	
++	/* Always allow drive-related requests */
++	if (cmd_code != GPCMD_TEST_UNIT_READY &&
++	    cmd_code != GPCMD_GET_CONFIGURATION &&
++	    cmd_code != GPCMD_GET_PERFORMANCE &&
++	    cmd_code != GPCMD_MECHANISM_STATUS &&
++	    cmd_code != GPCMD_REQUEST_SENSE &&
++	    cmd_code != GPCMD_MODE_SENSE_10 &&
++	    cmd_code != GPCMD_INQUIRY &&
++	    cmd_code != GPCMD_GET_EVENT_STATUS_NOTIFICATION &&
++	    cmd_code != GPCMD_REPORT_KEY &&
++	    cmd_code != GPCMD_READ_CDVD_CAPACITY &&
++	    cmd_code != GPCMD_READ_FORMAT_CAPACITIES)
++	{
++	    /* Have lock? */
++	    if ((get_atapi_pt_lock_state() != ATAPI_PT_LOCK_STATE_LOCKED_BY_ME) &&
++		/* Allow EJECT when nobody has the lock */
++		(get_atapi_pt_lock_state() != ATAPI_PT_LOCK_STATE_UNLOCKED || cmd_code != GPCMD_START_STOP_UNIT))
++	    {
++		DEBUG_PRINTF("[ATAPI] refusing command: 0x%02x (\e[0;32m%s\e[m) dma=%d domain=%d\n",
++			     cmd_code, atapi_cmd_to_str(cmd_code), s->atapi_dma, domid);
++		ide_atapi_pt_set_error(s, SENSE_ILLEGAL_REQUEST,
++				       ASC_INV_FIELD_IN_CMD_PACKET, 0, 0x70);
++		return;
++	    }
++	}
++    }
++
+     DEBUG_PRINTF("[ATAPI] sending command: 0x%02x (\e[0;32m%s\e[m) dma=%d domain=%d\n",
+                  cmd_code, atapi_cmd_to_str(cmd_code), s->atapi_dma, domid);
+     DEBUG_PRINTF("    ");
+diff --git a/vl.c b/vl.c
+index f22654d..34ed34a 100644
+--- a/vl.c
++++ b/vl.c
+@@ -2235,10 +2235,14 @@ static int bt_parse(const char *opt)
+ #define CDROM_ALIAS "index=1,media=cdrom"
+ #define CDROM_PT_ALIAS "index=1,media=cdrompt"
+ #define CDROM_PT_RO_ALIAS "index=1,media=cdrompt,denywrite=1"
++#define CDROM_PT_EXCLUSIVE_ALIAS "index=1,media=cdrompt,exclusive=1"
++#define CDROM_PT_RO_EXCLUSIVE_ALIAS "index=1,media=cdrompt,denywrite=1,exclusive=1"
+ #else
+ #define CDROM_ALIAS "media=cdrom"
+ #define CDROM_PT_ALIAS "media=cdrompt"
+ #define CDROM_PT_RO_ALIAS "media=cdrompt,denywrite=1"
++#define CDROM_PT_EXCLUSIVE_ALIAS "media=cdrompt,exclusive=1"
++#define CDROM_PT_RO_EXCLUSIVE_ALIAS "media=cdrompt,denywrite=1,exclusive=1"
+ #endif
+ #define FD_ALIAS "index=%d,if=floppy"
+ #define PFLASH_ALIAS "if=pflash"
+@@ -2387,13 +2391,14 @@ int drive_init(struct drive_opt *arg, int snapshot, void *opaque)
+     int cache;
+     int bdrv_flags, onerror;
+     int denywrite = 0;
++    int exclusive = 0;
+     int drives_table_idx;
+     char *str = arg->opt;
+     static const char * const params[] = { "bus", "unit", "if", "index",
+                                            "cyls", "heads", "secs", "trans",
+                                            "media", "snapshot", "file",
+                                            "cache", "format", "serial", "werror",
+-					   "denywrite",
++					   "denywrite", "exclusive",
+                                            NULL };
+ 
+     if (check_params(buf, sizeof(buf), params, str) < 0) {
+@@ -2547,6 +2552,10 @@ int drive_init(struct drive_opt *arg, int snapshot, void *opaque)
+         denywrite = strtol(buf, NULL, 0);
+     }
+ 
++    if (get_param_value(buf, sizeof(buf), "exclusive", str)) {
++        exclusive = strtol(buf, NULL, 0);
++    }
++
+     if (get_param_value(buf, sizeof(buf), "snapshot", str)) {
+         if (!strcmp(buf, "on"))
+ 	    snapshot = 1;
+@@ -2735,6 +2744,10 @@ int drive_init(struct drive_opt *arg, int snapshot, void *opaque)
+         bdrv_flags |= BDRV_O_RDWR;
+     }
+ 
++    if (exclusive) {
++        bdrv_flags |= BDRV_O_EXCLUSIVE;
++    }
++
+     fprintf(stderr, "**** vl open(%s)\n", file);
+     if (bdrv_open2(bdrv, file, bdrv_flags, drv) < 0) {
+         fprintf(stderr, "qemu: could not open disk image %s\n",
+@@ -4312,6 +4325,8 @@ enum {
+     QEMU_OPTION_cdrom,
+     QEMU_OPTION_cdrom_pt,
+     QEMU_OPTION_cdrom_pt_ro,
++    QEMU_OPTION_cdrom_pt_exclusive,
++    QEMU_OPTION_cdrom_pt_ro_exclusive,
+     QEMU_OPTION_drive,
+     QEMU_OPTION_mtdblock,
+     QEMU_OPTION_sd,
+@@ -4436,6 +4451,8 @@ static const QEMUOption qemu_options[] = {
+     { "cdrom", HAS_ARG, QEMU_OPTION_cdrom },
+     { "cdrom-pt", HAS_ARG, QEMU_OPTION_cdrom_pt },
+     { "cdrom-pt-ro", HAS_ARG, QEMU_OPTION_cdrom_pt_ro },
++    { "cdrom-pt-exclusive", HAS_ARG, QEMU_OPTION_cdrom_pt_exclusive },
++    { "cdrom-pt-ro-exclusive", HAS_ARG, QEMU_OPTION_cdrom_pt_ro_exclusive },
+     { "drive", HAS_ARG, QEMU_OPTION_drive },
+     { "mtdblock", HAS_ARG, QEMU_OPTION_mtdblock },
+     { "sd", HAS_ARG, QEMU_OPTION_sd },
+@@ -5206,6 +5223,12 @@ int main(int argc, char **argv, char **envp)
+             case QEMU_OPTION_cdrom_pt_ro:
+                 drive_add(optarg, CDROM_PT_RO_ALIAS);
+                 break;
++            case QEMU_OPTION_cdrom_pt_exclusive:
++                drive_add(optarg, CDROM_PT_EXCLUSIVE_ALIAS);
++                break;
++            case QEMU_OPTION_cdrom_pt_ro_exclusive:
++                drive_add(optarg, CDROM_PT_RO_EXCLUSIVE_ALIAS);
++                break;
+             case QEMU_OPTION_boot:
+                 boot_devices = optarg;
+                 /* We just do some generic consistency checks */

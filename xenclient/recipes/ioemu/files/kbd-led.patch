@@ -1,0 +1,110 @@
+diff --git a/hw/pckbd.c b/hw/pckbd.c
+index 3a004f7..f91a387 100644
+--- a/hw/pckbd.c
++++ b/hw/pckbd.c
+@@ -26,6 +26,7 @@
+ #include "pc.h"
+ #include "ps2.h"
+ #include "sysemu.h"
++#include "switcher.h"
+ 
+ /* debug PC keyboard */
+ //#define DEBUG_KBD
+@@ -130,6 +131,8 @@ typedef struct KBDState {
+ 
+ static KBDState kbd_state;
+ 
++static int wait_for_led_code = 0;
++
+ /* update irq and KBD_STAT_[MOUSE_]OBF */
+ /* XXX: not generating the irqs if KBD_MODE_DISABLE_KBD is set may be
+    incorrect, but it avoids having to simulate exact delays */
+@@ -185,7 +188,7 @@ static uint32_t kbd_read_status(void *opaque, uint32_t addr)
+     int val;
+     val = s->status;
+ #if defined(DEBUG_KBD)
+-    printf("kbd: read status=0x%02x\n", val);
++    fprintf(stderr, "kbd: read status=0x%02x\n", val);
+ #endif
+     return val;
+ }
+@@ -203,7 +206,7 @@ static void kbd_write_command(void *opaque, uint32_t addr, uint32_t val)
+     KBDState *s = opaque;
+ 
+ #ifdef DEBUG_KBD
+-    printf("kbd: write cmd=0x%02x\n", val);
++    fprintf(stderr, "kbd: write cmd=0x%02x\n", val);
+ #endif
+     switch(val) {
+     case KBD_CCMD_READ_MODE:
+@@ -287,7 +290,7 @@ static uint32_t kbd_read_data(void *opaque, uint32_t addr)
+         val = ps2_read_data(s->kbd);
+ 
+ #if defined(DEBUG_KBD)
+-    printf("kbd: read data=0x%02x\n", val);
++    fprintf(stderr, "kbd: read data=0x%02x\n", val);
+ #endif
+     return val;
+ }
+@@ -297,11 +300,25 @@ static void kbd_write_data(void *opaque, uint32_t addr, uint32_t val)
+     KBDState *s = opaque;
+ 
+ #ifdef DEBUG_KBD
+-    printf("kbd: write data=0x%02x\n", val);
++    fprintf(stderr, "kbd: write data=0x%02x write_cmd=0x%02x\n", val, s->write_cmd);
+ #endif
+ 
+     switch(s->write_cmd) {
+     case 0:
++        if (wait_for_led_code == 1)
++        {
++#ifdef DEBUG_KBD
++            fprintf(stderr, "kbd: sending led code=%d\n", val);
++#endif
++            switcher_send_led_code(val);
++            wait_for_led_code = 0;
++        }
++
++        if (val == KBD_CMD_SET_LEDS)
++        {
++            wait_for_led_code = 1;
++        }
++
+         ps2_write_keyboard(s->kbd, val);
+         break;
+     case KBD_CCMD_WRITE_MODE:
+diff --git a/switcher.c b/switcher.c
+index 316462b..66436ab 100644
+--- a/switcher.c
++++ b/switcher.c
+@@ -48,6 +48,7 @@ extern int gfx_passthru;
+ #define DOM0_INPUT_PVM_DOMID      'J'
+ #define DOM0_INPUT_OPT            'O'
+ #define DOM0_INPUT_SHUTDOWN       'S'
++#define DOM0_INPUT_LEDS           'L'
+ 
+ #define DOM0_INPUT_EVENT          'E'
+ #define DOM0_INPUT_PVM            'P'
+@@ -290,6 +291,11 @@ void switcher_shutdown(int reason)
+     }
+ }
+ 
++void switcher_send_led_code(int led_code)
++{
++    switcher_send("%c%d", DOM0_INPUT_LEDS, led_code);
++}
++
+ void switcher_connect(void)
+ {
+     struct stat st;
+diff --git a/switcher.h b/switcher.h
+index 3a89d55..cf0f5b9 100644
+--- a/switcher.h
++++ b/switcher.h
+@@ -32,4 +32,6 @@
+ 
+ void switcher_shutdown(int reason);
+ 
++void switcher_send_led_code(int led_code);
++
+ #endif

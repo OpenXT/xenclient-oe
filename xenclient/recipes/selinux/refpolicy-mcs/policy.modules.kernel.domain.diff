@@ -1,0 +1,62 @@
+diff --git a/policy/modules/kernel/domain.if b/policy/modules/kernel/domain.if
+index deb03ea..bb591da 100644
+--- a/policy/modules/kernel/domain.if
++++ b/policy/modules/kernel/domain.if
+@@ -1445,3 +1445,22 @@ interface(`domain_unconfined',`
+ 	typeattribute $1 set_curr_context;
+ 	typeattribute $1 process_uncond_exempt;
+ ')
++
++########################################
++## <summary>
++##      Unconfined readonly access to domains.
++## </summary>
++## <param name="domain">
++##      <summary>
++##      Domain allowed access.
++##      </summary>
++## </param>
++#
++interface(`domain_unconfined_readonly',`
++        gen_require(`
++                attribute unconfined_domain_readonly_type;
++        ')
++
++        typeattribute $1 unconfined_domain_readonly_type;
++
++')
+diff --git a/policy/modules/kernel/domain.te b/policy/modules/kernel/domain.te
+index 5665e47..9964180 100644
+--- a/policy/modules/kernel/domain.te
++++ b/policy/modules/kernel/domain.te
+@@ -15,6 +15,9 @@ neverallow domain ~domain:process { transition dyntransition };
+ # Domains that are unconfined
+ attribute unconfined_domain_type;
+ 
++# Domains that are unconfined readonly
++attribute unconfined_domain_readonly_type;
++
+ # Domains that can mmap low memory.
+ attribute mmap_low_domain_type;
+ neverallow { domain -mmap_low_domain_type } self:memprotect mmap_zero;
+@@ -153,3 +156,20 @@ allow unconfined_domain_type domain:key *;
+ 
+ # receive from all domains over labeled networking
+ domain_all_recvfrom_all_domains(unconfined_domain_type)
++
++########################################
++#
++# Unconfined readonly access to this module
++#
++
++# Use/sendto/connectto sockets created by any domain.
++allow unconfined_domain_readonly_type domain:{ socket_class_set socket key_socket } *;
++
++# Use descriptors and pipes created by any domain.
++allow unconfined_domain_readonly_type domain:fd use;
++allow unconfined_domain_readonly_type domain:fifo_file read_file_perms;
++
++# For /proc/pid
++allow unconfined_domain_readonly_type domain:dir list_dir_perms;
++allow unconfined_domain_readonly_type domain:file read_file_perms;
++allow unconfined_domain_readonly_type domain:lnk_file { read_lnk_file_perms ioctl lock };

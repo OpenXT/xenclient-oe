@@ -1,0 +1,106 @@
+diff --git a/intel_dbus.c b/intel_dbus.c
+index 5d6eb93..8885f63 100644
+--- a/intel_dbus.c
++++ b/intel_dbus.c
+@@ -10,6 +10,9 @@
+ #include <pci/pci.h>
+ #include <sys/socket.h>
+ #include <sys/un.h>
++#include <libgen.h>
++#include <glib.h>
++#include <glib/gprintf.h>
+ 
+ #include "screenshot.h"
+ 
+@@ -43,6 +46,33 @@ static DisplayState *lds = NULL;
+ extern uint8_t *xen_vga_vram_ptr;
+ extern uint64_t xen_vga_vram_gfmn;
+ 
++static const char *get_uuid(void)
++{
++    static char *uuid = NULL;
++
++    if (uuid == NULL)
++    {
++        char *tmp = xenstore_dom_read(domid, "vm", NULL);
++
++        if (tmp)
++        {
++            char *base = basename(tmp);
++            if (base)
++                uuid = strdup(base);
++        }
++    }
++    return uuid;
++}
++
++static FILE *intel_open_log(const char *mode)
++{
++    FILE *fd = NULL;
++    char name[256];
++
++    snprintf(name, 256, "/tmp/qemu-%s-fb", get_uuid());
++    return fopen(name, mode);
++}
++
+ static int intel_is_vga(void)
+ {
+     return !!xen_vga_vram_ptr;
+@@ -199,6 +229,7 @@ static void intel_iommu_map(void)
+     uint64_t guest_addr = 0;
+     int dirty_tracking = 0;
+     xen_pfn_t *mfns = NULL, *gfns = NULL;
++    FILE *fd = intel_open_log("a");
+ 
+     INTEL_DEBUG("intel_iommu_map\n");
+ 
+@@ -263,11 +294,15 @@ static void intel_iommu_map(void)
+         int i;
+         uint64_t val;
+ 
++        g_fprintf(fd, "domid:%d guest_addr:%08llX dirty_tracking:%d nbpages:%d\n",
++                domid, (uint64_t)guest_addr, dirty_tracking, nbpages);
++
+         garray = g_array_new (FALSE, FALSE, sizeof (guint64));
+         for (i = 0; i < nbpages; i++)
+         {
+             val = mfns[i];
+             g_array_append_val (garray, val);
++            g_fprintf(fd, "%04i -> %08llX\n", i, val);
+         }
+         com_citrix_xenclient_surfman_set_framebuffer_pages_(
+ 		g_dbus_conn_glib,
+@@ -275,6 +310,7 @@ static void intel_iommu_map(void)
+                 "/", domid, dirty_tracking, guest_addr, garray);
+         g_array_free (garray, TRUE);
+     }
++    fclose(fd);
+ }
+ 
+ 
+@@ -358,6 +394,7 @@ return "UNKNOWN";
+ static void intel_resize(DisplayState *ds)
+ {
+  const char *format;
++ FILE *fd = intel_open_log("w");
+ 
+     format=intel_get_format(ds);
+ 
+@@ -370,6 +407,9 @@ static void intel_resize(DisplayState *ds)
+             format);
+ 
+ 
++    g_fprintf(fd, "width:%d height:%d linesize:%d\n",
++            ds_get_width(ds), ds_get_height(ds),
++            intel_align_linesize(ds_get_linesize(ds)));
+     com_citrix_xenclient_surfman_set_framebuffer_paramters_(
+             g_dbus_conn_glib,
+             "com.citrix.xenclient.surfman",
+@@ -377,6 +417,7 @@ static void intel_resize(DisplayState *ds)
+             ds_get_width(ds), ds_get_height(ds),
+ 	    intel_align_linesize(ds_get_linesize(ds)), format);
+ 
++    fclose(fd);
+ 
+     intel_output = INTEL_OUTPUT_UNDEF;
+     intel_iommu_map();

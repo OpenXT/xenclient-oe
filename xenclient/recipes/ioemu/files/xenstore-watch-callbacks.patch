@@ -1,0 +1,209 @@
+Improved the way to do xenstore watchs.
+
+diff --git a/qemu-xen.h b/qemu-xen.h
+index d50c89f..4b0cf15 100644
+--- a/qemu-xen.h
++++ b/qemu-xen.h
+@@ -105,6 +105,19 @@ void xenstore_dom_chmod(int domid, const char *key, const char *perms);
+ char *xenstore_read(const char *path);
+ int xenstore_write(const char *path, const char *val);
+ 
++typedef void (*xenstore_callback) (const char *path, void *opaque);
++int xenstore_watch_screenshot_node(DisplayState *ds);
++int xenstore_watch_new_callback(const char *path, xenstore_callback fptr, void *opaque);
++
++char *xenstore_dom_read(int domid, const char *key, unsigned int *len);
++int xenstore_dom_write(int domid, const char *key, const char *value);
++void xenstore_dom_watch(int domid, const char *key, xenstore_callback ftp, void *opaque);
++void xenstore_dom_chmod(int domid, const char *key, const char *perms);
++
++char *xenstore_read(const char *path);
++int xenstore_write(const char *path, const char *val);
++
++
+  /* `danger' means that this parameter, variable or function refers to
+   * an area of xenstore which is writeable by the guest and thus must
+   * not be trusted by qemu code.  For variables containing xenstore
+diff --git a/xenstore.c b/xenstore.c
+index 4c483e2..e4eb54f 100644
+--- a/xenstore.c
++++ b/xenstore.c
+@@ -101,6 +101,52 @@ int xenstore_watch_new_callback(const char          *path,
+ }
+ 
+ 
++struct xenstore_watch_cb_t
++{
++    char                *path;
++    xenstore_callback   cb;
++    void                *opaque;
++};
++
++static struct xenstore_watch_cb_t *xenstore_watch_callbacks = NULL;
++
++int xenstore_watch_new_callback(const char          *path,
++                                xenstore_callback   fptr,
++                                void                *opaque)
++{
++    int         i = 0, ret = 0;
++
++    ret = xs_watch(xsh, path, path);
++    if (ret == 0)
++        return 0;
++
++    if (!xenstore_watch_callbacks)
++    {
++        xenstore_watch_callbacks = malloc(sizeof (struct xenstore_watch_cb_t));
++        xenstore_watch_callbacks[0].path = NULL;
++    }
++
++    while (xenstore_watch_callbacks[i].path)
++    {
++	if (!strcmp(xenstore_watch_callbacks[i].path, path))
++	{
++	    xenstore_watch_callbacks[i].cb = fptr;
++	    xenstore_watch_callbacks[i].opaque = opaque;
++	    return ret;
++	}
++        i++;
++    }
++
++    xenstore_watch_callbacks = realloc(xenstore_watch_callbacks,
++                                       (i + 2) * sizeof (struct xenstore_watch_cb_t));
++    xenstore_watch_callbacks[i].path = strdup(path);
++    xenstore_watch_callbacks[i].cb = fptr;
++    xenstore_watch_callbacks[i].opaque = opaque;
++    xenstore_watch_callbacks[i + 1].path = NULL;
++    return ret;
++}
++
++
+ static int pasprintf(char **buf, const char *fmt, ...)
+ {
+     va_list ap;
+@@ -1516,6 +1562,125 @@ xenstore_extended_power_mgmt_event_trigger(const char *key, const char *value)
+     return ret;
+ }
+ 
++char *xenstore_dom_read(int domid, const char *key, unsigned int *len)
++{
++    char *buf = NULL, *path = NULL, *value = NULL;
++
++    if (xsh == NULL)
++        goto out;
++
++    path = xs_get_domain_path(xsh, domid);
++    if (path == NULL) {
++        fprintf(logfile, "xs_get_domain_path(%d): error\n", domid);
++        goto out;
++    }
++
++    pasprintf(&buf, "%s/%s", path, key);
++    value = xs_read(xsh, XBT_NULL, buf, len);
++    if (value == NULL) {
++        fprintf(logfile, "xs_read(%s): read error\n", buf);
++        goto out;
++    }
++
++ out:
++    free(path);
++    free(buf);
++    return value;
++}
++
++void xenstore_dom_watch(int domid, const char *key, xenstore_callback fptr, void *opaque)
++{
++    char *buf = NULL, *path = NULL;
++    int rc = -1;
++
++    if (xsh == NULL)
++        goto out;
++
++    path = xs_get_domain_path(xsh, domid);
++    if (path == NULL) {
++        fprintf(logfile, "xs_get_domain_path: error\n");
++        goto out;
++    }
++
++    pasprintf(&buf, "%s/%s", path, key);
++	xenstore_watch_new_callback(buf, fptr, opaque);
++
++ out:
++    free(path);
++    free(buf);
++}
++
++void xenstore_dom_chmod(int domid, const char *key, const char *perms)
++{
++    char *buf = NULL, *path = NULL;
++    int rc = -1;
++	struct xs_permissions p;
++
++    if (xsh == NULL)
++        goto out;
++
++    path = xs_get_domain_path(xsh, domid);
++    if (path == NULL) {
++        fprintf(logfile, "xs_get_domain_path: error\n");
++        goto out;
++    }
++
++    pasprintf(&buf, "%s/%s", path, key);
++
++	xs_strings_to_perms(&p, 1, perms);
++	xs_set_permissions(xsh, XBT_NULL, buf, &p, 1);
++
++ out:
++    free(path);
++    free(buf);
++}
++
++int xenstore_dom_write(int domid, const char *key, const char *value)
++{
++    char *buf = NULL, *path = NULL;
++    int rc = -1;
++
++    if (xsh == NULL)
++        goto out;
++
++    path = xs_get_domain_path(xsh, domid);
++    if (path == NULL) {
++        fprintf(logfile, "xs_get_domain_path: error\n");
++        goto out;
++    }
++
++    pasprintf(&buf, "%s/%s", path, key);
++    rc = xs_write(xsh, XBT_NULL, buf, value, strlen(value));
++    if (rc == 0) {
++        fprintf(logfile, "xs_write(%s, %s): write error\n", buf, key);
++        goto out;
++    }
++
++ out:
++    free(path);
++    free(buf);
++    return rc;
++}
++
++char *xenstore_read(const char *path)
++{
++    char *value = NULL;
++    unsigned int len;
++
++    if (xsh == NULL)
++        return NULL;
++    return xs_read(xsh, XBT_NULL, path, &len);
++}
++
++int xenstore_write(const char *path, const char *val)
++{
++    if (xsh == NULL)
++        return 1;
++    return xs_write(xsh, XBT_NULL, path, val, strlen(val));
++}
++
++
++
+ /*
+  * Xen power management daemon stores battery generic information
+  * like model, make, design volt, capacity etc. under /pm/bif and 

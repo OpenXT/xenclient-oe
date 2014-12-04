@@ -1,0 +1,368 @@
+# HG changeset patch
+# Parent ef8aa4dc7d2aa467288b206700d943d976a0b61c
+
+diff --git a/tools/include/xen-sys/Linux/privcmd.h b/tools/include/xen-sys/Linux/privcmd.h
+index 5be860a..c579e81 100644
+--- a/tools/include/xen-sys/Linux/privcmd.h
++++ b/tools/include/xen-sys/Linux/privcmd.h
+@@ -75,6 +75,14 @@ typedef struct privcmd_mmapbatch_v2 {
+ 	int __user *err;  /* array of error codes */
+ } privcmd_mmapbatch_v2_t;
+ 
++typedef struct privcmd_mmapconsec {
++	int num;     /* number of pages to populate */
++	domid_t dom; /* target domain */
++	__u64 addr;  /* virtual address */
++	xen_pfn_t pfn; /* first pfn */
++	unsigned long __user *err_bits;  /* bit array of unmapped pfns */
++} privcmd_mmapconsec_t;
++
+ /*
+  * @cmd: IOCTL_PRIVCMD_HYPERCALL
+  * @arg: &privcmd_hypercall_t
+@@ -88,5 +96,7 @@ typedef struct privcmd_mmapbatch_v2 {
+ 	_IOC(_IOC_NONE, 'P', 3, sizeof(privcmd_mmapbatch_t))
+ #define IOCTL_PRIVCMD_MMAPBATCH_V2				\
+ 	_IOC(_IOC_NONE, 'P', 4, sizeof(privcmd_mmapbatch_v2_t))
++#define IOCTL_PRIVCMD_MMAPCONSEC					\
++	_IOC(_IOC_NONE, 'P', 5, sizeof(struct privcmd_mmapconsec))
+ 
+ #endif /* __LINUX_PUBLIC_PRIVCMD_H__ */
+diff --git a/tools/libxc/xc_foreign_memory.c b/tools/libxc/xc_foreign_memory.c
+index 7dfc817..f43d72c 100644
+--- a/tools/libxc/xc_foreign_memory.c
++++ b/tools/libxc/xc_foreign_memory.c
+@@ -121,6 +121,14 @@ void *xc_map_foreign_bulk_compat(xc_interface *xch, xc_osdep_handle h,
+     return ret;
+ }
+ 
++void *xc_map_foreign_consec(xc_interface *xch, uint32_t dom, int prot,
++                            xen_pfn_t pfn, int num,
++                            unsigned long *err_bits)
++{
++    return xch->ops->u.privcmd.map_foreign_consec(xch, xch->ops_handle,
++                                                  dom, prot, pfn, num, err_bits);
++}
++
+ /*
+  * Local variables:
+  * mode: C
+diff --git a/tools/libxc/xc_linux_osdep.c b/tools/libxc/xc_linux_osdep.c
+index 36832b6..95d57fb 100644
+--- a/tools/libxc/xc_linux_osdep.c
++++ b/tools/libxc/xc_linux_osdep.c
+@@ -412,6 +412,51 @@ static void *linux_privcmd_map_foreign_ranges(xc_interface *xch, xc_osdep_handle
+     return ret;
+ }
+ 
++/* Map into the current process the range of guest pages given
++ * by [pfn:pfn+num-1]. Mapping does not fail if some pages
++ * cannot be mapped.  Instead we indicate any pages that cannot be mapped
++ * by setting the corresponding bit in err_bits. */
++static void *linux_privcmd_map_foreign_consec(xc_interface *xch, xc_osdep_handle h,
++                                              uint32_t dom, int prot,
++                                              xen_pfn_t pfn, int num,
++                                              unsigned long *err_bits)
++{
++    int fd = (int)h;
++    privcmd_mmapconsec_t ioctlx;
++    void *addr;
++    int rc;
++
++    addr = mmap(NULL, (unsigned long)num << XC_PAGE_SHIFT, prot, MAP_SHARED,
++                fd, 0);
++    if ( addr == MAP_FAILED )
++    {
++        perror("xc_map_foreign_consec: mmap failed");
++        return NULL;
++    }
++
++    ioctlx.num = num;
++    ioctlx.dom = dom;
++    ioctlx.addr = (unsigned long)addr;
++    ioctlx.pfn = pfn;
++    ioctlx.err_bits = err_bits;
++    
++    fprintf(stderr, "%s : num:0x%08x dom:%d addr:%p pfn:0x%08lx err_bits:%s\n",
++           __FUNCTION__, num, dom, addr, pfn,
++           (err_bits ? "present" : "null") );
++    rc = ioctl(fd, IOCTL_PRIVCMD_MMAPCONSEC, &ioctlx);
++    fprintf(stderr, "%s : rc:%d\n", __FUNCTION__, rc);
++    if ( rc < 0 )
++    {
++        int saved_errno = errno;
++        perror("xc_map_foreign_consec: ioctl failed");
++        (void)munmap(addr, (unsigned long)num << XC_PAGE_SHIFT);
++        errno = saved_errno;
++        return NULL;
++    }
++
++    return addr;
++}
++
+ static struct xc_osdep_ops linux_privcmd_ops = {
+     .open = &linux_privcmd_open,
+     .close = &linux_privcmd_close,
+@@ -426,6 +471,7 @@ static struct xc_osdep_ops linux_privcmd_ops = {
+         .map_foreign_bulk = &linux_privcmd_map_foreign_bulk,
+         .map_foreign_range = &linux_privcmd_map_foreign_range,
+         .map_foreign_ranges = &linux_privcmd_map_foreign_ranges,
++        .map_foreign_consec = &linux_privcmd_map_foreign_consec,
+     },
+ };
+ 
+diff --git a/tools/libxc/xc_minios.c b/tools/libxc/xc_minios.c
+index dec4d73..40ac15c 100644
+--- a/tools/libxc/xc_minios.c
++++ b/tools/libxc/xc_minios.c
+@@ -181,6 +181,19 @@ static void *minios_privcmd_map_foreign_ranges(xc_interface *xch, xc_osdep_handl
+     return ret;
+ }
+ 
++/* Map into the current process the range of guest pages given
++ * by [pfn:pfn+num-1]. Mapping does not fail if some pages
++ * cannot be mapped.  Instead we indicate any pages that cannot be mapped
++ * by setting the corresponding bit in err_bits. */
++static void *minios_privcmd_map_foreign_consec(xc_interface *xch, xc_osdep_handle h, uint32_t dom, int prot,
++                                               xen_pfn_t pfn, int num,
++                                               unsigned long *err_bits)
++{
++    /* TODO */
++    IPRINTF(xch, "minios_privcmd %p: map_foreign_consec: dom%d prot:%#x pfn:0x%08lx num:0x%08x\n", h, dom, prot, pfn, num);
++    return MAP_FAILED;
++}
++
+ 
+ static struct xc_osdep_ops minios_privcmd_ops = {
+     .open = &minios_privcmd_open,
+@@ -196,6 +209,7 @@ static struct xc_osdep_ops minios_privcmd_ops = {
+         .map_foreign_bulk = &minios_privcmd_map_foreign_bulk,
+         .map_foreign_range = &minios_privcmd_map_foreign_range,
+         .map_foreign_ranges = &minios_privcmd_map_foreign_ranges,
++        .map_foreign_consec = &minios_privcmd_map_foreign_consec,
+     },
+ };
+ 
+diff --git a/tools/libxc/xc_netbsd.c b/tools/libxc/xc_netbsd.c
+index 8a90ef3..5d3be9f 100644
+--- a/tools/libxc/xc_netbsd.c
++++ b/tools/libxc/xc_netbsd.c
+@@ -207,6 +207,19 @@ mmap_failed:
+ 	return NULL;
+ }
+ 
++/* Map into the current process the range of guest pages given
++ * by [pfn:pfn+num-1]. Mapping does not fail if some pages
++ * cannot be mapped.  Instead we indicate any pages that cannot be mapped
++ * by setting the corresponding bit in err_bits. */
++static void *netbsd_privcmd_map_foreign_consec(xc_interface *xch, xc_osdep_handle h, uint32_t dom, int prot,
++                                               xen_pfn_t pfn, int num,
++                                               unsigned long *err_bits)
++{
++    /* TODO */
++    IPRINTF(xch, "netbsd_privcmd %p: map_foreign_consec: dom%d prot:%#x pfn:0x%08lx num:0x%08x\n", h, dom, prot, pfn, num);
++    return MAP_FAILED;
++}
++
+ static struct xc_osdep_ops netbsd_privcmd_ops = {
+     .open = &netbsd_privcmd_open,
+     .close = &netbsd_privcmd_close,
+@@ -221,6 +234,7 @@ static struct xc_osdep_ops netbsd_privcmd_ops = {
+         .map_foreign_bulk = &xc_map_foreign_bulk_compat,
+         .map_foreign_range = &netbsd_privcmd_map_foreign_range,
+         .map_foreign_ranges = &netbsd_privcmd_map_foreign_ranges,
++        .map_foreign_consec = &netbsd_privcmd_map_foreign_consec,
+     },
+ };
+ 
+diff --git a/tools/libxc/xc_solaris.c b/tools/libxc/xc_solaris.c
+index 7257a54..dafe009 100644
+--- a/tools/libxc/xc_solaris.c
++++ b/tools/libxc/xc_solaris.c
+@@ -178,6 +178,19 @@ mmap_failed:
+     return NULL;
+ }
+ 
++/* Map into the current process the range of guest pages given
++ * by [pfn:pfn+num-1]. Mapping does not fail if some pages
++ * cannot be mapped.  Instead we indicate any pages that cannot be mapped
++ * by setting the corresponding bit in err_bits. */
++static void *solaris_privcmd_map_foreign_consec(xc_interface *xch, xc_osdep_handle h, uint32_t dom, int prot,
++                                               xen_pfn_t pfn, int num,
++                                               unsigned long *err_bits)
++{
++    /* TODO */
++    IPRINTF(xch, "solaris_privcmd %p: map_foreign_consec: dom%d prot:%#x pfn:0x%08lx num:0x%08x\n", h, dom, prot, pfn, num);
++    return MAP_FAILED;
++}
++
+ static struct xc_osdep_ops solaris_privcmd_ops = {
+     .open = &solaris_privcmd_open,
+     .close = &solaris_privcmd_close,
+@@ -192,6 +205,7 @@ static struct xc_osdep_ops solaris_privcmd_ops = {
+         .map_foreign_bulk = &xc_map_foreign_bulk_compat,
+         .map_foreign_range = &solaris_privcmd_map_foreign_range,
+         .map_foreign_ranges = &solaris_privcmd_map_foreign_ranges,
++        .map_foreign_consec = &solaris_privcmd_map_foreign_consec,
+     },
+ };
+ 
+diff --git a/tools/libxc/xenctrl.h b/tools/libxc/xenctrl.h
+index 6fb2172..d1eb9dd 100644
+--- a/tools/libxc/xenctrl.h
++++ b/tools/libxc/xenctrl.h
+@@ -1294,6 +1294,26 @@ void *xc_map_foreign_batch(xc_interface *xch, uint32_t dom, int prot,
+                            xen_pfn_t *arr, int num );
+ 
+ /**
++ * Memory maps a single consecutive range within one domain to a local address range.
++ * It can succeed partially.  When a page cannot be mapped, its respective bit
++ * in @err_bits is set to true.
++ * Much faster than xc_map_foreign_bulk().
++ * For other usage details, see xc_map_foreign_pages().
++ *
++ * @parm xc_handle a handle on an open hypervisor interface
++ * @parm dom the domain to map memory from
++ * @parm prot same flag as in mmap().
++ * @parm pfn the first of 'num' page frames to map.
++ * @parm num the number of pages to map.
++ * @parm err_bits optional array of num bits. A bit is set to true if
++ * corresponding page not mapped.  Can be null.
++ *          
++ */
++void *xc_map_foreign_consec(xc_interface *xch, uint32_t dom, int prot,
++                            xen_pfn_t pfn, int num,
++                            unsigned long *err_bits);
++
++/**
+  * Like xc_map_foreign_pages(), except it can succeed partially.
+  * When a page cannot be mapped, its respective field in @err is
+  * set to the corresponding errno value.
+diff --git a/tools/libxc/xenctrl_osdep_ENOSYS.c b/tools/libxc/xenctrl_osdep_ENOSYS.c
+index 4821342..44202c3 100644
+--- a/tools/libxc/xenctrl_osdep_ENOSYS.c
++++ b/tools/libxc/xenctrl_osdep_ENOSYS.c
+@@ -63,6 +63,18 @@ static void *ENOSYS_privcmd_map_foreign_ranges(xc_interface *xch, xc_osdep_handl
+     return MAP_FAILED;
+ }
+ 
++/* Map into the current process the range of guest pages given
++ * by [pfn:pfn+num-1]. Mapping does not fail if some pages
++ * cannot be mapped.  Instead we indicate any pages that cannot be mapped
++ * by setting the corresponding bit in err_bits. */
++static void *ENOSYS_privcmd_map_foreign_consec(xc_interface *xch, xc_osdep_handle h, uint32_t dom, int prot,
++                                               xen_pfn_t pfn, int num,
++                                               unsigned long *err_bits)
++{
++    IPRINTF(xch, "ENOSYS_privcmd %p: map_foreign_consec: dom%d prot:%#x pfn:0x%08lx num:0x%08x\n", h, dom, prot, pfn, num);
++    return MAP_FAILED;
++}
++
+ static struct xc_osdep_ops ENOSYS_privcmd_ops =
+ {
+     .open      = &ENOSYS_privcmd_open,
+@@ -74,6 +86,7 @@ static struct xc_osdep_ops ENOSYS_privcmd_ops =
+         .map_foreign_bulk = &ENOSYS_privcmd_map_foreign_bulk,
+         .map_foreign_range = &ENOSYS_privcmd_map_foreign_range,
+         .map_foreign_ranges = &ENOSYS_privcmd_map_foreign_ranges,
++        .map_foreign_consec = &ENOSYS_privcmd_map_foreign_consec,
+     }
+ };
+ 
+diff --git a/tools/libxc/xenctrlosdep.h b/tools/libxc/xenctrlosdep.h
+index e610a24..32310a5 100644
+--- a/tools/libxc/xenctrlosdep.h
++++ b/tools/libxc/xenctrlosdep.h
+@@ -89,6 +89,9 @@ struct xc_osdep_ops
+             void *(*map_foreign_ranges)(xc_interface *xch, xc_osdep_handle h, uint32_t dom, size_t size, int prot,
+                                         size_t chunksize, privcmd_mmap_entry_t entries[],
+                                         int nentries);
++            void *(*map_foreign_consec)(xc_interface *xch, xc_osdep_handle h, uint32_t dom, int prot,
++                                        xen_pfn_t pfn, int num,
++                                        unsigned long *err_bits);
+         } privcmd;
+         struct {
+             int (*fd)(xc_evtchn *xce, xc_osdep_handle h);
+diff --git a/xen/arch/x86/mm.c b/xen/arch/x86/mm.c
+index 5123860..953c7a2 100644
+--- a/xen/arch/x86/mm.c
++++ b/xen/arch/x86/mm.c
+@@ -3423,6 +3423,8 @@ long do_mmu_update(
+     uint32_t xsm_needed = 0;
+     uint32_t xsm_checked = 0;
+     int rc = put_old_guest_table(curr);
++    int map_whole_batch = !!(count & MMU_MAP_WHOLE_BATCH);
++    count &= ~MMU_MAP_WHOLE_BATCH;
+ 
+     if ( unlikely(rc) )
+     {
+@@ -3491,6 +3493,12 @@ long do_mmu_update(
+             break;
+         }
+ 
++        /* Intercept the map_whole_batch test operation */
++        if (map_whole_batch && count == 1 && req.ptr == ~0 && req.val == ~0) 
++        {
++            break;
++        }
++
+         cmd = req.ptr & (sizeof(l1_pgentry_t)-1);
+ 
+         switch ( cmd )
+@@ -3667,7 +3675,25 @@ long do_mmu_update(
+         }
+ 
+         if ( unlikely(rc) )
+-            break;
++        {
++            if ( map_whole_batch ) 
++            {
++                /* Mark ptr to indicate failed mapping */
++                req.ptr = MMU_CONSEC_MAPPING_FAILED;
++                if ( unlikely(__copy_to_guest(ureqs, &req, 1) != 0) )
++                {
++                    MEM_LOG("Bad __copy_to_guest");
++                    rc = -EFAULT;
++                    break;
++                }
++                rc = 0;
++                /* Keep iterating */
++            }
++            else
++            {
++                break;
++            }
++        }
+ 
+         guest_handle_add_offset(ureqs, 1);
+     }
+@@ -3677,7 +3703,9 @@ long do_mmu_update(
+         ASSERT(i < count);
+         rc = hypercall_create_continuation(
+             __HYPERVISOR_mmu_update, "hihi",
+-            ureqs, (count - i) | MMU_UPDATE_PREEMPTED, pdone, foreigndom);
++            ureqs,
++            (count - i) | MMU_UPDATE_PREEMPTED | (map_whole_batch ? MMU_MAP_WHOLE_BATCH : 0),
++            pdone, foreigndom);
+     }
+     else if ( curr->arch.old_guest_table )
+     {
+diff --git a/xen/include/asm-x86/hypercall.h b/xen/include/asm-x86/hypercall.h
+index afa8ba9..0cb4707 100644
+--- a/xen/include/asm-x86/hypercall.h
++++ b/xen/include/asm-x86/hypercall.h
+@@ -15,6 +15,14 @@
+  * invocation of do_mmu_update() is resuming a previously preempted call.
+  */
+ #define MMU_UPDATE_PREEMPTED          (~(~0U>>1))
++/*
++ * In do_mmu_update() we steal the 2nd m.s.b of the @count parameter
++ * to indicate whether mapping should continue across the entire count
++ * even if some mappings should fail.
++ */
++#define MMU_MAP_WHOLE_BATCH           ((MMU_UPDATE_PREEMPTED)>>1)
++/* For map-whole-batch, we mark mmu_update.ptr in case of error: */
++#define MMU_CONSEC_MAPPING_FAILED     (~0U)
+ 
+ extern long
+ do_event_channel_op_compat(

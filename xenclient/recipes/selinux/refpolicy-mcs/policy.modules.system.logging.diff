@@ -1,0 +1,118 @@
+diff --git a/policy/modules/system/logging.fc b/policy/modules/system/logging.fc
+index 9529e40..e1e3442 100644
+--- a/policy/modules/system/logging.fc
++++ b/policy/modules/system/logging.fc
+@@ -51,6 +51,16 @@ ifdef(`distro_suse', `
+ /var/log/audit(/.*)?		gen_context(system_u:object_r:auditd_log_t,mls_systemhigh)
+ /var/log/syslog-ng(/.*)? 	gen_context(system_u:object_r:syslogd_var_run_t,mls_systemhigh)
+ 
++/var/volatile/log		-d	gen_context(system_u:object_r:var_log_t,s0-mls_systemhigh)
++/var/volatile/log/.*			gen_context(system_u:object_r:var_log_t,s0)
++/var/volatile/log/messages[^/]*		gen_context(system_u:object_r:var_log_t,mls_systemhigh)
++/var/volatile/log/secure[^/]*		gen_context(system_u:object_r:var_log_t,mls_systemhigh)
++/var/volatile/log/cron[^/]*		gen_context(system_u:object_r:var_log_t,mls_systemhigh)
++/var/volatile/log/maillog[^/]*		gen_context(system_u:object_r:var_log_t,mls_systemhigh)
++/var/volatile/log/spooler[^/]*		gen_context(system_u:object_r:var_log_t,mls_systemhigh)
++/var/volatile/log/audit(/.*)?		gen_context(system_u:object_r:auditd_log_t,mls_systemhigh)
++/var/volatile/log/syslog-ng(/.*)? 	gen_context(system_u:object_r:syslogd_var_run_t,s0)
++
+ ifndef(`distro_gentoo',`
+ /var/log/audit\.log	--	gen_context(system_u:object_r:auditd_log_t,mls_systemhigh)
+ ')
+diff --git a/policy/modules/system/logging.if b/policy/modules/system/logging.if
+index 9a6f599..6344608 100644
+--- a/policy/modules/system/logging.if
++++ b/policy/modules/system/logging.if
+@@ -915,6 +915,24 @@ interface(`logging_write_generic_logs',`
+ 
+ ########################################
+ ## <summary>
++##	Dontaudit Write generic log dirs.
++## </summary>
++## <param name="domain">
++##	<summary>
++##	Domain allowed access.
++##	</summary>
++## </param>
++#
++interface(`logging_dontaudit_write_log_dirs',`
++	gen_require(`
++		type var_log_t;
++	')
++
++	dontaudit $1 var_log_t:dir write;
++')
++
++########################################
++## <summary>
+ ##	Dontaudit Write generic log files.
+ ## </summary>
+ ## <param name="domain">
+@@ -1097,3 +1115,44 @@ interface(`logging_admin',`
+ 	logging_admin_audit($1, $2)
+ 	logging_admin_syslog($1, $2)
+ ')
++
++########################################
++## <summary>
++##	Allow process to read syslogd process state.
++## </summary>
++## <param name="domain">
++##	<summary>
++##	Domain allowed access.
++##	</summary>
++## </param>
++#
++interface(`logging_read_state_syslogd',`
++	gen_require(`
++		type syslogd_t;
++	')
++
++	kernel_search_proc($1)
++	allow $1 syslogd_t:dir search_dir_perms;
++	allow $1 syslogd_t:file read_file_perms;
++	allow $1 syslogd_t:lnk_file read_lnk_file_perms;
++')
++
++########################################
++## <summary>
++##      Execute the syslogd init script in
++##      the init script domain.
++## </summary>
++## <param name="domain">
++##      <summary>
++##      Domain allowed to transition.
++##      </summary>
++## </param>
++#
++#
++interface(`syslogd_initrc_domtrans',`
++        gen_require(`
++                type syslogd_initrc_exec_t;
++        ')
++
++        init_labeled_script_domtrans($1, syslogd_initrc_exec_t)
++')
+diff --git a/policy/modules/system/logging.te b/policy/modules/system/logging.te
+index 2795d89..57088f7 100644
+--- a/policy/modules/system/logging.te
++++ b/policy/modules/system/logging.te
+@@ -454,6 +454,7 @@ mls_file_write_all_levels(syslogd_t) # Need to be able to write to /var/run/ and
+ mls_trusted_object(syslogd_t) # Other process need to have the right to connectto/sendto /dev/log
+ 
+ term_write_console(syslogd_t)
++dev_dontaudit_rw_generic_chr_files(syslogd_t)
+ # Allow syslog to a terminal
+ term_write_unallocated_ttys(syslogd_t)
+ 
+@@ -474,6 +475,10 @@ miscfiles_read_localization(syslogd_t)
+ userdom_dontaudit_use_unpriv_user_fds(syslogd_t)
+ userdom_dontaudit_search_user_home_dirs(syslogd_t)
+ 
++corecmd_exec_bin(syslogd_t)
++corecmd_exec_shell(syslogd_t)
++logrotate_domtrans(syslogd_t)
++
+ ifdef(`distro_gentoo',`
+ 	# default gentoo syslog-ng config appends kernel
+ 	# and high priority messages to /dev/tty12

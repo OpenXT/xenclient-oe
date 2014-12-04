@@ -1,0 +1,37 @@
+diff --git a/drivers/usb/xen-usbback/vusb.c b/drivers/usb/xen-usbback/vusb.c
+index 2a8d827..2fe6360 100644
+--- a/drivers/usb/xen-usbback/vusb.c
++++ b/drivers/usb/xen-usbback/vusb.c
+@@ -529,6 +529,23 @@ static char * setup_recip(int type)
+ 	}
+ }
+ 
++static int maybe_set_configuration(struct usb_device *dev, int configuration)
++{
++	struct usb_host_config *cp = NULL;
++        int i;
++
++        for (i = 0; i < dev->descriptor.bNumConfigurations; i++) {
++                if (dev->config[i].desc.bConfigurationValue ==
++                    configuration) {
++                        cp = &dev->config[i];
++                        break;
++                }
++        }
++        if (cp && cp == dev->actconfig)
++                return 0;
++        return dusb_set_configuration(dev, configuration);
++}
++
+ static int setup_control_urb(struct vusb *vusb, usbif_request_t *req,
+ 				struct urb *urb)
+ {
+@@ -564,7 +581,7 @@ static int setup_control_urb(struct vusb *vusb, usbif_request_t *req,
+ 			debug_print(LOG_LVL_DEBUG, "set config %d\n", confnum);
+ 
+ 			usb_lock_device(usbdev);
+-			ret = dusb_set_configuration(usbdev, confnum);
++			ret = maybe_set_configuration(usbdev, confnum);
+ 			usb_unlock_device(usbdev);
+ 			if (ret == 0)
+ 				return (1);

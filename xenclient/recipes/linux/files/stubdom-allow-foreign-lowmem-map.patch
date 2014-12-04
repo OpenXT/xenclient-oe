@@ -1,0 +1,37 @@
+diff --git a/arch/x86/xen/mmu.c b/arch/x86/xen/mmu.c
+index cab96b6..dafd70d 100644
+--- a/arch/x86/xen/mmu.c
++++ b/arch/x86/xen/mmu.c
+@@ -502,8 +502,11 @@ static pte_t xen_make_pte(pteval_t pte)
+ 	 * mappings are just dummy local mappings to keep other
+ 	 * parts of the kernel happy.
+ 	 */
++
++        /* stubdom: we allow the mapping of lowmem of another domain, marked via
++         * simultaneous _PAGE_SPECIAL and _PAGE_IOMAP bits */
+ 	if (unlikely(pte & _PAGE_IOMAP) &&
+-	    (xen_initial_domain() || addr >= ISA_END_ADDRESS)) {
++	    (xen_initial_domain() || addr >= ISA_END_ADDRESS) || (pte & _PAGE_SPECIAL)) {
+ 		pte = iomap_pte(pte);
+ 	} else {
+ 		pte &= ~_PAGE_IOMAP;
+@@ -2483,11 +2486,18 @@ struct remap_data {
+ 	struct mmu_update *mmu_update;
+ };
+ 
++static inline pte_t foreign_special_pfn_pte(unsigned long page_nr, pgprot_t pgprot)
++{
++	return __pte(((phys_addr_t)page_nr << PAGE_SHIFT) |
++		     massage_pgprot(pgprot) | _PAGE_SPECIAL);
++}
++
++
+ static int remap_area_mfn_pte_fn(pte_t *ptep, pgtable_t token,
+ 				 unsigned long addr, void *data)
+ {
+ 	struct remap_data *rmd = data;
+-	pte_t pte = pte_mkspecial(pfn_pte(rmd->mfn++, rmd->prot));
++	pte_t pte = foreign_special_pfn_pte(rmd->mfn++, rmd->prot);
+ 
+ 	rmd->mmu_update->ptr = virt_to_machine(ptep).maddr;
+ 	rmd->mmu_update->val = pte_val_ma(pte);

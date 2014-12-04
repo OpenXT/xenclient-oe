@@ -1,0 +1,82 @@
+diff --git a/hw/pc.c b/hw/pc.c
+index 7457f9c..aae33e6 100644
+--- a/hw/pc.c
++++ b/hw/pc.c
+@@ -976,7 +976,17 @@ vga_bios_error:
+     ferr_irq = i8259[13];
+ 
+     if (pci_enabled) {
++        uint32_t val;
++
+         pci_bus = i440fx_init(&i440fx_state, i8259);
++
++        if (vga_passthrough) {
++            /* Intel GMCH must report Capabilities List status for vendor specific caps */
++            val = pt_pci_host_read(0, 0, 0, 0x34, 1);
++            if ((val != 0) && (pt_pci_host_read(0, 0, 0, val, 1) == 0x09))
++                i440fx_state->config[0x06] |= 0x10; // status |= capabilities list
++        }
++
+         piix3_devfn = piix3_init(pci_bus, -1);
+     } else {
+         pci_bus = NULL;
+diff --git a/hw/pci.c b/hw/pci.c
+index 9915846..f981fe9 100644
+--- a/hw/pci.c
++++ b/hw/pci.c
+@@ -639,12 +639,34 @@ uint32_t pci_data_read(void *opaque, uint32_t addr, int len)
+         goto the_end;
+     }
+     config_addr = addr & 0xff;
+-
++    val = pci_dev->config_read(pci_dev, config_addr, len);
+     if (vga_passthrough && pci_igfx_on_bus())
+     {
+         if (pci_dev->devfn = 0x00) // Host Bridge
+         {
+-            val = pci_dev->config_read(pci_dev, config_addr, len);
++
++            while (1)
++            {
++                val = pt_pci_host_read(0, 0, 0, 0x34, 1);
++                /* Only do the following for vendor specific caps (0x09) */
++                if ((val != 0) && (pt_pci_host_read(0, 0, 0, val, 1) == 0x09))
++                {
++                    if (config_addr == 0x34) /* reading caps pointer */
++                        break;
++                    if ((config_addr >= val)&&(config_addr < (val + 12)))
++                    {
++                        /* don't allow it to chain further */
++                        if (config_addr == (val + 1))
++                        {
++                            val = 0;
++                            break;
++                        }
++                        /* reading vendor specific capabilities from PCH */
++                        val = pt_pci_host_read(0, 0, 0, config_addr, len);
++                        break;
++                    }
++                }
++            }
+ 
+             switch (config_addr)
+             {
+@@ -656,6 +678,9 @@ uint32_t pci_data_read(void *opaque, uint32_t addr, int len)
+                 case 0x58:        /* SNB: PAVPC Offset */
+                 case 0xa4:        /* SNB: graphics base of stolen memory */
+                 case 0xa8:        /* SNB: base of GTT stolen memory */
++                case 0x08:        /* revision id */
++                case 0x2c:        /* sybsystem vendor id */
++                case 0x2e:        /* sybsystem id */
+                     val = pt_pci_host_read(0, 0, 0, config_addr, len);
+                     break;
+             }
+@@ -675,8 +700,6 @@ uint32_t pci_data_read(void *opaque, uint32_t addr, int len)
+             }
+         }
+     }
+-    else
+-      val = pci_dev->config_read(pci_dev, config_addr, len);
+ #if defined(DEBUG_PCI)
+     printf("pci_config_read: %s: addr=%02x val=%08x len=%d\n",
+            pci_dev->name, config_addr, val, len);

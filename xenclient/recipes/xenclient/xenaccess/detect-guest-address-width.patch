@@ -1,0 +1,401 @@
+diff --git a/xenaccess/xa_core.c b/xenaccess/xa_core.c
+index 1b84def..e90cfd9 100644
+--- a/xenaccess/xa_core.c
++++ b/xenaccess/xa_core.c
+@@ -257,35 +257,58 @@ int get_page_info_xen (xa_instance_t *instance)
+ #ifdef ENABLE_XEN
+ #ifdef HAVE_CONTEXT_ANY
+     vcpu_guest_context_any_t ctxt_any;
++    unsigned int guest_width = 0;
+ #endif /* HAVE_CONTEXT_ANY */
+     vcpu_guest_context_t ctxt;
+ 
++    /* For details on the registers involved in the x86 paging configuation
++       see the Intel 64 and IA-32 Architectures Software Developer's Manual,
++       Volume 3A: System Programming Guide, Part 1. */
++
+ #ifdef HAVE_CONTEXT_ANY
++    if (xa_get_guest_width(instance, &guest_width) != 0){
++        fprintf(stderr, "ERROR: failed to get guest width\n");
++	goto error_exit;
++    }
++
+     if ((ret = xc_vcpu_getcontext(
+-                instance->m.xen.xch,
+-                instance->m.xen.domain_id,
+-                0, /*TODO vcpu, assuming only 1 for now */
+-                &ctxt_any)) != 0){
++             instance->m.xen.xch,
++             instance->m.xen.domain_id,
++             0, /*TODO vcpu, assuming only 1 for now */
++             &ctxt_any)) != 0){
++        fprintf(stderr, "ERROR: failed to get context information.\n");
++        ret = XA_FAILURE;
++        goto error_exit;
++    }
++
++    /* PG Flag --> CR0, bit 31 == 1 --> paging enabled */
++    if (!xa_get_bit(GET_FIELD(&ctxt_any, ctrlreg[0]), 31)){
++        fprintf(stderr, "ERROR: Paging disabled for this VM, not supported.\n");
++        ret = XA_FAILURE;
++        goto error_exit;
++    }
++    /* PAE Flag --> CR4, bit 5 == 0 --> pae disabled */
++    instance->pae = xa_get_bit(GET_FIELD(&ctxt_any, ctrlreg[4]), 5);
++    xa_dbprint("**set instance->pae = %d\n", instance->pae);
++
++    /* PSE Flag --> CR4, bit 4 == 0 --> pse disabled */
++    instance->pse = xa_get_bit(GET_FIELD(&ctxt_any, ctrlreg[4]), 4);
++    xa_dbprint("**set instance->pse = %d\n", instance->pse);
++
++    /* testing to see CR3 value */
++    instance->cr3 = GET_FIELD(&ctxt_any, ctrlreg[3]) & 0xFFFFF000;
++    xa_dbprint("**set instance->cr3 = 0x%.8x\n", instance->cr3);
+ #else
+     if ((ret = xc_vcpu_getcontext(
+                 instance->m.xen.xch,
+                 instance->m.xen.domain_id,
+                 0, /*TODO vcpu, assuming only 1 for now */
+                 &ctxt)) != 0){
+-#endif /* HAVE_CONTEXT_ANY */
+         fprintf(stderr, "ERROR: failed to get context information.\n");
+         ret = XA_FAILURE;
+         goto error_exit;
+     }
+ 
+-#ifdef HAVE_CONTEXT_ANY
+-    ctxt = ctxt_any.c;
+-#endif /* HAVE_CONTEXT_ANY */
+-
+-    /* For details on the registers involved in the x86 paging configuation
+-       see the Intel 64 and IA-32 Architectures Software Developer's Manual,
+-       Volume 3A: System Programming Guide, Part 1. */
+-
+     /* PG Flag --> CR0, bit 31 == 1 --> paging enabled */
+     if (!xa_get_bit(ctxt.ctrlreg[0], 31)){
+         fprintf(stderr, "ERROR: Paging disabled for this VM, not supported.\n");
+@@ -303,6 +326,8 @@ int get_page_info_xen (xa_instance_t *instance)
+     /* testing to see CR3 value */
+     instance->cr3 = ctxt.ctrlreg[3] & 0xFFFFF000;
+     xa_dbprint("**set instance->cr3 = 0x%.8x\n", instance->cr3);
++
++#endif /* HAVE_CONTEXT_ANY */
+ #endif /* ENABLE_XEN */
+ 
+ error_exit:
+@@ -472,7 +497,7 @@ int helper_init (xa_instance_t *instance)
+     if (XA_MODE_XEN == instance->mode){
+ #ifdef ENABLE_XEN
+         /* init instance->hvm */
+-        instance->hvm = xa_ishvm(instance->m.xen.domain_id);
++        instance->hvm = instance->m.xen.info.hvm;
+ #ifdef XA_DEBUG
+         if (instance->hvm){
+             xa_dbprint("**set instance->hvm to true (HVM).\n");
+diff --git a/xenaccess/xa_memory.c b/xenaccess/xa_memory.c
+index c9e5d64..1b1cc7b 100644
+--- a/xenaccess/xa_memory.c
++++ b/xenaccess/xa_memory.c
+@@ -38,25 +38,36 @@
+ #define XENMEM_maximum_gpfn 0
+ #endif
+ 
++static int nr_gpfns(xc_interface *xch, domid_t domid)
++{
++    return xc_domain_maximum_gpfn(xch, domid) + 1;
++}
++
+ /* convert a pfn to a mfn based on the live mapping tables */
+ unsigned long helper_pfn_to_mfn (xa_instance_t *instance, unsigned long pfn)
+ {
+ #ifdef ENABLE_XEN
+-    shared_info_t *live_shinfo = NULL;
++    shared_info_any_t *live_shinfo = NULL;
+     unsigned long *live_pfn_to_mfn_frame_list_list = NULL;
+     unsigned long *live_pfn_to_mfn_frame_list = NULL;
+ 
+     /* Live mapping of the table mapping each PFN to its current MFN. */
+     unsigned long *live_pfn_to_mfn_table = NULL;
+-    unsigned long nr_pfns = 0;
++    unsigned long p2m_size = 0;
+     unsigned long ret = -1;
+ //    unsigned long mfn;
+-//    int i;
++    unsigned int guest_width = 0;
++    int i;
+ 
+     if (instance->hvm){
+         return pfn;
+     }
+ 
++    if (xa_get_guest_width(instance, &guest_width) != 0){
++        fprintf(stderr, "ERROR: failed to get guest width\n");
++        goto error_exit; 
++    }
++
+     if (NULL == instance->m.xen.live_pfn_to_mfn_table){
+         live_shinfo = xa_mmap_mfn(
+             instance, PROT_READ, instance->m.xen.info.shared_info_frame);
+@@ -65,16 +76,10 @@ unsigned long helper_pfn_to_mfn (xa_instance_t *instance, unsigned long pfn)
+             goto error_exit;
+         }
+ 
+-        if (instance->m.xen.xen_version == XA_XENVER_3_1_0){
+-            nr_pfns = xc_domain_maximum_gpfn(instance->m.xen.xch,
+-                                             instance->m.xen.domain_id) + 1;
+-        }
+-        else{
+-            nr_pfns = live_shinfo->arch.max_pfn;
+-        }
++	p2m_size = nr_gpfns(instance->m.xen.xch, instance->m.xen.domain_id);
+ 
+         live_pfn_to_mfn_frame_list_list = xa_mmap_mfn(
+-            instance, PROT_READ, live_shinfo->arch.pfn_to_mfn_frame_list_list);
++            instance, PROT_READ, GET_FIELD(live_shinfo, arch.pfn_to_mfn_frame_list_list));
+         if (live_pfn_to_mfn_frame_list_list == NULL){
+             fprintf(stderr, "ERROR: failed to init live_pfn_to_mfn_frame_list_list\n");
+             goto error_exit;
+@@ -85,9 +90,9 @@ unsigned long helper_pfn_to_mfn (xa_instance_t *instance, unsigned long pfn)
+             instance->m.xen.domain_id,
+             PROT_READ,
+             live_pfn_to_mfn_frame_list_list,
+-            (nr_pfns+(fpp*fpp)-1)/(fpp*fpp) );
++            P2M_FLL_ENTRIES );
+         if (live_pfn_to_mfn_frame_list == NULL){
+-            fprintf(stderr, "ERROR: failed to init live_pfn_to_mfn_frame_list\n");
++            fprintf(stderr, "ERROR: failed to init live_pfn_to_mfn_frame_list errno=%d\n", errno);
+             goto error_exit;
+         }
+ 
+@@ -95,9 +100,10 @@ unsigned long helper_pfn_to_mfn (xa_instance_t *instance, unsigned long pfn)
+             instance->m.xen.xch,
+             instance->m.xen.domain_id,
+             PROT_READ,
+-            live_pfn_to_mfn_frame_list, (nr_pfns+fpp-1)/fpp );
++            live_pfn_to_mfn_frame_list, 
++	    P2M_FL_ENTRIES );
+         if (live_pfn_to_mfn_table  == NULL){
+-            fprintf(stderr, "ERROR: failed to init live_pfn_to_mfn_table\n");
++            fprintf(stderr, "ERROR: failed to init live_pfn_to_mfn_table errno=%d\n", errno);
+             goto error_exit;
+         }
+ 
+@@ -114,7 +120,7 @@ unsigned long helper_pfn_to_mfn (xa_instance_t *instance, unsigned long pfn)
+ 
+         /* save mappings for later use */
+         instance->m.xen.live_pfn_to_mfn_table = live_pfn_to_mfn_table;
+-        instance->m.xen.nr_pfns = nr_pfns;
++        instance->m.xen.nr_pfns = p2m_size;
+     }
+ 
+     ret = instance->m.xen.live_pfn_to_mfn_table[pfn];
+@@ -427,6 +433,7 @@ uint32_t xa_current_cr3 (xa_instance_t *instance, uint32_t *cr3)
+     int ret = XA_SUCCESS;
+ #ifdef ENABLE_XEN
+ #ifdef HAVE_CONTEXT_ANY
++    unsigned int guest_width = 0;
+     vcpu_guest_context_any_t ctxt_any;
+ #endif /* HAVE_CONTEXT_ANY */
+     vcpu_guest_context_t ctxt;
+@@ -435,25 +442,31 @@ uint32_t xa_current_cr3 (xa_instance_t *instance, uint32_t *cr3)
+     if (XA_MODE_XEN == instance->mode){
+ #ifdef ENABLE_XEN
+ #ifdef HAVE_CONTEXT_ANY
++        if (xa_get_guest_width(instance, &guest_width) != 0){
++	    fprintf(stderr, "ERROR: failed to get guest width\n");
++	    goto error_exit; 
++        }
++
+         if ((ret = xc_vcpu_getcontext(
+-                instance->m.xen.xch,
+-                instance->m.xen.domain_id,
+-                0, /*TODO vcpu, assuming only 1 for now */
+-                &ctxt_any)) != 0){
++                 instance->m.xen.xch,
++                 instance->m.xen.domain_id,
++                 0, /*TODO vcpu, assuming only 1 for now */
++                 &ctxt_any)) != 0){
++            fprintf(stderr, "ERROR: failed to get context information.\n");
++            ret = XA_FAILURE;
++            goto error_exit;
++        }
++	*cr3 = GET_FIELD(&ctxt_any, ctrlreg[3]) & 0xFFFFF000;
+ #else
+         if ((ret = xc_vcpu_getcontext(
+-                instance->m.xen.xch,
+-                instance->m.xen.domain_id,
+-                0, /*TODO vcpu, assuming only 1 for now */
+-                &ctxt)) != 0){
+-#endif /* HAVE_CONTEXT_ANY */
++                 instance->m.xen.xch,
++                 instance->m.xen.domain_id,
++                 0, /*TODO vcpu, assuming only 1 for now */
++                 &ctxt)) != 0){
+             fprintf(stderr, "ERROR: failed to get context information.\n");
+             ret = XA_FAILURE;
+             goto error_exit;
+         }
+-#ifdef HAVE_CONTEXT_ANY
+-        *cr3 = ctxt_any.c.ctrlreg[3] & 0xFFFFF000;
+-#else
+         *cr3 = ctxt.ctrlreg[3] & 0xFFFFF000;
+ #endif /* HAVE_CONTEXT_ANY */
+ #endif /* ENABLE_XEN */
+diff --git a/xenaccess/xa_private.h b/xenaccess/xa_private.h
+index 308bb58..7f016e9 100644
+--- a/xenaccess/xa_private.h
++++ b/xenaccess/xa_private.h
+@@ -44,11 +44,25 @@
+ #include <time.h>
+ #ifdef ENABLE_XEN
+ #include <xenctrl.h>
++#include <xen/sys/privcmd.h>
+ #endif /* ENABLE_XEN */
+ #include "xenaccess.h"
+ 
+ /* Architecture dependent constants */
+-#define fpp 1024		/* number of xen_pfn_t that fits on one frame */
++
++/* Number of xen_pfn_t in a page */
++#ifdef ENABLE_XEN
++    #define FPP             (XC_PAGE_SIZE/(guest_width))
++#else
++    #define FPP             1024
++#endif /* ENABLE_XEN */
++
++/* Number of entries in the pfn_to_mfn_frame_list_list */
++#define P2M_FLL_ENTRIES (((p2m_size)+(FPP*FPP)-1)/(FPP*FPP))
++
++/* Number of entries in the pfn_to_mfn_frame_list */
++#define P2M_FL_ENTRIES  (((p2m_size)+FPP-1)/FPP)
++
+ 
+ /* other globals */
+ #define MAX_ROW_LENGTH 200
+@@ -58,11 +72,22 @@
+ #define XA_ECRITICAL 1
+ #define XA_EMINOR 2
+ 
++/* Get a field from an architecture independent 'any' union */
++#define GET_FIELD(_p, _f) ((guest_width==8) ? ((_p)->x64._f) : ((_p)->x32._f))
++
+ /*------------------------------
+  * Utility function from xa_util
+  */
+ 
+ /**
++ * Get the width of the guest OS running in the specified domain.
++ *
++ * @param[in] instance libxa instance.
++ * @param[out] guest_width Width of the guest OS.
++ */
++int xa_get_guest_width(xa_instance_t *instance, unsigned int *guest_width);
++
++/**
+  * Get the specifid bit from a given register entry.
+  *
+  * @param[in] reg The register contents to parse (e.g., CR0, CR3, etc)
+diff --git a/xenaccess/xa_util.c b/xenaccess/xa_util.c
+index 82fc1f0..849fb4c 100755
+--- a/xenaccess/xa_util.c
++++ b/xenaccess/xa_util.c
+@@ -35,6 +35,90 @@
+ #include <string.h>
+ #include <stdarg.h>
+ 
++#ifdef ENABLE_XEN
++static inline void safe_munlock(const void *addr, size_t len)
++{
++    int saved_errno = errno;
++    (void)munlock(addr, len);
++    errno = saved_errno;
++}
++
++static int lock_pages(void *addr, size_t len)
++{
++      int e = 0;
++      void *laddr = (void *)((unsigned long)addr & XC_PAGE_MASK);
++      size_t llen = (len + ((unsigned long)addr - (unsigned long)laddr) +
++                     XC_PAGE_SIZE - 1) & XC_PAGE_MASK;
++      e = mlock(laddr, llen);
++      return e;
++}
++
++static void unlock_pages(void *addr, size_t len)
++{
++    void *laddr = (void *)((unsigned long)addr & XC_PAGE_MASK);
++    size_t llen = (len + ((unsigned long)addr - (unsigned long)laddr) +
++                   XC_PAGE_SIZE - 1) & XC_PAGE_MASK;
++    safe_munlock(laddr, llen);
++}
++
++static inline int do_domctl(xc_interface *xch, struct xen_domctl *domctl)
++{
++    int ret = -1;
++    privcmd_hypercall_t hypercall;
++
++    domctl->interface_version = XEN_DOMCTL_INTERFACE_VERSION;
++
++    hypercall.op     = __HYPERVISOR_domctl;
++    hypercall.arg[0] = (unsigned long)domctl;
++
++    if ( lock_pages(domctl, sizeof(*domctl)) != 0 )
++    {
++	fprintf(stderr, "Could not lock memory for Xen hypercall");
++        goto out1;
++    }
++
++    if ( (ret = do_xen_hypercall(xch, &hypercall)) < 0 )
++    {
++        if ( errno == EACCES )
++	    fprintf(stderr, "domctl operation failed -- need to"
++                            " rebuild the user-space tool set?\n");
++    }
++
++    unlock_pages(domctl, sizeof(*domctl));
++
++ out1:
++    return ret;
++}
++
++int
++xa_get_guest_width(
++        xa_instance_t* instance, unsigned int *guest_width)
++{
++    struct xen_domctl domctl;
++
++    memset(&domctl, 0, sizeof(domctl));
++    domctl.domain = instance->m.xen.domain_id;
++    domctl.cmd = XEN_DOMCTL_get_address_size;
++
++    if (do_domctl(instance->m.xen.xch, &domctl) != 0)
++        return XA_FAILURE;
++
++    *guest_width = domctl.u.address_size.size / 8;
++    return XA_SUCCESS;
++}
++
++#else
++
++int
++xa_get_guest_width(
++        xa_instance_t* instance, unsigned int *guest_width)
++{
++    *guest_width = 4;
++    return XA_SUCCESS;
++}
++
++#endif /* ENABLE_XEN */
++
+ int xa_read_long_mach (
+         xa_instance_t *instance, uint32_t maddr, uint32_t *value)
+ {
+@@ -245,7 +329,7 @@ void *xc_map_foreign_pages(xc_interface *xch, uint32_t dom, int prot,
+                  * appropriate one.
+                  */
+                 errno = EINVAL;
+-                munmap(res, num * PAGE_SIZE);
++                munmap(res, num * XC_PAGE_SIZE);
+                 res = NULL;
+                 break;
+             }

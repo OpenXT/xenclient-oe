@@ -1,0 +1,218 @@
+diff --git a/tools/libxc/xc_domain.c b/tools/libxc/xc_domain.c
+index 9f3edbb..4858c13 100644
+--- a/tools/libxc/xc_domain.c
++++ b/tools/libxc/xc_domain.c
+@@ -1692,6 +1692,35 @@ int xc_domain_set_virq_handler(xc_interface *xch, uint32_t domid, int virq)
+     return do_domctl(xch, &domctl);
+ }
+ 
++int xc_domain_aperture_map(
++    xc_interface *xch,
++    uint32_t domid,
++    unsigned long aperture_gfn,
++    uint64_t *gfns,
++    unsigned long nr_gfns,
++    uint32_t add_mapping)
++{
++    int ret;
++    DECLARE_DOMCTL;
++    DECLARE_HYPERCALL_BOUNCE(gfns, nr_gfns * sizeof (*gfns), XC_HYPERCALL_BUFFER_BOUNCE_IN);
++
++    if (xc_hypercall_bounce_pre(xch, gfns))
++        return -1;
++
++    domctl.cmd = XEN_DOMCTL_aperture_map;
++    domctl.domain = domid;
++    domctl.u.aperture_map.aperture_gfn = aperture_gfn;
++    set_xen_guest_handle(domctl.u.aperture_map.gfns, gfns);
++    domctl.u.aperture_map.nr_gfns = nr_gfns;
++    domctl.u.aperture_map.add_mapping = add_mapping;
++
++    ret = do_domctl(xch, &domctl);
++
++    xc_hypercall_bounce_post(xch, gfns);
++
++    return ret ? -1 : 0;
++}
++
+ /*
+  * Local variables:
+  * mode: C
+diff --git a/tools/libxc/xenctrl.h b/tools/libxc/xenctrl.h
+index 465c053..a817d96 100644
+--- a/tools/libxc/xenctrl.h
++++ b/tools/libxc/xenctrl.h
+@@ -848,6 +848,13 @@ int xc_domain_set_access_required(xc_interface *xch,
+  */
+ int xc_domain_set_virq_handler(xc_interface *xch, uint32_t domid, int virq);
+ 
++int xc_domain_aperture_map(xc_interface *xch,
++                           uint32_t domid,
++                           unsigned long aperture_gfn,
++                           uint64_t *gfns,
++                           unsigned long nr_gfns,
++                           uint32_t add_mapping);
++
+ /*
+  * CPUPOOL MANAGEMENT FUNCTIONS
+  */
+diff --git a/xen/arch/x86/domctl.c b/xen/arch/x86/domctl.c
+index c2a04c4..973bc1f 100644
+--- a/xen/arch/x86/domctl.c
++++ b/xen/arch/x86/domctl.c
+@@ -1214,6 +1214,78 @@ long arch_do_domctl(
+     }
+     break;
+ 
++    case XEN_DOMCTL_aperture_map:
++    {
++        struct domain *d;
++        unsigned long aperture = domctl->u.aperture_map.aperture_gfn;
++        unsigned long nr_gfns = domctl->u.aperture_map.nr_gfns;
++        int add = domctl->u.aperture_map.add_mapping;
++        unsigned long i;
++
++        ret = -ESRCH;
++        if ( unlikely((d = rcu_lock_domain_by_id(domctl->domain)) == NULL) )
++            break;
++
++        if ( add )
++        {
++            gdprintk(XENLOG_INFO,
++                "aperture_map:add: gfn=%lx nr_gfns=%lx\n",
++                aperture, nr_gfns);
++
++            for ( i = 0; i < nr_gfns; i++ )
++            {
++                struct page_info *page = NULL;
++                uint64_t gpfn;
++                mfn_t mfn;
++
++                if ( unlikely(copy_from_guest_offset(&gpfn, domctl->u.aperture_map.gfns, i, 1)) )
++                {
++                    ret = -EFAULT;
++                    goto aperture_out;
++                }
++
++                page = get_page_from_gfn(d, gpfn, NULL, P2M_ALLOC);
++                if (!page) {
++                    continue;
++                }
++                mfn = _mfn(page_to_mfn(page));
++                if (mfn_x(mfn) == INVALID_MFN) {
++                    put_page(page);
++                    continue;
++                }
++                set_mmio_p2m_entry(d, aperture + i, mfn);
++                put_page(page);
++            }
++            ret = 0;
++        }
++        else
++        {
++            gdprintk(XENLOG_INFO,
++                "aperture_map:remove: gfn=%lx nr_gfns=%lx\n",
++                 aperture, nr_gfns);
++
++            for ( i = 0; i < nr_gfns; i++ )
++            {
++                struct page_info *page = NULL;
++                mfn_t mfn;
++
++                page = get_page_from_gfn(d, aperture + i, NULL, P2M_ALLOC);
++                if (!page) {
++                    continue;
++                }
++                mfn = _mfn(page_to_mfn(page));
++                if (mfn_x(mfn) != INVALID_MFN)
++                    clear_mmio_p2m_entry(d, aperture + i);
++                put_page(page);
++            }
++            ret = 0;
++        }
++
++aperture_out:
++        rcu_unlock_domain(d);
++    }
++    break;
++
+     default:
+         ret = iommu_do_domctl(domctl, d, u_domctl);
+         break;
+diff --git a/xen/include/public/domctl.h b/xen/include/public/domctl.h
+index 271207d..7352b97 100644
+--- a/xen/include/public/domctl.h
++++ b/xen/include/public/domctl.h
+@@ -873,6 +873,17 @@ struct xen_domctl_setcorespersocket {
+ typedef struct xen_domctl_setcorespersocket xen_domctl_setcorespersocket_t;
+ DEFINE_XEN_GUEST_HANDLE(xen_domctl_setcorespersocket_t);
+ 
++/* XEN_DOMCTL_aperture_map */
++struct xen_domctl_aperture_map {
++    uint64_aligned_t aperture_gfn; /* aperture start */
++    uint64_aligned_t nr_gfns;   /* number of pages in range */
++    XEN_GUEST_HANDLE_64(uint64_t) gfns;
++    uint32_t add_mapping;       /* add or remove mapping */
++    uint32_t padding;           /* padding for 64-bit aligned structure */
++};
++typedef struct xen_domctl_aperture_map xen_domctl_aperture_map_t;
++DEFINE_XEN_GUEST_HANDLE(xen_domctl_aperture_map_t);
++
+ struct xen_domctl {
+     uint32_t cmd;
+ #define XEN_DOMCTL_createdomain                   1
+@@ -943,6 +954,7 @@ struct xen_domctl {
+ #define XEN_DOMCTL_getnodeaffinity               69
+ #define XEN_DOMCTL_setbiosuuid                   90
+ #define XEN_DOMCTL_set_xcisrv                    91
++#define XEN_DOMCTL_aperture_map                  92
+ 
+ #define XEN_DOMCTL_gdbsx_guestmemio            1000
+ #define XEN_DOMCTL_gdbsx_pausevcpu             1001
+@@ -998,6 +1010,7 @@ struct xen_domctl {
+         struct xen_domctl_cpuid             cpuid;
+         struct xen_domctl_vcpuextstate      vcpuextstate;
+ #endif
++        struct xen_domctl_aperture_map      aperture_map;
+         struct xen_domctl_set_access_required access_required;
+         struct xen_domctl_audit_p2m         audit_p2m;
+         struct xen_domctl_set_virq_handler  set_virq_handler;
+diff --git a/xen/include/xsm/dummy.h b/xen/include/xsm/dummy.h
+index 903ddf5..026c211 100644
+--- a/xen/include/xsm/dummy.h
++++ b/xen/include/xsm/dummy.h
+@@ -138,6 +138,7 @@ static XSM_INLINE int xsm_domctl(XSM_DEFAULT_ARG struct domain *d, int cmd)
+     case XEN_DOMCTL_memory_mapping:
+     case XEN_DOMCTL_bind_pt_irq:
+     case XEN_DOMCTL_unbind_pt_irq:
++    case XEN_DOMCTL_aperture_map:
+         return xsm_default_action(XSM_DM_PRIV, current->domain, d);
+     default:
+         return xsm_default_action(XSM_PRIV, current->domain, d);
+diff --git a/xen/xsm/flask/hooks.c b/xen/xsm/flask/hooks.c
+index 202d4f1..a7fba21 100644
+--- a/xen/xsm/flask/hooks.c
++++ b/xen/xsm/flask/hooks.c
+@@ -736,6 +736,9 @@ static int flask_domctl(struct domain *d, int cmd)
+     case XEN_DOMCTL_setcorespersocket:
+         return current_has_perm(d, SECCLASS_DOMAIN2, DOMAIN2__SETCORESPERSOCKET);
+ 
++    case XEN_DOMCTL_aperture_map:
++        return current_has_perm(d, SECCLASS_DOMAIN2, DOMAIN2__APERTURE_MAP);
++
+     default:
+         printk("flask_domctl: Unknown op %d\n", cmd);
+         return -EPERM;
+diff --git a/xen/xsm/flask/policy/access_vectors b/xen/xsm/flask/policy/access_vectors
+index 3d2c737..77b3b50 100644
+--- a/xen/xsm/flask/policy/access_vectors
++++ b/xen/xsm/flask/policy/access_vectors
+@@ -200,6 +200,8 @@ class domain2
+     setbiosuuid
+ # XEN_DOMCTL_set_xcisrv
+     set_xcisrv
++# XEN_DOMCTL_aperture_map
++    aperture_map
+ }
+ 
+ # Similar to class domain, but primarily contains domctls related to HVM domains

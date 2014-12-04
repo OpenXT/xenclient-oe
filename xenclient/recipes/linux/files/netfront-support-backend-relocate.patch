@@ -1,0 +1,34 @@
+diff --git a/drivers/net/xen-netfront.c b/drivers/net/xen-netfront.c
+index 2317127..f1fc8b2 100644
+--- a/drivers/net/xen-netfront.c
++++ b/drivers/net/xen-netfront.c
+@@ -1857,16 +1857,27 @@ static void netback_changed(struct xenbus_device *dev,
+ 	dev_dbg(&dev->dev, "%s\n", xenbus_strstate(backend_state));
+ 
+ 	switch (backend_state) {
++	case XenbusStateUnknown:
++            /* if the backend vanishes from xenstore, close frontend */
++            if (!xenbus_exists(XBT_NIL, dev->otherend, "")) {
++                if (dev->state != XenbusStateClosed) {
++                    dev_warn(&dev->dev, "backend vanished, closing frontend\n");
++                    xenbus_frontend_closed(dev);
++                    xennet_disconnect_backend(np);
++                }
++            }
++            break;
+ 	case XenbusStateInitialising:
+ 	case XenbusStateInitialised:
+ 	case XenbusStateReconfiguring:
+ 	case XenbusStateReconfigured:
+-	case XenbusStateUnknown:
+ 	case XenbusStateClosed:
+ 		break;
+ 
+ 	case XenbusStateInitWait:
+-		if (dev->state != XenbusStateInitialising)
++		/* allow reconnect if our state is either initialising, or closed */
++		if (dev->state != XenbusStateInitialising &&
++		    dev->state != XenbusStateClosed)
+ 			break;
+ 		if (xennet_connect(netdev) != 0)
+ 			break;

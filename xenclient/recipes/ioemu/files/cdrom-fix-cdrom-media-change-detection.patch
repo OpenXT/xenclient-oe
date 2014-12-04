@@ -1,0 +1,437 @@
+diff --git a/hw/ide.c b/hw/ide.c
+index c8be324..3717858 100644
+--- a/hw/ide.c
++++ b/hw/ide.c
+@@ -48,6 +48,12 @@
+ 
+ #include <assert.h>
+ 
++#if 0
++#define cdprintf(fmt, args...) fprintf(stderr, "CD: " fmt, ##args)
++#else
++#define cdprintf(fmt, args...)
++#endif
++
+ /* debug IDE devices */
+ //#define DEBUG_IDE
+ //#define DEBUG_IDE_ATAPI
+@@ -457,6 +463,10 @@ typedef struct ATAPIPassThroughState
+ } ATAPIPassThroughState;
+ #endif /* __linux__ */
+ 
++struct unreported_events {
++    bool new_media;
++};
++
+ /* NOTE: IDEState represents in fact one drive */
+ typedef struct IDEState {
+     /* ide config */
+@@ -498,8 +508,11 @@ typedef struct IDEState {
+     struct IDEState *cur_drive;
+     BlockDriverState *bs;
+     /* ATAPI specific */
++    struct unreported_events events;
+     uint8_t sense_key;
+     uint8_t asc;
++    uint8_t cdrom_changed;
++    uint8_t media_change_notified;
+     int packet_transfer_size;
+     int elementary_transfer_size;
+     int io_buffer_index;
+@@ -527,6 +540,7 @@ typedef struct IDEState {
+     uint32_t mdata_size;
+     uint8_t *mdata_storage;
+     int media_changed;
++    int last_media_status;
+     /* for pmac */
+     int is_read;
+ } IDEState;
+@@ -632,6 +646,7 @@ buffered_pio_init(void)
+     p2->page_offset = off2;
+ }
+ 
++
+ static inline void
+ __buffered_pio_flush(struct pio_buffer *piobuf, IDEState *s, uint32_t pointer)
+ {
+@@ -721,7 +736,7 @@ __handle_buffered_pio(struct pio_buffer *piobuf)
+     IDEState *s = piobuf->opaque;
+     uint32_t pointer = piobuf->pointer;
+ 
+-    
++
+     if (pointer == 0)
+         return;/* no buffered pio */
+ 
+@@ -736,7 +751,7 @@ __handle_buffered_pio(struct pio_buffer *piobuf)
+             pointer = s->data_ptr - s->io_buffer;
+         s->data_ptr -= pointer;
+     }
+-	
++
+     piobuf->pointer = 0;
+     piobuf->data_end = 0;
+     piobuf->opaque = NULL;
+@@ -885,7 +900,7 @@ static void ide_atapi_identify(IDEState *s)
+     put_le16(p + 21, 512); /* cache size in sectors */
+     put_le16(p + 22, 4); /* ecc bytes */
+     padstr((char *)(p + 23), QEMU_VERSION, 8); /* firmware version */
+-    padstr((char *)(p + 27), "QEMU DVD-ROM", 40); /* model */
++    padstr((char *)(p + 27), "XenClient DVD-ROM", 40); /* model */
+     put_le16(p + 48, 1); /* dword I/O (XXX: should not be set on CDROM) */
+ #ifdef USE_DMA_CDROM
+     put_le16(p + 49, 1 << 9 | 1 << 8); /* DMA and LBA supported */
+@@ -1539,6 +1554,15 @@ static void ide_atapi_cmd_ok(IDEState *s)
+     ide_set_irq(s);
+ }
+ 
++static void ide_atapi_cmd_ua(IDEState *s)
++{
++    s->sense_key = SENSE_UNIT_ATTENTION;
++    s->asc = ASC_MEDIUM_MAY_HAVE_CHANGED;
++    ide_atapi_cmd_ok(s);
++    s->sense_key = SENSE_NONE;
++    s->asc = ASC_NONE;
++}
++
+ static void ide_atapi_cmd_error(IDEState *s, int sense_key, int asc)
+ {
+ #ifdef DEBUG_IDE_ATAPI
+@@ -1976,6 +2000,122 @@ static int ide_dvd_read_structure(IDEState *s, int format,
+     }
+ }
+ 
++#define ATAPI_MEDIA_EMPTY     0
++#define ATAPI_MEDIA_PRE_EMPTY 1
++#define ATAPI_MEDIA_PRESENT   2
++
++static unsigned int event_status_media(IDEState *s,
++                                       uint8_t *buf,
++                                       unsigned int max_len)
++{
++    enum media_event_code {
++        no_change = 0,       /* Status unchanged */
++        eject_requested,     /* received a request from user to eject */
++        new_media,           /* new media inserted and ready for access */
++        media_removal,       /* only for media changers */
++        media_changed,       /* only for media changers */
++        bg_format_completed, /* MRW or DVD+RW b/g format completed */
++        bg_format_restarted, /* MRW or DVD+RW b/g format restarted */
++    };
++    uint8_t event_code, media_status;
++
++    cdprintf("event_status_media: lms=%d new_media=%d\n",
++	     s->last_media_status, s->events.new_media); 
++
++    /* 
++     * This is related to BUG [XC-8950]
++     *
++     * Decide what to return depending on current media status 
++     * and last media status: we use the transition from 
++     * 2 (tray closed, media present) 
++     * to 
++     * 0 (tray open)
++     * to detect that a medium has been removed but on that 
++     * transition we report to the guest that the medium is still
++     * present but with a eject_requested event_code, only next time
++     * we will report media_removal event_code.
++     *
++     * This means when the medium gets changed the guest will be 
++     * returned the following sequence:
++     *
++     * event_code       |  media_status
++     * _________________|___________________________________
++     *                  |
++     * no_change        |  PRESENT
++     *                  |           <-- medium is changed, removed, tray open
++     * eject_requested  |  PRESENT
++     * media_removal    |  EMPTY
++     * no_change        |  EMPTY
++     *                  |           <-- medium is changed, new media, tray closed
++     * new_media        |  PRESENT
++     * no_change        |  PRESENT
++     *
++     * Going trought the eject_requested state makes Linux 
++     * (Ubuntu 12.04) happy.
++     */
++
++    media_status = bdrv_is_inserted(s->bs) ? ATAPI_MEDIA_PRESENT : ATAPI_MEDIA_EMPTY;
++
++    if (media_status == s->last_media_status) {
++	event_code = no_change;
++	s->last_media_status  = media_status;
++    } else if (media_status == ATAPI_MEDIA_PRESENT) {
++	event_code = new_media;
++	s->last_media_status  = media_status;
++    } else if (media_status == ATAPI_MEDIA_EMPTY) {
++	if (s->last_media_status == ATAPI_MEDIA_PRESENT) {
++	    event_code = eject_requested;
++	    media_status = ATAPI_MEDIA_PRESENT;
++	    s->last_media_status  = ATAPI_MEDIA_PRE_EMPTY;
++	} else if (s->last_media_status == ATAPI_MEDIA_PRE_EMPTY) {
++	    event_code = media_removal;
++	    s->last_media_status  = ATAPI_MEDIA_EMPTY;
++	}
++    } else {
++	cdprintf("ERROR: media_status=%d, unexpected value!\n");
++    }
++
++
++    buf[4] = event_code;
++    buf[5] = media_status;
++
++    cdprintf("event_status_media: lms=%d event_code=%d media_status=%d\n",
++	     s->last_media_status, event_code, media_status); 
++
++    return 6; /* We wrote to just 2 extra bytes from the header */
++}
++
++static unsigned int event_status_nea(uint8_t *buf, unsigned int max_len)
++{
++    unsigned int used_len;
++
++    /*
++     * Ensure we don't write on memory we don't have.
++     * max_len of 0 should not produce an error as well.
++     */
++    used_len = 0;
++
++    /* No event descriptor returned */
++    if (max_len > 0) {
++        buf[0] = 0;
++        used_len++;
++    }
++    if (max_len > 1) {
++        buf[1] = 0;
++        used_len++;
++    }
++
++    if (max_len > 3) {
++        buf[2] = 0x80;           /* No Event Available (NEA) */
++        used_len++;
++    }
++    if (max_len > 3) {
++        buf[3] = 0x00;           /* Empty supported event classes */
++        used_len++;
++    }
++    return used_len;
++}
++
+ #ifdef __linux__
+ # include "atapi-pt.c"
+ #endif
+@@ -1998,28 +2138,46 @@ static void ide_atapi_cmd(IDEState *s)
+         printf("\n");
+     }
+ #endif
++    if (s->cdrom_changed && !s->media_change_notified &&
++	s->io_buffer[0] != GPCMD_INQUIRY &&
++	s->io_buffer[0] != GPCMD_GET_EVENT_STATUS_NOTIFICATION) {
++	ide_atapi_cmd_error(s, SENSE_NOT_READY,
++			    ASC_MEDIUM_NOT_PRESENT);
++	s->media_change_notified = 1;
++	s->events.new_media = true;
++	s->sense_key = SENSE_UNIT_ATTENTION;
++	s->asc = ASC_MEDIUM_MAY_HAVE_CHANGED;
++	return;
++    }
+     /* If there's a UNIT_ATTENTION condition pending, only
+        REQUEST_SENSE and INQUIRY commands are allowed to complete. */
+-    if (s->sense_key == SENSE_UNIT_ATTENTION &&
++    if (s->sense_key == SENSE_UNIT_ATTENTION && 
+ 	s->io_buffer[0] != GPCMD_REQUEST_SENSE &&
+-	s->io_buffer[0] != GPCMD_INQUIRY) {
++	s->io_buffer[0] != GPCMD_INQUIRY &&
++        s->io_buffer[0] != GPCMD_GET_EVENT_STATUS_NOTIFICATION &&
++        s->io_buffer[0] != GPCMD_TEST_UNIT_READY) {
++	cdprintf("Attention (cmd %d)\n", s->io_buffer[0]);
+ 	ide_atapi_cmd_check_status(s);
+ 	return;
+     }
+     switch(s->io_buffer[0]) {
+     case GPCMD_TEST_UNIT_READY:
+         if (bdrv_is_inserted(s->bs)) {
+-            if (s->is_cdrom && s->sense_key == SENSE_NOT_READY) {
+-                ide_atapi_cmd_error(s, SENSE_UNIT_ATTENTION,
+-                                    ASC_MEDIUM_MAY_HAVE_CHANGED);
+-                break;
++            int sense, asc;
++
++	    cdprintf("TUR (%d %d)\n", s->sense_key, s->asc);
++
++	    if (s->cdrom_changed) {
++                ide_atapi_cmd_ua(s);
++                s->cdrom_changed = 0;
++            } else {
++                ide_atapi_cmd_ok(s);
+             }
+-            ide_atapi_cmd_ok(s);
+         } else {
+             ide_atapi_cmd_error(s, SENSE_NOT_READY,
+                                 ASC_MEDIUM_NOT_PRESENT);
+         }
+-        break;
++	break;
+     case GPCMD_MODE_SENSE_10:
+         {
+             int action, code;
+@@ -2070,8 +2228,8 @@ static void ide_atapi_cmd(IDEState *s)
+                     buf[12] = 0x71;
+                     buf[13] = 3 << 5;
+                     buf[14] = (1 << 0) | (1 << 3) | (1 << 5);
+-                    if (bdrv_is_locked(s->bs))
+-                        buf[6] |= 1 << 1;
++                    //if (bdrv_is_locked(s->bs))
++                    //    buf[6] |= 1 << 1;
+                     buf[15] = 0x00;
+                     cpu_to_ube16(&buf[16], 706);
+                     buf[18] = 0;
+@@ -2102,15 +2260,24 @@ static void ide_atapi_cmd(IDEState *s)
+         }
+         break;
+     case GPCMD_REQUEST_SENSE:
++	cdprintf("Request sense\n");
++	if (s->cdrom_changed) {
++	    cdprintf("Request sense return: SENSE UNIT ATTENTION, MEDIUM MAY HAVE CHANGED\n");
++	    s->sense_key = SENSE_UNIT_ATTENTION;
++	    s->asc = ASC_MEDIUM_MAY_HAVE_CHANGED;
++	}
+         max_len = packet[4];
+         memset(buf, 0, 18);
+         buf[0] = 0x70 | (1 << 7);
+         buf[2] = s->sense_key;
+         buf[7] = 10;
+         buf[12] = s->asc;
+-        if (s->sense_key == SENSE_UNIT_ATTENTION)
+-            s->sense_key = SENSE_NONE;
+         ide_atapi_cmd_reply(s, 18, max_len);
++	if (s->cdrom_changed) {
++	    s->cdrom_changed = 0;
++	    s->sense_key = SENSE_NONE;
++	    s->asc = ASC_NONE;
++	}
+         break;
+     case GPCMD_PREVENT_ALLOW_MEDIUM_REMOVAL:
+         if (bdrv_is_inserted(s->bs)) {
+@@ -2395,7 +2562,81 @@ static void ide_atapi_cmd(IDEState *s)
+             ide_atapi_cmd_reply(s, len, max_len);
+             break;
+         }
++    case GPCMD_GET_EVENT_STATUS_NOTIFICATION:
++        {
++	    enum cdb {
++		polled = 1,
++		request = 4,
++		allocation_length_msb = 7,
++		allocation_length_lsb = 8,
++		control = 9,
++	    };
++	    enum notification_class_request_type {
++		reserved1 = 1 << 0,
++		operational_change = 1 << 1,
++		power_management = 1 << 2,
++		external_request = 1 << 3,
++		media = 1 << 4,
++		multi_host = 1 << 5,
++		device_busy = 1 << 6,
++		reserved2 = 1 << 7,
++	    };
++	    enum event_notification_class_field {
++		enc_no_events = 0,
++		enc_operational_change,
++		enc_power_management,
++		enc_external_request,
++		enc_media,
++		enc_multiple_hosts,
++		enc_device_busy,
++		enc_reserved,
++	    };
++	    unsigned int max_len, used_len;
++	    unsigned int supported_events;
++
++	    cdprintf("Get event SN: %d\n", s->events.new_media);
++
++	    max_len = ube16_to_cpu(packet + allocation_length_msb);
++
++	    /* It is fine by the MMC spec to not support async mode operations */
++	    if (!(packet[polled] & 0x01)) { /* asynchronous mode */
++		/* Only polling is supported, asynchronous mode is not. */
++		ide_atapi_cmd_error(s, SENSE_ILLEGAL_REQUEST,
++				    ASC_INV_FIELD_IN_CMD_PACKET);
++		return;
++	    }
++
++	    /* polling mode operation */
++
++	    /*
++	     * These are the supported events.
++	     *
++	     * We currently only support requests of the 'media' type.
++	     */
++	    supported_events = media;
++
++	    /*
++	     * Responses to requests are to be based on request priority.  The
++	     * notification_class_request_type enum above specifies the
++	     * priority: upper elements are higher prio than lower ones.
++	     */
++
++	    if (packet[request] & media) {
++
++		/* Event notification header */
++		cpu_to_ube16(buf, max_len);
++		buf[2] = enc_media;
++		buf[3] = supported_events;
++
++		used_len = event_status_media(s, buf, max_len);
++	    } else {
++		used_len = event_status_nea(buf, max_len);
++	    }
++	    ide_atapi_cmd_reply(s, used_len, max_len);
++	}
++	break;
+     default:
++	cdprintf("Illegal request, Illegal Opcode: %d\n", s->io_buffer[0]);
+         ide_atapi_cmd_error(s, SENSE_ILLEGAL_REQUEST,
+                             ASC_ILLEGAL_OPCODE);
+         break;
+@@ -2466,9 +2707,8 @@ static void cdrom_change_cb(void *opaque)
+     bdrv_get_geometry(s->bs, &nb_sectors);
+     s->nb_sectors = nb_sectors;
+ 
+-    s->sense_key = SENSE_UNIT_ATTENTION;
+-    s->asc = ASC_MEDIUM_MAY_HAVE_CHANGED;
+-
++    s->cdrom_changed = 1;
++    s->media_change_notified = 0;
+     ide_set_irq(s);
+ }
+ 
+@@ -3191,7 +3431,13 @@ static void ide_reset(IDEState *s)
+        accesses */
+     s->end_transfer_func = ide_dummy_transfer_stop;
+     ide_dummy_transfer_stop(s);
++    s->sense_key = 0;
++    s->asc = 0;
+     s->media_changed = 0;
++    s->cdrom_changed = 0;
++    s->last_media_status = 0;
++    s->media_change_notified = 0;
++    s->events.new_media = false;
+ }
+ 
+ /* Unplug all of the IDE hard disks, starting at index @start in the
+@@ -3364,6 +3610,13 @@ static void ide_load(QEMUFile* f, IDEState *s, int version_id)
+ 
+     qemu_get_8s(f, &s->sense_key);
+     qemu_get_8s(f, &s->asc);
++    if (version_id == 3) {
++        qemu_get_8s(f, &s->cdrom_changed);
++    } else {
++        if (s->sense_key == SENSE_UNIT_ATTENTION &&
++                       s->asc == ASC_MEDIUM_MAY_HAVE_CHANGED)
++            s->cdrom_changed = 1;
++    }
+     /* XXX: if a transfer is pending, we do not save it yet */
+ }
+ 

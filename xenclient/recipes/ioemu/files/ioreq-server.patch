@@ -1,0 +1,294 @@
+diff --git a/exec.c b/exec.c
+index 3746839..29231a7 100644
+--- a/exec.c
++++ b/exec.c
+@@ -2350,6 +2350,7 @@ void cpu_register_physical_memory_offset(target_phys_addr_t start_addr,
+     for(env = first_cpu; env != NULL; env = env->next_cpu) {
+         tlb_flush(env, 1);
+     }
++    
+ }
+ 
+ /* XXX: temporary until new memory mapping API */
+diff --git a/hw/pc.c b/hw/pc.c
+index c1af1c1..9d6fe8c 100644
+--- a/hw/pc.c
++++ b/hw/pc.c
+@@ -637,7 +637,6 @@ static void load_linux(uint8_t *option_rom,
+ 
+     /* Special pages are placed at end of low RAM: pick an arbitrary one and
+      * subtract a suitably large amount of padding (64kB) to skip BIOS data. */
+-    xc_get_hvm_param(xc_handle, domid, HVM_PARAM_BUFIOREQ_PFN, &end_low_ram);
+     end_low_ram = (end_low_ram << 12) - (64*1024);
+ 
+     /* highest address for loading the initrd */
+diff --git a/hw/pci.c b/hw/pci.c
+index efb4daf..a562463 100644
+--- a/hw/pci.c
++++ b/hw/pci.c
+@@ -248,6 +248,7 @@ PCIDevice *pci_register_device(PCIBus *bus, const char *name,
+         return NULL;
+     found: ;
+     }
++
+     pci_dev = qemu_mallocz(instance_size);
+     pci_dev->bus = bus;
+     pci_dev->devfn = devfn;
+@@ -255,6 +256,12 @@ PCIDevice *pci_register_device(PCIBus *bus, const char *name,
+     memset(pci_dev->irq_state, 0, sizeof(pci_dev->irq_state));
+     pci_set_default_subsystem_id(pci_dev);
+ 
++    if (xen_register_pcidev(pci_dev))
++    {
++        fprintf(stderr, "Failed to register pci device \"%s\"\n", name);
++        return NULL;
++    }
++
+     if (!config_read)
+         config_read = pci_default_read_config;
+     if (!config_write)
+diff --git a/hw/xen.h b/hw/xen.h
+index 3c8da41..8053efe 100644
+--- a/hw/xen.h
++++ b/hw/xen.h
+@@ -16,5 +16,6 @@ enum xen_mode {
+ 
+ extern uint32_t xen_domid;
+ extern enum xen_mode xen_mode;
++extern ioservid_t xen_serverid;
+ 
+ #endif /* QEMU_HW_XEN_H */
+diff --git a/hw/xen_machine_fv.c b/hw/xen_machine_fv.c
+index fc4daf3..41dbdf4 100644
+--- a/hw/xen_machine_fv.c
++++ b/hw/xen_machine_fv.c
+@@ -66,6 +66,7 @@ TAILQ_HEAD(map_cache_head, map_cache_rev) locked_entries = TAILQ_HEAD_INITIALIZE
+ /* For most cases (>99.9%), the page address is the same. */
+ static unsigned long last_address_index = ~0UL;
+ static uint8_t      *last_address_vaddr;
++ioservid_t xen_serverid = 0;
+ 
+ static int qemu_map_cache_init(void)
+ {
+@@ -280,6 +281,7 @@ static void xen_init_fv(ram_addr_t ram_size, int vga_ram_size,
+     unsigned long ioreq_pfn;
+     extern void *shared_page;
+     extern void *buffered_io_page;
++    int rc;
+ #ifdef __ia64__
+     unsigned long nr_pages;
+     xen_pfn_t *page_array;
+@@ -295,7 +297,18 @@ static void xen_init_fv(ram_addr_t ram_size, int vga_ram_size,
+     }
+ #endif
+ 
+-    xc_get_hvm_param(xc_handle, domid, HVM_PARAM_IOREQ_PFN, &ioreq_pfn);
++    rc = xc_hvm_register_ioreq_server(xc_handle, domid);
++
++    if (rc < 0)
++        hw_error("registered server return error %d", rc);
++
++    xen_serverid = rc;
++
++    fprintf(logfile, "registered with server id %u\n", xen_serverid);
++
++    xc_get_hvm_param(xc_handle, domid, HVM_PARAM_IO_PFN_FIRST, &ioreq_pfn);
++    ioreq_pfn += (xen_serverid - 1) * 2 + 1;
++
+     fprintf(logfile, "shared page at pfn %lx\n", ioreq_pfn);
+     shared_page = xc_map_foreign_range(xc_handle, domid, XC_PAGE_SIZE,
+                                        PROT_READ|PROT_WRITE, ioreq_pfn);
+@@ -304,7 +317,7 @@ static void xen_init_fv(ram_addr_t ram_size, int vga_ram_size,
+         exit(-1);
+     }
+ 
+-    xc_get_hvm_param(xc_handle, domid, HVM_PARAM_BUFIOREQ_PFN, &ioreq_pfn);
++    ioreq_pfn++;
+     fprintf(logfile, "buffered io page at pfn %lx\n", ioreq_pfn);
+     buffered_io_page = xc_map_foreign_range(xc_handle, domid, XC_PAGE_SIZE,
+                                             PROT_READ|PROT_WRITE, ioreq_pfn);
+diff --git a/i386-dm/exec-dm.c b/i386-dm/exec-dm.c
+index 6db990e..a35cc6e 100644
+--- a/i386-dm/exec-dm.c
++++ b/i386-dm/exec-dm.c
+@@ -305,6 +305,8 @@ void cpu_register_physical_memory(target_phys_addr_t start_addr,
+         exit(-1);
+     }
+ 
++    xen_map_iorange(start_addr, size, 1);
++
+     mmio[mmio_cnt].io_index = phys_offset;
+     mmio[mmio_cnt].start = start_addr;
+     mmio[mmio_cnt++].size = size;
+diff --git a/i386-dm/helper2.c b/i386-dm/helper2.c
+index a28cc3c..df4d98e 100644
+--- a/i386-dm/helper2.c
++++ b/i386-dm/helper2.c
+@@ -61,6 +61,7 @@
+ #include "sysemu.h"
+ #include "qemu-xen.h"
+ #include "qemu-char.h"
++#include "xen_common.h"
+ 
+ #include "switcher.h"
+ 
+@@ -410,6 +411,40 @@ static void cpu_ioreq_move(CPUState *env, ioreq_t *req)
+     }
+ }
+ 
++static void cpu_ioreq_config_space(CPUState *env, ioreq_t *req)
++{
++    uint64_t cf8 = req->addr;
++    uint16_t tmp = req->size;
++    uint16_t size = req->size & 0xff;
++    uint16_t off = req->size >> 16;
++
++    req->addr = 0xcfc + off;
++    req->size = size;
++
++    do_outp(env, 0xcf8, 4, cf8);
++    cpu_ioreq_pio(env, req);
++    req->addr = cf8;
++    req->size = tmp;
++}
++
++#define UNPLUG_ALL_IDE_DISKS 1
++#define UNPLUG_ALL_NICS 2
++#define UNPLUG_AUX_IDE_DISKS 4
++#define XEN_PLATFORM_IOPORT 0x10
++
++static void cpu_ioreq_event(CPUState *env, ioreq_t *req)
++{
++    if (req->data & IOREQ_EVENT_UNPLUG_ALL_IDE_DISKS) {
++        do_outp(env, XEN_PLATFORM_IOPORT, 2, UNPLUG_ALL_IDE_DISKS);
++    }
++    if (req->data & IOREQ_EVENT_UNPLUG_ALL_NICS) {
++        do_outp(env, XEN_PLATFORM_IOPORT, 2, UNPLUG_ALL_NICS);
++    }
++    if (req->data & IOREQ_EVENT_UNPLUG_AUX_IDE_DISKS) {
++        do_outp(env, XEN_PLATFORM_IOPORT, 2, UNPLUG_AUX_IDE_DISKS);
++    }
++}
++
+ void timeoffset_get(void)
+ {
+     char *p;
+@@ -453,6 +488,12 @@ static void __handle_ioreq(CPUState *env, ioreq_t *req)
+     case IOREQ_TYPE_COPY:
+         cpu_ioreq_move(env, req);
+         break;
++    case IOREQ_TYPE_PCI_CONFIG:
++        cpu_ioreq_config_space(env, req);
++        break;
++    case IOREQ_TYPE_EVENT:
++        cpu_ioreq_event(env, req);
++        break;
+     case IOREQ_TYPE_TIMEOFFSET:
+         cpu_ioreq_timeoffset(env, req);
+         break;
+@@ -552,6 +593,43 @@ static void cpu_handle_ioreq(void *opaque)
+     }
+ }
+ 
++int xen_register_pcidev(PCIDevice *pci_dev)
++{
++    int rc = 0;
++
++    rc = xc_hvm_register_pcidev(xc_handle, domid, xen_serverid,
++                                0, 0, (pci_dev->devfn >> 3) & 0x1f,
++                                (pci_dev->devfn & 0x7));
++
++    return rc;
++}
++
++void xen_map_iorange(target_phys_addr_t addr, uint64_t size, int is_mmio)
++{
++    static target_phys_addr_t t_addr = 0;
++
++    if (!is_mmio && t_addr == addr)
++        return;
++
++    if (!is_mmio)
++      t_addr = addr;
++
++    fprintf (stderr, "Register iorange 0x%"PRIx64" - 0x%"PRIx64" is_mmio = %d\n",
++             addr, addr + size - 1, is_mmio);
++    xc_hvm_map_io_range_to_ioreq_server(xc_handle, domid, xen_serverid,
++                                        is_mmio, addr, addr + size - 1);
++}
++
++void xen_unmap_iorange(target_phys_addr_t addr, uint64_t size,
++                       int is_mmio)
++{
++    fprintf (stderr, "Unregister iorange 0x%"PRIx64" - 0x%"PRIx64" is_mmio = %d\n",
++             addr, addr + size - 1, is_mmio);
++    xc_hvm_unmap_io_range_from_ioreq_server(xc_handle, domid, xen_serverid,
++                                            is_mmio, addr);
++}
++
++
+ int xen_pause_requested;
+ 
+ int main_loop(void)
+diff --git a/qemu-xen.h b/qemu-xen.h
+index 03f5562..81a855d 100644
+--- a/qemu-xen.h
++++ b/qemu-xen.h
+@@ -166,4 +166,13 @@ extern void xenmou_setslot(uint8_t slot);
+ 
+ 
+ 
++/* QEMU disaggregation */
++int xen_register_pcidev(PCIDevice *pci_dev);
++
++void xen_map_iorange(target_phys_addr_t addr, uint64_t size, int is_mmio);
++
++void xen_unmap_iorange(target_phys_addr_t addr, uint64_t size,
++                       int is_mmio);
++
++
+ #endif /*QEMU_XEN_H*/
+diff --git a/vl.c b/vl.c
+index 782f8de..cf0d378 100644
+--- a/vl.c
++++ b/vl.c
+@@ -382,6 +382,8 @@ int register_ioport_read(int start, int length, int size,
+ {
+     int i, bsize;
+ 
++    xen_map_iorange(start, length, 0);
++
+     if (size == 1) {
+         bsize = 0;
+     } else if (size == 2) {
+@@ -407,6 +409,8 @@ int register_ioport_write(int start, int length, int size,
+ {
+     int i, bsize;
+ 
++    xen_map_iorange(start, length, 0);
++
+     if (size == 1) {
+         bsize = 0;
+     } else if (size == 2) {
+@@ -430,6 +434,8 @@ void isa_unassign_ioport(int start, int length)
+ {
+     int i;
+ 
++    xen_unmap_iorange(start, length, 0);
++
+     for(i = start; i < start + length; i++) {
+         ioport_read_table[0][i] = default_ioport_readb;
+         ioport_read_table[1][i] = default_ioport_readw;
+diff --git a/xenstore.c b/xenstore.c
+index f6d6354..1192bd8 100644
+--- a/xenstore.c
++++ b/xenstore.c
+@@ -1442,7 +1442,7 @@ void xenstore_dm_finished_startup(void)
+         fprintf(logfile, "xs_get_domain_path() failed.\n");
+         goto out;
+     }
+-    if (pasprintf(&buf, "%s/device-misc/dm-ready", path) == -1) {
++    if (pasprintf(&buf, "%s/dms/qemu-old", path) == -1) {
+         fprintf(logfile, "pasprintf failed to get path.\n");
+         goto out;
+     }

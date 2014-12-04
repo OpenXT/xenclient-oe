@@ -1,0 +1,353 @@
+# HG changeset patch
+# Parent 2542be588a9ceab3e78575c88dd48ab047d54a9d
+
+diff --git a/tools/firmware/hvmloader/acpi/Makefile b/tools/firmware/hvmloader/acpi/Makefile
+index 2c50851..ae4586a 100644
+--- a/tools/firmware/hvmloader/acpi/Makefile
++++ b/tools/firmware/hvmloader/acpi/Makefile
+@@ -18,7 +18,7 @@
+ XEN_ROOT = $(CURDIR)/../../../..
+ include $(XEN_ROOT)/tools/firmware/Rules.mk
+ 
+-C_SRC = build.c dsdt_anycpu.c dsdt_15cpu.c static_tables.c dsdt_anycpu_qemu_xen.c
++C_SRC = build.c dsdt_anycpu.c dsdt_15cpu.c static_tables.c dsdt_anycpu_qemu_xen.c qemu_utils.c
+ OBJS  = $(patsubst %.c,%.o,$(C_SRC))
+ 
+ CFLAGS += $(CFLAGS_xeninclude)
+diff --git a/tools/firmware/hvmloader/acpi/build.c b/tools/firmware/hvmloader/acpi/build.c
+index 37825f9..4dc6173 100644
+--- a/tools/firmware/hvmloader/acpi/build.c
++++ b/tools/firmware/hvmloader/acpi/build.c
+@@ -23,6 +23,7 @@
+ #include "ssdt_pm.h"
+ #include "../config.h"
+ #include "../util.h"
++#include "qemu_utils.h"
+ #include <xen/hvm/hvm_xs_strings.h>
+ 
+ #define ACPI_MAX_SECONDARY_TABLES 16
+@@ -247,18 +248,80 @@ static int construct_passthrough_tables(unsigned long *table_ptrs,
+     return nr_added;
+ }
+ 
++static void fixup_headers(struct acpi_header *dest, struct acpi_header *src)
++{
++    char bounce[9];
++
++    if (dest == src)
++        return;
++
++    memset(bounce, 0, 9);
++    memcpy(bounce, dest->oem_id, 6);
++    printf("  Overwriting '%s'   with ", bounce);
++    memset(bounce, 0, 9);
++    memcpy(bounce, src->oem_id, 6);
++    printf("'%s'   in ", bounce);
++    printf("%c%c%c%c's OEM_ID\n",
++           ((char*)(&dest->signature))[0],
++           ((char*)(&dest->signature))[1],
++           ((char*)(&dest->signature))[2],
++           ((char*)(&dest->signature))[3]);
++
++
++    memcpy(dest->oem_id, src->oem_id, 6);
++
++    memset(bounce, 0, 9);
++    memcpy(bounce, dest->oem_table_id, 8);
++    printf("  Overwriting '%s' with ", bounce);
++    memset(bounce, 0, 9);
++    memcpy(bounce, src->oem_table_id, 8);
++    printf("'%s' in ", bounce);
++    printf("%c%c%c%c's OEM_TABLE_ID\n",
++           ((char*)(&dest->signature))[0],
++           ((char*)(&dest->signature))[1],
++           ((char*)(&dest->signature))[2],
++           ((char*)(&dest->signature))[3]);
++
++
++    memcpy(dest->oem_table_id, src->oem_table_id, 8);
++    set_checksum(dest, offsetof(struct acpi_header, checksum), dest->length);
++}
++
++static int is_slic(struct acpi_header *table)
++{
++    printf("  Table (%c%c%c%c) is ",
++           ((char*)(&table->signature))[0],
++           ((char*)(&table->signature))[1],
++           ((char*)(&table->signature))[2],
++           ((char*)(&table->signature))[3]);
++    
++
++    if ( ( ((char*)(&table->signature))[0] == 'S' ) &&
++         ( ((char*)(&table->signature))[1] == 'L' ) &&
++         ( ((char*)(&table->signature))[2] == 'I' ) &&
++         ( ((char*)(&table->signature))[3] == 'C' ) ) {
++        printf("SLIC\n");
++        return 1;
++    }
++
++    printf ("NOT SLIC\n");
++    return 0;
++}
++
+ static int construct_secondary_tables(unsigned long *table_ptrs,
+-                                      struct acpi_info *info)
++                                      struct acpi_info *info,
++				      struct acpi_20_fadt *fadt)
+ {
+     int nr_tables = 0;
+-    struct acpi_20_madt *madt;
+-    struct acpi_20_hpet *hpet;
+-    struct acpi_20_waet *waet;
+-    struct acpi_20_tcpa *tcpa;
++    struct acpi_20_madt *madt = NULL;
++    struct acpi_20_hpet *hpet = NULL;
++    struct acpi_20_waet *waet = NULL;
++    struct acpi_20_tcpa *tcpa = NULL;
+     unsigned char *ssdt;
+     static const uint16_t tis_signature[] = {0x0001, 0x0001, 0x0001};
+     uint16_t *tis_hdr;
+     void *lasa;
++    uint16_t num_tables, i;
+ 
+     /* MADT. */
+     if ( (hvm_info->nr_vcpus > 1) || hvm_info->apic_mode )
+@@ -345,6 +408,30 @@ static int construct_secondary_tables(unsigned long *table_ptrs,
+     /* Load any additional tables passed through. */
+     nr_tables += construct_passthrough_tables(table_ptrs, nr_tables);
+ 
++    /* Qemu tables. */
++    num_tables = qemu_cfg_acpi_additional_tables();
++    printf(" QEMU provides %d ACPI table%s%s\n", num_tables,
++           num_tables==1?"":"s", num_tables?":":".");
++    
++    for (i = 0; i < num_tables; i++) {
++        uint16_t table_len;
++        struct acpi_header *header;
++
++        table_len = qemu_cfg_next_acpi_table_len();
++
++	header =  mem_alloc(table_len, 16);
++	
++        qemu_cfg_next_acpi_table_load(header, table_len);
++        table_ptrs[nr_tables++] = (unsigned long)header;
++
++        printf("    0x%x (%c%c%c%c) @ 0x%x\n",
++               header->signature,
++               ((char*)(&header->signature))[0],
++               ((char*)(&header->signature))[1],
++               ((char*)(&header->signature))[2],
++               ((char*)(&header->signature))[3], (unsigned int)header);
++    }
++
+     table_ptrs[nr_tables] = 0;
+     return nr_tables;
+ }
+@@ -402,6 +489,8 @@ void acpi_build_tables(struct acpi_config *config, unsigned int physical)
+     unsigned char       *dsdt;
+     unsigned long        secondary_tables[ACPI_MAX_SECONDARY_TABLES];
+     int                  nr_secondaries, i;
++    struct acpi_header *slic_header = NULL;
++    int needs_id_fixup = 0;
+ 
+     /* Allocate and initialise the acpi info area. */
+     mem_hole_populate_ram(ACPI_INFO_PHYSICAL_ADDRESS >> PAGE_SHIFT, 1);
+@@ -469,10 +558,28 @@ void acpi_build_tables(struct acpi_config *config, unsigned int physical)
+                  offsetof(struct acpi_header, checksum),
+                  sizeof(struct acpi_20_fadt));
+ 
+-    nr_secondaries = construct_secondary_tables(secondary_tables, acpi_info);
++    nr_secondaries = construct_secondary_tables(secondary_tables, acpi_info, fadt);
+     if ( nr_secondaries < 0 )
+         goto oom;
+ 
++    /* Check to see if one of the secondary tables is a SLIC. */
++    for (i = 0; i < (sizeof(secondary_tables) /  sizeof(unsigned long)) && secondary_tables[i]; i++) {
++        if (secondary_tables[i] && is_slic((struct acpi_header *)secondary_tables[i])) {
++            slic_header = (struct acpi_header *)secondary_tables[i];
++            needs_id_fixup = 1;
++            break;
++        }
++    }
++
++    /* If we have a SLIC, patch up the other tables to match it. */
++    if (needs_id_fixup) {
++        for (i = 0; i < sizeof(secondary_tables) && secondary_tables[i]; i++) {
++            fixup_headers((struct acpi_header *)secondary_tables[i], slic_header);
++        }
++        fixup_headers(&fadt_10->header, slic_header);
++        fixup_headers(&fadt->header, slic_header);
++    }
++
+     xsdt = mem_alloc(sizeof(struct acpi_20_xsdt)+
+                      sizeof(uint64_t)*nr_secondaries,
+                      16);
+@@ -482,10 +589,14 @@ void acpi_build_tables(struct acpi_config *config, unsigned int physical)
+     for ( i = 0; secondary_tables[i]; i++ )
+         xsdt->entry[i+1] = secondary_tables[i];
+     xsdt->header.length = sizeof(struct acpi_header) + (i+1)*sizeof(uint64_t);
+-    set_checksum(xsdt,
+-                 offsetof(struct acpi_header, checksum),
+-                 xsdt->header.length);
+-
++    
++    if (needs_id_fixup) {
++        fixup_headers(&xsdt->header, slic_header);
++    } else {
++        set_checksum(xsdt,
++                     offsetof(struct acpi_header, checksum),
++                     xsdt->header.length);
++    }
+     rsdt = mem_alloc(sizeof(struct acpi_20_rsdt)+
+                      sizeof(uint32_t)*nr_secondaries,
+                      16);
+@@ -495,9 +606,13 @@ void acpi_build_tables(struct acpi_config *config, unsigned int physical)
+     for ( i = 0; secondary_tables[i]; i++ )
+         rsdt->entry[i+1] = secondary_tables[i];
+     rsdt->header.length = sizeof(struct acpi_header) + (i+1)*sizeof(uint32_t);
+-    set_checksum(rsdt,
+-                 offsetof(struct acpi_header, checksum),
+-                 rsdt->header.length);
++    if (needs_id_fixup) {
++        fixup_headers(&rsdt->header, slic_header);
++    } else {
++        set_checksum(rsdt,
++                     offsetof(struct acpi_header, checksum),
++                     rsdt->header.length);
++    }
+ 
+     /*
+      * Fill in low-memory data structures: acpi_info and RSDP.
+@@ -507,6 +622,9 @@ void acpi_build_tables(struct acpi_config *config, unsigned int physical)
+     memcpy(rsdp, &Rsdp, sizeof(struct acpi_20_rsdp));
+     rsdp->rsdt_address = (unsigned long)rsdt;
+     rsdp->xsdt_address = (unsigned long)xsdt;
++    if (needs_id_fixup) {
++        memcpy(rsdp->oem_id, slic_header->oem_id, 6);
++    }
+     set_checksum(rsdp,
+                  offsetof(struct acpi_10_rsdp, checksum),
+                  sizeof(struct acpi_10_rsdp));
+diff --git a/tools/firmware/hvmloader/acpi/qemu_utils.c b/tools/firmware/hvmloader/acpi/qemu_utils.c
+new file mode 100644
+index 0000000..f12e7bd
+--- /dev/null
++++ b/tools/firmware/hvmloader/acpi/qemu_utils.c
+@@ -0,0 +1,102 @@
++#include "acpi2_0.h"
++#include "../config.h"
++#include "../util.h"
++
++void set_checksum(void *table, uint32_t checksum_offset, uint32_t length);
++
++#define PORT_QEMU_CFG_CTL      0x0510
++#define PORT_QEMU_CFG_DATA     0x0511
++
++#define QEMU_CFG_SIGNATURE              0x00
++#define QEMU_ARCH_LOCAL			0x8000
++#define QEMU_CFG_ACPI_TABLES            (QEMU_ARCH_LOCAL + 0)
++
++static int qemu_cfg_present;
++
++static void
++qemu_cfg_select(uint16_t f)
++{
++    outw(PORT_QEMU_CFG_CTL, f);
++}
++
++static void
++qemu_cfg_read(uint8_t *buf, int len)
++{
++    int i;
++    for (i = 0; i < len; i++) {
++	    buf[i] = inb(PORT_QEMU_CFG_DATA);
++    }
++}
++
++static void
++qemu_cfg_read_entry(void *buf, int e, int len)
++{
++    qemu_cfg_select(e);
++    qemu_cfg_read(buf, len);
++}
++
++void qemu_cfg_port_probe(void)
++{
++    char *sig = "QEMU";
++    int i;
++
++    qemu_cfg_present = 1;
++
++    qemu_cfg_select(QEMU_CFG_SIGNATURE);
++
++    for (i = 0; i < 4; i++) {
++        if (inb(PORT_QEMU_CFG_DATA) != sig[i]) {
++            qemu_cfg_present = 0;
++            break;
++        }
++    }
++}
++
++uint16_t qemu_cfg_acpi_additional_tables(void)
++{
++    uint16_t cnt;
++
++    qemu_cfg_port_probe();
++
++    if (!qemu_cfg_present)
++        return 0;
++
++    qemu_cfg_read_entry(&cnt, QEMU_CFG_ACPI_TABLES, sizeof(cnt));
++
++    return cnt;
++}
++
++uint16_t qemu_cfg_next_acpi_table_len(void)
++{
++    uint16_t len;
++
++    qemu_cfg_read((uint8_t*)&len, sizeof(len));
++
++    return len;
++}
++
++void* qemu_cfg_next_acpi_table_load(void *addr, uint16_t len)
++{
++    qemu_cfg_read(addr, len);
++    return addr;
++}
++
++int
++get_external_tables(void *buf)
++{
++    uint16_t num_tables, i;
++    uint16_t total_len = 0;
++
++    num_tables = qemu_cfg_acpi_additional_tables();
++    
++    for (i = 0; i < num_tables; i++) {
++        uint16_t table_len;
++        table_len = qemu_cfg_next_acpi_table_len();
++	
++	qemu_cfg_next_acpi_table_load(buf, table_len);
++	buf += table_len;
++	total_len += table_len;
++    }
++
++    return total_len;
++}
+diff --git a/tools/firmware/hvmloader/acpi/qemu_utils.h b/tools/firmware/hvmloader/acpi/qemu_utils.h
+new file mode 100644
+index 0000000..068fa69
+--- /dev/null
++++ b/tools/firmware/hvmloader/acpi/qemu_utils.h
+@@ -0,0 +1,9 @@
++#ifndef _QEMU_TABLES_H_
++#define _QEMU_TABLES_H_
++
++uint16_t qemu_cfg_acpi_additional_tables(void);
++uint16_t qemu_cfg_next_acpi_table_len(void);
++void* qemu_cfg_next_acpi_table_load(void *addr, uint16_t len);
++int get_external_tables(void *buf);
++
++#endif

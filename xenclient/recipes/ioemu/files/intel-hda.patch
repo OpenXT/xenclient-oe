@@ -1,0 +1,3218 @@
+original commit message:
+Add Intel HD Audio support to qemu.
+
+This patch adds three devices to qemu:
+
+intel-hda
+    Intel HD Audio Controller, the PCI device.  Provides a HDA bus.
+    Emulates ICH6 at the moment.  Adding a ICH9 PCIE
+    variant shouldn't be hard.
+
+hda-duplex
+    HDA Codec.  Attaches to the HDA bus.  Supports 16bit stereo,
+    rates 16k -> 96k, playback, recording and volume control
+    (with CONFIG_MIXEMU=y).
+
+hda-output
+    HDA Codec without recording support.  Subset of the hda-duplex
+    codec.  Use this if you don't want your guests access your mic.
+
+Usage: add '-device intel-hda -device hda-duplex' to your command line.
+
+Tested guests:
+ * Linux works.
+ * Win7 works.
+ * DOS (mpxplay) works.
+ * WinXP doesn't work.
+
+Signed-off-by: Gerd Hoffmann <kraxel@redhat.com>
+Signed-off-by: malc <av1474@comtv.ru>
+
+Signed-off-by: Anthony PERARD <anthony.perard@citrix.com>
+---
+ Makefile.target     |    4 +
+ configure           |    4 +-
+ hw/audiodev.h       |    3 +
+ hw/hda-audio.c      |  929 +++++++++++++++++++++++++++++++++++
+ hw/intel-hda-defs.h |  717 +++++++++++++++++++++++++++
+ hw/intel-hda.c      | 1345 +++++++++++++++++++++++++++++++++++++++++++++++++++
+ hw/intel-hda.h      |   70 +++
+ osdep.h             |   10 +
+ vl.c                |   10 +
+ 9 files changed, 3090 insertions(+), 2 deletions(-)
+ create mode 100644 hw/hda-audio.c
+ create mode 100644 hw/intel-hda-defs.h
+ create mode 100644 hw/intel-hda.c
+ create mode 100644 hw/intel-hda.h
+
+diff --git a/Makefile.target b/Makefile.target
+index 19bb0fd..07a386c 100644
+--- a/Makefile.target
++++ b/Makefile.target
+@@ -551,6 +551,10 @@ endif
+ ifdef CONFIG_CS4231A
+ SOUND_HW += cs4231a.o
+ endif
++ifdef CONFIG_HDA
++SOUND_HW += hda-audio.o
++SOUND_HW += intel-hda.o
++endif
+
+ ifdef CONFIG_VNC_TLS
+ CPPFLAGS += $(CONFIG_VNC_TLS_CFLAGS)
+diff --git a/configure b/configure
+index 904e019..55e7632 100755
+--- a/configure
++++ b/configure
+@@ -27,8 +27,8 @@ static="no"
+ cross_prefix=""
+ cc="gcc"
+ audio_drv_list=""
+-audio_card_list="ac97 es1370 sb16"
+-audio_possible_cards="ac97 es1370 sb16 cs4231a adlib gus"
++audio_card_list="ac97 es1370 sb16 hda"
++audio_possible_cards="ac97 es1370 sb16 cs4231a adlib gus hda"
+ host_cc="gcc"
+ ar="ar"
+ make="make"
+diff --git a/hw/audiodev.h b/hw/audiodev.h
+index 5f4a211..f4c3a62 100644
+--- a/hw/audiodev.h
++++ b/hw/audiodev.h
+@@ -15,3 +15,6 @@ int ac97_init (PCIBus *buf, AudioState *s);
+
+ /* cs4231a.c */
+ int cs4231a_init (AudioState *s, qemu_irq *pic);
++
++/* intel-hda.c */
++int intel_hda_and_codec_init(PCIBus *bus, AudioState *audio);
+diff --git a/hw/hda-audio.c b/hw/hda-audio.c
+new file mode 100644
+index 0000000..8966bf5
+--- /dev/null
++++ b/hw/hda-audio.c
+@@ -0,0 +1,929 @@
++/*
++ * Copyright (C) 2010 Red Hat, Inc.
++ *
++ * written by Gerd Hoffmann <kraxel@redhat.com>
++ *
++ * This program is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU General Public License as
++ * published by the Free Software Foundation; either version 2 or
++ * (at your option) version 3 of the License.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, see <http://www.gnu.org/licenses/>.
++ */
++
++#include <assert.h>
++
++#include "hw.h"
++#include "pci.h"
++#include "intel-hda.h"
++#include "intel-hda-defs.h"
++#include "audio/audio.h"
++
++/* -------------------------------------------------------------------------- */
++
++typedef struct desc_param {
++    uint32_t id;
++    uint32_t val;
++} desc_param;
++
++typedef struct desc_node {
++    uint32_t nid;
++    const char *name;
++    const desc_param *params;
++    uint32_t nparams;
++    uint32_t config;
++    uint32_t pinctl;
++    uint32_t *conn;
++    uint32_t stindex;
++} desc_node;
++
++typedef struct desc_codec {
++    const char *name;
++    uint32_t iid;
++    const desc_node *nodes;
++    uint32_t nnodes;
++} desc_codec;
++
++static const desc_param* hda_codec_find_param(const desc_node *node, uint32_t id)
++{
++    int i;
++
++    for (i = 0; i < node->nparams; i++) {
++        if (node->params[i].id == id) {
++            return &node->params[i];
++        }
++    }
++    return NULL;
++}
++
++static const desc_node* hda_codec_find_node(const desc_codec *codec, uint32_t nid)
++{
++    int i;
++
++    for (i = 0; i < codec->nnodes; i++) {
++        if (codec->nodes[i].nid == nid) {
++            return &codec->nodes[i];
++        }
++    }
++    return NULL;
++}
++
++static void hda_codec_parse_fmt(uint32_t format, struct audsettings *as)
++{
++    if (format & AC_FMT_TYPE_NON_PCM) {
++        return;
++    }
++
++    as->freq = (format & AC_FMT_BASE_44K) ? 44100 : 48000;
++
++    switch ((format & AC_FMT_MULT_MASK) >> AC_FMT_MULT_SHIFT) {
++    case 1: as->freq *= 2; break;
++    case 2: as->freq *= 3; break;
++    case 3: as->freq *= 4; break;
++    }
++
++    switch ((format & AC_FMT_DIV_MASK) >> AC_FMT_DIV_SHIFT) {
++    case 1: as->freq /= 2; break;
++    case 2: as->freq /= 3; break;
++    case 3: as->freq /= 4; break;
++    case 4: as->freq /= 5; break;
++    case 5: as->freq /= 6; break;
++    case 6: as->freq /= 7; break;
++    case 7: as->freq /= 8; break;
++    }
++
++    switch (format & AC_FMT_BITS_MASK) {
++    case AC_FMT_BITS_8:  as->fmt = AUD_FMT_S8;  break;
++    case AC_FMT_BITS_16: as->fmt = AUD_FMT_S16; break;
++    case AC_FMT_BITS_32: as->fmt = AUD_FMT_S32; break;
++    }
++
++    as->nchannels = ((format & AC_FMT_CHAN_MASK) >> AC_FMT_CHAN_SHIFT) + 1;
++}
++
++/* -------------------------------------------------------------------------- */
++/*
++ * HDA codec descriptions
++ */
++
++/* some defines */
++
++#define QEMU_HDA_ID_VENDOR  0x1af4
++#define QEMU_HDA_ID_OUTPUT  ((QEMU_HDA_ID_VENDOR << 16) | 0x10)
++#define QEMU_HDA_ID_DUPLEX  ((QEMU_HDA_ID_VENDOR << 16) | 0x20)
++
++#define QEMU_HDA_PCM_FORMATS (AC_SUPPCM_BITS_16 |       \
++                              0x1fc /* 16 -> 96 kHz */)
++#define QEMU_HDA_AMP_NONE    (0)
++#define QEMU_HDA_AMP_STEPS   0x4a
++
++#ifdef CONFIG_MIXEMU
++#define QEMU_HDA_AMP_CAPS                                               \
++    (AC_AMPCAP_MUTE |                                                   \
++     (QEMU_HDA_AMP_STEPS << AC_AMPCAP_OFFSET_SHIFT)    |                \
++     (QEMU_HDA_AMP_STEPS << AC_AMPCAP_NUM_STEPS_SHIFT) |                \
++     (3                  << AC_AMPCAP_STEP_SIZE_SHIFT))
++#else
++#define QEMU_HDA_AMP_CAPS    QEMU_HDA_AMP_NONE
++#endif
++
++/* common: audio output widget */
++static const desc_param common_params_audio_dac[] = {
++    {
++        .id  = AC_PAR_AUDIO_WIDGET_CAP,
++        .val = ((AC_WID_AUD_OUT << AC_WCAP_TYPE_SHIFT) |
++                AC_WCAP_FORMAT_OVRD |
++                AC_WCAP_AMP_OVRD |
++                AC_WCAP_OUT_AMP |
++                AC_WCAP_STEREO),
++    },{
++        .id  = AC_PAR_PCM,
++        .val = QEMU_HDA_PCM_FORMATS,
++    },{
++        .id  = AC_PAR_STREAM,
++        .val = AC_SUPFMT_PCM,
++    },{
++        .id  = AC_PAR_AMP_IN_CAP,
++        .val = QEMU_HDA_AMP_NONE,
++    },{
++        .id  = AC_PAR_AMP_OUT_CAP,
++        .val = QEMU_HDA_AMP_CAPS,
++    },
++};
++
++/* common: pin widget (line-out) */
++static const desc_param common_params_audio_lineout[] = {
++    {
++        .id  = AC_PAR_AUDIO_WIDGET_CAP,
++        .val = ((AC_WID_PIN << AC_WCAP_TYPE_SHIFT) |
++                AC_WCAP_CONN_LIST |
++                AC_WCAP_STEREO),
++    },{
++        .id  = AC_PAR_PIN_CAP,
++        .val = AC_PINCAP_OUT,
++    },{
++        .id  = AC_PAR_CONNLIST_LEN,
++        .val = 1,
++    },{
++        .id  = AC_PAR_AMP_IN_CAP,
++        .val = QEMU_HDA_AMP_NONE,
++    },{
++        .id  = AC_PAR_AMP_OUT_CAP,
++        .val = QEMU_HDA_AMP_NONE,
++    },
++};
++
++/* output: root node */
++static const desc_param output_params_root[] = {
++    {
++        .id  = AC_PAR_VENDOR_ID,
++        .val = QEMU_HDA_ID_OUTPUT,
++    },{
++        .id  = AC_PAR_SUBSYSTEM_ID,
++        .val = QEMU_HDA_ID_OUTPUT,
++    },{
++        .id  = AC_PAR_REV_ID,
++        .val = 0x00100101,
++    },{
++        .id  = AC_PAR_NODE_COUNT,
++        .val = 0x00010001,
++    },
++};
++
++/* output: audio function */
++static const desc_param output_params_audio_func[] = {
++    {
++        .id  = AC_PAR_FUNCTION_TYPE,
++        .val = AC_GRP_AUDIO_FUNCTION,
++    },{
++        .id  = AC_PAR_SUBSYSTEM_ID,
++        .val = QEMU_HDA_ID_OUTPUT,
++    },{
++        .id  = AC_PAR_NODE_COUNT,
++        .val = 0x00020002,
++    },{
++        .id  = AC_PAR_PCM,
++        .val = QEMU_HDA_PCM_FORMATS,
++    },{
++        .id  = AC_PAR_STREAM,
++        .val = AC_SUPFMT_PCM,
++    },{
++        .id  = AC_PAR_AMP_IN_CAP,
++        .val = QEMU_HDA_AMP_NONE,
++    },{
++        .id  = AC_PAR_AMP_OUT_CAP,
++        .val = QEMU_HDA_AMP_NONE,
++    },{
++        .id  = AC_PAR_GPIO_CAP,
++        .val = 0,
++    },{
++        .id  = AC_PAR_AUDIO_FG_CAP,
++        .val = 0x00000808,
++    },{
++        .id  = AC_PAR_POWER_STATE,
++        .val = 0,
++    },
++};
++
++/* output: nodes */
++static const desc_node output_nodes[] = {
++    {
++        .nid     = AC_NODE_ROOT,
++        .name    = "root",
++        .params  = output_params_root,
++        .nparams = ARRAY_SIZE(output_params_root),
++    },{
++        .nid     = 1,
++        .name    = "func",
++        .params  = output_params_audio_func,
++        .nparams = ARRAY_SIZE(output_params_audio_func),
++    },{
++        .nid     = 2,
++        .name    = "dac",
++        .params  = common_params_audio_dac,
++        .nparams = ARRAY_SIZE(common_params_audio_dac),
++        .stindex = 0,
++    },{
++        .nid     = 3,
++        .name    = "out",
++        .params  = common_params_audio_lineout,
++        .nparams = ARRAY_SIZE(common_params_audio_lineout),
++        .config  = ((AC_JACK_PORT_COMPLEX << AC_DEFCFG_PORT_CONN_SHIFT) |
++                    (AC_JACK_LINE_OUT     << AC_DEFCFG_DEVICE_SHIFT)    |
++                    (AC_JACK_CONN_UNKNOWN << AC_DEFCFG_CONN_TYPE_SHIFT) |
++                    (AC_JACK_COLOR_GREEN  << AC_DEFCFG_COLOR_SHIFT)     |
++                    0x10),
++        .pinctl  = AC_PINCTL_OUT_EN,
++        .conn    = (uint32_t[]) { 2 },
++    }
++};
++
++/* output: codec */
++static const desc_codec output = {
++    .name   = "output",
++    .iid    = QEMU_HDA_ID_OUTPUT,
++    .nodes  = output_nodes,
++    .nnodes = ARRAY_SIZE(output_nodes),
++};
++
++/* duplex: root node */
++static const desc_param duplex_params_root[] = {
++    {
++        .id  = AC_PAR_VENDOR_ID,
++        .val = QEMU_HDA_ID_DUPLEX,
++    },{
++        .id  = AC_PAR_SUBSYSTEM_ID,
++        .val = QEMU_HDA_ID_DUPLEX,
++    },{
++        .id  = AC_PAR_REV_ID,
++        .val = 0x00100101,
++    },{
++        .id  = AC_PAR_NODE_COUNT,
++        .val = 0x00010001,
++    },
++};
++
++/* duplex: audio input widget */
++static const desc_param duplex_params_audio_adc[] = {
++    {
++        .id  = AC_PAR_AUDIO_WIDGET_CAP,
++        .val = ((AC_WID_AUD_IN << AC_WCAP_TYPE_SHIFT) |
++                AC_WCAP_CONN_LIST |
++                AC_WCAP_FORMAT_OVRD |
++                AC_WCAP_AMP_OVRD |
++                AC_WCAP_IN_AMP |
++                AC_WCAP_STEREO),
++    },{
++        .id  = AC_PAR_CONNLIST_LEN,
++        .val = 1,
++    },{
++        .id  = AC_PAR_PCM,
++        .val = QEMU_HDA_PCM_FORMATS,
++    },{
++        .id  = AC_PAR_STREAM,
++        .val = AC_SUPFMT_PCM,
++    },{
++        .id  = AC_PAR_AMP_IN_CAP,
++        .val = QEMU_HDA_AMP_CAPS,
++    },{
++        .id  = AC_PAR_AMP_OUT_CAP,
++        .val = QEMU_HDA_AMP_NONE,
++    },
++};
++
++/* duplex: pin widget (line-in) */
++static const desc_param duplex_params_audio_linein[] = {
++    {
++        .id  = AC_PAR_AUDIO_WIDGET_CAP,
++        .val = ((AC_WID_PIN << AC_WCAP_TYPE_SHIFT) |
++                AC_WCAP_STEREO),
++    },{
++        .id  = AC_PAR_PIN_CAP,
++        .val = AC_PINCAP_IN,
++    },{
++        .id  = AC_PAR_AMP_IN_CAP,
++        .val = QEMU_HDA_AMP_NONE,
++    },{
++        .id  = AC_PAR_AMP_OUT_CAP,
++        .val = QEMU_HDA_AMP_NONE,
++    },
++};
++
++/* duplex: audio function */
++static const desc_param duplex_params_audio_func[] = {
++    {
++        .id  = AC_PAR_FUNCTION_TYPE,
++        .val = AC_GRP_AUDIO_FUNCTION,
++    },{
++        .id  = AC_PAR_SUBSYSTEM_ID,
++        .val = QEMU_HDA_ID_DUPLEX,
++    },{
++        .id  = AC_PAR_NODE_COUNT,
++        .val = 0x00020004,
++    },{
++        .id  = AC_PAR_PCM,
++        .val = QEMU_HDA_PCM_FORMATS,
++    },{
++        .id  = AC_PAR_STREAM,
++        .val = AC_SUPFMT_PCM,
++    },{
++        .id  = AC_PAR_AMP_IN_CAP,
++        .val = QEMU_HDA_AMP_NONE,
++    },{
++        .id  = AC_PAR_AMP_OUT_CAP,
++        .val = QEMU_HDA_AMP_NONE,
++    },{
++        .id  = AC_PAR_GPIO_CAP,
++        .val = 0,
++    },{
++        .id  = AC_PAR_AUDIO_FG_CAP,
++        .val = 0x00000808,
++    },{
++        .id  = AC_PAR_POWER_STATE,
++        .val = 0,
++    },
++};
++
++/* duplex: nodes */
++static const desc_node duplex_nodes[] = {
++    {
++        .nid     = AC_NODE_ROOT,
++        .name    = "root",
++        .params  = duplex_params_root,
++        .nparams = ARRAY_SIZE(duplex_params_root),
++    },{
++        .nid     = 1,
++        .name    = "func",
++        .params  = duplex_params_audio_func,
++        .nparams = ARRAY_SIZE(duplex_params_audio_func),
++    },{
++        .nid     = 2,
++        .name    = "dac",
++        .params  = common_params_audio_dac,
++        .nparams = ARRAY_SIZE(common_params_audio_dac),
++        .stindex = 0,
++    },{
++        .nid     = 3,
++        .name    = "out",
++        .params  = common_params_audio_lineout,
++        .nparams = ARRAY_SIZE(common_params_audio_lineout),
++        .config  = ((AC_JACK_PORT_COMPLEX << AC_DEFCFG_PORT_CONN_SHIFT) |
++                    (AC_JACK_LINE_OUT     << AC_DEFCFG_DEVICE_SHIFT)    |
++                    (AC_JACK_CONN_UNKNOWN << AC_DEFCFG_CONN_TYPE_SHIFT) |
++                    (AC_JACK_COLOR_GREEN  << AC_DEFCFG_COLOR_SHIFT)     |
++                    0x10),
++        .pinctl  = AC_PINCTL_OUT_EN,
++        .conn    = (uint32_t[]) { 2 },
++    },{
++        .nid     = 4,
++        .name    = "adc",
++        .params  = duplex_params_audio_adc,
++        .nparams = ARRAY_SIZE(duplex_params_audio_adc),
++        .stindex = 1,
++        .conn    = (uint32_t[]) { 5 },
++    },{
++        .nid     = 5,
++        .name    = "in",
++        .params  = duplex_params_audio_linein,
++        .nparams = ARRAY_SIZE(duplex_params_audio_linein),
++        .config  = ((AC_JACK_PORT_COMPLEX << AC_DEFCFG_PORT_CONN_SHIFT) |
++                    (AC_JACK_LINE_IN      << AC_DEFCFG_DEVICE_SHIFT)    |
++                    (AC_JACK_CONN_UNKNOWN << AC_DEFCFG_CONN_TYPE_SHIFT) |
++                    (AC_JACK_COLOR_RED    << AC_DEFCFG_COLOR_SHIFT)     |
++                    0x20),
++        .pinctl  = AC_PINCTL_IN_EN,
++    }
++};
++
++/* duplex: codec */
++static const desc_codec duplex = {
++    .name   = "duplex",
++    .iid    = QEMU_HDA_ID_DUPLEX,
++    .nodes  = duplex_nodes,
++    .nnodes = ARRAY_SIZE(duplex_nodes),
++};
++
++/* -------------------------------------------------------------------------- */
++
++static const char *fmt2name[] = {
++    [ AUD_FMT_U8  ] = "PCM-U8",
++    [ AUD_FMT_S8  ] = "PCM-S8",
++    [ AUD_FMT_U16 ] = "PCM-U16",
++    [ AUD_FMT_S16 ] = "PCM-S16",
++    [ AUD_FMT_U32 ] = "PCM-U32",
++    [ AUD_FMT_S32 ] = "PCM-S32",
++};
++
++typedef struct HDAAudioState HDAAudioState;
++typedef struct HDAAudioStream HDAAudioStream;
++
++struct HDAAudioStream {
++    HDAAudioState *state;
++    const desc_node *node;
++    bool output, running;
++    uint32_t stream;
++    uint32_t channel;
++    uint32_t format;
++    uint32_t gain_left, gain_right;
++    bool mute_left, mute_right;
++    struct audsettings as;
++    union {
++        SWVoiceIn *in;
++        SWVoiceOut *out;
++    } voice;
++    uint8_t buf[HDA_BUFFER_SIZE];
++    uint32_t bpos;
++};
++
++struct HDAAudioState {
++    HDACodecDevice hda;
++    const char *name;
++
++    QEMUSoundCard card;
++    const desc_codec *desc;
++    HDAAudioStream st[4];
++    bool running[16];
++
++    /* properties */
++    uint32_t debug;
++};
++
++static void hda_audio_input_cb(void *opaque, int avail)
++{
++    HDAAudioStream *st = opaque;
++    int recv = 0;
++    int len;
++    bool rc;
++
++    while (avail - recv >= sizeof(st->buf)) {
++        if (st->bpos != sizeof(st->buf)) {
++            len = AUD_read(st->voice.in, st->buf + st->bpos,
++                           sizeof(st->buf) - st->bpos);
++            st->bpos += len;
++            recv += len;
++            if (st->bpos != sizeof(st->buf)) {
++                break;
++            }
++        }
++        rc = hda_codec_xfer(&st->state->hda, st->stream, false,
++                            st->buf, sizeof(st->buf));
++        if (!rc) {
++            break;
++        }
++        st->bpos = 0;
++    }
++}
++
++static void hda_audio_output_cb(void *opaque, int avail)
++{
++    HDAAudioStream *st = opaque;
++    int sent = 0;
++    int len;
++    bool rc;
++
++    while (avail - sent >= sizeof(st->buf)) {
++        if (st->bpos == sizeof(st->buf)) {
++            rc = hda_codec_xfer(&st->state->hda, st->stream, true,
++                                st->buf, sizeof(st->buf));
++            if (!rc) {
++                break;
++            }
++            st->bpos = 0;
++        }
++        len = AUD_write(st->voice.out, st->buf + st->bpos,
++                        sizeof(st->buf) - st->bpos);
++        st->bpos += len;
++        sent += len;
++        if (st->bpos != sizeof(st->buf)) {
++            break;
++        }
++    }
++}
++
++static void hda_audio_set_running(HDAAudioStream *st, bool running)
++{
++    if (st->node == NULL) {
++        return;
++    }
++    if (st->running == running) {
++        return;
++    }
++    st->running = running;
++    dprint(st->state, 1, "%s: %s (stream %d)\n", st->node->name,
++           st->running ? "on" : "off", st->stream);
++    if (st->output) {
++        AUD_set_active_out(st->voice.out, st->running);
++    } else {
++        AUD_set_active_in(st->voice.in, st->running);
++    }
++}
++
++static void hda_audio_set_amp(HDAAudioStream *st)
++{
++    bool muted;
++    uint32_t left, right;
++
++    if (st->node == NULL) {
++        return;
++    }
++
++    muted = st->mute_left && st->mute_right;
++    left  = st->mute_left  ? 0 : st->gain_left;
++    right = st->mute_right ? 0 : st->gain_right;
++
++    left = left * 255 / QEMU_HDA_AMP_STEPS;
++    right = right * 255 / QEMU_HDA_AMP_STEPS;
++
++    if (st->output) {
++        AUD_set_volume_out(st->voice.out, muted, left, right);
++    } else {
++        AUD_set_volume_in(st->voice.in, muted, left, right);
++    }
++}
++
++static void hda_audio_setup(HDAAudioStream *st)
++{
++    if (st->node == NULL) {
++        return;
++    }
++
++    dprint(st->state, 1, "%s: format: %d x %s @ %d Hz\n",
++           st->node->name, st->as.nchannels,
++           fmt2name[st->as.fmt], st->as.freq);
++
++    if (st->output) {
++        st->voice.out = AUD_open_out(&st->state->card, st->voice.out,
++                                     st->node->name, st,
++                                     hda_audio_output_cb, &st->as);
++    } else {
++        st->voice.in = AUD_open_in(&st->state->card, st->voice.in,
++                                   st->node->name, st,
++                                   hda_audio_input_cb, &st->as);
++    }
++}
++
++static void hda_audio_command(HDACodecDevice *hda, uint32_t nid, uint32_t data)
++{
++    HDAAudioState *a = DO_UPCAST(HDAAudioState, hda, hda);
++    HDAAudioStream *st;
++    const desc_node *node = NULL;
++    const desc_param *param;
++    uint32_t verb, payload, response, count, shift;
++
++    if ((data & 0x70000) == 0x70000) {
++        /* 12/8 id/payload */
++        verb = (data >> 8) & 0xfff;
++        payload = data & 0x00ff;
++    } else {
++        /* 4/16 id/payload */
++        verb = (data >> 8) & 0xf00;
++        payload = data & 0xffff;
++    }
++
++    node = hda_codec_find_node(a->desc, nid);
++    if (node == NULL) {
++        goto fail;
++    }
++    dprint(a, 2, "%s: nid %d (%s), verb 0x%x, payload 0x%x\n",
++           __FUNCTION__, nid, node->name, verb, payload);
++
++    switch (verb) {
++    /* all nodes */
++    case AC_VERB_PARAMETERS:
++        param = hda_codec_find_param(node, payload);
++        if (param == NULL) {
++            goto fail;
++        }
++        hda_codec_response(hda, true, param->val);
++        break;
++    case AC_VERB_GET_SUBSYSTEM_ID:
++        hda_codec_response(hda, true, a->desc->iid);
++        break;
++
++    /* all functions */
++    case AC_VERB_GET_CONNECT_LIST:
++        param = hda_codec_find_param(node, AC_PAR_CONNLIST_LEN);
++        count = param ? param->val : 0;
++        response = 0;
++        shift = 0;
++        while (payload < count && shift < 32) {
++            response |= node->conn[payload] << shift;
++            payload++;
++            shift += 8;
++        }
++        hda_codec_response(hda, true, response);
++        break;
++
++    /* pin widget */
++    case AC_VERB_GET_CONFIG_DEFAULT:
++        hda_codec_response(hda, true, node->config);
++        break;
++    case AC_VERB_GET_PIN_WIDGET_CONTROL:
++        hda_codec_response(hda, true, node->pinctl);
++        break;
++    case AC_VERB_SET_PIN_WIDGET_CONTROL:
++        if (node->pinctl != payload) {
++            dprint(a, 1, "unhandled pin control bit\n");
++        }
++        hda_codec_response(hda, true, 0);
++        break;
++
++    /* audio in/out widget */
++    case AC_VERB_SET_CHANNEL_STREAMID:
++        st = a->st + node->stindex;
++        if (st->node == NULL) {
++            goto fail;
++        }
++        hda_audio_set_running(st, false);
++        st->stream = (payload >> 4) & 0x0f;
++        st->channel = payload & 0x0f;
++        dprint(a, 2, "%s: stream %d, channel %d\n",
++               st->node->name, st->stream, st->channel);
++        hda_audio_set_running(st, a->running[st->stream]);
++        hda_codec_response(hda, true, 0);
++        break;
++    case AC_VERB_GET_CONV:
++        st = a->st + node->stindex;
++        if (st->node == NULL) {
++            goto fail;
++        }
++        response = st->stream << 4 | st->channel;
++        hda_codec_response(hda, true, response);
++        break;
++    case AC_VERB_SET_STREAM_FORMAT:
++        st = a->st + node->stindex;
++        if (st->node == NULL) {
++            goto fail;
++        }
++        st->format = payload;
++        hda_codec_parse_fmt(st->format, &st->as);
++        hda_audio_setup(st);
++        hda_codec_response(hda, true, 0);
++        break;
++    case AC_VERB_GET_STREAM_FORMAT:
++        st = a->st + node->stindex;
++        if (st->node == NULL) {
++            goto fail;
++        }
++        hda_codec_response(hda, true, st->format);
++        break;
++    case AC_VERB_GET_AMP_GAIN_MUTE:
++        st = a->st + node->stindex;
++        if (st->node == NULL) {
++            goto fail;
++        }
++        if (payload & AC_AMP_GET_LEFT) {
++            response = st->gain_left | (st->mute_left ? AC_AMP_MUTE : 0);
++        } else {
++            response = st->gain_right | (st->mute_right ? AC_AMP_MUTE : 0);
++        }
++        hda_codec_response(hda, true, response);
++        break;
++    case AC_VERB_SET_AMP_GAIN_MUTE:
++        st = a->st + node->stindex;
++        if (st->node == NULL) {
++            goto fail;
++        }
++        dprint(a, 1, "amp (%s): %s%s%s%s index %d  gain %3d %s\n",
++               st->node->name,
++               (payload & AC_AMP_SET_OUTPUT) ? "o" : "-",
++               (payload & AC_AMP_SET_INPUT)  ? "i" : "-",
++               (payload & AC_AMP_SET_LEFT)   ? "l" : "-",
++               (payload & AC_AMP_SET_RIGHT)  ? "r" : "-",
++               (payload & AC_AMP_SET_INDEX) >> AC_AMP_SET_INDEX_SHIFT,
++               (payload & AC_AMP_GAIN),
++               (payload & AC_AMP_MUTE) ? "muted" : "");
++        if (payload & AC_AMP_SET_LEFT) {
++            st->gain_left = payload & AC_AMP_GAIN;
++            st->mute_left = payload & AC_AMP_MUTE;
++        }
++        if (payload & AC_AMP_SET_RIGHT) {
++            st->gain_right = payload & AC_AMP_GAIN;
++            st->mute_right = payload & AC_AMP_MUTE;
++        }
++        hda_audio_set_amp(st);
++        hda_codec_response(hda, true, 0);
++        break;
++
++    /* not supported */
++    case AC_VERB_SET_POWER_STATE:
++    case AC_VERB_GET_POWER_STATE:
++    case AC_VERB_GET_SDI_SELECT:
++        hda_codec_response(hda, true, 0);
++        break;
++    default:
++        goto fail;
++    }
++    return;
++
++fail:
++    dprint(a, 1, "%s: not handled: nid %d (%s), verb 0x%x, payload 0x%x\n",
++           __FUNCTION__, nid, node ? node->name : "?", verb, payload);
++    hda_codec_response(hda, true, 0);
++}
++
++static void hda_audio_stream(HDACodecDevice *hda, uint32_t stnr, bool running)
++{
++    HDAAudioState *a = DO_UPCAST(HDAAudioState, hda, hda);
++    int s;
++
++    a->running[stnr] = running;
++    for (s = 0; s < ARRAY_SIZE(a->st); s++) {
++        if (a->st[s].node == NULL) {
++            continue;
++        }
++        if (a->st[s].stream != stnr) {
++            continue;
++        }
++        hda_audio_set_running(&a->st[s], running);
++    }
++}
++
++static int hda_audio_init(HDACodecDevice *hda, const struct desc_codec *desc)
++{
++    HDAAudioState *a = DO_UPCAST(HDAAudioState, hda, hda);
++    HDAAudioStream *st;
++    const desc_node *node;
++    const desc_param *param;
++    uint32_t i, type;
++
++    a->desc = desc;
++    a->name = "intel-hda";
++    dprint(a, 1, "%s: cad %d\n", __FUNCTION__, a->hda.cad);
++
++    AUD_register_card(hda->parent_bus->audio, "hda", &a->card);
++    for (i = 0; i < a->desc->nnodes; i++) {
++        node = a->desc->nodes + i;
++        param = hda_codec_find_param(node, AC_PAR_AUDIO_WIDGET_CAP);
++        if (NULL == param)
++            continue;
++        type = (param->val & AC_WCAP_TYPE) >> AC_WCAP_TYPE_SHIFT;
++        switch (type) {
++        case AC_WID_AUD_OUT:
++        case AC_WID_AUD_IN:
++            assert(node->stindex < ARRAY_SIZE(a->st));
++            st = a->st + node->stindex;
++            st->state = a;
++            st->node = node;
++            if (type == AC_WID_AUD_OUT) {
++                /* unmute output by default */
++                st->gain_left = QEMU_HDA_AMP_STEPS;
++                st->gain_right = QEMU_HDA_AMP_STEPS;
++                st->bpos = sizeof(st->buf);
++                st->output = true;
++            } else {
++                st->output = false;
++            }
++            st->format = AC_FMT_TYPE_PCM | AC_FMT_BITS_16 |
++                (1 << AC_FMT_CHAN_SHIFT);
++            hda_codec_parse_fmt(st->format, &st->as);
++            hda_audio_setup(st);
++            break;
++        }
++    }
++    return 0;
++}
++
++static int hda_audio_exit(HDACodecDevice *hda)
++{
++    HDAAudioState *a = DO_UPCAST(HDAAudioState, hda, hda);
++    HDAAudioStream *st;
++    int i;
++
++    dprint(a, 1, "%s\n", __FUNCTION__);
++    for (i = 0; i < ARRAY_SIZE(a->st); i++) {
++        st = a->st + i;
++        if (st->node == NULL) {
++            continue;
++        }
++        if (st->output) {
++            AUD_close_out(&a->card, st->voice.out);
++        } else {
++            AUD_close_in(&a->card, st->voice.in);
++        }
++    }
++    AUD_remove_card(&a->card);
++    return 0;
++}
++
++static int hda_audio_post_load(void *opaque, int version)
++{
++    HDAAudioState *a = opaque;
++    HDAAudioStream *st;
++    int i;
++
++    dprint(a, 1, "%s\n", __FUNCTION__);
++    for (i = 0; i < ARRAY_SIZE(a->st); i++) {
++        st = a->st + i;
++        if (st->node == NULL)
++            continue;
++        hda_codec_parse_fmt(st->format, &st->as);
++        hda_audio_setup(st);
++        hda_audio_set_amp(st);
++        hda_audio_set_running(st, a->running[st->stream]);
++    }
++    return 0;
++}
++
++#ifdef novmstatefornow
++static const VMStateDescription vmstate_hda_audio_stream = {
++    .name = "hda-audio-stream",
++    .version_id = 1,
++    .fields = (VMStateField []) {
++        VMSTATE_UINT32(stream, HDAAudioStream),
++        VMSTATE_UINT32(channel, HDAAudioStream),
++        VMSTATE_UINT32(format, HDAAudioStream),
++        VMSTATE_UINT32(gain_left, HDAAudioStream),
++        VMSTATE_UINT32(gain_right, HDAAudioStream),
++        VMSTATE_BOOL(mute_left, HDAAudioStream),
++        VMSTATE_BOOL(mute_right, HDAAudioStream),
++        VMSTATE_UINT32(bpos, HDAAudioStream),
++        VMSTATE_BUFFER(buf, HDAAudioStream),
++        VMSTATE_END_OF_LIST()
++    }
++};
++
++static const VMStateDescription vmstate_hda_audio = {
++    .name = "hda-audio",
++    .version_id = 1,
++    .post_load = hda_audio_post_load,
++    .fields = (VMStateField []) {
++        VMSTATE_STRUCT_ARRAY(st, HDAAudioState, 4, 0,
++                             vmstate_hda_audio_stream,
++                             HDAAudioStream),
++        VMSTATE_BOOL_ARRAY(running, HDAAudioState, 16),
++        VMSTATE_END_OF_LIST()
++    }
++};
++#endif
++
++static HDACodecDeviceInfo hda_audio_info_output = {
++    /* .init         = hda_audio_init_output, */
++    .exit         = hda_audio_exit,
++    .command      = hda_audio_command,
++    .stream       = hda_audio_stream,
++};
++
++static HDACodecDeviceInfo hda_audio_info_duplex = {
++    /* .init         = hda_audio_init_duplex, */
++    .exit         = hda_audio_exit,
++    .command      = hda_audio_command,
++    .stream       = hda_audio_stream,
++};
++
++int hda_audio_init_output(HDACodecBus *bus)
++{
++    HDAAudioState *hda;
++
++    hda = qemu_mallocz(sizeof (HDAAudioState));
++    hda->hda.parent_bus = bus;
++    hda->hda.info = &hda_audio_info_output;
++    hda->hda.cad = -1;
++    hda->debug = 0;
++    if (hda_codec_dev_init(&hda->hda)) {
++        fprintf(stderr, "! error init hda codec dev\n");
++    }
++    return hda_audio_init(&hda->hda, &output);
++}
++
++int hda_audio_init_duplex(HDACodecBus *bus)
++{
++    HDAAudioState *hda;
++
++    hda = qemu_mallocz(sizeof (HDAAudioState));
++    hda->hda.parent_bus = bus;
++    hda->hda.info = &hda_audio_info_duplex;
++    hda->hda.cad = -1;
++    hda->debug = 0;
++    if (hda_codec_dev_init(&hda->hda)) {
++        printf("! error init hda codec dev\n");
++    }
++
++    return hda_audio_init(&hda->hda, &duplex);
++}
+diff --git a/hw/intel-hda-defs.h b/hw/intel-hda-defs.h
+new file mode 100644
+index 0000000..2e37e5b
+--- /dev/null
++++ b/hw/intel-hda-defs.h
+@@ -0,0 +1,717 @@
++#ifndef HW_INTEL_HDA_DEFS_H
++#define HW_INTEL_HDA_DEFS_H
++
++/* qemu */
++#define HDA_BUFFER_SIZE 256
++
++/* --------------------------------------------------------------------- */
++/* from linux/sound/pci/hda/hda_intel.c                                  */
++
++/*
++ * registers
++ */
++#define ICH6_REG_GCAP                  0x00
++#define   ICH6_GCAP_64OK       (1 << 0)   /* 64bit address support */
++#define   ICH6_GCAP_NSDO       (3 << 1)   /* # of serial data out signals */
++#define   ICH6_GCAP_BSS                (31 << 3)  /* # of bidirectional streams */
++#define   ICH6_GCAP_ISS                (15 << 8)  /* # of input streams */
++#define   ICH6_GCAP_OSS                (15 << 12) /* # of output streams */
++#define ICH6_REG_VMIN                  0x02
++#define ICH6_REG_VMAJ                  0x03
++#define ICH6_REG_OUTPAY                        0x04
++#define ICH6_REG_INPAY                 0x06
++#define ICH6_REG_GCTL                  0x08
++#define   ICH6_GCTL_RESET      (1 << 0)   /* controller reset */
++#define   ICH6_GCTL_FCNTRL     (1 << 1)   /* flush control */
++#define   ICH6_GCTL_UNSOL      (1 << 8)   /* accept unsol. response enable */
++#define ICH6_REG_WAKEEN                        0x0c
++#define ICH6_REG_STATESTS              0x0e
++#define ICH6_REG_GSTS                  0x10
++#define   ICH6_GSTS_FSTS       (1 << 1)   /* flush status */
++#define ICH6_REG_INTCTL                        0x20
++#define ICH6_REG_INTSTS                        0x24
++#define ICH6_REG_WALLCLK               0x30    /* 24Mhz source */
++#define ICH6_REG_SYNC                  0x34
++#define ICH6_REG_CORBLBASE             0x40
++#define ICH6_REG_CORBUBASE             0x44
++#define ICH6_REG_CORBWP                        0x48
++#define ICH6_REG_CORBRP                        0x4a
++#define   ICH6_CORBRP_RST      (1 << 15)  /* read pointer reset */
++#define ICH6_REG_CORBCTL               0x4c
++#define   ICH6_CORBCTL_RUN     (1 << 1)   /* enable DMA */
++#define   ICH6_CORBCTL_CMEIE   (1 << 0)   /* enable memory error irq */
++#define ICH6_REG_CORBSTS               0x4d
++#define   ICH6_CORBSTS_CMEI    (1 << 0)   /* memory error indication */
++#define ICH6_REG_CORBSIZE              0x4e
++
++#define ICH6_REG_RIRBLBASE             0x50
++#define ICH6_REG_RIRBUBASE             0x54
++#define ICH6_REG_RIRBWP                        0x58
++#define   ICH6_RIRBWP_RST      (1 << 15)  /* write pointer reset */
++#define ICH6_REG_RINTCNT               0x5a
++#define ICH6_REG_RIRBCTL               0x5c
++#define   ICH6_RBCTL_IRQ_EN    (1 << 0)   /* enable IRQ */
++#define   ICH6_RBCTL_DMA_EN    (1 << 1)   /* enable DMA */
++#define   ICH6_RBCTL_OVERRUN_EN        (1 << 2)   /* enable overrun irq */
++#define ICH6_REG_RIRBSTS               0x5d
++#define   ICH6_RBSTS_IRQ       (1 << 0)   /* response irq */
++#define   ICH6_RBSTS_OVERRUN   (1 << 2)   /* overrun irq */
++#define ICH6_REG_RIRBSIZE              0x5e
++
++#define ICH6_REG_IC                    0x60
++#define ICH6_REG_IR                    0x64
++#define ICH6_REG_IRS                   0x68
++#define   ICH6_IRS_VALID       (1<<1)
++#define   ICH6_IRS_BUSY                (1<<0)
++
++#define ICH6_REG_DPLBASE               0x70
++#define ICH6_REG_DPUBASE               0x74
++#define   ICH6_DPLBASE_ENABLE  0x1     /* Enable position buffer */
++
++/* SD offset: SDI0=0x80, SDI1=0xa0, ... SDO3=0x160 */
++enum { SDI0, SDI1, SDI2, SDI3, SDO0, SDO1, SDO2, SDO3 };
++
++/* stream register offsets from stream base */
++#define ICH6_REG_SD_CTL                        0x00
++#define ICH6_REG_SD_STS                        0x03
++#define ICH6_REG_SD_LPIB               0x04
++#define ICH6_REG_SD_CBL                        0x08
++#define ICH6_REG_SD_LVI                        0x0c
++#define ICH6_REG_SD_FIFOW              0x0e
++#define ICH6_REG_SD_FIFOSIZE           0x10
++#define ICH6_REG_SD_FORMAT             0x12
++#define ICH6_REG_SD_BDLPL              0x18
++#define ICH6_REG_SD_BDLPU              0x1c
++
++/* PCI space */
++#define ICH6_PCIREG_TCSEL      0x44
++
++/*
++ * other constants
++ */
++
++/* max number of SDs */
++/* ICH, ATI and VIA have 4 playback and 4 capture */
++#define ICH6_NUM_CAPTURE       4
++#define ICH6_NUM_PLAYBACK      4
++
++/* ULI has 6 playback and 5 capture */
++#define ULI_NUM_CAPTURE                5
++#define ULI_NUM_PLAYBACK       6
++
++/* ATI HDMI has 1 playback and 0 capture */
++#define ATIHDMI_NUM_CAPTURE    0
++#define ATIHDMI_NUM_PLAYBACK   1
++
++/* TERA has 4 playback and 3 capture */
++#define TERA_NUM_CAPTURE       3
++#define TERA_NUM_PLAYBACK      4
++
++/* this number is statically defined for simplicity */
++#define MAX_AZX_DEV            16
++
++/* max number of fragments - we may use more if allocating more pages for BDL */
++#define BDL_SIZE               4096
++#define AZX_MAX_BDL_ENTRIES    (BDL_SIZE / 16)
++#define AZX_MAX_FRAG           32
++/* max buffer size - no h/w limit, you can increase as you like */
++#define AZX_MAX_BUF_SIZE       (1024*1024*1024)
++
++/* RIRB int mask: overrun[2], response[0] */
++#define RIRB_INT_RESPONSE      0x01
++#define RIRB_INT_OVERRUN       0x04
++#define RIRB_INT_MASK          0x05
++
++/* STATESTS int mask: S3,SD2,SD1,SD0 */
++#define AZX_MAX_CODECS         8
++#define AZX_DEFAULT_CODECS     4
++#define STATESTS_INT_MASK      ((1 << AZX_MAX_CODECS) - 1)
++
++/* SD_CTL bits */
++#define SD_CTL_STREAM_RESET    0x01    /* stream reset bit */
++#define SD_CTL_DMA_START       0x02    /* stream DMA start bit */
++#define SD_CTL_STRIPE          (3 << 16)       /* stripe control */
++#define SD_CTL_TRAFFIC_PRIO    (1 << 18)       /* traffic priority */
++#define SD_CTL_DIR             (1 << 19)       /* bi-directional stream */
++#define SD_CTL_STREAM_TAG_MASK (0xf << 20)
++#define SD_CTL_STREAM_TAG_SHIFT        20
++
++/* SD_CTL and SD_STS */
++#define SD_INT_DESC_ERR                0x10    /* descriptor error interrupt */
++#define SD_INT_FIFO_ERR                0x08    /* FIFO error interrupt */
++#define SD_INT_COMPLETE                0x04    /* completion interrupt */
++#define SD_INT_MASK            (SD_INT_DESC_ERR|SD_INT_FIFO_ERR|\
++                                SD_INT_COMPLETE)
++
++/* SD_STS */
++#define SD_STS_FIFO_READY      0x20    /* FIFO ready */
++
++/* INTCTL and INTSTS */
++#define ICH6_INT_ALL_STREAM    0xff       /* all stream interrupts */
++#define ICH6_INT_CTRL_EN       0x40000000 /* controller interrupt enable bit */
++#define ICH6_INT_GLOBAL_EN     0x80000000 /* global interrupt enable bit */
++
++/* below are so far hardcoded - should read registers in future */
++#define ICH6_MAX_CORB_ENTRIES  256
++#define ICH6_MAX_RIRB_ENTRIES  256
++
++/* position fix mode */
++enum {
++       POS_FIX_AUTO,
++       POS_FIX_LPIB,
++       POS_FIX_POSBUF,
++};
++
++/* Defines for ATI HD Audio support in SB450 south bridge */
++#define ATI_SB450_HDAUDIO_MISC_CNTR2_ADDR   0x42
++#define ATI_SB450_HDAUDIO_ENABLE_SNOOP      0x02
++
++/* Defines for Nvidia HDA support */
++#define NVIDIA_HDA_TRANSREG_ADDR      0x4e
++#define NVIDIA_HDA_ENABLE_COHBITS     0x0f
++#define NVIDIA_HDA_ISTRM_COH          0x4d
++#define NVIDIA_HDA_OSTRM_COH          0x4c
++#define NVIDIA_HDA_ENABLE_COHBIT      0x01
++
++/* Defines for Intel SCH HDA snoop control */
++#define INTEL_SCH_HDA_DEVC      0x78
++#define INTEL_SCH_HDA_DEVC_NOSNOOP       (0x1<<11)
++
++/* Define IN stream 0 FIFO size offset in VIA controller */
++#define VIA_IN_STREAM0_FIFO_SIZE_OFFSET        0x90
++/* Define VIA HD Audio Device ID*/
++#define VIA_HDAC_DEVICE_ID             0x3288
++
++/* HD Audio class code */
++#define PCI_CLASS_MULTIMEDIA_HD_AUDIO  0x0403
++
++/* --------------------------------------------------------------------- */
++/* from linux/sound/pci/hda/hda_codec.h                                  */
++
++/*
++ * nodes
++ */
++#define        AC_NODE_ROOT            0x00
++
++/*
++ * function group types
++ */
++enum {
++       AC_GRP_AUDIO_FUNCTION = 0x01,
++       AC_GRP_MODEM_FUNCTION = 0x02,
++};
++
++/*
++ * widget types
++ */
++enum {
++       AC_WID_AUD_OUT,         /* Audio Out */
++       AC_WID_AUD_IN,          /* Audio In */
++       AC_WID_AUD_MIX,         /* Audio Mixer */
++       AC_WID_AUD_SEL,         /* Audio Selector */
++       AC_WID_PIN,             /* Pin Complex */
++       AC_WID_POWER,           /* Power */
++       AC_WID_VOL_KNB,         /* Volume Knob */
++       AC_WID_BEEP,            /* Beep Generator */
++       AC_WID_VENDOR = 0x0f    /* Vendor specific */
++};
++
++/*
++ * GET verbs
++ */
++#define AC_VERB_GET_STREAM_FORMAT              0x0a00
++#define AC_VERB_GET_AMP_GAIN_MUTE              0x0b00
++#define AC_VERB_GET_PROC_COEF                  0x0c00
++#define AC_VERB_GET_COEF_INDEX                 0x0d00
++#define AC_VERB_PARAMETERS                     0x0f00
++#define AC_VERB_GET_CONNECT_SEL                        0x0f01
++#define AC_VERB_GET_CONNECT_LIST               0x0f02
++#define AC_VERB_GET_PROC_STATE                 0x0f03
++#define AC_VERB_GET_SDI_SELECT                 0x0f04
++#define AC_VERB_GET_POWER_STATE                        0x0f05
++#define AC_VERB_GET_CONV                       0x0f06
++#define AC_VERB_GET_PIN_WIDGET_CONTROL         0x0f07
++#define AC_VERB_GET_UNSOLICITED_RESPONSE       0x0f08
++#define AC_VERB_GET_PIN_SENSE                  0x0f09
++#define AC_VERB_GET_BEEP_CONTROL               0x0f0a
++#define AC_VERB_GET_EAPD_BTLENABLE             0x0f0c
++#define AC_VERB_GET_DIGI_CONVERT_1             0x0f0d
++#define AC_VERB_GET_DIGI_CONVERT_2             0x0f0e /* unused */
++#define AC_VERB_GET_VOLUME_KNOB_CONTROL                0x0f0f
++/* f10-f1a: GPIO */
++#define AC_VERB_GET_GPIO_DATA                  0x0f15
++#define AC_VERB_GET_GPIO_MASK                  0x0f16
++#define AC_VERB_GET_GPIO_DIRECTION             0x0f17
++#define AC_VERB_GET_GPIO_WAKE_MASK             0x0f18
++#define AC_VERB_GET_GPIO_UNSOLICITED_RSP_MASK  0x0f19
++#define AC_VERB_GET_GPIO_STICKY_MASK           0x0f1a
++#define AC_VERB_GET_CONFIG_DEFAULT             0x0f1c
++/* f20: AFG/MFG */
++#define AC_VERB_GET_SUBSYSTEM_ID               0x0f20
++#define AC_VERB_GET_CVT_CHAN_COUNT             0x0f2d
++#define AC_VERB_GET_HDMI_DIP_SIZE              0x0f2e
++#define AC_VERB_GET_HDMI_ELDD                  0x0f2f
++#define AC_VERB_GET_HDMI_DIP_INDEX             0x0f30
++#define AC_VERB_GET_HDMI_DIP_DATA              0x0f31
++#define AC_VERB_GET_HDMI_DIP_XMIT              0x0f32
++#define AC_VERB_GET_HDMI_CP_CTRL               0x0f33
++#define AC_VERB_GET_HDMI_CHAN_SLOT             0x0f34
++
++/*
++ * SET verbs
++ */
++#define AC_VERB_SET_STREAM_FORMAT              0x200
++#define AC_VERB_SET_AMP_GAIN_MUTE              0x300
++#define AC_VERB_SET_PROC_COEF                  0x400
++#define AC_VERB_SET_COEF_INDEX                 0x500
++#define AC_VERB_SET_CONNECT_SEL                        0x701
++#define AC_VERB_SET_PROC_STATE                 0x703
++#define AC_VERB_SET_SDI_SELECT                 0x704
++#define AC_VERB_SET_POWER_STATE                        0x705
++#define AC_VERB_SET_CHANNEL_STREAMID           0x706
++#define AC_VERB_SET_PIN_WIDGET_CONTROL         0x707
++#define AC_VERB_SET_UNSOLICITED_ENABLE         0x708
++#define AC_VERB_SET_PIN_SENSE                  0x709
++#define AC_VERB_SET_BEEP_CONTROL               0x70a
++#define AC_VERB_SET_EAPD_BTLENABLE             0x70c
++#define AC_VERB_SET_DIGI_CONVERT_1             0x70d
++#define AC_VERB_SET_DIGI_CONVERT_2             0x70e
++#define AC_VERB_SET_VOLUME_KNOB_CONTROL                0x70f
++#define AC_VERB_SET_GPIO_DATA                  0x715
++#define AC_VERB_SET_GPIO_MASK                  0x716
++#define AC_VERB_SET_GPIO_DIRECTION             0x717
++#define AC_VERB_SET_GPIO_WAKE_MASK             0x718
++#define AC_VERB_SET_GPIO_UNSOLICITED_RSP_MASK  0x719
++#define AC_VERB_SET_GPIO_STICKY_MASK           0x71a
++#define AC_VERB_SET_CONFIG_DEFAULT_BYTES_0     0x71c
++#define AC_VERB_SET_CONFIG_DEFAULT_BYTES_1     0x71d
++#define AC_VERB_SET_CONFIG_DEFAULT_BYTES_2     0x71e
++#define AC_VERB_SET_CONFIG_DEFAULT_BYTES_3     0x71f
++#define AC_VERB_SET_EAPD                               0x788
++#define AC_VERB_SET_CODEC_RESET                        0x7ff
++#define AC_VERB_SET_CVT_CHAN_COUNT             0x72d
++#define AC_VERB_SET_HDMI_DIP_INDEX             0x730
++#define AC_VERB_SET_HDMI_DIP_DATA              0x731
++#define AC_VERB_SET_HDMI_DIP_XMIT              0x732
++#define AC_VERB_SET_HDMI_CP_CTRL               0x733
++#define AC_VERB_SET_HDMI_CHAN_SLOT             0x734
++
++/*
++ * Parameter IDs
++ */
++#define AC_PAR_VENDOR_ID               0x00
++#define AC_PAR_SUBSYSTEM_ID            0x01
++#define AC_PAR_REV_ID                  0x02
++#define AC_PAR_NODE_COUNT              0x04
++#define AC_PAR_FUNCTION_TYPE           0x05
++#define AC_PAR_AUDIO_FG_CAP            0x08
++#define AC_PAR_AUDIO_WIDGET_CAP                0x09
++#define AC_PAR_PCM                     0x0a
++#define AC_PAR_STREAM                  0x0b
++#define AC_PAR_PIN_CAP                 0x0c
++#define AC_PAR_AMP_IN_CAP              0x0d
++#define AC_PAR_CONNLIST_LEN            0x0e
++#define AC_PAR_POWER_STATE             0x0f
++#define AC_PAR_PROC_CAP                        0x10
++#define AC_PAR_GPIO_CAP                        0x11
++#define AC_PAR_AMP_OUT_CAP             0x12
++#define AC_PAR_VOL_KNB_CAP             0x13
++#define AC_PAR_HDMI_LPCM_CAP           0x20
++
++/*
++ * AC_VERB_PARAMETERS results (32bit)
++ */
++
++/* Function Group Type */
++#define AC_FGT_TYPE                    (0xff<<0)
++#define AC_FGT_TYPE_SHIFT              0
++#define AC_FGT_UNSOL_CAP               (1<<8)
++
++/* Audio Function Group Capabilities */
++#define AC_AFG_OUT_DELAY               (0xf<<0)
++#define AC_AFG_IN_DELAY                        (0xf<<8)
++#define AC_AFG_BEEP_GEN                        (1<<16)
++
++/* Audio Widget Capabilities */
++#define AC_WCAP_STEREO                 (1<<0)  /* stereo I/O */
++#define AC_WCAP_IN_AMP                 (1<<1)  /* AMP-in present */
++#define AC_WCAP_OUT_AMP                        (1<<2)  /* AMP-out present */
++#define AC_WCAP_AMP_OVRD               (1<<3)  /* AMP-parameter override */
++#define AC_WCAP_FORMAT_OVRD            (1<<4)  /* format override */
++#define AC_WCAP_STRIPE                 (1<<5)  /* stripe */
++#define AC_WCAP_PROC_WID               (1<<6)  /* Proc Widget */
++#define AC_WCAP_UNSOL_CAP              (1<<7)  /* Unsol capable */
++#define AC_WCAP_CONN_LIST              (1<<8)  /* connection list */
++#define AC_WCAP_DIGITAL                        (1<<9)  /* digital I/O */
++#define AC_WCAP_POWER                  (1<<10) /* power control */
++#define AC_WCAP_LR_SWAP                        (1<<11) /* L/R swap */
++#define AC_WCAP_CP_CAPS                        (1<<12) /* content protection */
++#define AC_WCAP_CHAN_CNT_EXT           (7<<13) /* channel count ext */
++#define AC_WCAP_DELAY                  (0xf<<16)
++#define AC_WCAP_DELAY_SHIFT            16
++#define AC_WCAP_TYPE                   (0xf<<20)
++#define AC_WCAP_TYPE_SHIFT             20
++
++/* supported PCM rates and bits */
++#define AC_SUPPCM_RATES                        (0xfff << 0)
++#define AC_SUPPCM_BITS_8               (1<<16)
++#define AC_SUPPCM_BITS_16              (1<<17)
++#define AC_SUPPCM_BITS_20              (1<<18)
++#define AC_SUPPCM_BITS_24              (1<<19)
++#define AC_SUPPCM_BITS_32              (1<<20)
++
++/* supported PCM stream format */
++#define AC_SUPFMT_PCM                  (1<<0)
++#define AC_SUPFMT_FLOAT32              (1<<1)
++#define AC_SUPFMT_AC3                  (1<<2)
++
++/* GP I/O count */
++#define AC_GPIO_IO_COUNT               (0xff<<0)
++#define AC_GPIO_O_COUNT                        (0xff<<8)
++#define AC_GPIO_O_COUNT_SHIFT          8
++#define AC_GPIO_I_COUNT                        (0xff<<16)
++#define AC_GPIO_I_COUNT_SHIFT          16
++#define AC_GPIO_UNSOLICITED            (1<<30)
++#define AC_GPIO_WAKE                   (1<<31)
++
++/* Converter stream, channel */
++#define AC_CONV_CHANNEL                        (0xf<<0)
++#define AC_CONV_STREAM                 (0xf<<4)
++#define AC_CONV_STREAM_SHIFT           4
++
++/* Input converter SDI select */
++#define AC_SDI_SELECT                  (0xf<<0)
++
++/* stream format id */
++#define AC_FMT_CHAN_SHIFT              0
++#define AC_FMT_CHAN_MASK               (0x0f << 0)
++#define AC_FMT_BITS_SHIFT              4
++#define AC_FMT_BITS_MASK               (7 << 4)
++#define AC_FMT_BITS_8                  (0 << 4)
++#define AC_FMT_BITS_16                 (1 << 4)
++#define AC_FMT_BITS_20                 (2 << 4)
++#define AC_FMT_BITS_24                 (3 << 4)
++#define AC_FMT_BITS_32                 (4 << 4)
++#define AC_FMT_DIV_SHIFT               8
++#define AC_FMT_DIV_MASK                        (7 << 8)
++#define AC_FMT_MULT_SHIFT              11
++#define AC_FMT_MULT_MASK               (7 << 11)
++#define AC_FMT_BASE_SHIFT              14
++#define AC_FMT_BASE_48K                        (0 << 14)
++#define AC_FMT_BASE_44K                        (1 << 14)
++#define AC_FMT_TYPE_SHIFT              15
++#define AC_FMT_TYPE_PCM                        (0 << 15)
++#define AC_FMT_TYPE_NON_PCM            (1 << 15)
++
++/* Unsolicited response control */
++#define AC_UNSOL_TAG                   (0x3f<<0)
++#define AC_UNSOL_ENABLED               (1<<7)
++#define AC_USRSP_EN                    AC_UNSOL_ENABLED
++
++/* Unsolicited responses */
++#define AC_UNSOL_RES_TAG               (0x3f<<26)
++#define AC_UNSOL_RES_TAG_SHIFT         26
++#define AC_UNSOL_RES_SUBTAG            (0x1f<<21)
++#define AC_UNSOL_RES_SUBTAG_SHIFT      21
++#define AC_UNSOL_RES_ELDV              (1<<1)  /* ELD Data valid (for HDMI) */
++#define AC_UNSOL_RES_PD                        (1<<0)  /* pinsense detect */
++#define AC_UNSOL_RES_CP_STATE          (1<<1)  /* content protection */
++#define AC_UNSOL_RES_CP_READY          (1<<0)  /* content protection */
++
++/* Pin widget capabilies */
++#define AC_PINCAP_IMP_SENSE            (1<<0)  /* impedance sense capable */
++#define AC_PINCAP_TRIG_REQ             (1<<1)  /* trigger required */
++#define AC_PINCAP_PRES_DETECT          (1<<2)  /* presence detect capable */
++#define AC_PINCAP_HP_DRV               (1<<3)  /* headphone drive capable */
++#define AC_PINCAP_OUT                  (1<<4)  /* output capable */
++#define AC_PINCAP_IN                   (1<<5)  /* input capable */
++#define AC_PINCAP_BALANCE              (1<<6)  /* balanced I/O capable */
++/* Note: This LR_SWAP pincap is defined in the Realtek ALC883 specification,
++ *       but is marked reserved in the Intel HDA specification.
++ */
++#define AC_PINCAP_LR_SWAP              (1<<7)  /* L/R swap */
++/* Note: The same bit as LR_SWAP is newly defined as HDMI capability
++ *       in HD-audio specification
++ */
++#define AC_PINCAP_HDMI                 (1<<7)  /* HDMI pin */
++#define AC_PINCAP_DP                   (1<<24) /* DisplayPort pin, can
++                                                * coexist with AC_PINCAP_HDMI
++                                                */
++#define AC_PINCAP_VREF                 (0x37<<8)
++#define AC_PINCAP_VREF_SHIFT           8
++#define AC_PINCAP_EAPD                 (1<<16) /* EAPD capable */
++#define AC_PINCAP_HBR                  (1<<27) /* High Bit Rate */
++/* Vref status (used in pin cap) */
++#define AC_PINCAP_VREF_HIZ             (1<<0)  /* Hi-Z */
++#define AC_PINCAP_VREF_50              (1<<1)  /* 50% */
++#define AC_PINCAP_VREF_GRD             (1<<2)  /* ground */
++#define AC_PINCAP_VREF_80              (1<<4)  /* 80% */
++#define AC_PINCAP_VREF_100             (1<<5)  /* 100% */
++
++/* Amplifier capabilities */
++#define AC_AMPCAP_OFFSET               (0x7f<<0)  /* 0dB offset */
++#define AC_AMPCAP_OFFSET_SHIFT         0
++#define AC_AMPCAP_NUM_STEPS            (0x7f<<8)  /* number of steps */
++#define AC_AMPCAP_NUM_STEPS_SHIFT      8
++#define AC_AMPCAP_STEP_SIZE            (0x7f<<16) /* step size 0-32dB
++                                                   * in 0.25dB
++                                                   */
++#define AC_AMPCAP_STEP_SIZE_SHIFT      16
++#define AC_AMPCAP_MUTE                 (1<<31)    /* mute capable */
++#define AC_AMPCAP_MUTE_SHIFT           31
++
++/* Connection list */
++#define AC_CLIST_LENGTH                        (0x7f<<0)
++#define AC_CLIST_LONG                  (1<<7)
++
++/* Supported power status */
++#define AC_PWRST_D0SUP                 (1<<0)
++#define AC_PWRST_D1SUP                 (1<<1)
++#define AC_PWRST_D2SUP                 (1<<2)
++#define AC_PWRST_D3SUP                 (1<<3)
++#define AC_PWRST_D3COLDSUP             (1<<4)
++#define AC_PWRST_S3D3COLDSUP           (1<<29)
++#define AC_PWRST_CLKSTOP               (1<<30)
++#define AC_PWRST_EPSS                  (1U<<31)
++
++/* Power state values */
++#define AC_PWRST_SETTING               (0xf<<0)
++#define AC_PWRST_ACTUAL                        (0xf<<4)
++#define AC_PWRST_ACTUAL_SHIFT          4
++#define AC_PWRST_D0                    0x00
++#define AC_PWRST_D1                    0x01
++#define AC_PWRST_D2                    0x02
++#define AC_PWRST_D3                    0x03
++
++/* Processing capabilies */
++#define AC_PCAP_BENIGN                 (1<<0)
++#define AC_PCAP_NUM_COEF               (0xff<<8)
++#define AC_PCAP_NUM_COEF_SHIFT         8
++
++/* Volume knobs capabilities */
++#define AC_KNBCAP_NUM_STEPS            (0x7f<<0)
++#define AC_KNBCAP_DELTA                        (1<<7)
++
++/* HDMI LPCM capabilities */
++#define AC_LPCMCAP_48K_CP_CHNS         (0x0f<<0) /* max channels w/ CP-on */
++#define AC_LPCMCAP_48K_NO_CHNS         (0x0f<<4) /* max channels w/o CP-on */
++#define AC_LPCMCAP_48K_20BIT           (1<<8)  /* 20b bitrate supported */
++#define AC_LPCMCAP_48K_24BIT           (1<<9)  /* 24b bitrate supported */
++#define AC_LPCMCAP_96K_CP_CHNS         (0x0f<<10) /* max channels w/ CP-on */
++#define AC_LPCMCAP_96K_NO_CHNS         (0x0f<<14) /* max channels w/o CP-on */
++#define AC_LPCMCAP_96K_20BIT           (1<<18) /* 20b bitrate supported */
++#define AC_LPCMCAP_96K_24BIT           (1<<19) /* 24b bitrate supported */
++#define AC_LPCMCAP_192K_CP_CHNS                (0x0f<<20) /* max channels w/ CP-on */
++#define AC_LPCMCAP_192K_NO_CHNS                (0x0f<<24) /* max channels w/o CP-on */
++#define AC_LPCMCAP_192K_20BIT          (1<<28) /* 20b bitrate supported */
++#define AC_LPCMCAP_192K_24BIT          (1<<29) /* 24b bitrate supported */
++#define AC_LPCMCAP_44K                 (1<<30) /* 44.1kHz support */
++#define AC_LPCMCAP_44K_MS              (1<<31) /* 44.1kHz-multiplies support */
++
++/*
++ * Control Parameters
++ */
++
++/* Amp gain/mute */
++#define AC_AMP_MUTE                    (1<<7)
++#define AC_AMP_GAIN                    (0x7f)
++#define AC_AMP_GET_INDEX               (0xf<<0)
++
++#define AC_AMP_GET_LEFT                        (1<<13)
++#define AC_AMP_GET_RIGHT               (0<<13)
++#define AC_AMP_GET_OUTPUT              (1<<15)
++#define AC_AMP_GET_INPUT               (0<<15)
++
++#define AC_AMP_SET_INDEX               (0xf<<8)
++#define AC_AMP_SET_INDEX_SHIFT         8
++#define AC_AMP_SET_RIGHT               (1<<12)
++#define AC_AMP_SET_LEFT                        (1<<13)
++#define AC_AMP_SET_INPUT               (1<<14)
++#define AC_AMP_SET_OUTPUT              (1<<15)
++
++/* DIGITAL1 bits */
++#define AC_DIG1_ENABLE                 (1<<0)
++#define AC_DIG1_V                      (1<<1)
++#define AC_DIG1_VCFG                   (1<<2)
++#define AC_DIG1_EMPHASIS               (1<<3)
++#define AC_DIG1_COPYRIGHT              (1<<4)
++#define AC_DIG1_NONAUDIO               (1<<5)
++#define AC_DIG1_PROFESSIONAL           (1<<6)
++#define AC_DIG1_LEVEL                  (1<<7)
++
++/* DIGITAL2 bits */
++#define AC_DIG2_CC                     (0x7f<<0)
++
++/* Pin widget control - 8bit */
++#define AC_PINCTL_EPT                  (0x3<<0)
++#define AC_PINCTL_EPT_NATIVE           0
++#define AC_PINCTL_EPT_HBR              3
++#define AC_PINCTL_VREFEN               (0x7<<0)
++#define AC_PINCTL_VREF_HIZ             0       /* Hi-Z */
++#define AC_PINCTL_VREF_50              1       /* 50% */
++#define AC_PINCTL_VREF_GRD             2       /* ground */
++#define AC_PINCTL_VREF_80              4       /* 80% */
++#define AC_PINCTL_VREF_100             5       /* 100% */
++#define AC_PINCTL_IN_EN                        (1<<5)
++#define AC_PINCTL_OUT_EN               (1<<6)
++#define AC_PINCTL_HP_EN                        (1<<7)
++
++/* Pin sense - 32bit */
++#define AC_PINSENSE_IMPEDANCE_MASK     (0x7fffffff)
++#define AC_PINSENSE_PRESENCE           (1<<31)
++#define AC_PINSENSE_ELDV               (1<<30) /* ELD valid (HDMI) */
++
++/* EAPD/BTL enable - 32bit */
++#define AC_EAPDBTL_BALANCED            (1<<0)
++#define AC_EAPDBTL_EAPD                        (1<<1)
++#define AC_EAPDBTL_LR_SWAP             (1<<2)
++
++/* HDMI ELD data */
++#define AC_ELDD_ELD_VALID              (1<<31)
++#define AC_ELDD_ELD_DATA               0xff
++
++/* HDMI DIP size */
++#define AC_DIPSIZE_ELD_BUF             (1<<3) /* ELD buf size of packet size */
++#define AC_DIPSIZE_PACK_IDX            (0x07<<0) /* packet index */
++
++/* HDMI DIP index */
++#define AC_DIPIDX_PACK_IDX             (0x07<<5) /* packet idnex */
++#define AC_DIPIDX_BYTE_IDX             (0x1f<<0) /* byte index */
++
++/* HDMI DIP xmit (transmit) control */
++#define AC_DIPXMIT_MASK                        (0x3<<6)
++#define AC_DIPXMIT_DISABLE             (0x0<<6) /* disable xmit */
++#define AC_DIPXMIT_ONCE                        (0x2<<6) /* xmit once then disable */
++#define AC_DIPXMIT_BEST                        (0x3<<6) /* best effort */
++
++/* HDMI content protection (CP) control */
++#define AC_CPCTRL_CES                  (1<<9) /* current encryption state */
++#define AC_CPCTRL_READY                        (1<<8) /* ready bit */
++#define AC_CPCTRL_SUBTAG               (0x1f<<3) /* subtag for unsol-resp */
++#define AC_CPCTRL_STATE                        (3<<0) /* current CP request state */
++
++/* Converter channel <-> HDMI slot mapping */
++#define AC_CVTMAP_HDMI_SLOT            (0xf<<0) /* HDMI slot number */
++#define AC_CVTMAP_CHAN                 (0xf<<4) /* converter channel number */
++
++/* configuration default - 32bit */
++#define AC_DEFCFG_SEQUENCE             (0xf<<0)
++#define AC_DEFCFG_DEF_ASSOC            (0xf<<4)
++#define AC_DEFCFG_ASSOC_SHIFT          4
++#define AC_DEFCFG_MISC                 (0xf<<8)
++#define AC_DEFCFG_MISC_SHIFT           8
++#define AC_DEFCFG_MISC_NO_PRESENCE     (1<<0)
++#define AC_DEFCFG_COLOR                        (0xf<<12)
++#define AC_DEFCFG_COLOR_SHIFT          12
++#define AC_DEFCFG_CONN_TYPE            (0xf<<16)
++#define AC_DEFCFG_CONN_TYPE_SHIFT      16
++#define AC_DEFCFG_DEVICE               (0xf<<20)
++#define AC_DEFCFG_DEVICE_SHIFT         20
++#define AC_DEFCFG_LOCATION             (0x3f<<24)
++#define AC_DEFCFG_LOCATION_SHIFT       24
++#define AC_DEFCFG_PORT_CONN            (0x3<<30)
++#define AC_DEFCFG_PORT_CONN_SHIFT      30
++
++/* device device types (0x0-0xf) */
++enum {
++       AC_JACK_LINE_OUT,
++       AC_JACK_SPEAKER,
++       AC_JACK_HP_OUT,
++       AC_JACK_CD,
++       AC_JACK_SPDIF_OUT,
++       AC_JACK_DIG_OTHER_OUT,
++       AC_JACK_MODEM_LINE_SIDE,
++       AC_JACK_MODEM_HAND_SIDE,
++       AC_JACK_LINE_IN,
++       AC_JACK_AUX,
++       AC_JACK_MIC_IN,
++       AC_JACK_TELEPHONY,
++       AC_JACK_SPDIF_IN,
++       AC_JACK_DIG_OTHER_IN,
++       AC_JACK_OTHER = 0xf,
++};
++
++/* jack connection types (0x0-0xf) */
++enum {
++       AC_JACK_CONN_UNKNOWN,
++       AC_JACK_CONN_1_8,
++       AC_JACK_CONN_1_4,
++       AC_JACK_CONN_ATAPI,
++       AC_JACK_CONN_RCA,
++       AC_JACK_CONN_OPTICAL,
++       AC_JACK_CONN_OTHER_DIGITAL,
++       AC_JACK_CONN_OTHER_ANALOG,
++       AC_JACK_CONN_DIN,
++       AC_JACK_CONN_XLR,
++       AC_JACK_CONN_RJ11,
++       AC_JACK_CONN_COMB,
++       AC_JACK_CONN_OTHER = 0xf,
++};
++
++/* jack colors (0x0-0xf) */
++enum {
++       AC_JACK_COLOR_UNKNOWN,
++       AC_JACK_COLOR_BLACK,
++       AC_JACK_COLOR_GREY,
++       AC_JACK_COLOR_BLUE,
++       AC_JACK_COLOR_GREEN,
++       AC_JACK_COLOR_RED,
++       AC_JACK_COLOR_ORANGE,
++       AC_JACK_COLOR_YELLOW,
++       AC_JACK_COLOR_PURPLE,
++       AC_JACK_COLOR_PINK,
++       AC_JACK_COLOR_WHITE = 0xe,
++       AC_JACK_COLOR_OTHER,
++};
++
++/* Jack location (0x0-0x3f) */
++/* common case */
++enum {
++       AC_JACK_LOC_NONE,
++       AC_JACK_LOC_REAR,
++       AC_JACK_LOC_FRONT,
++       AC_JACK_LOC_LEFT,
++       AC_JACK_LOC_RIGHT,
++       AC_JACK_LOC_TOP,
++       AC_JACK_LOC_BOTTOM,
++};
++/* bits 4-5 */
++enum {
++       AC_JACK_LOC_EXTERNAL = 0x00,
++       AC_JACK_LOC_INTERNAL = 0x10,
++       AC_JACK_LOC_SEPARATE = 0x20,
++       AC_JACK_LOC_OTHER    = 0x30,
++};
++enum {
++       /* external on primary chasis */
++       AC_JACK_LOC_REAR_PANEL = 0x07,
++       AC_JACK_LOC_DRIVE_BAY,
++       /* internal */
++       AC_JACK_LOC_RISER = 0x17,
++       AC_JACK_LOC_HDMI,
++       AC_JACK_LOC_ATAPI,
++       /* others */
++       AC_JACK_LOC_MOBILE_IN = 0x37,
++       AC_JACK_LOC_MOBILE_OUT,
++};
++
++/* Port connectivity (0-3) */
++enum {
++       AC_JACK_PORT_COMPLEX,
++       AC_JACK_PORT_NONE,
++       AC_JACK_PORT_FIXED,
++       AC_JACK_PORT_BOTH,
++};
++
++/* max. connections to a widget */
++#define HDA_MAX_CONNECTIONS    32
++
++/* max. codec address */
++#define HDA_MAX_CODEC_ADDRESS  0x0f
++
++/* max number of PCM devics per card */
++#define HDA_MAX_PCMS           10
++
++/* --------------------------------------------------------------------- */
++
++#endif
+diff --git a/hw/intel-hda.c b/hw/intel-hda.c
+new file mode 100644
+index 0000000..03b2bd7
+--- /dev/null
++++ b/hw/intel-hda.c
+@@ -0,0 +1,1345 @@
++/*
++ * Copyright (C) 2010 Red Hat, Inc.
++ *
++ * written by Gerd Hoffmann <kraxel@redhat.com>
++ *
++ * This program is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU General Public License as
++ * published by the Free Software Foundation; either version 2 or
++ * (at your option) version 3 of the License.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, see <http://www.gnu.org/licenses/>.
++ */
++
++#include <assert.h>
++
++#include "hw.h"
++#include "pci.h"
++#include "qemu-timer.h"
++#include "audiodev.h"
++#include "intel-hda.h"
++#include "intel-hda-defs.h"
++
++typedef uint32_t pcibus_t;
++
++/* --------------------------------------------------------------------- */
++/* hda bus                                                               */
++
++void hda_codec_bus_init(void *dev, HDACodecBus *bus,
++                        hda_codec_response_func response,
++                        hda_codec_xfer_func xfer)
++{
++    bus->parent = dev;
++    LIST_INIT(&bus->children);
++
++    bus->response = response;
++    bus->xfer = xfer;
++
++}
++
++int hda_codec_dev_init(HDACodecDevice *dev)
++{
++    HDACodecBus *bus = dev->parent_bus;
++
++    if (dev->cad == -1) {
++        dev->cad = bus->next_cad;
++    }
++    if (dev->cad >= 15) {
++        return -1;
++    }
++    bus->next_cad = dev->cad + 1;
++    LIST_INSERT_HEAD(&bus->children, dev, sibling);
++    return 0;
++}
++
++#ifdef noneedforanexit
++static int hda_codec_dev_exit(DeviceState *qdev)
++{
++    HDACodecDevice *dev = DO_UPCAST(HDACodecDevice, qdev, qdev);
++
++    if (dev->info->exit) {
++        dev->info->exit(dev);
++    }
++    return 0;
++}
++#endif
++
++HDACodecDevice *hda_codec_find(HDACodecBus *bus, uint32_t cad)
++{
++    HDACodecDevice *cdev;
++
++    LIST_FOREACH(cdev, &bus->children, sibling) {
++        if (cdev->cad == cad) {
++            return cdev;
++        }
++    }
++    return NULL;
++}
++
++void hda_codec_response(HDACodecDevice *dev, bool solicited, uint32_t response)
++{
++    HDACodecBus *bus = dev->parent_bus;
++    bus->response(dev, solicited, response);
++}
++
++bool hda_codec_xfer(HDACodecDevice *dev, uint32_t stnr, bool output,
++                    uint8_t *buf, uint32_t len)
++{
++    HDACodecBus *bus = dev->parent_bus;
++    return bus->xfer(dev, stnr, output, buf, len);
++}
++
++/* --------------------------------------------------------------------- */
++/* intel hda emulation                                                   */
++
++typedef struct IntelHDAStream IntelHDAStream;
++typedef struct IntelHDAState IntelHDAState;
++typedef struct IntelHDAReg IntelHDAReg;
++
++typedef struct bpl {
++    uint64_t addr;
++    uint32_t len;
++    uint32_t flags;
++} bpl;
++
++struct IntelHDAStream {
++    /* registers */
++    uint32_t ctl;
++    uint32_t lpib;
++    uint32_t cbl;
++    uint32_t lvi;
++    uint32_t fmt;
++    uint32_t bdlp_lbase;
++    uint32_t bdlp_ubase;
++
++    /* state */
++    bpl      *bpl;
++    uint32_t bentries;
++    uint32_t bsize, be, bp;
++};
++
++struct IntelHDAState {
++    PCIDevice pci;
++    const char *name;
++    HDACodecBus codecs;
++
++    /* registers */
++    uint32_t g_ctl;
++    uint32_t wake_en;
++    uint32_t state_sts;
++    uint32_t int_ctl;
++    uint32_t int_sts;
++    uint32_t wall_clk;
++
++    uint32_t corb_lbase;
++    uint32_t corb_ubase;
++    uint32_t corb_rp;
++    uint32_t corb_wp;
++    uint32_t corb_ctl;
++    uint32_t corb_sts;
++    uint32_t corb_size;
++
++    uint32_t rirb_lbase;
++    uint32_t rirb_ubase;
++    uint32_t rirb_wp;
++    uint32_t rirb_cnt;
++    uint32_t rirb_ctl;
++    uint32_t rirb_sts;
++    uint32_t rirb_size;
++
++    uint32_t dp_lbase;
++    uint32_t dp_ubase;
++
++    uint32_t icw;
++    uint32_t irr;
++    uint32_t ics;
++
++    /* streams */
++    IntelHDAStream st[8];
++
++    /* state */
++    target_phys_addr_t base_addr;
++    int mmio_addr;
++    uint32_t rirb_count;
++    int64_t wall_base_ns;
++
++    /* debug logging */
++    const IntelHDAReg *last_reg;
++    uint32_t last_val;
++    uint32_t last_write;
++    uint32_t last_sec;
++    uint32_t repeat_count;
++
++    /* properties */
++    uint32_t debug;
++};
++
++struct IntelHDAReg {
++    const char *name;      /* register name */
++    uint32_t   size;       /* size in bytes */
++    uint32_t   reset;      /* reset value */
++    uint32_t   wmask;      /* write mask */
++    uint32_t   wclear;     /* write 1 to clear bits */
++    uint32_t   offset;     /* location in IntelHDAState */
++    uint32_t   shift;      /* byte access entries for dwords */
++    uint32_t   stream;
++    void       (*whandler)(IntelHDAState *d, const IntelHDAReg *reg, uint32_t old);
++    void       (*rhandler)(IntelHDAState *d, const IntelHDAReg *reg);
++};
++
++static void intel_hda_reset(void/*DeviceState*/ *dev);
++
++/* --------------------------------------------------------------------- */
++
++static target_phys_addr_t intel_hda_addr(uint32_t lbase, uint32_t ubase)
++{
++    target_phys_addr_t addr;
++
++#if TARGET_PHYS_ADDR_BITS == 32
++    addr = lbase;
++#else
++    addr = ubase;
++    addr <<= 32;
++    addr |= lbase;
++#endif
++    return addr;
++}
++
++static void stl_phys_le(target_phys_addr_t addr, uint32_t value)
++{
++    uint32_t value_le = cpu_to_le32(value);
++    cpu_physical_memory_write(addr, (uint8_t*)(&value_le), sizeof(value_le));
++}
++
++static uint32_t ldl_phys_le(target_phys_addr_t addr)
++{
++    uint32_t value_le;
++    cpu_physical_memory_read(addr, (uint8_t*)(&value_le), sizeof(value_le));
++    return le32_to_cpu(value_le);
++}
++
++static void intel_hda_update_int_sts(IntelHDAState *d)
++{
++    uint32_t sts = 0;
++    uint32_t i;
++
++    /* update controller status */
++    if (d->rirb_sts & ICH6_RBSTS_IRQ) {
++        sts |= (1 << 30);
++    }
++    if (d->rirb_sts & ICH6_RBSTS_OVERRUN) {
++        sts |= (1 << 30);
++    }
++    if (d->state_sts & d->wake_en) {
++        sts |= (1 << 30);
++    }
++
++    /* update stream status */
++    for (i = 0; i < 8; i++) {
++        /* buffer completion interrupt */
++        if (d->st[i].ctl & (1 << 26)) {
++            sts |= (1 << i);
++        }
++    }
++
++    /* update global status */
++    if (sts & d->int_ctl) {
++        sts |= (1 << 31);
++    }
++
++    d->int_sts = sts;
++}
++
++static void intel_hda_update_irq(IntelHDAState *d)
++{
++    /* int msi = d->msi && msi_enabled(&d->pci); */
++    int msi = 0;
++    int level;
++
++    intel_hda_update_int_sts(d);
++    if (d->int_sts & (1 << 31) && d->int_ctl & (1 << 31)) {
++        level = 1;
++    } else {
++        level = 0;
++    }
++    dprint(d, 2, "%s: level %d [%s]\n", __FUNCTION__,
++           level, msi ? "msi" : "intx");
++    if (msi) {
++        /* if (level) { */
++            /* msi_notify(&d->pci, 0); */
++        /* } */
++    } else {
++        qemu_set_irq(d->pci.irq[0], level);
++    }
++}
++
++static int intel_hda_send_command(IntelHDAState *d, uint32_t verb)
++{
++    uint32_t cad, nid, data;
++    HDACodecDevice *codec;
++
++    cad = (verb >> 28) & 0x0f;
++    if (verb & (1 << 27)) {
++        /* indirect node addressing, not specified in HDA 1.0 */
++        dprint(d, 1, "%s: indirect node addressing (guest bug?)\n", __FUNCTION__);
++        return -1;
++    }
++    nid = (verb >> 20) & 0x7f;
++    data = verb & 0xfffff;
++
++    codec = hda_codec_find(&d->codecs, cad);
++    if (codec == NULL) {
++        dprint(d, 1, "%s: addressed non-existing codec\n", __FUNCTION__);
++        return -1;
++    }
++    codec->info->command(codec, nid, data);
++    return 0;
++}
++
++static void intel_hda_corb_run(IntelHDAState *d)
++{
++    target_phys_addr_t addr;
++    uint32_t rp, verb;
++
++    if (d->ics & ICH6_IRS_BUSY) {
++        dprint(d, 2, "%s: [icw] verb 0x%08x\n", __FUNCTION__, d->icw);
++        intel_hda_send_command(d, d->icw);
++        return;
++    }
++
++    for (;;) {
++        if (!(d->corb_ctl & ICH6_CORBCTL_RUN)) {
++            dprint(d, 2, "%s: !run\n", __FUNCTION__);
++            return;
++        }
++        if ((d->corb_rp & 0xff) == d->corb_wp) {
++            dprint(d, 2, "%s: corb ring empty\n", __FUNCTION__);
++            return;
++        }
++        if (d->rirb_count == d->rirb_cnt) {
++            dprint(d, 2, "%s: rirb count reached\n", __FUNCTION__);
++            return;
++        }
++
++        rp = (d->corb_rp + 1) & 0xff;
++        addr = intel_hda_addr(d->corb_lbase, d->corb_ubase);
++        verb = ldl_phys_le(addr + 4*rp);
++        d->corb_rp = rp;
++
++        dprint(d, 2, "%s: [rp 0x%x] verb 0x%08x\n", __FUNCTION__, rp, verb);
++        intel_hda_send_command(d, verb);
++    }
++}
++
++static void intel_hda_response(HDACodecDevice *dev, bool solicited, uint32_t response)
++{
++    /* HDACodecBus *bus = DO_UPCAST(HDACodecBus, qbus, dev->qdev.parent_bus); */
++    HDACodecBus *bus = dev->parent_bus;
++    IntelHDAState *d = container_of(bus, IntelHDAState, codecs);
++    target_phys_addr_t addr;
++    uint32_t wp, ex;
++
++    if (d->ics & ICH6_IRS_BUSY) {
++        dprint(d, 2, "%s: [irr] response 0x%x, cad 0x%x\n",
++               __FUNCTION__, response, dev->cad);
++        d->irr = response;
++        d->ics &= ~(ICH6_IRS_BUSY | 0xf0);
++        d->ics |= (ICH6_IRS_VALID | (dev->cad << 4));
++        return;
++    }
++
++    if (!(d->rirb_ctl & ICH6_RBCTL_DMA_EN)) {
++        dprint(d, 1, "%s: rirb dma disabled, drop codec response\n", __FUNCTION__);
++        return;
++    }
++
++    ex = (solicited ? 0 : (1 << 4)) | dev->cad;
++    wp = (d->rirb_wp + 1) & 0xff;
++    addr = intel_hda_addr(d->rirb_lbase, d->rirb_ubase);
++    stl_phys_le(addr + 8*wp, response);
++    stl_phys_le(addr + 8*wp + 4, ex);
++    d->rirb_wp = wp;
++
++    dprint(d, 2, "%s: [wp 0x%x] response 0x%x, extra 0x%x\n",
++           __FUNCTION__, wp, response, ex);
++
++    d->rirb_count++;
++    if (d->rirb_count == d->rirb_cnt) {
++        dprint(d, 2, "%s: rirb count reached (%d)\n", __FUNCTION__, d->rirb_count);
++        if (d->rirb_ctl & ICH6_RBCTL_IRQ_EN) {
++            d->rirb_sts |= ICH6_RBSTS_IRQ;
++            intel_hda_update_irq(d);
++        }
++    } else if ((d->corb_rp & 0xff) == d->corb_wp) {
++        dprint(d, 2, "%s: corb ring empty (%d/%d)\n", __FUNCTION__,
++               d->rirb_count, d->rirb_cnt);
++        if (d->rirb_ctl & ICH6_RBCTL_IRQ_EN) {
++            d->rirb_sts |= ICH6_RBSTS_IRQ;
++            intel_hda_update_irq(d);
++        }
++    }
++}
++
++static bool intel_hda_xfer(HDACodecDevice *dev, uint32_t stnr, bool output,
++                           uint8_t *buf, uint32_t len)
++{
++    /* HDACodecBus *bus = DO_UPCAST(HDACodecBus, qbus, dev->qdev.parent_bus); */
++    HDACodecBus *bus = dev->parent_bus;
++    IntelHDAState *d = container_of(bus, IntelHDAState, codecs);
++    IntelHDAStream *st = NULL;
++    target_phys_addr_t addr;
++    uint32_t s, copy, left;
++    bool irq = false;
++
++    for (s = 0; s < ARRAY_SIZE(d->st); s++) {
++        if (stnr == ((d->st[s].ctl >> 20) & 0x0f)) {
++            st = d->st + s;
++            break;
++        }
++    }
++    if (st == NULL) {
++        return false;
++    }
++    if (st->bpl == NULL) {
++        return false;
++    }
++    if (st->ctl & (1 << 26)) {
++        /*
++         * Wait with the next DMA xfer until the guest
++         * has acked the buffer completion interrupt
++         */
++        return false;
++    }
++
++    left = len;
++    while (left > 0) {
++        copy = left;
++        if (copy > st->bsize - st->lpib)
++            copy = st->bsize - st->lpib;
++        if (copy > st->bpl[st->be].len - st->bp)
++            copy = st->bpl[st->be].len - st->bp;
++
++        dprint(d, 3, "dma: entry %d, pos %d/%d, copy %d\n",
++               st->be, st->bp, st->bpl[st->be].len, copy);
++
++        cpu_physical_memory_rw(st->bpl[st->be].addr + st->bp,
++                               buf, copy, !output);
++        st->lpib += copy;
++        st->bp += copy;
++        buf += copy;
++        left -= copy;
++
++        if (st->bpl[st->be].len == st->bp) {
++            /* bpl entry filled */
++            if (st->bpl[st->be].flags & 0x01) {
++                irq = true;
++            }
++            st->bp = 0;
++            st->be++;
++            if (st->be == st->bentries) {
++                /* bpl wrap around */
++                st->be = 0;
++                st->lpib = 0;
++            }
++        }
++    }
++    if (d->dp_lbase & 0x01) {
++        addr = intel_hda_addr(d->dp_lbase & ~0x01, d->dp_ubase);
++        stl_phys_le(addr + 8*s, st->lpib);
++    }
++    dprint(d, 3, "dma: --\n");
++
++    if (irq) {
++        st->ctl |= (1 << 26); /* buffer completion interrupt */
++        intel_hda_update_irq(d);
++    }
++    return true;
++}
++
++static void intel_hda_parse_bdl(IntelHDAState *d, IntelHDAStream *st)
++{
++    target_phys_addr_t addr;
++    uint8_t buf[16];
++    uint32_t i;
++
++    addr = intel_hda_addr(st->bdlp_lbase, st->bdlp_ubase);
++    st->bentries = st->lvi +1;
++    qemu_free(st->bpl);
++    st->bpl = qemu_malloc(sizeof(bpl) * st->bentries);
++    for (i = 0; i < st->bentries; i++, addr += 16) {
++        cpu_physical_memory_read(addr, buf, 16);
++        st->bpl[i].addr  = le64_to_cpu(*(uint64_t *)buf);
++        st->bpl[i].len   = le32_to_cpu(*(uint32_t *)(buf + 8));
++        st->bpl[i].flags = le32_to_cpu(*(uint32_t *)(buf + 12));
++        dprint(d, 1, "bdl/%d: 0x%" PRIx64 " +0x%x, 0x%x\n",
++               i, st->bpl[i].addr, st->bpl[i].len, st->bpl[i].flags);
++    }
++
++    st->bsize = st->cbl;
++    st->lpib  = 0;
++    st->be    = 0;
++    st->bp    = 0;
++}
++
++static void intel_hda_notify_codecs(IntelHDAState *d, uint32_t stream, bool running)
++{
++    /* DeviceState *qdev; */
++    HDACodecDevice *cdev;
++
++    LIST_FOREACH(cdev, &d->codecs.children, sibling) {
++        /* cdev = DO_UPCAST(HDACodecDevice, qdev, qdev); */
++        if (cdev->info->stream) {
++            cdev->info->stream(cdev, stream, running);
++        }
++    }
++}
++
++/* --------------------------------------------------------------------- */
++
++static void intel_hda_set_g_ctl(IntelHDAState *d, const IntelHDAReg *reg, uint32_t old)
++{
++    if ((d->g_ctl & ICH6_GCTL_RESET) == 0) {
++        intel_hda_reset(d);
++    }
++}
++
++static void intel_hda_set_wake_en(IntelHDAState *d, const IntelHDAReg *reg, uint32_t old)
++{
++    intel_hda_update_irq(d);
++}
++
++static void intel_hda_set_state_sts(IntelHDAState *d, const IntelHDAReg *reg, uint32_t old)
++{
++    intel_hda_update_irq(d);
++}
++
++static void intel_hda_set_int_ctl(IntelHDAState *d, const IntelHDAReg *reg, uint32_t old)
++{
++    intel_hda_update_irq(d);
++}
++
++static void intel_hda_get_wall_clk(IntelHDAState *d, const IntelHDAReg *reg)
++{
++    int64_t ns;
++
++    /* ns = qemu_get_clock_ns(vm_clock) - d->wall_base_ns; */
++    ns = qemu_get_clock(vm_clock) - d->wall_base_ns;
++    d->wall_clk = (uint32_t)(ns * 24 / 1000);  /* 24 MHz */
++}
++
++static void intel_hda_set_corb_wp(IntelHDAState *d, const IntelHDAReg *reg, uint32_t old)
++{
++    intel_hda_corb_run(d);
++}
++
++static void intel_hda_set_corb_ctl(IntelHDAState *d, const IntelHDAReg *reg, uint32_t old)
++{
++    intel_hda_corb_run(d);
++}
++
++static void intel_hda_set_rirb_wp(IntelHDAState *d, const IntelHDAReg *reg, uint32_t old)
++{
++    if (d->rirb_wp & ICH6_RIRBWP_RST) {
++        d->rirb_wp = 0;
++    }
++}
++
++static void intel_hda_set_rirb_sts(IntelHDAState *d, const IntelHDAReg *reg, uint32_t old)
++{
++    intel_hda_update_irq(d);
++
++    if ((old & ICH6_RBSTS_IRQ) && !(d->rirb_sts & ICH6_RBSTS_IRQ)) {
++        /* cleared ICH6_RBSTS_IRQ */
++        d->rirb_count = 0;
++        intel_hda_corb_run(d);
++    }
++}
++
++static void intel_hda_set_ics(IntelHDAState *d, const IntelHDAReg *reg, uint32_t old)
++{
++    if (d->ics & ICH6_IRS_BUSY) {
++        intel_hda_corb_run(d);
++    }
++}
++
++static void intel_hda_set_st_ctl(IntelHDAState *d, const IntelHDAReg *reg, uint32_t old)
++{
++    IntelHDAStream *st = d->st + reg->stream;
++
++    if (st->ctl & 0x01) {
++        /* reset */
++        dprint(d, 1, "st #%d: reset\n", reg->stream);
++        st->ctl = 0;
++    }
++    if ((st->ctl & 0x02) != (old & 0x02)) {
++        uint32_t stnr = (st->ctl >> 20) & 0x0f;
++        /* run bit flipped */
++        if (st->ctl & 0x02) {
++            /* start */
++            dprint(d, 1, "st #%d: start %d (ring buf %d bytes)\n",
++                   reg->stream, stnr, st->cbl);
++            intel_hda_parse_bdl(d, st);
++            intel_hda_notify_codecs(d, stnr, true);
++        } else {
++            /* stop */
++            dprint(d, 1, "st #%d: stop %d\n", reg->stream, stnr);
++            intel_hda_notify_codecs(d, stnr, false);
++        }
++    }
++    intel_hda_update_irq(d);
++}
++
++/* --------------------------------------------------------------------- */
++
++#define ST_REG(_n, _o) (0x80 + (_n) * 0x20 + (_o))
++
++static const struct IntelHDAReg regtab[] = {
++    /* global */
++    [ ICH6_REG_GCAP ] = {
++        .name     = "GCAP",
++        .size     = 2,
++        .reset    = 0x4401,
++    },
++    [ ICH6_REG_VMIN ] = {
++        .name     = "VMIN",
++        .size     = 1,
++    },
++    [ ICH6_REG_VMAJ ] = {
++        .name     = "VMAJ",
++        .size     = 1,
++        .reset    = 1,
++    },
++    [ ICH6_REG_OUTPAY ] = {
++        .name     = "OUTPAY",
++        .size     = 2,
++        .reset    = 0x3c,
++    },
++    [ ICH6_REG_INPAY ] = {
++        .name     = "INPAY",
++        .size     = 2,
++        .reset    = 0x1d,
++    },
++    [ ICH6_REG_GCTL ] = {
++        .name     = "GCTL",
++        .size     = 4,
++        .wmask    = 0x0103,
++        .offset   = offsetof(IntelHDAState, g_ctl),
++        .whandler = intel_hda_set_g_ctl,
++    },
++    [ ICH6_REG_WAKEEN ] = {
++        .name     = "WAKEEN",
++        .size     = 2,
++        .wmask    = 0x7fff,
++        .offset   = offsetof(IntelHDAState, wake_en),
++        .whandler = intel_hda_set_wake_en,
++    },
++    [ ICH6_REG_STATESTS ] = {
++        .name     = "STATESTS",
++        .size     = 2,
++        .wmask    = 0x7fff,
++        .wclear   = 0x7fff,
++        .offset   = offsetof(IntelHDAState, state_sts),
++        .whandler = intel_hda_set_state_sts,
++    },
++
++    /* interrupts */
++    [ ICH6_REG_INTCTL ] = {
++        .name     = "INTCTL",
++        .size     = 4,
++        .wmask    = 0xc00000ff,
++        .offset   = offsetof(IntelHDAState, int_ctl),
++        .whandler = intel_hda_set_int_ctl,
++    },
++    [ ICH6_REG_INTSTS ] = {
++        .name     = "INTSTS",
++        .size     = 4,
++        .wmask    = 0xc00000ff,
++        .wclear   = 0xc00000ff,
++        .offset   = offsetof(IntelHDAState, int_sts),
++    },
++
++    /* misc */
++    [ ICH6_REG_WALLCLK ] = {
++        .name     = "WALLCLK",
++        .size     = 4,
++        .offset   = offsetof(IntelHDAState, wall_clk),
++        .rhandler = intel_hda_get_wall_clk,
++    },
++    [ ICH6_REG_WALLCLK + 0x2000 ] = {
++        .name     = "WALLCLK(alias)",
++        .size     = 4,
++        .offset   = offsetof(IntelHDAState, wall_clk),
++        .rhandler = intel_hda_get_wall_clk,
++    },
++
++    /* dma engine */
++    [ ICH6_REG_CORBLBASE ] = {
++        .name     = "CORBLBASE",
++        .size     = 4,
++        .wmask    = 0xffffff80,
++        .offset   = offsetof(IntelHDAState, corb_lbase),
++    },
++    [ ICH6_REG_CORBUBASE ] = {
++        .name     = "CORBUBASE",
++        .size     = 4,
++        .wmask    = 0xffffffff,
++        .offset   = offsetof(IntelHDAState, corb_ubase),
++    },
++    [ ICH6_REG_CORBWP ] = {
++        .name     = "CORBWP",
++        .size     = 2,
++        .wmask    = 0xff,
++        .offset   = offsetof(IntelHDAState, corb_wp),
++        .whandler = intel_hda_set_corb_wp,
++    },
++    [ ICH6_REG_CORBRP ] = {
++        .name     = "CORBRP",
++        .size     = 2,
++        .wmask    = 0x80ff,
++        .offset   = offsetof(IntelHDAState, corb_rp),
++    },
++    [ ICH6_REG_CORBCTL ] = {
++        .name     = "CORBCTL",
++        .size     = 1,
++        .wmask    = 0x03,
++        .offset   = offsetof(IntelHDAState, corb_ctl),
++        .whandler = intel_hda_set_corb_ctl,
++    },
++    [ ICH6_REG_CORBSTS ] = {
++        .name     = "CORBSTS",
++        .size     = 1,
++        .wmask    = 0x01,
++        .wclear   = 0x01,
++        .offset   = offsetof(IntelHDAState, corb_sts),
++    },
++    [ ICH6_REG_CORBSIZE ] = {
++        .name     = "CORBSIZE",
++        .size     = 1,
++        .reset    = 0x42,
++        .offset   = offsetof(IntelHDAState, corb_size),
++    },
++    [ ICH6_REG_RIRBLBASE ] = {
++        .name     = "RIRBLBASE",
++        .size     = 4,
++        .wmask    = 0xffffff80,
++        .offset   = offsetof(IntelHDAState, rirb_lbase),
++    },
++    [ ICH6_REG_RIRBUBASE ] = {
++        .name     = "RIRBUBASE",
++        .size     = 4,
++        .wmask    = 0xffffffff,
++        .offset   = offsetof(IntelHDAState, rirb_ubase),
++    },
++    [ ICH6_REG_RIRBWP ] = {
++        .name     = "RIRBWP",
++        .size     = 2,
++        .wmask    = 0x8000,
++        .offset   = offsetof(IntelHDAState, rirb_wp),
++        .whandler = intel_hda_set_rirb_wp,
++    },
++    [ ICH6_REG_RINTCNT ] = {
++        .name     = "RINTCNT",
++        .size     = 2,
++        .wmask    = 0xff,
++        .offset   = offsetof(IntelHDAState, rirb_cnt),
++    },
++    [ ICH6_REG_RIRBCTL ] = {
++        .name     = "RIRBCTL",
++        .size     = 1,
++        .wmask    = 0x07,
++        .offset   = offsetof(IntelHDAState, rirb_ctl),
++    },
++    [ ICH6_REG_RIRBSTS ] = {
++        .name     = "RIRBSTS",
++        .size     = 1,
++        .wmask    = 0x05,
++        .wclear   = 0x05,
++        .offset   = offsetof(IntelHDAState, rirb_sts),
++        .whandler = intel_hda_set_rirb_sts,
++    },
++    [ ICH6_REG_RIRBSIZE ] = {
++        .name     = "RIRBSIZE",
++        .size     = 1,
++        .reset    = 0x42,
++        .offset   = offsetof(IntelHDAState, rirb_size),
++    },
++
++    [ ICH6_REG_DPLBASE ] = {
++        .name     = "DPLBASE",
++        .size     = 4,
++        .wmask    = 0xffffff81,
++        .offset   = offsetof(IntelHDAState, dp_lbase),
++    },
++    [ ICH6_REG_DPUBASE ] = {
++        .name     = "DPUBASE",
++        .size     = 4,
++        .wmask    = 0xffffffff,
++        .offset   = offsetof(IntelHDAState, dp_ubase),
++    },
++
++    [ ICH6_REG_IC ] = {
++        .name     = "ICW",
++        .size     = 4,
++        .wmask    = 0xffffffff,
++        .offset   = offsetof(IntelHDAState, icw),
++    },
++    [ ICH6_REG_IR ] = {
++        .name     = "IRR",
++        .size     = 4,
++        .offset   = offsetof(IntelHDAState, irr),
++    },
++    [ ICH6_REG_IRS ] = {
++        .name     = "ICS",
++        .size     = 2,
++        .wmask    = 0x0003,
++        .wclear   = 0x0002,
++        .offset   = offsetof(IntelHDAState, ics),
++        .whandler = intel_hda_set_ics,
++    },
++
++#define HDA_STREAM(_t, _i)                                            \
++    [ ST_REG(_i, ICH6_REG_SD_CTL) ] = {                               \
++        .stream   = _i,                                               \
++        .name     = _t stringify(_i) " CTL",                          \
++        .size     = 4,                                                \
++        .wmask    = 0x1cff001f,                                       \
++        .offset   = offsetof(IntelHDAState, st[_i].ctl),              \
++        .whandler = intel_hda_set_st_ctl,                             \
++    },                                                                \
++    [ ST_REG(_i, ICH6_REG_SD_CTL) + 2] = {                            \
++        .stream   = _i,                                               \
++        .name     = _t stringify(_i) " CTL(stnr)",                    \
++        .size     = 1,                                                \
++        .shift    = 16,                                               \
++        .wmask    = 0x00ff0000,                                       \
++        .offset   = offsetof(IntelHDAState, st[_i].ctl),              \
++        .whandler = intel_hda_set_st_ctl,                             \
++    },                                                                \
++    [ ST_REG(_i, ICH6_REG_SD_STS)] = {                                \
++        .stream   = _i,                                               \
++        .name     = _t stringify(_i) " CTL(sts)",                     \
++        .size     = 1,                                                \
++        .shift    = 24,                                               \
++        .wmask    = 0x1c000000,                                       \
++        .wclear   = 0x1c000000,                                       \
++        .offset   = offsetof(IntelHDAState, st[_i].ctl),              \
++        .whandler = intel_hda_set_st_ctl,                             \
++    },                                                                \
++    [ ST_REG(_i, ICH6_REG_SD_LPIB) ] = {                              \
++        .stream   = _i,                                               \
++        .name     = _t stringify(_i) " LPIB",                         \
++        .size     = 4,                                                \
++        .offset   = offsetof(IntelHDAState, st[_i].lpib),             \
++    },                                                                \
++    [ ST_REG(_i, ICH6_REG_SD_LPIB) + 0x2000 ] = {                     \
++        .stream   = _i,                                               \
++        .name     = _t stringify(_i) " LPIB(alias)",                  \
++        .size     = 4,                                                \
++        .offset   = offsetof(IntelHDAState, st[_i].lpib),             \
++    },                                                                \
++    [ ST_REG(_i, ICH6_REG_SD_CBL) ] = {                               \
++        .stream   = _i,                                               \
++        .name     = _t stringify(_i) " CBL",                          \
++        .size     = 4,                                                \
++        .wmask    = 0xffffffff,                                       \
++        .offset   = offsetof(IntelHDAState, st[_i].cbl),              \
++    },                                                                \
++    [ ST_REG(_i, ICH6_REG_SD_LVI) ] = {                               \
++        .stream   = _i,                                               \
++        .name     = _t stringify(_i) " LVI",                          \
++        .size     = 2,                                                \
++        .wmask    = 0x00ff,                                           \
++        .offset   = offsetof(IntelHDAState, st[_i].lvi),              \
++    },                                                                \
++    [ ST_REG(_i, ICH6_REG_SD_FIFOSIZE) ] = {                          \
++        .stream   = _i,                                               \
++        .name     = _t stringify(_i) " FIFOS",                        \
++        .size     = 2,                                                \
++        .reset    = HDA_BUFFER_SIZE,                                  \
++    },                                                                \
++    [ ST_REG(_i, ICH6_REG_SD_FORMAT) ] = {                            \
++        .stream   = _i,                                               \
++        .name     = _t stringify(_i) " FMT",                          \
++        .size     = 2,                                                \
++        .wmask    = 0x7f7f,                                           \
++        .offset   = offsetof(IntelHDAState, st[_i].fmt),              \
++    },                                                                \
++    [ ST_REG(_i, ICH6_REG_SD_BDLPL) ] = {                             \
++        .stream   = _i,                                               \
++        .name     = _t stringify(_i) " BDLPL",                        \
++        .size     = 4,                                                \
++        .wmask    = 0xffffff80,                                       \
++        .offset   = offsetof(IntelHDAState, st[_i].bdlp_lbase),       \
++    },                                                                \
++    [ ST_REG(_i, ICH6_REG_SD_BDLPU) ] = {                             \
++        .stream   = _i,                                               \
++        .name     = _t stringify(_i) " BDLPU",                        \
++        .size     = 4,                                                \
++        .wmask    = 0xffffffff,                                       \
++        .offset   = offsetof(IntelHDAState, st[_i].bdlp_ubase),       \
++    },                                                                \
++
++    HDA_STREAM("IN", 0)
++    HDA_STREAM("IN", 1)
++    HDA_STREAM("IN", 2)
++    HDA_STREAM("IN", 3)
++
++    HDA_STREAM("OUT", 4)
++    HDA_STREAM("OUT", 5)
++    HDA_STREAM("OUT", 6)
++    HDA_STREAM("OUT", 7)
++
++};
++
++static const IntelHDAReg *intel_hda_reg_find(IntelHDAState *d, target_phys_addr_t addr)
++{
++    const IntelHDAReg *reg;
++
++    addr -= d->base_addr;
++    if (addr >= sizeof(regtab)/sizeof(regtab[0])) {
++        goto noreg;
++    }
++    reg = regtab+addr;
++    if (reg->name == NULL) {
++        goto noreg;
++    }
++    return reg;
++
++noreg:
++    dprint(d, 1, "unknown register, addr 0x%x\n", (int) addr);
++    return NULL;
++}
++
++static uint32_t *intel_hda_reg_addr(IntelHDAState *d, const IntelHDAReg *reg)
++{
++    uint8_t *addr = (void*)d;
++
++    addr += reg->offset;
++    return (uint32_t*)addr;
++}
++
++static void intel_hda_reg_write(IntelHDAState *d, const IntelHDAReg *reg, uint32_t val,
++                                uint32_t wmask)
++{
++    uint32_t *addr;
++    uint32_t old;
++
++    if (!reg) {
++        return;
++    }
++
++    if (d->debug) {
++        time_t now = time(NULL);
++        if (d->last_write && d->last_reg == reg && d->last_val == val) {
++            d->repeat_count++;
++            if (d->last_sec != now) {
++                dprint(d, 2, "previous register op repeated %d times\n", d->repeat_count);
++                d->last_sec = now;
++                d->repeat_count = 0;
++            }
++        } else {
++            if (d->repeat_count) {
++                dprint(d, 2, "previous register op repeated %d times\n", d->repeat_count);
++            }
++            dprint(d, 2, "write %-16s: 0x%x (%x)\n", reg->name, val, wmask);
++            d->last_write = 1;
++            d->last_reg   = reg;
++            d->last_val   = val;
++            d->last_sec   = now;
++            d->repeat_count = 0;
++        }
++    }
++    assert(reg->offset != 0);
++
++    addr = intel_hda_reg_addr(d, reg);
++    old = *addr;
++
++    if (reg->shift) {
++        val <<= reg->shift;
++        wmask <<= reg->shift;
++    }
++    wmask &= reg->wmask;
++    *addr &= ~wmask;
++    *addr |= wmask & val;
++    *addr &= ~(val & reg->wclear);
++
++    if (reg->whandler) {
++        reg->whandler(d, reg, old);
++    }
++}
++
++static uint32_t intel_hda_reg_read(IntelHDAState *d, const IntelHDAReg *reg,
++                                   uint32_t rmask)
++{
++    uint32_t *addr, ret;
++
++    if (!reg) {
++        return 0;
++    }
++
++    if (reg->rhandler) {
++        reg->rhandler(d, reg);
++    }
++
++    if (reg->offset == 0) {
++        /* constant read-only register */
++        ret = reg->reset;
++    } else {
++        addr = intel_hda_reg_addr(d, reg);
++        ret = *addr;
++        if (reg->shift) {
++            ret >>= reg->shift;
++        }
++        ret &= rmask;
++    }
++    if (d->debug) {
++        time_t now = time(NULL);
++        if (!d->last_write && d->last_reg == reg && d->last_val == ret) {
++            d->repeat_count++;
++            if (d->last_sec != now) {
++                dprint(d, 2, "previous register op repeated %d times\n", d->repeat_count);
++                d->last_sec = now;
++                d->repeat_count = 0;
++            }
++        } else {
++            if (d->repeat_count) {
++                dprint(d, 2, "previous register op repeated %d times\n", d->repeat_count);
++            }
++            dprint(d, 2, "read  %-16s: 0x%x (%x)\n", reg->name, ret, rmask);
++            d->last_write = 0;
++            d->last_reg   = reg;
++            d->last_val   = ret;
++            d->last_sec   = now;
++            d->repeat_count = 0;
++        }
++    }
++    return ret;
++}
++
++static void intel_hda_regs_reset(IntelHDAState *d)
++{
++    uint32_t *addr;
++    int i;
++
++    for (i = 0; i < sizeof(regtab)/sizeof(regtab[0]); i++) {
++        if (regtab[i].name == NULL) {
++            continue;
++        }
++        if (regtab[i].offset == 0) {
++            continue;
++        }
++        addr = intel_hda_reg_addr(d, regtab + i);
++        *addr = regtab[i].reset;
++    }
++}
++
++/* --------------------------------------------------------------------- */
++
++static void intel_hda_mmio_writeb(void *opaque, target_phys_addr_t addr, uint32_t val)
++{
++    IntelHDAState *d = opaque;
++    const IntelHDAReg *reg = intel_hda_reg_find(d, addr);
++
++    intel_hda_reg_write(d, reg, val, 0xff);
++}
++
++static void intel_hda_mmio_writew(void *opaque, target_phys_addr_t addr, uint32_t val)
++{
++    IntelHDAState *d = opaque;
++    const IntelHDAReg *reg = intel_hda_reg_find(d, addr);
++
++    intel_hda_reg_write(d, reg, val, 0xffff);
++}
++
++static void intel_hda_mmio_writel(void *opaque, target_phys_addr_t addr, uint32_t val)
++{
++    IntelHDAState *d = opaque;
++    const IntelHDAReg *reg = intel_hda_reg_find(d, addr);
++
++    intel_hda_reg_write(d, reg, val, 0xffffffff);
++}
++
++static uint32_t intel_hda_mmio_readb(void *opaque, target_phys_addr_t addr)
++{
++    IntelHDAState *d = opaque;
++    const IntelHDAReg *reg = intel_hda_reg_find(d, addr);
++
++    return intel_hda_reg_read(d, reg, 0xff);
++}
++
++static uint32_t intel_hda_mmio_readw(void *opaque, target_phys_addr_t addr)
++{
++    IntelHDAState *d = opaque;
++    const IntelHDAReg *reg = intel_hda_reg_find(d, addr);
++
++    return intel_hda_reg_read(d, reg, 0xffff);
++}
++
++static uint32_t intel_hda_mmio_readl(void *opaque, target_phys_addr_t addr)
++{
++    IntelHDAState *d = opaque;
++    const IntelHDAReg *reg = intel_hda_reg_find(d, addr);
++
++    return intel_hda_reg_read(d, reg, 0xffffffff);
++}
++
++static CPUReadMemoryFunc * intel_hda_mmio_read[3] = {
++    intel_hda_mmio_readb,
++    intel_hda_mmio_readw,
++    intel_hda_mmio_readl,
++};
++
++static CPUWriteMemoryFunc * intel_hda_mmio_write[3] = {
++    intel_hda_mmio_writeb,
++    intel_hda_mmio_writew,
++    intel_hda_mmio_writel,
++};
++
++static void intel_hda_map(PCIDevice *pci, int region_num,
++                          pcibus_t addr, pcibus_t size, int type)
++{
++    IntelHDAState *d = DO_UPCAST(IntelHDAState, pci, pci);
++
++    d->base_addr = addr;
++    cpu_register_physical_memory(addr, 0x4000, d->mmio_addr);
++}
++
++/* --------------------------------------------------------------------- */
++
++static void intel_hda_reset(void/*DeviceState*/ *dev)
++{
++    /* IntelHDAState *d = DO_UPCAST(IntelHDAState, pci.qdev, dev); */
++    IntelHDAState *d = (IntelHDAState*)dev;
++    /* DeviceState *qdev; */
++    HDACodecDevice *cdev;
++
++    intel_hda_regs_reset(d);
++    d->wall_base_ns = qemu_get_clock(vm_clock);
++
++    /* reset codecs */
++    LIST_FOREACH(cdev, &d->codecs.children, sibling) {
++        /* cdev = DO_UPCAST(HDACodecDevice, qdev, qdev); */
++        /* if (qdev->info->reset) { */
++            /* qdev->info->reset(qdev); */
++        /* } */
++        d->state_sts |= (1 << cdev->cad);
++    }
++    intel_hda_update_irq(d);
++}
++
++static int intel_hda_init(PCIDevice *pci)
++{
++    IntelHDAState *d = DO_UPCAST(IntelHDAState, pci, pci);
++    uint8_t *conf = d->pci.config;
++
++    d->name = d->pci.name;
++
++    pci_config_set_vendor_id(conf, PCI_VENDOR_ID_INTEL);
++    pci_config_set_device_id(conf, 0x2668);
++    conf[PCI_REVISION] = 1;
++    pci_config_set_class(conf, PCI_CLASS_MULTIMEDIA_HD_AUDIO);
++    conf[PCI_INTERRUPT_PIN] = 1;
++
++    /* HDCTL off 0x40 bit 0 selects signaling mode (1-HDA, 0 - Ac97) 18.1.19 */
++    conf[0x40] = 0x01;
++
++    d->mmio_addr = cpu_register_io_memory(0, intel_hda_mmio_read,
++                                          intel_hda_mmio_write, d);
++    pci_register_io_region(&d->pci, 0, 0x4000, PCI_ADDRESS_SPACE_MEM,
++                           intel_hda_map);
++
++    hda_codec_bus_init(d, &d->codecs,
++                       intel_hda_response, intel_hda_xfer);
++    qemu_register_reset (intel_hda_reset, d);
++    d->debug = 1;
++
++    return 0;
++}
++
++static int intel_hda_exit(PCIDevice *pci)
++{
++    IntelHDAState *d = DO_UPCAST(IntelHDAState, pci, pci);
++
++    cpu_unregister_io_memory(d->mmio_addr);
++    return 0;
++}
++
++static int intel_hda_post_load(IntelHDAState *opaque, int version)
++{
++    IntelHDAState* d = opaque;
++    int i;
++
++    dprint(d, 1, "%s\n", __FUNCTION__);
++    for (i = 0; i < ARRAY_SIZE(d->st); i++) {
++        if (d->st[i].ctl & 0x02) {
++            intel_hda_parse_bdl(d, &d->st[i]);
++        }
++    }
++    intel_hda_update_irq(d);
++    return 0;
++}
++
++static void intel_hda_stream_save(QEMUFile *f, IntelHDAStream *st)
++{
++    qemu_put_be32s(f, &st->ctl);
++    qemu_put_be32s(f, &st->lpib);
++    qemu_put_be32s(f, &st->cbl);
++    qemu_put_be32s(f, &st->lvi);
++    qemu_put_be32s(f, &st->fmt);
++    qemu_put_be32s(f, &st->bdlp_lbase);
++    qemu_put_be32s(f, &st->bdlp_ubase);
++}
++static int intel_hda_stream_load(QEMUFile *f, IntelHDAStream *st, int version_id)
++{
++    qemu_get_be32s(f, &st->ctl);
++    qemu_get_be32s(f, &st->lpib);
++    qemu_get_be32s(f, &st->cbl);
++    qemu_get_be32s(f, &st->lvi);
++    qemu_get_be32s(f, &st->fmt);
++    qemu_get_be32s(f, &st->bdlp_lbase);
++    qemu_get_be32s(f, &st->bdlp_ubase);
++
++    return 0;
++}
++
++static void intel_hda_save(QEMUFile *f, void *opaque)
++{
++    IntelHDAState *s = opaque;
++    int i = 0;
++
++    pci_device_save(&s->pci, f);
++    qemu_put_be32s(f, &s->g_ctl);
++    qemu_put_be32s(f, &s->wake_en);
++    qemu_put_be32s(f, &s->state_sts);
++    qemu_put_be32s(f, &s->int_ctl);
++    qemu_put_be32s(f, &s->int_sts);
++    qemu_put_be32s(f, &s->wall_clk);
++    qemu_put_be32s(f, &s->corb_lbase);
++    qemu_put_be32s(f, &s->corb_ubase);
++    qemu_put_be32s(f, &s->corb_rp);
++    qemu_put_be32s(f, &s->corb_wp);
++    qemu_put_be32s(f, &s->corb_ctl);
++    qemu_put_be32s(f, &s->corb_sts);
++    qemu_put_be32s(f, &s->corb_size);
++    qemu_put_be32s(f, &s->rirb_lbase);
++    qemu_put_be32s(f, &s->rirb_ubase);
++    qemu_put_be32s(f, &s->rirb_wp);
++    qemu_put_be32s(f, &s->rirb_cnt);
++    qemu_put_be32s(f, &s->rirb_ctl);
++    qemu_put_be32s(f, &s->rirb_sts);
++    qemu_put_be32s(f, &s->rirb_size);
++    qemu_put_be32s(f, &s->dp_lbase);
++    qemu_put_be32s(f, &s->dp_ubase);
++    qemu_put_be32s(f, &s->icw);
++    qemu_put_be32s(f, &s->irr);
++    qemu_put_be32s(f, &s->ics);
++    for (i = 0; i < 8; i++) {
++        intel_hda_stream_save(f, &s->st[i]);
++    }
++
++    /* additional state info */
++    qemu_put_be32s(f, &s->rirb_count);
++    qemu_put_be64s(f, &s->wall_base_ns);
++}
++static int intel_hda_load(QEMUFile *f, void *opaque, int version_id)
++{
++    IntelHDAState *s = opaque;
++    int i = 0;
++    int ret;
++
++    if (version_id > 1) {
++        return -EINVAL;
++    }
++
++    ret = pci_device_load(&s->pci, f);
++    if (ret) {
++        return ret;
++    }
++
++    qemu_get_be32s(f, &s->g_ctl);
++    qemu_get_be32s(f, &s->wake_en);
++    qemu_get_be32s(f, &s->state_sts);
++    qemu_get_be32s(f, &s->int_ctl);
++    qemu_get_be32s(f, &s->int_sts);
++    qemu_get_be32s(f, &s->wall_clk);
++    qemu_get_be32s(f, &s->corb_lbase);
++    qemu_get_be32s(f, &s->corb_ubase);
++    qemu_get_be32s(f, &s->corb_rp);
++    qemu_get_be32s(f, &s->corb_wp);
++    qemu_get_be32s(f, &s->corb_ctl);
++    qemu_get_be32s(f, &s->corb_sts);
++    qemu_get_be32s(f, &s->corb_size);
++    qemu_get_be32s(f, &s->rirb_lbase);
++    qemu_get_be32s(f, &s->rirb_ubase);
++    qemu_get_be32s(f, &s->rirb_wp);
++    qemu_get_be32s(f, &s->rirb_cnt);
++    qemu_get_be32s(f, &s->rirb_ctl);
++    qemu_get_be32s(f, &s->rirb_sts);
++    qemu_get_be32s(f, &s->rirb_size);
++    qemu_get_be32s(f, &s->dp_lbase);
++    qemu_get_be32s(f, &s->dp_ubase);
++    qemu_get_be32s(f, &s->icw);
++    qemu_get_be32s(f, &s->irr);
++    qemu_get_be32s(f, &s->ics);
++    for (i = 0; i < 8; i++) {
++        intel_hda_stream_load(f, &s->st[i], version_id);
++    }
++
++    /* additional state info */
++    qemu_get_be32s(f, &s->rirb_count);
++    qemu_get_be64s(f, &s->wall_base_ns);
++
++    intel_hda_post_load(s, version_id);
++
++    return 0;
++}
++
++#ifdef thenewqemu
++static PCIDeviceInfo intel_hda_info = {
++    .qdev.name    = "intel-hda",
++    .qdev.desc    = "Intel HD Audio Controller",
++    .qdev.size    = sizeof(IntelHDAState),
++    .qdev.vmsd    = &vmstate_intel_hda,
++    .qdev.reset   = intel_hda_reset,
++    .init         = intel_hda_init,
++    .exit         = intel_hda_exit,
++    .config_write = intel_hda_write_config,
++    .qdev.props   = (Property[]) {
++        DEFINE_PROP_UINT32("debug", IntelHDAState, debug, 0),
++        DEFINE_PROP_UINT32("msi", IntelHDAState, msi, 1),
++        DEFINE_PROP_END_OF_LIST(),
++    }
++};
++
++static void intel_hda_register(void)
++{
++    pci_qdev_register(&intel_hda_info);
++}
++device_init(intel_hda_register);
++#endif
++
++/*
++ * create intel hda controller with codec attached to it,
++ * so '-soundhw hda' works.
++ */
++int intel_hda_and_codec_init(PCIBus *bus, AudioState *audio)
++{
++    PCIDevice *controller;
++    HDACodecBus *hdabus;
++
++    controller = pci_register_device(bus, "intel-hda", sizeof (IntelHDAState), -1, NULL, NULL);
++    intel_hda_init(controller);
++    register_savevm("intel-hda", 0, 1, intel_hda_save, intel_hda_load, controller);
++    hdabus = &((IntelHDAState*)controller)->codecs;
++    hdabus->audio = audio;
++
++    hda_audio_init_duplex(hdabus);
++    /* hda_audio_init_output(hdabus); */
++    return 0;
++}
+diff --git a/hw/intel-hda.h b/hw/intel-hda.h
+new file mode 100644
+index 0000000..cde3466
+--- /dev/null
++++ b/hw/intel-hda.h
+@@ -0,0 +1,70 @@
++#ifndef HW_INTEL_HDA_H
++#define HW_INTEL_HDA_H
++
++/* --------------------------------------------------------------------- */
++/* hda bus                                                               */
++
++typedef struct HDACodecBus HDACodecBus;
++typedef struct HDACodecDevice HDACodecDevice;
++typedef struct HDACodecDeviceInfo HDACodecDeviceInfo;
++
++typedef void (*hda_codec_response_func)(HDACodecDevice *dev,
++                                        bool solicited, uint32_t response);
++typedef bool (*hda_codec_xfer_func)(HDACodecDevice *dev,
++                                    uint32_t stnr, bool output,
++                                    uint8_t *buf, uint32_t len);
++
++struct HDACodecBus {
++    PCIDevice* parent;
++    LIST_HEAD(, HDACodecDevice) children;
++
++    AudioState *audio;
++
++    uint32_t next_cad;
++    hda_codec_response_func response;
++    hda_codec_xfer_func xfer;
++};
++
++struct HDACodecDevice {
++    HDACodecBus *parent_bus;
++
++    LIST_ENTRY(HDACodecDevice) sibling;
++
++    HDACodecDeviceInfo  *info;
++    uint32_t            cad;    /* codec address */
++};
++
++struct HDACodecDeviceInfo {
++    int (*init)(HDACodecDevice *dev);
++    int (*exit)(HDACodecDevice *dev);
++    void (*command)(HDACodecDevice *dev, uint32_t nid, uint32_t data);
++    void (*stream)(HDACodecDevice *dev, uint32_t stnr, bool running);
++};
++
++void hda_codec_bus_init(void *dev, HDACodecBus *bus,
++                        hda_codec_response_func response,
++                        hda_codec_xfer_func xfer);
++HDACodecDevice *hda_codec_find(HDACodecBus *bus, uint32_t cad);
++
++void hda_codec_response(HDACodecDevice *dev, bool solicited, uint32_t response);
++bool hda_codec_xfer(HDACodecDevice *dev, uint32_t stnr, bool output,
++                    uint8_t *buf, uint32_t len);
++
++/* --------------------------------------------------------------------- */
++
++#define dprint(_dev, _level, _fmt, ...)                                 \
++    do {                                                                \
++        if (_dev->debug >= _level) {                                    \
++            fprintf(stderr, "%s: ", _dev->name);                        \
++            fprintf(stderr, _fmt, ## __VA_ARGS__);                      \
++        }                                                               \
++    } while (0)
++
++/* --------------------------------------------------------------------- */
++
++
++int hda_audio_init_output(HDACodecBus *bus);
++int hda_audio_init_duplex(HDACodecBus *bus);
++int hda_codec_dev_init(HDACodecDevice *dev);
++
++#endif
+diff --git a/osdep.h b/osdep.h
+index 2bd2e62..46b04bd 100644
+--- a/osdep.h
++++ b/osdep.h
+@@ -33,6 +33,16 @@
+         (type *) ((char *) __mptr - offsetof(type, member));})
+ #endif
+
++/* Convert from a base type to a parent type, with compile time checking.  */
++#ifdef __GNUC__
++#define DO_UPCAST(type, field, dev) ( __extension__ ( { \
++    char __attribute__((unused)) offset_must_be_zero[ \
++        -offsetof(type, field)]; \
++    container_of(dev, type, field);}))
++#else
++#define DO_UPCAST(type, field, dev) container_of(dev, type, field)
++#endif
++
+ #ifndef MIN
+ #define MIN(a, b) (((a) < (b)) ? (a) : (b))
+ #endif
+diff --git a/vl.c b/vl.c
+index f07a659..4e30320 100644
+--- a/vl.c
++++ b/vl.c
+@@ -4552,6 +4552,16 @@ struct soundhw soundhw[] = {
+     },
+ #endif
+
++#ifdef CONFIG_HDA
++    {
++        "hda",
++        "Intel HD Audio",
++        0,
++        0,
++        { .init_pci = intel_hda_and_codec_init }
++    },
++#endif
++
+ #endif /* HAS_AUDIO_CHOICE */
+
+     { NULL, NULL, 0, 0, { NULL } }
+--
+1.7.2.3
+

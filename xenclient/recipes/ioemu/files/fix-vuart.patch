@@ -1,0 +1,674 @@
+diff --git a/hw/pc.c b/hw/pc.c
+index 657d545..8d78de3 100644
+--- a/hw/pc.c
++++ b/hw/pc.c
+@@ -1077,14 +1077,15 @@ vga_bios_error:
+ 	  int interrupt_line =   s->interrupt_line;
+ 	  int base = s->base_port_address;
+ #if 1
+-	  syslog(LOG_DEBUG, "serial init: %s is a vuart\n", serial_hds[i]);
++	  syslog(LOG_DEBUG, "serial init: %p is a vuart\n", serial_hds[i]);
+ #endif
+-	  xen_uart_16550_init(base,
++	  xen_UART_16550_init(base,
++			      interrupt_line,
+ 			      i8259[interrupt_line],
+ 			      115200);
+ 	} else {
+ #if 1
+-	  syslog(LOG_DEBUG, "serial init: %s is not a vuart; pc.c calling serial_init\n", serial_hds[i]);
++	  syslog(LOG_DEBUG, "serial init: %p is not a vuart; pc.c calling serial_init\n", serial_hds[i]);
+ #endif
+ 	  serial_init(serial_io[i], i8259[serial_irq[i]], 115200,
+ 		      serial_hds[i]);
+diff --git a/hw/xen_uart_16550.c b/hw/xen_uart_16550.c
+index b8fed41..286b889 100644
+--- a/hw/xen_uart_16550.c
++++ b/hw/xen_uart_16550.c
+@@ -9,9 +9,10 @@
+ #include "qemu-timer.h"	  /* todo: might be able to take this out   */
+ #include "qemu-char.h"	  /* todo: might be able to take this out   */
+ #include "sysemu.h"
++#include "qemu-xen.h"
+ #include "xen_uart_16550.h"
+ 
+-// #define DEBUG_XEN_UART 1
++/* #define DEBUG_XEN_UART 1 */
+ 
+ static const char *uart_reg_debug_names[] = {
+   "thr/rbr/dll",		/* 0 */
+@@ -35,37 +36,21 @@ static volatile int xen_UART_switch_requested = 0;
+ #endif
+ static volatile int xen_UART_domid_owning_UART = 0;
+ 
+-static int already_connected = 0;
+-
+-static void xen_UART_check_for_switching()
++static void xen_UART_check_for_switching(XenUartState *s)
+ {
++  int already_connected = s->connected;
+   int now_connected = (domid == xen_UART_domid_owning_UART);
+   int i;
+ 
+ #ifdef XEN_UART_SWITCH_BY_XENSTORE
+   if (xen_UART_switch_requested) {
+     xen_UART_switch_requested = 0;
+-#ifdef DEBUG_XEN_UART
+-    syslog(LOG_DEBUG, "serial %d(%d %d): switch requested: new owner=%d, connected = %d, already connected=%d\n",
+-	   domid, already_connected, xen_UART_domid_owning_UART, xen_UART_domid_owning_UART, now_connected, already_connected);
+-#endif
+   }
+ #endif
+ 
+-#if 1				/* flag:always_connected */
+-  /* for debugging only **************************************************************** */
+-  now_connected = 1;
+-#endif
+-
+   if (now_connected != already_connected) {
+-#if 1
+-    syslog(LOG_DEBUG, "serial %d(%d %d): domid %d %s\n", domid, already_connected, xen_UART_domid_owning_UART, domid, now_connected ? "connecting" : "disconnecting");
+-#endif
+     for (i = 0; i < n_initialized_UARTs; i++) {
+-#ifdef DEBUG_XEN_UART
+-      syslog(LOG_DEBUG, "serial %d(%d %d): [dis]connector handling UART %d (%d)\n", domid, already_connected, xen_UART_domid_owning_UART, i, now_connected);
+-#endif
+-      xen_uart_attach_hardware(initialized_UARTs[i], now_connected);
++      xen_UART_attach_hardware(initialized_UARTs[i], now_connected);
+     }
+     already_connected = now_connected;
+   }
+@@ -74,9 +59,6 @@ static void xen_UART_check_for_switching()
+ static void xen_UART_fifo_clear(XenUartState *s, int fifo)
+ {
+     XenUartFifo *f = (fifo) ? &s->recv_fifo : &s->xmit_fifo;
+-#ifdef DEBUG_XEN_UART
+-    syslog(LOG_DEBUG, "serial %d(%d %d): clearing fifo %d\n", domid, already_connected, xen_UART_domid_owning_UART, fifo);
+-#endif
+     memset(f->data, 0, UART_FIFO_LENGTH);
+     f->count = 0;
+     f->head = 0;
+@@ -117,10 +99,8 @@ static void xen_UART_update_irq(XenUartState *s)
+ {
+     uint8_t tmp_iir = UART_IIR_NO_INT;
+ 
+-#ifdef DEBUG_XEN_UART
+-    syslog(LOG_DEBUG, "serial %d(%d %d): --> update irq\n", domid, already_connected, xen_UART_domid_owning_UART);
+-#endif
+ 
++    /* todo: should this be a condition chain collecting one bit of result, or should it be a series of separate conditions each ORing in a bit? */
+     if ((s->ier & UART_IER_RLSI) && (s->lsr & UART_LSR_INT_ANY)) {
+         tmp_iir = UART_IIR_RLSI;
+     } else if ((s->ier & UART_IER_RDI) && s->timeout_ipending) {
+@@ -145,41 +125,32 @@ static void xen_UART_update_irq(XenUartState *s)
+     } else {
+         qemu_irq_lower(s->irq);
+     }
+-#ifdef DEBUG_XEN_UART
+-    syslog(LOG_DEBUG, "serial %d(%d %d): <-- update irq\n", domid, already_connected, xen_UART_domid_owning_UART);
+-#endif
+ }
+ 
+ static void xen_UART_ioport_write(void *opaque, uint32_t addr, uint32_t val)
+ {
+   XenUartState *s = opaque;
+ 
+-  xen_UART_check_for_switching();
+-
+-#ifdef DEBUG_XEN_UART
+-  syslog(LOG_DEBUG, "serial %d(%d %d): --> write addr=0x%02x (%s) val=0x%02x, %s\n", domid, already_connected, xen_UART_domid_owning_UART, addr, uart_reg_debug_names[addr&7], val, s->connected ? "connected" : "virtual");
+-#endif
++  xen_UART_check_for_switching(s);
+ 
+   switch (addr & 7) {
+   default:
+   case UART_THR:		/* 0 = transmit holding register */
+     // case UART_DLL:		/* 0 = divisor latch low */
+     if (s->lcr & UART_LCR_DLAB) {
+-      s->divider = (s->divider & 0xff00) | val;
+-#ifdef DEBUG_XEN_UART
+-      syslog(LOG_DEBUG, "serial %d(%d %d):     write dll = %#x = %d\n", domid, already_connected, xen_UART_domid_owning_UART, val, val);
+-#endif
++      s->divider = (s->divider & 0xff00) | (val & 0xff);
+       if (s->connected) {
+ 	/* we assume that the hardware (s->lcr & UART_LCR_DLAB) is in step with our copy */
+ 	outb(val, s->base + UART_DLL);
++#if 0				/* flag: raise_interrupt_on_transmit */
++	s->thr_ipending = 1;
++	xen_UART_update_irq(s);
++#endif
+       }
+     } else {
+       s->thr = (uint8_t) val;
+       if (s->connected) {
+ 	/* we assume that the hardware (s->lcr & UART_LCR_DLAB) is in step with our copy */
+-#ifdef DEBUG_XEN_UART
+-	syslog(LOG_DEBUG, "serial %d(%d %d):     write thr = %#x = %c\n", domid, already_connected, xen_UART_domid_owning_UART, val, (char)val);
+-#endif
+ 	outb(val, s->base + UART_THR);
+       } else {
+ 	if (s->fcr & UART_FCR_ENABLE) {
+@@ -208,10 +179,7 @@ static void xen_UART_ioport_write(void *opaque, uint32_t addr, uint32_t val)
+   case UART_IER:		/* 1 = interrupt enable */
+     // case UART_DLH:           /* 1 = divisor latch high */
+     if (s->lcr & UART_LCR_DLAB) {
+-      s->divider = (s->divider & 0x00ff) | (val << 8);
+-#ifdef DEBUG_XEN_UART
+-      syslog(LOG_DEBUG, "serial %d(%d %d):     write dlh = %#x = %d\n", domid, already_connected, xen_UART_domid_owning_UART, val, val);
+-#endif
++      s->divider = (s->divider & 0x00ff) | ((val & 0xff) << 8);
+       if (s->connected) {
+ 	outb(val, s->base + UART_DLH);
+       }
+@@ -219,8 +187,10 @@ static void xen_UART_ioport_write(void *opaque, uint32_t addr, uint32_t val)
+       s->ier = val & 0x0f;
+ 
+       if (s->connected) {
+-	outb(val, s->base + UART_THR);
++	outb(val, s->base + UART_IER);
+       } else {
++	/* if there's a character already waiting, raise the interrupt
++	   for it now interrupts are enabled: */
+ 	if (s->lsr & UART_LSR_THRE) {
+ 	  s->thr_ipending = 1;
+ 	  xen_UART_update_irq(s);
+@@ -230,7 +200,7 @@ static void xen_UART_ioport_write(void *opaque, uint32_t addr, uint32_t val)
+     break;
+ 
+   case UART_FCR: /* 2 = fifo control (w) (and interrupt identity (r)) */
+-    val = val & 0xFF;
++    val = val & 0xff;
+ 
+     if (s->connected) {
+       outb(val, s->base+UART_FCR);
+@@ -284,7 +254,7 @@ static void xen_UART_ioport_write(void *opaque, uint32_t addr, uint32_t val)
+ 
+   case UART_LCR:		/* 3 = line control register */
+     {
+-      int break_enable = (val >> 6) & 1;
++      int break_enable = val & UART_LCR_BE;
+       s->lcr = val;
+ 
+       if (s->connected) {
+@@ -327,9 +297,6 @@ static void xen_UART_ioport_write(void *opaque, uint32_t addr, uint32_t val)
+     s->scr = val;
+     break;
+   }
+-#ifdef DEBUG_XEN_UART
+-  syslog(LOG_DEBUG, "serial %d(%d %d): <-- written %#x to %#x\n", domid, already_connected, xen_UART_domid_owning_UART, val, addr);
+-#endif
+ }
+ 
+ static uint32_t xen_UART_serial_ioport_read(void *opaque, uint32_t addr)
+@@ -337,11 +304,8 @@ static uint32_t xen_UART_serial_ioport_read(void *opaque, uint32_t addr)
+   XenUartState *s = opaque;
+   uint32_t ret;
+ 
+-  xen_UART_check_for_switching();
++  xen_UART_check_for_switching(s);
+ 
+-#ifdef DEBUG_XEN_UART
+-  syslog(LOG_DEBUG, "serial %d(%d %d): --> read addr=0x%02x (%s), %s\n", domid, already_connected, xen_UART_domid_owning_UART, addr, uart_reg_debug_names[addr&7], s->connected ? "connected" : "virtual");
+-#endif
+ 
+   switch (addr & 7) {
+   default:
+@@ -351,18 +315,14 @@ static uint32_t xen_UART_serial_ioport_read(void *opaque, uint32_t addr)
+ 	 s->divider are in step with our copy, so we don't fetch from
+ 	 the hw UART */
+       ret = s->divider & 0xff; 
+-#ifdef DEBUG_XEN_UART
+-      syslog(LOG_DEBUG, "serial %d(%d %d):     divider low = %#x\n", domid, already_connected, xen_UART_domid_owning_UART, ret);
+-#endif
+     } else {
+       if (s->fcr & UART_FCR_ENABLE) {
+ 	if (s->connected) {
+ 	  ret = inb(s->base + UART_RBR);
+-#ifdef DEBUG_XEN_UART
+-	  syslog(LOG_DEBUG, "serial %d(%d %d):     fcr=true read rbr = %#x = %c\n", domid, already_connected, xen_UART_domid_owning_UART, ret, (char)ret);
+-#endif
+ 	} else {
+-	  ret = 0;
++	  ret = 0;		/* if not connected, just `read' a NUL */
++	  /* todo: this is not consistent with the last case of this decision tree where we do `ret = s->rbr;'
++	   and shouldn't it depend on (s->lsr & UART_LSR_DR) anyway?*/
+ 	  if (s->recv_fifo.count == 0) {
+ 	    s->lsr &= ~(UART_LSR_DR | UART_LSR_BI);
+ 	  } else {
+@@ -378,9 +338,6 @@ static uint32_t xen_UART_serial_ioport_read(void *opaque, uint32_t addr)
+       } else {
+ 	if (s->connected) {
+ 	  ret = inb(s->base + UART_RBR);
+-#ifdef DEBUG_XEN_UART
+-	  syslog(LOG_DEBUG, "serial %d(%d %d):     fcr=false read rbr = %#x = %c\n", domid, already_connected, xen_UART_domid_owning_UART, ret, (char)ret);
+-#endif
+ 	} else {
+ 	  ret = s->rbr;
+ 	  s->lsr &= ~(UART_LSR_DR | UART_LSR_BI);
+@@ -444,7 +401,6 @@ static uint32_t xen_UART_serial_ioport_read(void *opaque, uint32_t addr)
+     if (s->mcr & UART_MCR_LOOP) {
+       if (s->connected) {
+ 	ret = s->msr = inb(s->base + UART_MSR);
+-	syslog(LOG_DEBUG, "serial %d(%d %d):     got %#x from hardware MSR (loop)\n", domid, already_connected, xen_UART_domid_owning_UART, ret);
+       } else {
+ 	/* in loopback, the modem output pins are connected to the
+ 	   inputs */
+@@ -455,14 +411,13 @@ static uint32_t xen_UART_serial_ioport_read(void *opaque, uint32_t addr)
+     } else {
+       if (s->connected) {
+ 	s->msr = inb(s->base + UART_MSR);
+-	syslog(LOG_DEBUG, "serial %d(%d %d):     update %#x from hardware MSR\n", domid, already_connected, xen_UART_domid_owning_UART, s->msr);
+       }
+       ret = s->msr;
+       /* Clear delta bits & msr int after read, if they were set */
+       /* TODO: what is this for, and should the "ret = s->msr" line come after it? It is currently before it, which looks a little odd.  JCGS 20110616 */
+       if (s->msr & UART_MSR_ANY_DELTA) {
+ 	s->msr &= 0xF0;
+-	syslog(LOG_DEBUG, "serial %d(%d %d): clear delta to %#x\n", domid, already_connected, xen_UART_domid_owning_UART, s->msr);
++	syslog(LOG_DEBUG, "serial %d(%d): clear delta to %#x\n", domid, xen_UART_domid_owning_UART, s->msr);
+ 	xen_UART_update_irq(s);
+       }
+     }
+@@ -471,14 +426,11 @@ static uint32_t xen_UART_serial_ioport_read(void *opaque, uint32_t addr)
+     ret = s->scr;
+     break;
+   }
+-#ifdef DEBUG_XEN_UART
+-  syslog(LOG_DEBUG, "serial %d(%d %d): <-- read addr=0x%02x val=0x%02x\n", domid, already_connected, xen_UART_domid_owning_UART, addr, ret);
+-#endif
+   return ret;
+ }
+ 
+ #ifdef DEBUG_XEN_UART
+-static void xen_uart_describe_state(FILE *str, const char *label, XenUartState *s)
++static void xen_UART_describe_state(FILE *str, const char *label, XenUartState *s)
+ {
+   /* Interrupt Enable Register */
+   if (s->ier & UART_IER_MSI) fprintf(str, "%sEnable Modem status interrupt\n", label);
+@@ -549,47 +501,38 @@ static void xen_uart_describe_state(FILE *str, const char *label, XenUartState *
+ }
+ #endif
+ 
+-static void xen_uart_load_from_hardware(XenUartState *emulated)
++static void xen_UART_load_from_hardware(XenUartState *emulated)
+ {
+   int base = emulated->base;
+-#ifdef DEBUG_XEN_UART
+-  syslog(LOG_DEBUG, "serial %d(%d %d): Loading vuart structure from hardware based at port %#x\n", domid, already_connected, xen_UART_domid_owning_UART, base);
+-#endif
+-  emulated->lcr = inb(base+UART_LCR); syslog(LOG_DEBUG, "serial %d(%d %d): %#x emulated->lcr = %#x\n", domid, already_connected, xen_UART_domid_owning_UART, base+UART_LCR, emulated->lcr);
++  emulated->lcr = inb(base+UART_LCR); syslog(LOG_DEBUG, "serial %d(%d): %#x emulated->lcr = %#x\n", domid, xen_UART_domid_owning_UART, base+UART_LCR, emulated->lcr);
+   /* Switch it to DLAB and read that */
+-  outb(emulated->lcr | UART_LCR_DLAB, base+UART_LCR); syslog(LOG_DEBUG, "serial %d(%d %d): emulated->lcr = %#x\n", domid, already_connected, xen_UART_domid_owning_UART, emulated->lcr);
+-  emulated->divider  = (inb(base+UART_DLL) & 0xff) | (0xff & (inb(base+UART_DLH) << 8)); syslog(LOG_DEBUG, "serial %d(%d %d): emulated->divider = %#x\n", domid, already_connected, xen_UART_domid_owning_UART, emulated->divider);
++  outb(emulated->lcr | UART_LCR_DLAB, base+UART_LCR); syslog(LOG_DEBUG, "serial %d(%d): emulated->lcr = %#x\n", domid, xen_UART_domid_owning_UART, emulated->lcr);
++  emulated->divider  = (inb(base+UART_DLL) & 0xff) | (0xff & (inb(base+UART_DLH) << 8)); syslog(LOG_DEBUG, "serial %d(%d): emulated->divider = %#x\n", domid, xen_UART_domid_owning_UART, emulated->divider);
+   /* Switch it to receive buffer and read that */
+-  outb(emulated->lcr & ~UART_LCR_DLAB, base+UART_LCR); syslog(LOG_DEBUG, "serial %d(%d %d): emulated->lcr = %#x\n", domid, already_connected, xen_UART_domid_owning_UART, emulated->lcr);
+-  emulated->rbr = inb(base+UART_RBR); syslog(LOG_DEBUG, "serial %d(%d %d): %#x emulated->rbr = %#x\n", domid, already_connected, xen_UART_domid_owning_UART, base+UART_RBR, emulated->rbr);
++  outb(emulated->lcr & ~UART_LCR_DLAB, base+UART_LCR); syslog(LOG_DEBUG, "serial %d(%d): emulated->lcr = %#x\n", domid, xen_UART_domid_owning_UART, emulated->lcr);
++  emulated->rbr = inb(base+UART_RBR); syslog(LOG_DEBUG, "serial %d(%d): %#x emulated->rbr = %#x\n", domid, xen_UART_domid_owning_UART, base+UART_RBR, emulated->rbr);
+   /* restore it to whichever it was */
+-  outb(emulated->lcr, base+UART_LCR); syslog(LOG_DEBUG, "serial %d(%d %d): emulated->lcr = %#x\n", domid, already_connected, xen_UART_domid_owning_UART, emulated->lcr);
++  outb(emulated->lcr, base+UART_LCR); syslog(LOG_DEBUG, "serial %d(%d): emulated->lcr = %#x\n", domid, xen_UART_domid_owning_UART, emulated->lcr);
+   /* the rest are plain reads */
+-  emulated->rbr = inb(base+UART_RBR); syslog(LOG_DEBUG, "serial %d(%d %d): %#x emulated->rbr = %#x\n", domid, already_connected, xen_UART_domid_owning_UART, base+UART_RBR, emulated->rbr);
+-  emulated->thr = inb(base+UART_THR); syslog(LOG_DEBUG, "serial %d(%d %d): %#x emulated->thr = %#x\n", domid, already_connected, xen_UART_domid_owning_UART, base+UART_THR, emulated->thr);
+-  emulated->ier = inb(base+UART_IER); syslog(LOG_DEBUG, "serial %d(%d %d): %#x emulated->ier = %#x\n", domid, already_connected, xen_UART_domid_owning_UART, base+UART_IER, emulated->ier);
+-  emulated->iir = inb(base+UART_IIR); syslog(LOG_DEBUG, "serial %d(%d %d): %#x emulated->iir = %#x\n", domid, already_connected, xen_UART_domid_owning_UART, base+UART_IIR, emulated->iir);
+-  emulated->fcr = inb(base+UART_FCR); syslog(LOG_DEBUG, "serial %d(%d %d): %#x emulated->fcr = %#x\n", domid, already_connected, xen_UART_domid_owning_UART, base+UART_FCR, emulated->fcr);
+-  emulated->lcr = inb(base+UART_LCR); syslog(LOG_DEBUG, "serial %d(%d %d): %#x emulated->lcr = %#x\n", domid, already_connected, xen_UART_domid_owning_UART, base+UART_LCR, emulated->lcr);
+-  emulated->mcr = inb(base+UART_MCR); syslog(LOG_DEBUG, "serial %d(%d %d): %#x emulated->mcr = %#x\n", domid, already_connected, xen_UART_domid_owning_UART, base+UART_MCR, emulated->mcr);
+-  emulated->lsr = inb(base+UART_LSR); syslog(LOG_DEBUG, "serial %d(%d %d): %#x emulated->lsr = %#x\n", domid, already_connected, xen_UART_domid_owning_UART, base+UART_LSR, emulated->lsr);
+-  emulated->msr = inb(base+UART_MSR); syslog(LOG_DEBUG, "serial %d(%d %d): %#x emulated->msr = %#x\n", domid, already_connected, xen_UART_domid_owning_UART, base+UART_MSR, emulated->msr);
+-  emulated->scr = inb(base+UART_SCR); syslog(LOG_DEBUG, "serial %d(%d %d): %#x emulated->scr = %#x\n", domid, already_connected, xen_UART_domid_owning_UART, base+UART_SCR, emulated->scr);
++  emulated->rbr = inb(base+UART_RBR); syslog(LOG_DEBUG, "serial %d(%d): %#x emulated->rbr = %#x\n", domid, xen_UART_domid_owning_UART, base+UART_RBR, emulated->rbr);
++  emulated->thr = inb(base+UART_THR); syslog(LOG_DEBUG, "serial %d(%d): %#x emulated->thr = %#x\n", domid, xen_UART_domid_owning_UART, base+UART_THR, emulated->thr);
++  emulated->ier = inb(base+UART_IER); syslog(LOG_DEBUG, "serial %d(%d): %#x emulated->ier = %#x\n", domid, xen_UART_domid_owning_UART, base+UART_IER, emulated->ier);
++  emulated->iir = inb(base+UART_IIR); syslog(LOG_DEBUG, "serial %d(%d): %#x emulated->iir = %#x\n", domid, xen_UART_domid_owning_UART, base+UART_IIR, emulated->iir);
++  emulated->fcr = inb(base+UART_FCR); syslog(LOG_DEBUG, "serial %d(%d): %#x emulated->fcr = %#x\n", domid, xen_UART_domid_owning_UART, base+UART_FCR, emulated->fcr);
++  emulated->lcr = inb(base+UART_LCR); syslog(LOG_DEBUG, "serial %d(%d): %#x emulated->lcr = %#x\n", domid, xen_UART_domid_owning_UART, base+UART_LCR, emulated->lcr);
++  emulated->mcr = inb(base+UART_MCR); syslog(LOG_DEBUG, "serial %d(%d): %#x emulated->mcr = %#x\n", domid, xen_UART_domid_owning_UART, base+UART_MCR, emulated->mcr);
++  emulated->lsr = inb(base+UART_LSR); syslog(LOG_DEBUG, "serial %d(%d): %#x emulated->lsr = %#x\n", domid, xen_UART_domid_owning_UART, base+UART_LSR, emulated->lsr);
++  emulated->msr = inb(base+UART_MSR); syslog(LOG_DEBUG, "serial %d(%d): %#x emulated->msr = %#x\n", domid, xen_UART_domid_owning_UART, base+UART_MSR, emulated->msr);
++  emulated->scr = inb(base+UART_SCR); syslog(LOG_DEBUG, "serial %d(%d): %#x emulated->scr = %#x\n", domid, xen_UART_domid_owning_UART, base+UART_SCR, emulated->scr);
+   outb(0, base+UART_SCR);
+-  emulated->scr = inb(base+UART_SCR); syslog(LOG_DEBUG, "serial %d(%d %d): emulated->scr now = %#x\n", domid, already_connected, xen_UART_domid_owning_UART, emulated->scr);
+-#ifdef DEBUG_XEN_UART
+-  xen_uart_describe_state(stderr, "serial: initial ", emulated);
+-#endif
++  emulated->scr = inb(base+UART_SCR); syslog(LOG_DEBUG, "serial %d(%d): emulated->scr now = %#x\n", domid, xen_UART_domid_owning_UART, emulated->scr);
+ }
+ 
+-void xen_uart_attach_hardware(XenUartState *emulated, int connect_now)
++void xen_UART_attach_hardware(XenUartState *emulated, int connect_now)
+ {
+   if (connect_now) {
+     if (!emulated->connected) {
+       int base = emulated->base;
+-#ifdef DEBUG_XEN_UART
+-      syslog(LOG_DEBUG, "serial %d(%d %d): connecting domid %d, base=%#x\n", domid, already_connected, xen_UART_domid_owning_UART, domid, base);
+-#endif
+       /* connect: copy structure to hardware */
+       outb(emulated->lcr | UART_LCR_DLAB, base+UART_LCR);
+       outb(emulated->divider & 0xff, base+UART_DLL);
+@@ -604,15 +547,29 @@ void xen_uart_attach_hardware(XenUartState *emulated, int connect_now)
+       outb(emulated->mcr, base+UART_MCR);
+       // outb(emulated->lsr, base+UART_LSR); // read-only
+       // outb(emulated->msr, base+UART_MSR); // read only
++      {
++	int bind_result = 
++	xc_domain_bind_pt_irq(xc_handle,
++			      domid,
++			      emulated->irq_level,
++			      PT_IRQ_TYPE_ISA,
++			      0, 0, 0, /* not used, as we're using PT_IRQ_TYPE_ISA */
++			      emulated->irq_level);
++      }
+     }
+   } else {
+     if (emulated->connected) {
+-#ifdef DEBUG_XEN_UART
+-      syslog(LOG_DEBUG, "serial %d(%d %d): disconnecting domid %d\n", domid, already_connected, xen_UART_domid_owning_UART, domid);
+-#endif
+       /* disconnect: pick up volatile state from hardware; assume that
+ 	 the rest of the state is as we last left it: */
+       int base = emulated->base;
++
++      xc_domain_unbind_pt_irq(xc_handle,
++			      domid,
++			      emulated->irq_level,
++			      PT_IRQ_TYPE_ISA,
++			      0, 0, 0, /* not used, as we're using PT_IRQ_TYPE_ISA */
++			      emulated->irq_level);
++
+       emulated->iir = inb(base+UART_IIR); // read-only
+       emulated->lsr = inb(base+UART_LSR); // read-only
+       emulated->msr = inb(base+UART_MSR); // read only
+@@ -623,7 +580,7 @@ void xen_uart_attach_hardware(XenUartState *emulated, int connect_now)
+ }
+ 
+ #ifdef XEN_UART_SWITCH_BY_XENSTORE
+-static void xen_uart_switching_detection_from_xenstore(const char *path, void *opaque)
++static void xen_UART_switching_detection_from_xenstore(const char *path, void *opaque)
+ {
+   static struct xs_handle *xsh = NULL;
+ 
+@@ -638,18 +595,15 @@ static void xen_uart_switching_detection_from_xenstore(const char *path, void *o
+ 
+   xen_UART_domid_owning_UART = atol(holder_string);
+ 
+-#ifdef DEBUG_XEN_UART
+-  syslog(LOG_DEBUG, "serial %d(%d %d): read %d from switcher element\n", domid, already_connected, xen_UART_domid_owning_UART, xen_UART_domid_owning_UART);
+-#endif
+-
+   xen_UART_switch_requested = 1;
+ 
+   free(holder_string);
+ }
+ #endif
+ 
+- /* If fd is zero, it means that the serial device uses the console */
+-XenUartState *xen_uart_16550_init(int base, qemu_irq irq, int baudbase)
++XenUartState *xen_UART_16550_init(int base,
++				  uint8_t interrupt_level, qemu_irq irq,
++				  int baudbase)
+ {
+   XenUartState *s;
+   // return NULL;
+@@ -664,18 +618,17 @@ XenUartState *xen_uart_16550_init(int base, qemu_irq irq, int baudbase)
+ #endif
+ 
+ #if 1
+-  syslog(LOG_DEBUG, "serial %d(%d %d): initializing a virtual uart: base=%#x\n", domid, already_connected, xen_UART_domid_owning_UART, base);
++  syslog(LOG_DEBUG, "serial %d(%d): initializing a virtual uart: base=%#x\n", domid, xen_UART_domid_owning_UART, base);
+ #endif
+ 
+-#if 1				/* flag:alloc_uart_state */
+   s = qemu_mallocz(sizeof(XenUartState));
+ 
++  s->irq_level = interrupt_level;
+   s->irq = irq;
+   s->baudbase = baudbase;
+   s->lcr &= ~UART_LCR_DLAB;	/* todo: probably set the whole register */
+   s->base = base;
+-#endif
+-
++  s->connected = 0;
+ 
+ #if 1
+   qemu_register_reset(xen_UART_reset, s);
+@@ -686,7 +639,7 @@ XenUartState *xen_uart_16550_init(int base, qemu_irq irq, int baudbase)
+ 
+ #if 0				/* flag:register_savevm */
+   /* todo: implement these functions if anyone really wants them */
+-  register_savevm("vuart", base, 2, vuart_save, vuart_load, s);
++  register_savevm("xen_UART", base, 2, xen_UART_save, xen_UART_load, s);
+ #endif
+ 
+ #ifdef XEN_UART_SWITCH_BY_XENSTORE
+@@ -702,27 +655,21 @@ XenUartState *xen_uart_16550_init(int base, qemu_irq irq, int baudbase)
+       if (NULL == readback) {
+ 	char buf[1024];
+ 	snprintf(buf, 1023, "%d", domid);
++	xen_UART_domid_owning_UART = domid;
+ 	xs_write(xsh, XBT_NULL, "/holding_uarts", buf, strlen(buf));
+       }
+   }
+-  xenstore_watch_new_callback( "/holding_uarts", xen_uart_switching_detection_from_xenstore, 0);
+-#ifdef DEBUG_XEN_UART
+-  syslog(LOG_DEBUG, "serial %d(%d %d): watching /holding_uarts\n", domid, already_connected, xen_UART_domid_owning_UART);
+-#endif
+-#endif
+-#if 0
+-  return NULL;
++  xenstore_watch_new_callback( "/holding_uarts", xen_UART_switching_detection_from_xenstore, 0);
+ #endif
+ 
+-#if 1				/* flag: iopl3 */
+   iopl(3);
+-#endif
+-
+-  syslog(LOG_DEBUG, "serial: done iopl\n");
+ 
+-#if 1				/* flag: enable_load_from_hardware */
+-  xen_uart_load_from_hardware(s);
++  xen_UART_load_from_hardware(s);
+   syslog(LOG_DEBUG, "serial: loaded base=%#x from hardware\n", base);
++
++#if 1				/* flag: connect_hw_immediately */
++  syslog(LOG_DEBUG, "serial: immediate initial attach of hardware, condition=%d\n", domid == xen_UART_domid_owning_UART);
++  xen_UART_attach_hardware(s, domid == xen_UART_domid_owning_UART);
+ #endif
+ 
+ #if 1				/* flag: enable_ioport_read */
+@@ -739,7 +686,7 @@ XenUartState *xen_uart_16550_init(int base, qemu_irq irq, int baudbase)
+ #endif
+ 
+ #if 1
+-  syslog(LOG_DEBUG, "serial %d(%d %d): initialized uarts: %d\n", domid, already_connected, xen_UART_domid_owning_UART, n_initialized_UARTs);
++  syslog(LOG_DEBUG, "serial %d(%d): initialized uarts: %d\n", domid, xen_UART_domid_owning_UART, n_initialized_UARTs);
+ #endif
+ 
+ 
+diff --git a/hw/xen_uart_16550.h b/hw/xen_uart_16550.h
+index a683c90..fa36244 100644
+--- a/hw/xen_uart_16550.h
++++ b/hw/xen_uart_16550.h
+@@ -48,6 +48,13 @@
+ #define UART_FCR_TRG14       0xc0    /* Rx FIFO trig lev 14  */
+ 
+ /* Line Control Register */
++#define UART_LCR_WLS0        0x01    /* Word Length Select 0 */
++#define UART_LCR_WLS1        0x02    /* Word Length Select 1 */
++#define UART_LCR_STB         0x04    /* number of Stop Bits */
++#define UART_LCR_PEN         0x08    /* Parity ENable */
++#define UART_LCR_EPS         0x10    /* Even Parity Select */
++#define UART_LCR_SP          0x20    /* Stick Parity */
++#define UART_LCR_BE          0x40    /* Break Enable */
+ #define UART_LCR_DLAB        0x80    /* Divisor Latch Access */
+ 
+ /* Modem Control Register */
+@@ -132,6 +139,7 @@ typedef struct XenUartState {
+   /* NOTE: this hidden state is necessary for tx irq generation as
+      it can be reset while reading iir */
+   int thr_ipending;
++  uint8_t irq_level;
+   qemu_irq irq;
+   CharDriverState *chr;		/* todo: not sure we need this */
+   int last_break_enable;
+@@ -158,8 +166,8 @@ typedef struct XenUartState {
+ } XenUartState;
+ 
+ 
+-extern XenUartState *xen_uart_16550_init(int base, qemu_irq irq, int baudbase);
+-extern void xen_uart_attach_hardware(XenUartState *emulated, int connect_now);
++extern XenUartState *xen_UART_16550_init(int base, uint8_t interrupt_level, qemu_irq irq, int baudbase);
++extern void xen_UART_attach_hardware(XenUartState *emulated, int connect_now);
+ 
+ #endif
+ /* xen_uart_16550 ends here */
+diff --git a/vl.c b/vl.c
+index 86766db..26fc95a 100644
+--- a/vl.c
++++ b/vl.c
+@@ -4902,6 +4902,81 @@ static void vcpu_hex_str_to_bitmap(const char *optarg)
+     }
+ }
+ 
++static void add_serial_device(const char *devspec,
++			      int *serial_device_index_p,
++			      const char *serial_devices[])
++{
++  /* devspec can either be a plain spec, in which case it is given the
++     next free slot in the serial ports array, or a number in square
++     brackets followed by a plain spec, in which case the number
++     indicates which slot it is to get.
++  */
++  int index;
++#if 1
++  fprintf(stderr, "serial: add_serial_device(%s, %d)\n", devspec, *serial_device_index_p);
++#endif
++  if (devspec[0] == '[') {
++    char *number_end;
++    index = strtol(devspec+1, &number_end, 10);
++    if (index >= MAX_SERIAL_PORTS) {
++      fprintf(stderr, "qemu: too high serial port number (max %d)\n", MAX_SERIAL_PORTS - 1);
++      exit(1);
++    }
++    if (*number_end != ']') {
++      fprintf(stderr, "qemu: bad syntax in serial port spec \"%s\"\n", devspec);
++      exit(1);
++    }
++    devspec = number_end+1;
++#if 1
++    fprintf(stderr, "serial: add_serial_device got index %d, remaining string \"%s\"\n", index, devspec);
++#endif
++  } else {
++    int first_pass = 1;
++#if 1
++    fprintf(stderr, "serial: scanning for empty slots from %d\n", *serial_device_index_p);
++#endif
++    while (serial_devices[*serial_device_index_p] != NULL) {
++#if 1
++      fprintf(stderr, "serial: slot %d occupied already\n", *serial_device_index_p);
++#endif
++      *serial_device_index_p++;
++      if (*serial_device_index_p >= MAX_SERIAL_PORTS) {
++#if 1
++	fprintf(stderr, "serial: slot search wrapped\n");
++#endif
++	if (first_pass)
++	  first_pass = *serial_device_index_p = 0;
++	else {
++	  fprintf(stderr, "qemu: too many serial ports (max %d)\n", MAX_SERIAL_PORTS);
++	  exit(1);
++	}
++      }
++    }
++    index = (*serial_device_index_p)++;
++  }
++#if 1
++  fprintf(stderr, "serial: putting device %s in slot %d\n", devspec, index);
++#endif
++  serial_devices[index] = devspec;
++
++#if 1
++  fprintf(stderr, "serial: device table:\n");
++  {
++    int i;
++    for (i = 0; i < MAX_SERIAL_PORTS; i++) {
++      if (serial_devices[i]) {
++	fprintf(stderr, "serial %02d: %s\n", i, serial_devices[i]);
++      } else {
++	fprintf(stderr, "serial %02d: --empty---\n", i);
++      }
++    }
++  }
++#endif
++
++}
++
++#define Add_Serial_Device(_devspec_) add_serial_device(_devspec_, &serial_device_index, serial_devices)
++
+ int main(int argc, char **argv, char **envp)
+ {
+ #ifdef CONFIG_GDBSTUB
+@@ -5032,21 +5107,24 @@ int main(int argc, char **argv, char **envp)
+     monitor_device = "vc:80Cx24C";
+ 
+     serial_device_index = 0;
+-    serial_devices[serial_device_index++] = "vc:80Cx24C";
++    for(i = serial_device_index; i < MAX_SERIAL_PORTS; i++)
++        serial_devices[i] = NULL;
++
++#if 0
++    Add_Serial_Device("vc:80Cx24C");
++#endif
+ #if 0
+-    serial_devices[serial_device_index++] = "vuart:3F8,4";
++    Add_Serial_Device("vuart:3F8,4");
+ #if 0
+-    serial_devices[serial_device_index++] = "vuart:2F8,3";
++    Add_Serial_Device("vuart:2F8,3");
+ #if 0
+-    serial_devices[serial_device_index++] = "vuart:3E8,4";
++    Add_Serial_Device("vuart:3E8,4");
+ #if 0
+-    serial_devices[serial_device_index++] = "vuart:2E8,3";
++    Add_Serial_Device("vuart:2E8,3");
+ #endif
+ #endif
+ #endif
+ #endif
+-    for(i = serial_device_index; i < MAX_SERIAL_PORTS; i++)
+-        serial_devices[i] = NULL;
+ 
+     parallel_devices[0] = "vc:80Cx24C";
+     for(i = 1; i < MAX_PARALLEL_PORTS; i++)
+@@ -5459,14 +5537,10 @@ int main(int argc, char **argv, char **envp)
+                 monitor_device = optarg;
+                 break;
+             case QEMU_OPTION_serial:
+-                if (serial_device_index >= MAX_SERIAL_PORTS) {
+-                    fprintf(stderr, "qemu: too many serial ports\n");
+-                    exit(1);
+-                }
+ #if 1
+-		syslog(LOG_DEBUG, "serial: adding [%d] --> %s from options\n", serial_device_index, optarg);
++	        syslog(LOG_DEBUG, "QEMU_OPTION_serial: \"%s\"\n", optarg);
+ #endif
+-                serial_devices[serial_device_index++] = optarg;
++                Add_Serial_Device(optarg);
+                 break;
+             case QEMU_OPTION_virtiocon:
+                 if (virtio_console_index >= MAX_VIRTIO_CONSOLES) {
+@@ -5770,7 +5844,7 @@ int main(int argc, char **argv, char **envp)
+ 
+     if (nographic) {
+        if (serial_device_index == 0)
+-           serial_devices[0] = "stdio";
++	 Add_Serial_Device("stdio");
+        if (parallel_device_index == 0)
+            parallel_devices[0] = "null";
+        if (strncmp(monitor_device, "vc", 2) == 0)

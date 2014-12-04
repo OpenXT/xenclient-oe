@@ -1,0 +1,62 @@
+diff --git a/xen/drivers/passthrough/vtd/iommu.c b/xen/drivers/passthrough/vtd/iommu.c
+index bc2e731..825b6f7 100644
+--- a/xen/drivers/passthrough/vtd/iommu.c
++++ b/xen/drivers/passthrough/vtd/iommu.c
+@@ -2277,16 +2277,36 @@ static int intel_iommu_group_id(u16 seg, u8 bus, u8 devfn)
+         return PCI_BDF2(bus, devfn);
+ }
+ 
++#define IGFX_BAR_COUNT            0x6
++
++static const u8 iGfx_domain     = 0x0;
++static const u8 iGfx_bus        = 0x0;
++static const u8 iGfx_device     = 0x2;
++static const u8 iGfx_function   = 0x0;
++static const u8 iGfx_bar_size   = 0x4;
++static const u8 iGfx_bar_offset = 0x10;
++static u32 iGfx_pci_bars[IGFX_BAR_COUNT];
+ static u32 iommu_state[MAX_IOMMUS][MAX_IOMMU_REGS];
+ static void vtd_suspend(void)
+ {
+     struct acpi_drhd_unit *drhd;
+     struct iommu *iommu;
+-    u32    i;
++    u32    i, count, bar_start;
+ 
+     if ( !iommu_enabled )
+         return;
+ 
++    /* Note:  Following is to workaround host S3 resume issue on HP laptops.
++     * Turns out saving iGfx bars during iommu suspend and restoring them
++     * in iommu resume will fix the hang/reset during host resume on 
++     * HP laptops. Following does that as a fallback on systems that doesn't
++     * have the firmware fix to save/restore iGfx bars.
++     */
++    memset(iGfx_pci_bars, 0, sizeof(iGfx_pci_bars));
++    for ( count = 0, bar_start=iGfx_bar_offset; count < IGFX_BAR_COUNT; count++,
++            bar_start+=iGfx_bar_size )
++        iGfx_pci_bars[count] = pci_conf_read32(iGfx_domain, iGfx_bus, iGfx_device, iGfx_function, bar_start);
++
+     iommu_flush_all();
+ 
+     for_each_drhd_unit ( drhd )
+@@ -2341,7 +2361,7 @@ static void vtd_resume(void)
+ {
+     struct acpi_drhd_unit *drhd;
+     struct iommu *iommu;
+-    u32 i;
++    u32 i, count, bar_start;
+     unsigned long flags;
+ 
+     if ( !iommu_enabled )
+@@ -2350,6 +2370,10 @@ static void vtd_resume(void)
+     if ( init_vtd_hw() != 0  && force_iommu )
+          panic("IOMMU setup failed, crash Xen for security purpose!\n");
+ 
++    for ( count = 0, bar_start = iGfx_bar_offset; count < IGFX_BAR_COUNT; count++,
++          bar_start += iGfx_bar_size )
++        pci_conf_write32(iGfx_domain, iGfx_bus, iGfx_device, iGfx_function, bar_start, iGfx_pci_bars[count]);
++
+     for_each_drhd_unit ( drhd )
+     {
+         iommu = drhd->iommu;

@@ -1,0 +1,90 @@
+diff --git a/arch/x86/xen/enlighten.c b/arch/x86/xen/enlighten.c
+index 08c6511..e4c6704 100644
+--- a/arch/x86/xen/enlighten.c
++++ b/arch/x86/xen/enlighten.c
+@@ -1357,10 +1357,13 @@ asmlinkage void __init xen_start_kernel(void)
+ 	/* Prevent unwanted bits from being set in PTEs. */
+ 	__supported_pte_mask &= ~_PAGE_GLOBAL;
+ #if 0
++	/*
++	 * Re-enabling the PAT.
++	 * UIVM can change cache-attributes for xenfb2.
++	 */
+ 	if (!xen_initial_domain())
+-#endif
+ 		__supported_pte_mask &= ~(_PAGE_PWT | _PAGE_PCD);
+-
++#endif
+ 	__supported_pte_mask |= _PAGE_IOMAP;
+ 
+ 	/*
+@@ -1419,12 +1422,18 @@ asmlinkage void __init xen_start_kernel(void)
+ 	acpi_numa = -1;
+ #endif
+ #ifdef CONFIG_X86_PAT
++# if 0
++	/*
++	 * Do not disable it, we backported Konrad patches to have it.
++	 * Required for Xenfb2's caching policy (otherwise igfx has trouble)
++	 */
+ 	/*
+ 	 * For right now disable the PAT. We should remove this once
+ 	 * git commit 8eaffa67b43e99ae581622c5133e20b0f48bcef1
+ 	 * (xen/pat: Disable PAT support for now) is reverted.
+ 	 */
+ 	pat_enabled = 0;
++# endif
+ #endif
+ 	/* Don't do the full vcpu_info placement stuff until we have a
+ 	   possible map and a non-dummy shared_info. */
+diff --git a/arch/x86/xen/mmu.c b/arch/x86/xen/mmu.c
+index cab96b6..b54219a 100644
+--- a/arch/x86/xen/mmu.c
++++ b/arch/x86/xen/mmu.c
+@@ -434,13 +434,13 @@ static pteval_t iomap_pte(pteval_t val)
+ static pteval_t xen_pte_val(pte_t pte)
+ {
+ 	pteval_t pteval = pte.pte;
+-#if 0
++
+ 	/* If this is a WC pte, convert back from Xen WC to Linux WC */
+ 	if ((pteval & (_PAGE_PAT | _PAGE_PCD | _PAGE_PWT)) == _PAGE_PAT) {
+ 		WARN_ON(!pat_enabled);
+ 		pteval = (pteval & ~_PAGE_PAT) | _PAGE_PWT;
+ 	}
+-#endif
++
+ 	if (xen_initial_domain() && (pteval & _PAGE_IOMAP))
+ 		return pteval;
+ 
+@@ -482,7 +482,7 @@ void xen_set_pat(u64 pat)
+ static pte_t xen_make_pte(pteval_t pte)
+ {
+ 	phys_addr_t addr = (pte & PTE_PFN_MASK);
+-#if 0
++
+ 	/* If Linux is trying to set a WC pte, then map to the Xen WC.
+ 	 * If _PAGE_PAT is set, then it probably means it is really
+ 	 * _PAGE_PSE, so avoid fiddling with the PAT mapping and hope
+@@ -495,7 +495,7 @@ static pte_t xen_make_pte(pteval_t pte)
+ 		if ((pte & (_PAGE_PCD | _PAGE_PWT)) == _PAGE_PWT)
+ 			pte = (pte & ~(_PAGE_PCD | _PAGE_PWT)) | _PAGE_PAT;
+ 	}
+-#endif
++
+ 	/*
+ 	 * Unprivileged domains are allowed to do IOMAPpings for
+ 	 * PCI passthrough, but not map ISA space.  The ISA
+diff --git a/mm/memory.c b/mm/memory.c
+index cb59c65..00b40aa 100644
+--- a/mm/memory.c
++++ b/mm/memory.c
+@@ -809,6 +809,8 @@ struct page *vm_normal_page(struct vm_area_struct *vma, unsigned long addr,
+ check_pfn:
+ 	if (unlikely(pfn > highest_memmap_pfn)) {
+ 		print_bad_pte(vma, addr, pte, NULL);
++		printk(KERN_ALERT "pfn:%#lx > highest_memmap_pfn:%#lx\n",
++		       pfn, highest_memmap_pfn);
+ 		return NULL;
+ 	}
+ 
