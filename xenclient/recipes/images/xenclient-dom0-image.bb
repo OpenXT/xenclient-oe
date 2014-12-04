@@ -19,7 +19,7 @@ ANGSTROM_EXTRA_INSTALL += " \
 export IMAGE_BASENAME = "xenclient-dom0-image"
 export STAGING_KERNEL_DIR
 
-DEPENDS = "task-base task-xenclient-dom0 task-xenclient-dom0-extra"
+DEPENDS = "task-base task-xenclient-dom0"
 IMAGE_INSTALL = "\
     ${ROOTFS_PKGMANAGE} \
     ${IMAGE_INITSCRIPTS} \
