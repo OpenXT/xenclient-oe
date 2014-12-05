@@ -1,0 +1,88 @@
+diff --git a/hw/vga.c b/hw/vga.c
+index 779ac93..d18c091 100644
+--- a/hw/vga.c
++++ b/hw/vga.c
+@@ -569,6 +569,9 @@ static uint32_t vbe_ioport_read_data(void *opaque, uint32_t addr)
+ 	    case VBE_DISPI_INDEX_32BPP_ONLY:
+ 	        val = xenstore_is_32bpp_only();
+                 break;
++	    case VBE_DISPI_INDEX_LEGACY_RES_ONLY:
++	        val = xenstore_is_legacy_res_only();
++                break;
+             default:
+                 val = s->vbe_regs[s->vbe_index];
+             }
+diff --git a/hw/vga_int.h b/hw/vga_int.h
+index 9385911..d2c73c0 100644
+--- a/hw/vga_int.h
++++ b/hw/vga_int.h
+@@ -54,8 +54,9 @@
+ #define VBE_DISPI_INDEX_EDID_YRES        0xf
+ #define VBE_DISPI_INDEX_STRIDE_ALIGN     0x10
+ #define VBE_DISPI_INDEX_32BPP_ONLY       0x11
++#define VBE_DISPI_INDEX_LEGACY_RES_ONLY  0x12
+ 
+-#define VBE_DISPI_INDEX_NB               0x12
++#define VBE_DISPI_INDEX_NB               0x13
+ 
+ #define VBE_DISPI_ID0                    0xB0C0
+ #define VBE_DISPI_ID1                    0xB0C1
+diff --git a/qemu-xen.h b/qemu-xen.h
+index 39425f3..cd277c7 100644
+--- a/qemu-xen.h
++++ b/qemu-xen.h
+@@ -145,6 +145,7 @@ int xenstore_pv_driver_build_blacklisted(uint16_t product_number,
+ void xenstore_do_eject(BlockDriverState *bs);
+ int xenstore_find_device(BlockDriverState *bs);
+ int xenstore_is_32bpp_only(void);
++int xenstore_is_legacy_res_only(void);
+ 
+ /* xenfbfront.c */
+ int xenfb_pv_display_init(DisplayState *ds);
+diff --git a/xenstore.c b/xenstore.c
+index 09c2696..f220651 100644
+--- a/xenstore.c
++++ b/xenstore.c
+@@ -1950,6 +1950,42 @@ int xenstore_is_32bpp_only(void)
+     return retVal;
+ }
+ 
++int xenstore_is_legacy_res_only(void)
++{
++    unsigned int len;
++    int   retVal;
++    char *value = NULL, *res_path = NULL;
++    char *domain_path;
++
++    domain_path = xs_get_domain_path(xsh, domid);
++
++    if (domain_path == NULL) {
++      fprintf(logfile, "xs_get_domain_path() error, domid %d\n", domid);
++      goto out;
++    }
++
++    if (pasprintf(&res_path, "%s/platform/restrictdisplayres", domain_path) == -1) {
++      fprintf(logfile, "%s out of memory.\n", __FUNCTION__);
++      goto out;
++    }
++
++    value = xs_read(xsh, XBT_NULL, res_path, &len);
++    if (value == NULL) {
++      retVal = 0;
++      goto out;
++    }
++
++    retVal = strtol(value, NULL, 10);
++
++    fprintf(logfile, "%s resolution restricted %s, %d\n", __FUNCTION__, value, retVal);
++ out:
++    free(domain_path);
++    free(res_path);
++    free(value);
++
++    return retVal;
++}
++
+ /*
+  * Create a store entry for a device (e.g., monitor, serial/parallel lines).
+  * The entry is <domain-path><storeString>/tty and the value is the name

@@ -1,0 +1,134 @@
+diff --git a/hw/pc.c b/hw/pc.c
+index 6c71ad8..4313ab2 100644
+--- a/hw/pc.c
++++ b/hw/pc.c
+@@ -1026,6 +1026,8 @@ vga_bios_error:
+     }
+ #endif
+ 
++    vbestate_init();
++
+     rtc_state = rtc_init(0x70, i8259[8], 2000);
+ 
+     qemu_register_boot_set(pc_boot_set, rtc_state);
+diff --git a/hw/vbestate.c b/hw/vbestate.c
+new file mode 100644
+index 0000000..3c81a54
+--- /dev/null
++++ b/hw/vbestate.c
+@@ -0,0 +1,103 @@
++#include <stdio.h>
++#include <stdlib.h>
++#include <stdint.h>
++#include <sys/mman.h>
++#include <sys/types.h>
++#include <sys/stat.h>
++#include <fcntl.h>
++#include <assert.h>
++#include <signal.h>
++#include <pci/pci.h>
++#include <png.h>
++
++#include "hw.h"
++#include "pc.h"
++#include "isa.h"
++#include "qemu-common.h"
++#include "qemu-timer.h"
++#include "console.h"
++#include "sysemu.h"
++#include "qemu-xen.h"
++
++#define STATE_BASE 0x3800
++#define STATE_SIZE 0x40
++
++#undef CHATTY 
++
++static uint8_t data[STATE_SIZE];
++
++static struct pt_shadow_region *region_list = NULL;
++
++static uint32_t
++state_read8 (void *opaque, uint32_t addr)
++{
++  addr -= STATE_BASE;
++
++  if (!addr)
++    {                           /* Special case spinlock */
++      if (data[0])
++        return 0x0;
++      data[0] = 0xff;
++      return 0xff;
++    }
++
++#ifdef CHATTY
++  syslog (LOG_ERR, "vbestate read[%02x]=%02x", addr, data[addr]);
++#endif
++  return data[addr];
++}
++
++static void
++state_write8 (void *opaque, uint32_t addr, uint32_t val)
++{
++  addr -= STATE_BASE;
++  if (!addr) /*Special case spinlock*/
++    {
++      if (!val) return;
++      data[0] = 0;
++      return;
++    }
++
++#ifdef CHATTY
++  syslog (LOG_ERR, "vbestate write[%02x]=%02x", addr, val & 0xff);
++#endif
++
++  data[addr] = val & 0xff;
++}
++
++#if 0
++static uint32_t
++state_read16 (void *opaque, uint32_t addr)
++{
++  return state_read8 (addr) | (state_read8 (addr + 1) << 8);
++}
++
++static uint32_t
++state_read32 (void *opaque, uint32_t addr)
++{
++  return state_read16 (addr) | (state_read16 (addr + 2) << 16);
++}
++
++
++static void
++state_write16 (void *opaque, uint32_t addr, uint32_t val)
++{
++  state_write8 (addr, val & 0xff);
++  state_write8 (addr + 1, val >> 8);
++}
++
++static void
++state_write32 (void *opaque, uint32_t addr, uint32_t val)
++{
++  state_write32 (addr, val & 0xffff);
++  state_write32 (addr + 2, val >> 16);
++}
++#endif
++
++
++void
++vbestate_init (void)
++{
++  register_ioport_write (STATE_BASE, STATE_SIZE, 1, state_write8, NULL);
++  register_ioport_read (STATE_BASE, STATE_SIZE, 1, state_read8, NULL);
++}
+diff --git a/xen-hooks.mak b/xen-hooks.mak
+index 23f2bb7..a00c8e5 100644
+--- a/xen-hooks.mak
++++ b/xen-hooks.mak
+@@ -37,6 +37,7 @@ OBJS += helper2.o
+ OBJS += battery_mgmt.o
+ OBJS += xen_acpi_wmi.o
+ OBJS += thermal_mgmt.o
++OBJS += vbestate.o
+ 
+ CONFIG_AUDIO=1
+ 

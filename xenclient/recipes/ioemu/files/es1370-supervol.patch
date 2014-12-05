@@ -1,0 +1,131 @@
+diff --git a/audio/alsaaudio.c b/audio/alsaaudio.c
+index 715cb2a..49539df 100644
+--- a/audio/alsaaudio.c
++++ b/audio/alsaaudio.c
+@@ -994,6 +994,97 @@ void alsa_volume(int rvol, int lvol, int mute)
+     }
+ }
+ 
++
++
++void alsa_volume_mono(int chn, int vol, int mute)
++{
++
++    static snd_mixer_t *handle = NULL;
++    static const char *card = "default";
++    snd_mixer_elem_t *elem;
++    snd_mixer_selem_id_t *sid;
++    int err, ok;
++
++    snd_mixer_selem_id_alloca(&sid);
++
++    if (handle == NULL) {
++
++	if ((err = snd_mixer_open(&handle, 0)) < 0) {
++	    alsa_logerr(err, "Mixer %s open error: %s\n", card,
++		       snd_strerror(err));
++	    return;
++	}
++
++	if ((err = snd_mixer_attach(handle, card)) < 0) {
++	    alsa_logerr(err, "Mixer attach %s error: %s", card,
++		       snd_strerror(err));
++	    snd_mixer_close(handle);
++	    handle = NULL;
++	    return;
++	}
++
++	if ((err = snd_mixer_selem_register(handle, NULL, NULL)) < 0) {
++	    alsa_logerr(err, "Mixer register error: %s", snd_strerror(err));
++	    snd_mixer_close(handle);
++	    handle = NULL;
++	    return;
++	}
++
++	err = snd_mixer_load(handle);
++	if (err < 0) {
++	    alsa_logerr(err, "Mixer %s load error: %s", card, snd_strerror(err));
++	    snd_mixer_close(handle);
++	    handle = NULL;
++	    return;
++	}
++    }
++
++
++    snd_mixer_selem_id_set_index(sid, 0);
++    snd_mixer_selem_id_set_name(sid, conf.volume_control);
++    elem = snd_mixer_find_selem(handle, sid);
++    if (!elem) {
++	alsa_logerr(ENOENT, "Unable to find simple control '%s',%i\n",
++		   snd_mixer_selem_id_get_name(sid),
++		   snd_mixer_selem_id_get_index(sid));
++	snd_mixer_close(handle);
++	handle = NULL;
++	return;
++    }
++    
++
++	ok = snd_mixer_selem_has_playback_channel(elem, chn);
++	
++	if (ok)
++	{
++	if (snd_mixer_selem_has_playback_switch(elem))
++	    err = snd_mixer_selem_set_playback_switch(elem, chn, mute);
++	else if (mute)
++	    vol = 0;
++	
++
++	
++	err = snd_mixer_selem_set_playback_volume_range(elem, 0, 0x1F);
++	if (err < 0) 
++	    alsa_logerr(err, "Unable to set volume scale for channel %d\n", chn);
++
++
++	err = snd_mixer_selem_set_playback_volume(elem, chn, vol);
++
++	if (err < 0) {
++	    alsa_logerr(err, "Unable to set volume for channel %d\n", chn);
++	
++	    snd_mixer_close(handle);
++	    handle = NULL;
++	    return;
++	}
++	}
++    
++}
++
++
++
++
+ static struct audio_option alsa_options[] = {
+     {"DAC_SIZE_IN_USEC", AUD_OPT_BOOL, &conf.size_in_usec_out,
+      "DAC period/buffer size in microseconds (otherwise in frames)", NULL, 0},
+diff --git a/audio/audio.h b/audio/audio.h
+index b09cce5..85604f1 100644
+--- a/audio/audio.h
++++ b/audio/audio.h
+@@ -174,5 +174,6 @@ int wav_start_capture (CaptureState *s, const char *path, int freq,
+                        int bits, int nchannels);
+ 
+ void alsa_volume(int, int, int);
++void alsa_volume_mono(int, int, int);
+ 
+ #endif  /* audio.h */
+diff --git a/hw/es1370.c b/hw/es1370.c
+index 50f5a55..c3f2457 100644
+--- a/hw/es1370.c
++++ b/hw/es1370.c
+@@ -525,9 +525,11 @@ IO_WRITE_PROTO (es1370_writew)
+ 
+     switch (addr) {
+     case ES1370_REG_CODEC:
+-        dolog ("ignored codec write address %#x, data %#x\n",
+-               (val >> 8) & 0xff, val & 0xff);
++/*        dolog ("ignored codec write address %#x, data %#x\n",
++               (val >> 8) & 0xff, val & 0xff); */
+         s->codec = val;
++	if ((val>>8)<2)  /* We only lisen for master volume */
++		alsa_volume_mono(val>>8,  ~val & 0x1f, (val & 0xE0)!=0);
+         break;
+ 
+     case ES1370_REG_CONTROL:

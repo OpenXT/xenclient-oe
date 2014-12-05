@@ -1,0 +1,59 @@
+diff --git a/hw/pass-through.c b/hw/pass-through.c
+index 38af09e..9cbcae0 100644
+--- a/hw/pass-through.c
++++ b/hw/pass-through.c
+@@ -3527,6 +3527,21 @@ static int pt_pmcsr_reg_write(struct pt_dev *ptdev,
+     return 0;
+ }
+ 
++static int msi_is_enable(struct pt_dev *dev)
++{
++    uint16_t val = 0;
++    uint32_t address = 0;
++    if (!dev->msi)
++        return 0;
++
++    address = dev->msi->ctrl_offset;
++    if (!address)
++        return 0;
++
++    val = pci_read_word(dev->pci_dev, address);
++    return val & PCI_MSI_FLAGS_ENABLE;
++}
++
+ /* write Message Control register */
+ static int pt_msgctrl_reg_write(struct pt_dev *ptdev,
+     struct pt_reg_tbl *cfg_entry,
+@@ -3591,6 +3606,14 @@ static int pt_msgctrl_reg_write(struct pt_dev *ptdev,
+             ptdev->msi->flags &= ~MSI_FLAG_UNINIT;
+             ptdev->msi->flags |= PT_MSI_MAPPED;
+         }
++        else
++        {
++            if (!msi_is_enable(ptdev))
++            {
++                pt_msi_setup(ptdev);
++                pt_msi_update(ptdev);
++            }
++        }
+         ptdev->msi->flags |= PCI_MSI_FLAGS_ENABLE;
+     }
+     else
+diff --git a/hw/pt-msi.c b/hw/pt-msi.c
+index 9f4a3b3..4fb3ee2 100644
+--- a/hw/pt-msi.c
++++ b/hw/pt-msi.c
+@@ -66,11 +66,13 @@ int pt_msi_setup(struct pt_dev *dev)
+ {
+     int pirq = -1;
+ 
++#if 0
+     if ( !(dev->msi->flags & MSI_FLAG_UNINIT) )
+     {
+         PT_LOG("Error: setup physical after initialized?? \n");
+         return -1;
+     }
++#endif
+ 
+     if ( xc_physdev_map_pirq_msi(xc_handle, domid, AUTO_ASSIGN, &pirq,
+                                  dev->pci_dev->dev << 3 | dev->pci_dev->func,

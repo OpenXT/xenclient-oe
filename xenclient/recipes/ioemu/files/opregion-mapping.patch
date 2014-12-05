@@ -1,0 +1,377 @@
+based on git://xenbits.xen.org/qemu-xen-4.2-testing.git
+commit b7469189669c4de0a5161a869f443738d84539ec
+Author: Jean Guyader <jean.guyader@eu.citrix.com>
+Date:   Fri May 11 12:40:42 2012 +0100
+
+    passthrough: Intel GPU passthrough, fix OpRegion mapping
+        
+    The OpRegion shouldn't be mapped 1:1 because the address in the host
+    can't be used in the guest directly.
+                
+    This patch traps read and write access to the opregion of the Intel
+    GPU config space (offset 0xfc).
+                        
+    To work correctly this patch needs a change in hvmloader.
+                            
+    HVMloader will allocate 2 pages for the OpRegion and write this address
+    on the config space of the Intel GPU. Qemu will trap and map the host
+    OpRegion to the guest. Any write to this offset after that won't have
+    any effect. Any read of this config space offset will return the address
+    in the guest.
+                                                
+    Signed-off-by: Jean Guyader <jean.guyader@eu.citrix.com>
+    Acked-by: Stefano Stabellini <stefano.stabellini@eu.citrix.com>
+
+index a5ed736..f9766c5 100644
+--- a/hw/pass-through.c
++++ b/hw/pass-through.c
+@@ -244,6 +244,14 @@ static int pt_bar_reg_restore(struct pt_dev *ptdev,
+ static int pt_exp_rom_bar_reg_restore(struct pt_dev *ptdev,
+     struct pt_reg_tbl *cfg_entry,
+     uint32_t real_offset, uint32_t dev_value, uint32_t *value);
++static int pt_intel_opregion_read(struct pt_dev *ptdev,
++        struct pt_reg_tbl *cfg_entry,
++        uint32_t *value, uint32_t valid_mask);
++static int pt_intel_opregion_write(struct pt_dev *ptdev,
++        struct pt_reg_tbl *cfg_entry,
++        uint32_t *value, uint32_t dev_value, uint32_t valid_mask);
++static uint8_t pt_reg_grp_header0_size_init(struct pt_dev *ptdev,
++        struct pt_reg_grp_info_tbl *grp_reg, uint32_t base_offset);
+ 
+ /* pt_reg_info_tbl declaration
+  * - only for emulated register (either a part or whole bit).
+@@ -450,6 +458,16 @@ static struct pt_reg_info_tbl pt_emu_reg_header0_tbl[] = {
+         .u.dw.write = pt_exp_rom_bar_reg_write,
+         .u.dw.restore = pt_exp_rom_bar_reg_restore,
+     },
++    /* Intel IGFX OpRegion reg */
++    {
++        .offset     = PCI_INTEL_OPREGION,
++        .size       = 4,
++        .init_val   = 0,
++        .no_wb      = 1,
++        .u.dw.read   = pt_intel_opregion_read,
++        .u.dw.write  = pt_intel_opregion_write,
++        .u.dw.restore  = NULL,
++    },
+     {
+         .size = 0,
+     },
+@@ -743,7 +761,7 @@ static const struct pt_reg_grp_info_tbl pt_emu_reg_grp_tbl[] = {
+         .grp_id     = 0xFF,
+         .grp_type   = GRP_TYPE_EMU,
+         .grp_size   = 0x40,
+-        .size_init  = pt_reg_grp_size_init,
++        .size_init  = pt_reg_grp_header0_size_init,
+         .emu_reg_tbl= pt_emu_reg_header0_tbl,
+     },
+     /* PCI PowerManagement Capability reg group */
+@@ -3016,6 +3034,19 @@ static uint32_t pt_msixctrl_reg_init(struct pt_dev *ptdev,
+     return reg->init_val;
+ }
+ 
++static uint8_t pt_reg_grp_header0_size_init(struct pt_dev *ptdev,
++        struct pt_reg_grp_info_tbl *grp_reg, uint32_t base_offset)
++{
++    /*
++    ** By default we will trap up to 0x40 in the cfg space.
++    ** If an intel device is pass through we need to trap 0xfc,
++    ** therefore the size should be 0xff.
++    */
++    if (igd_passthru)
++        return 0xFF;
++    return grp_reg->grp_size;
++}
++
+ /* get register group size */
+ static uint8_t pt_reg_grp_size_init(struct pt_dev *ptdev,
+         struct pt_reg_grp_info_tbl *grp_reg, uint32_t base_offset)
+@@ -4191,6 +4222,22 @@ static int pt_pmcsr_reg_restore(struct pt_dev *ptdev,
+     return 0;
+ }
+ 
++static int pt_intel_opregion_read(struct pt_dev *ptdev,
++        struct pt_reg_tbl *cfg_entry,
++        uint32_t *value, uint32_t valid_mask)
++{
++    *value = igd_read_opregion(ptdev);
++    return 0;
++}
++
++static int pt_intel_opregion_write(struct pt_dev *ptdev,
++        struct pt_reg_tbl *cfg_entry,
++        uint32_t *value, uint32_t dev_value, uint32_t valid_mask)
++{
++    igd_write_opregion(ptdev, *value);
++    return 0;
++}
++
+ static struct pt_dev * register_real_device(PCIBus *e_bus,
+         const char *e_dev_name, int e_devfn, uint8_t r_bus, uint8_t r_dev,
+         uint8_t r_func, uint32_t machine_irq, struct pci_access *pci_access,
+diff --git a/hw/pass-through.h b/hw/pass-through.h
+index 8fbe1ae..4ae1559 100644
+--- a/hw/pass-through.h
++++ b/hw/pass-through.h
+@@ -413,10 +413,11 @@ void intel_pch_init(PCIBus *bus);
+ int register_vga_regions(struct pt_dev *real_device);
+ int unregister_vga_regions(struct pt_dev *real_device);
+ int setup_vga_pt(struct pt_dev *real_device);
+-PCIBus *intel_pci_bridge_init(PCIBus *bus, int devfn, uint16_t vid, uint16_t did, uint16_t svid, uint16_t sdid,
+-                                      const char *name, uint16_t revision, uint8_t *caps, int caps_len );
++
+ void igd_pci_write(PCIDevice *pci_dev, uint32_t config_addr, uint32_t val, int len);
+ uint32_t igd_pci_read(PCIDevice *pci_dev, uint32_t config_addr, int len);
++uint32_t igd_read_opregion(struct pt_dev *pci_dev);
++void igd_write_opregion(struct pt_dev *real_dev, uint32_t val);
+ 
+ #endif /* __PASSTHROUGH_H__ */
+ 
+diff --git a/hw/pci.h b/hw/pci.h
+index 0b8d84a..36b334a 100644
+--- a/hw/pci.h
++++ b/hw/pci.h
+@@ -169,6 +169,7 @@ typedef struct PCIIORegion {
+ #define PCI_INTERRUPT_PIN	0x3d	/* 8 bits */
+ #define PCI_MIN_GNT		0x3e	/* 8 bits */
+ #define PCI_MAX_LAT		0x3f	/* 8 bits */
++#define PCI_INTEL_OPREGION      0xfc    /* 32 bits */
+ 
+ /* Header type 1 (PCI-to-PCI bridges) */
+ #define PCI_SEC_STATUS		0x1e	/* Secondary status register */
+diff --git a/hw/piix_pci.c b/hw/piix_pci.c
+index 9c5dcf1..1181ba7 100644
+--- a/hw/piix_pci.c
++++ b/hw/piix_pci.c
+@@ -211,14 +211,15 @@ PCIBus *i440fx_init(PCIDevice **pi440fx_state, qemu_irq *pic)
+ #ifdef CONFIG_PASSTHROUGH
+     d = pci_register_device(b, "i440FX", sizeof(PCIDevice), 0,
+                             igd_pci_read, igd_pci_write);
++    intel_type0_copy_config_space(d);
+ #else
+     d = pci_register_device(b, "i440FX", sizeof(PCIDevice), 0,
+                             NULL, NULL);
+-#endif
+ 
+     pci_config_set_vendor_id(d->config, PCI_VENDOR_ID_INTEL);
+     pci_config_set_device_id(d->config, PCI_DEVICE_ID_INTEL_82441);
+     d->config[0x08] = 0x02; // revision
++#endif
+     pci_config_set_class(d->config, PCI_CLASS_BRIDGE_HOST);
+     d->config[0x0e] = 0x00; // header_type
+ 
+diff --git a/hw/pt-graphics.c b/hw/pt-graphics.c
+index 773a558..3730feb 100644
+--- a/hw/pt-graphics.c
++++ b/hw/pt-graphics.c
+@@ -15,6 +15,8 @@ extern int gfx_passthru;
+ extern int igd_passthru;
+ extern int surfman;
+ 
++static uint32_t igd_guest_opregion = 0;
++
+ static int pch_map_irq(PCIDevice *pci_dev, int irq_num)
+ {
+     PT_LOG("pch_map_irq called\n");
+@@ -64,6 +66,99 @@ void intel_pch_init(PCIBus *bus)
+     }
+ }
+ 
++/* Copy root config space information we want to expose. */
++void intel_type0_copy_config_space(PCIDevice *d)
++{
++    uint8_t capptr;
++    uint8_t captype;
++    uint8_t caplen;
++    uint8_t capstart;
++    uint8_t i;
++    uint8_t addr[] = { 0x0, 0x1, 0x2, 0x3, 0x8, 0x2c, 0x2d, 0x2e, 0x2f };
++
++    for (i = 0; i < sizeof (addr); ++i) {
++        d->config[addr[i]] = pt_pci_host_read(pci_bus_num(d->bus), PCI_SLOT(d->devfn),
++                                              PCI_FUNC(d->devfn), addr[i], 1);
++    }
++
++    capptr = pt_pci_host_read(pci_bus_num(d->bus), PCI_SLOT(d->devfn),
++                              PCI_FUNC(d->devfn), 0x34, 1);
++    if (!capptr)
++        return;
++
++    captype = pt_pci_host_read(pci_bus_num(d->bus), PCI_SLOT(d->devfn),
++                               PCI_FUNC(d->devfn), capptr, 1);
++    if (captype != 0x9)
++        return;
++
++    caplen = pt_pci_host_read(pci_bus_num(d->bus), PCI_SLOT(d->devfn),
++                              PCI_FUNC(d->devfn), capptr + 2, 1);
++    if (!caplen)
++        return ;
++
++    d->config[0x6] |= 0x10;
++    d->config[0x34] = capptr;
++    d->config[capptr] = captype;
++    d->config[capptr + 1] = 0;
++    d->config[capptr + 2] = caplen;
++
++    for (capstart = capptr + 3; caplen; ++capstart, --caplen) {
++        d->config[capstart] = pt_pci_host_read(pci_bus_num(d->bus), PCI_SLOT(d->devfn),
++                                               PCI_FUNC(d->devfn), capstart, 1);
++    }
++}
++
++uint32_t igd_read_opregion(struct pt_dev *pci_dev)
++{
++    uint32_t val = -1;
++
++    if ( igd_guest_opregion == 0 )
++        return -1;
++
++    val = igd_guest_opregion;
++#ifdef PT_DEBUG_PCI_CONFIG_ACCESS
++    PT_LOG_DEV((PCIDevice*)pci_dev, "addr=%x len=%x val=%x\n",
++            PCI_INTEL_OPREGION, 4, val);
++#endif
++    return val;
++}
++
++void igd_write_opregion(struct pt_dev *real_dev, uint32_t val)
++{
++    uint32_t host_opregion = 0;
++    PCIDevice *dev = &real_dev->dev;
++
++    int ret;
++
++    if ( igd_guest_opregion )
++    {
++        PT_LOG("opregion register already been set, ignoring %x\n", val);
++        return;
++    }
++
++    host_opregion = pt_pci_host_read(pci_bus_num(dev->bus), PCI_SLOT(dev->devfn), PCI_FUNC(dev->devfn),
++                                     PCI_INTEL_OPREGION, 4);
++    igd_guest_opregion = (val & ~0xfff) | (host_opregion & 0xfff);
++    PT_LOG("Map OpRegion: %x -> %x\n", host_opregion, igd_guest_opregion);
++
++    ret = xc_domain_memory_mapping(xc_handle, domid,
++                                   igd_guest_opregion >> XC_PAGE_SHIFT,
++                                   host_opregion >> XC_PAGE_SHIFT,
++                                   2,
++                                   DPCI_ADD_MAPPING);
++
++    if ( ret != 0 )
++    {
++        PT_LOG("Error: Can't map opregion\n");
++        igd_guest_opregion = 0;
++    }
++#ifdef PT_DEBUG_PCI_CONFIG_ACCESS
++    PT_LOG_DEV((PCIDevice*)real_dev, "addr=%x len=%lx val=%x\n",
++            PCI_INTEL_OPREGION, len, val);
++#endif
++
++}
++
+ void igd_pci_write(PCIDevice *pci_dev, uint32_t config_addr, uint32_t val, int len)
+ {
+     assert(pci_dev->devfn == 0x00);
+@@ -96,13 +191,7 @@ uint32_t igd_pci_read(PCIDevice *pci_dev, uint32_t config_addr, int len)
+ 
+ 
+ 
+-    switch (config_addr)
+-    {
+-        case 0x00:        /* vendor id */
+-        case 0x02:        /* device id */
+-        case 0x08:        /* revision id */
+-        case 0x2c:        /* sybsystem vendor id */
+-        case 0x2e:        /* sybsystem id */
++    switch (config_addr) {
+         case 0x50:        /* processor graphics control register */
+         case 0x52:        /* processor graphics control register */
+         case 0xa0:        /* top of memory */
+@@ -117,26 +206,7 @@ uint32_t igd_pci_read(PCIDevice *pci_dev, uint32_t config_addr, int len)
+                    PCI_FUNC(pci_dev->devfn), config_addr, len, val);
+             break;
+         default:
+-            val = pt_pci_host_read(0, 0, 0, 0x34, 1);
+-
+-            /* Only do the following for vendor specific caps (0x09) */
+-            if ((val != 0) && (pt_pci_host_read(0, 0, 0, val, 1) == 0x09))
+-            {
+-                if (config_addr == 0x34) /* reading caps pointer */
+-                    return 0;
+-                if ((config_addr >= val) && (config_addr < (val + 12)))
+-                {
+-                    /* don't allow it to chain further */
+-                    if (config_addr == (val + 1))
+-                    {
+-                        return 0;
+-                    }
+-                    /* reading vendor specific capabilities from PCH */
+-                    return pt_pci_host_read(0, 0, 0, config_addr, len);
+-                }
+-            }
+-            else
+-                val = pci_default_read_config(pci_dev, config_addr, len);
++            val = pci_default_read_config(pci_dev, config_addr, len);
+     }
+     return val;
+ }
+@@ -146,7 +216,7 @@ uint32_t igd_pci_read(PCIDevice *pci_dev, uint32_t config_addr, int len)
+  */
+ int register_vga_regions(struct pt_dev *real_device)
+ {
+-    u32 vendor_id, igd_opregion;
++    u32 vendor_id;
+     int ret = 0;
+ 
+     if ( !gfx_passthru || real_device->pci_dev->device_class != 0x0300 )
+@@ -164,19 +234,6 @@ int register_vga_regions(struct pt_dev *real_device)
+             0x20,
+             DPCI_ADD_MAPPING);
+ 
+-    /* 1:1 map ASL Storage register value */
+-    vendor_id = pt_pci_host_read(0, 2, 0, 0, 2);
+-    igd_opregion = pt_pci_host_read(0, 2, 0, 0xfc, 4);
+-    if ( (vendor_id == 0x8086) && igd_opregion )
+-    {
+-        ret |= xc_domain_memory_mapping(xc_handle, domid,
+-                igd_opregion >> XC_PAGE_SHIFT,
+-                igd_opregion >> XC_PAGE_SHIFT,
+-                2,
+-                DPCI_ADD_MAPPING);
+-        PT_LOG("register_vga: igd_opregion = %x\n", igd_opregion);
+-    }
+-
+     if (!ret && surfman) {
+         PT_LOG("Passing device to surfman\n");
+         surfman_passthrough_init(real_device);
+@@ -193,7 +250,7 @@ int register_vga_regions(struct pt_dev *real_device)
+  */
+ int unregister_vga_regions(struct pt_dev *real_device)
+ {
+-    u32 vendor_id, igd_opregion;
++    u32 vendor_id;
+     int ret = 0;
+ 
+     if ( !gfx_passthru || real_device->pci_dev->device_class != 0x0300 )
+@@ -208,16 +265,15 @@ int unregister_vga_regions(struct pt_dev *real_device)
+     ret |= xc_domain_memory_mapping(xc_handle, domid,
+             0xa0000 >> XC_PAGE_SHIFT,
+             0xa0000 >> XC_PAGE_SHIFT,
+-            20,
++            0x20,
+             DPCI_REMOVE_MAPPING);
+ 
+     vendor_id = pt_pci_host_read(0, 2, 0, 0, 2);
+-    igd_opregion = pt_pci_host_read(0, 2, 0, 0xfc, 4);
+-    if ( (vendor_id == 0x8086) && igd_opregion )
++    if ( (vendor_id == 0x8086) && igd_guest_opregion )
+     {
+         ret |= xc_domain_memory_mapping(xc_handle, domid,
+-                igd_opregion >> XC_PAGE_SHIFT,
+-                igd_opregion >> XC_PAGE_SHIFT,
++                igd_guest_opregion >> XC_PAGE_SHIFT,
++                igd_guest_opregion >> XC_PAGE_SHIFT,
+                 2,
+                 DPCI_REMOVE_MAPPING);
+     }

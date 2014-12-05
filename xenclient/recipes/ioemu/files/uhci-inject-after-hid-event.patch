@@ -1,0 +1,54 @@
+diff --git a/hw/usb-hid.c b/hw/usb-hid.c
+index 17cde4b..75fa356 100644
+--- a/hw/usb-hid.c
++++ b/hw/usb-hid.c
+@@ -473,6 +473,8 @@ static void usb_pointer_event(void *hs_v, int x1, int y1, int z1,
+     usb_pointer_event_combine(&s->queue[use_slot],s->xyrel, x1,y1,z1);
+ 
+     usb_notify_datain_cb(hs);
++
++    uhci_frame_timer(hs->dev.port->opaque);
+ }
+ 
+ static void usb_keyboard_event(void *opaque, int keycode)
+diff --git a/hw/usb-uhci.c b/hw/usb-uhci.c
+index d42d394..c850436 100644
+--- a/hw/usb-uhci.c
++++ b/hw/usb-uhci.c
+@@ -619,6 +619,7 @@ static void uhci_attach(USBPort *port1, USBDevice *dev)
+         uhci_resume(s);
+ 
+         port->port.dev = dev;
++        dev->port = port;
+         /* send the attach message */
+         usb_send_msg(dev, USB_MSG_ATTACH);
+     } else {
+@@ -1017,7 +1018,7 @@ static void uhci_process_frame(UHCIState *s)
+     s->pending_int_mask = int_mask;
+ }
+ 
+-static void uhci_frame_timer(void *opaque)
++void uhci_frame_timer(void *opaque)
+ {
+     UHCIState *s = opaque;
+     int64_t expire_time;
+diff --git a/hw/usb.h b/hw/usb.h
+index 4cd832d..ce75f8e 100644
+--- a/hw/usb.h
++++ b/hw/usb.h
+@@ -176,6 +176,7 @@ struct USBDevice {
+     int setup_state;
+     int setup_len;
+     int setup_index;
++    USBPort *port;
+ };
+ 
+ typedef void (*usb_attachfn)(USBPort *port, USBDevice *dev);
+@@ -251,6 +252,7 @@ USBDevice *usb_mouse_init(void);
+ USBDevice *usb_tablet_init(void);
+ USBDevice *usb_keyboard_init(void);
+ void usb_hid_datain_cb(USBDevice *dev, void *opaque, void (*datain)(void *));
++void uhci_frame_timer(void *opaque);
+ 
+ /* usb-msd.c */
+ USBDevice *usb_msd_init(const char *filename, BlockDriverState **pbs);

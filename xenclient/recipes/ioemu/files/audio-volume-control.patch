@@ -1,0 +1,215 @@
+diff --git a/audio/alsaaudio.c b/audio/alsaaudio.c
+index 557fd8f..e2c9e0c 100644
+--- a/audio/alsaaudio.c
++++ b/audio/alsaaudio.c
+@@ -57,10 +57,13 @@ static struct {
+     int buffer_size_out_overridden;
+     int period_size_out_overridden;
+     int verbose;
++
++    const char *volume_control;
+ } conf = {
+     .buffer_size_out = 1024,
+     .pcm_name_out = "default",
+     .pcm_name_in = "default",
++    .volume_control = "Master",
+ };
+ 
+ struct alsa_params_req {
+@@ -290,6 +293,25 @@ static int alsa_open (int in, struct alsa_params_req *req,
+         return -1;
+     }
+ 
++    /* Close and then open again: volume control seems to only work
++     * after the device has been closed once. */
++    err = snd_pcm_close(handle);
++    if (err < 0) {
++	alsa_logerr2 (err, typ, "Failed to close `%s':\n", pcm_name);
++	return -1;
++    }
++
++    err = snd_pcm_open (
++        &handle,
++        pcm_name,
++        in ? SND_PCM_STREAM_CAPTURE : SND_PCM_STREAM_PLAYBACK,
++        SND_PCM_NONBLOCK
++        );
++    if (err < 0) {
++        alsa_logerr2 (err, typ, "Failed to re-open `%s':\n", pcm_name);
++        return -1;
++    }
++
+     err = snd_pcm_hw_params_any (handle, hw_params);
+     if (err < 0) {
+         alsa_logerr2 (err, typ, "Failed to initialize hardware parameters\n");
+@@ -905,6 +927,73 @@ static void alsa_audio_fini (void *opaque)
+     (void) opaque;
+ }
+ 
++void alsa_volume(int rvol, int lvol, int mute)
++{
++    static snd_mixer_t *handle = NULL;
++    static const char *card = "default";
++    snd_mixer_elem_t *elem;
++    snd_mixer_selem_id_t *sid;
++    int err, chn, volume;
++
++    snd_mixer_selem_id_alloca(&sid);
++
++    if (handle == NULL) {
++	if ((err = snd_mixer_open(&handle, 0)) < 0) {
++	    alsa_logerr(err, "Mixer %s open error: %s\n", card,
++		       snd_strerror(err));
++	    return;
++	}
++	if ((err = snd_mixer_attach(handle, card)) < 0) {
++	    alsa_logerr(err, "Mixer attach %s error: %s", card,
++		       snd_strerror(err));
++	    snd_mixer_close(handle);
++	    handle = NULL;
++	    return;
++	}
++	if ((err = snd_mixer_selem_register(handle, NULL, NULL)) < 0) {
++	    alsa_logerr(err, "Mixer register error: %s", snd_strerror(err));
++	    snd_mixer_close(handle);
++	    handle = NULL;
++	    return;
++	}
++	err = snd_mixer_load(handle);
++	if (err < 0) {
++	    alsa_logerr(err, "Mixer %s load error: %s", card, snd_strerror(err));
++	    snd_mixer_close(handle);
++	    handle = NULL;
++	    return;
++	}
++    }
++    snd_mixer_selem_id_set_index(sid, 0);
++    snd_mixer_selem_id_set_name(sid, conf.volume_control);
++    elem = snd_mixer_find_selem(handle, sid);
++    if (!elem) {
++	alsa_logerr(ENOENT, "Unable to find simple control '%s',%i\n",
++		   snd_mixer_selem_id_get_name(sid),
++		   snd_mixer_selem_id_get_index(sid));
++	snd_mixer_close(handle);
++	handle = NULL;
++	return;
++    }
++
++    for (chn = 0; chn <= SND_MIXER_SCHN_LAST; chn++) {
++	if (!snd_mixer_selem_has_playback_channel(elem, chn))
++	    continue;
++	if (snd_mixer_selem_has_playback_switch(elem))
++	    err = snd_mixer_selem_set_playback_switch(elem, chn, mute);
++	else if (mute)
++	    rvol = lvol = 0;
++	volume = (chn == 1) ? rvol : lvol;
++	err = snd_mixer_selem_set_playback_volume(elem, chn, volume);
++	if (err < 0) {
++	    alsa_logerr(err, "Unable to set volume for channel %d\n", chn);
++	    snd_mixer_close(handle);
++	    handle = NULL;
++	    return;
++	}
++    }
++}
++
+ static struct audio_option alsa_options[] = {
+     {"DAC_SIZE_IN_USEC", AUD_OPT_BOOL, &conf.size_in_usec_out,
+      "DAC period/buffer size in microseconds (otherwise in frames)", NULL, 0},
+@@ -936,6 +1025,9 @@ static struct audio_option alsa_options[] = {
+     {"VERBOSE", AUD_OPT_BOOL, &conf.verbose,
+      "Behave in a more verbose way", NULL, 0},
+ 
++    {"VOL_CTRL", AUD_OPT_STR, &conf.volume_control,
++     "Volume control voice name", NULL, 0},
++
+     {NULL, 0, NULL, NULL, NULL, 0}
+ };
+ 
+diff --git a/audio/audio.h b/audio/audio.h
+index 4aaeb96..b09cce5 100644
+--- a/audio/audio.h
++++ b/audio/audio.h
+@@ -173,4 +173,6 @@ uint32_t lsbindex (uint32_t u);
+ int wav_start_capture (CaptureState *s, const char *path, int freq,
+                        int bits, int nchannels);
+ 
++void alsa_volume(int, int, int);
++
+ #endif  /* audio.h */
+diff --git a/hw/ac97.c b/hw/ac97.c
+index ade2719..93417ad 100644
+--- a/hw/ac97.c
++++ b/hw/ac97.c
+@@ -116,6 +116,7 @@ enum {
+ 
+ #define VOL_MASK 0x1f
+ #define MUTE_SHIFT 15
++#define MAX_VOL_MASK 0xff
+ 
+ #define REC_MASK 7
+ enum {
+@@ -527,6 +528,28 @@ static void record_select (AC97LinkState *s, uint32_t val)
+     ls = aud_to_ac97_record_source (als);
+     mixer_store (s, AC97_Record_Select, rs | (ls << 8));
+ }
++#else
++static void set_volume (AC97LinkState *s, int index,
++                        /* audmixerctl_t mt, */ uint32_t val)
++{
++    int mute = (val >> MUTE_SHIFT) & 1;
++    uint8_t rvol = val & MAX_VOL_MASK;
++    uint8_t lvol = (val >> 8) & MAX_VOL_MASK;
++
++    if (rvol > VOL_MASK)
++        rvol = VOL_MASK;
++
++    if (lvol > VOL_MASK)
++        lvol = VOL_MASK;
++
++    rvol = 255 * (VOL_MASK - rvol) / VOL_MASK;
++    lvol = 255 * (VOL_MASK - lvol) / VOL_MASK;
++
++    if (index == AC97_Master_Volume_Mute)
++	alsa_volume(rvol, lvol, mute);
++
++    mixer_store (s, index, val);
++}
+ #endif
+ 
+ static void mixer_reset (AC97LinkState *s)
+@@ -568,6 +591,8 @@ static void mixer_reset (AC97LinkState *s)
+     set_volume (s, AC97_Master_Volume_Mute, AUD_MIXER_VOLUME  , 0x8000);
+     set_volume (s, AC97_PCM_Out_Volume_Mute, AUD_MIXER_PCM    , 0x8808);
+     set_volume (s, AC97_Line_In_Volume_Mute, AUD_MIXER_LINE_IN, 0x8808);
++#else
++    set_volume (s, AC97_Master_Volume_Mute, /* AUD_MIXER_VOLUME  , */ 0x8000);
+ #endif
+     reset_voices (s, active);
+ }
+@@ -632,10 +657,10 @@ static void nam_writew (void *opaque, uint32_t addr, uint32_t val)
+         val |= mixer_load (s, index) & 0xf;
+         mixer_store (s, index, val);
+         break;
+-#ifdef USE_MIXER
+     case AC97_Master_Volume_Mute:
+-        set_volume (s, index, AUD_MIXER_VOLUME, val);
++        set_volume (s, index, /* AUD_MIXER_VOLUME, */ val);
+         break;
++#ifdef USE_MIXER
+     case AC97_PCM_Out_Volume_Mute:
+         set_volume (s, index, AUD_MIXER_PCM, val);
+         break;
+diff --git a/monitor.c b/monitor.c
+index 8915a6e..a35c9a5 100644
+--- a/monitor.c
++++ b/monitor.c
+@@ -1601,6 +1601,8 @@ static const term_cmd_t term_cmds[] = {
+       "name [up|down]", "change the link status of a network adapter" },
+     { "cpu_set", "is", do_cpu_set_nr,
+       "cpu [online|offline]", "change cpu state" },
++    { "volume", "iii", alsa_volume,
++      "volume", "set alsa volume (right, left, mute)" },
+     { NULL, NULL, },
+ };
+ 

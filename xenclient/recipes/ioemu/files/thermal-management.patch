@@ -1,0 +1,206 @@
+diff --git a/hw/piix4acpi.c b/hw/piix4acpi.c
+index 7ab673e..03287a0 100644
+--- a/hw/piix4acpi.c
++++ b/hw/piix4acpi.c
+@@ -31,6 +31,7 @@
+ #include "battery_mgmt.h"
+ #include "qemu-log.h"
+ #include "xen_acpi_common.h"
++#include "thermal_mgmt.h"
+ 
+ #include <xen/hvm/ioreq.h>
+ #include <xen/hvm/params.h>
+@@ -277,6 +278,7 @@ static void acpi_map(PCIDevice *pci_dev, int region_num,
+ 
+     battery_mgmt_init(pci_dev);
+     xen_acpi_wmi_init(pci_dev);
++    thermal_mgmt_init(pci_dev);
+ }
+ 
+ static inline int test_bit(uint8_t *map, int bit)
+diff --git a/hw/thermal_mgmt.c b/hw/thermal_mgmt.c
+new file mode 100644
+index 0000000..3744bda
+--- /dev/null
++++ b/hw/thermal_mgmt.c
+@@ -0,0 +1,78 @@
++/*
++ * thermal_mgmt.c
++ *
++ * Copyright (c) 2009  Kamala Narasimhan
++ * Copyright (c) 2009  Citrix Systems, Inc.
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
++ */
++
++/* Implementation Notes:  Following provides a minimal thermal zone implementation for
++ * HVM guest.  The vACPI layer exposes a single thermal zone with critical and current
++ * temperature objects which when invoked relies on the below to return back the critical
++ * and current temperature provided by the underlying firmware.
++ */
++
++#include "hw.h"
++#include "pc.h"
++#include "qemu-xen.h"
++#include "isa.h"
++#include "thermal_mgmt.h"
++
++#ifndef CONFIG_NO_THERMAL_MGMT
++
++/* #define THERMAL_MGMT_DBG */
++
++extern FILE *logfile;
++
++static uint32_t thermal_port_1_readw(void *opaque, uint32_t addr)
++{
++    int current_temp;
++
++    xenstore_refresh_thermal_info();
++    current_temp = xenstore_read_current_temperature();
++#ifdef THERMAL_MGMT_DBG
++    fprintf(logfile, "Current temperature - %d\n", current_temp);
++#endif
++    return current_temp;
++}
++
++static uint32_t thermal_port_2_readw(void *opaque, uint32_t addr)
++{
++    int critical_temp;
++
++    xenstore_refresh_thermal_info();
++    critical_temp = xenstore_read_critical_temperature();
++#ifdef THERMAL_MGMT_DBG
++    fprintf(logfile, "Critical trip point temperature - %d\n", critical_temp);
++#endif
++    return critical_temp;
++}
++
++void thermal_mgmt_init(PCIDevice *device)
++{
++#ifdef THERMAL_MGMT_DBG
++    fprintf(logfile, "In thermal management init\n");
++#endif
++
++    register_ioport_read(THERMAL_PORT_1, 1, 2, thermal_port_1_readw, device);
++    register_ioport_read(THERMAL_PORT_2, 1, 2, thermal_port_2_readw, device);
++}
++
++#else
++
++void thermal_mgmt_init(PCIDevice *device) { }
++
++#endif
+diff --git a/hw/thermal_mgmt.h b/hw/thermal_mgmt.h
+new file mode 100644
+index 0000000..785a6f3
+--- /dev/null
++++ b/hw/thermal_mgmt.h
+@@ -0,0 +1,34 @@
++/*
++ * thermal_mgmt.h
++ *
++ * Copyright (c) 2009  Kamala Narasimhan
++ * Copyright (c) 2009  Citrix Systems, Inc.
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
++ */
++
++#ifndef _THERMAL_MGMT_H
++#define _THERMAL_MGMT_H
++
++#ifdef CONFIG_STUBDOM
++#define CONFIG_NO_THERMAL_MGMT
++#endif
++
++#define THERMAL_PORT_1 0x9C
++#define THERMAL_PORT_2 0x9E
++
++void thermal_mgmt_init(PCIDevice *device);
++
++#endif
+diff --git a/qemu-xen.h b/qemu-xen.h
+index a733b1b..3f77c25 100644
+--- a/qemu-xen.h
++++ b/qemu-xen.h
+@@ -129,9 +129,12 @@ int xenstore_read_is_battery_present(void);
+ int xenstore_read_is_secondary_battery_present(void);
+ char *xenstore_read_battery_data(int battery_status, unsigned int battery_num);
+ int xenstore_refresh_battery_status(void);
++int xenstore_refresh_thermal_info(void);
+ void xenstore_register_for_pm_events(void);
+ int xenstore_read_ac_adapter_state(void);
+ int xenstore_read_lid_state(void);
++int xenstore_read_current_temperature(void);
++int xenstore_read_critical_temperature(void);
+ void xenstore_register_for_oem_events(void);
+ int xenstore_pv_driver_build_blacklisted(uint16_t product_number,
+                                          uint32_t build_nr);
+diff --git a/xen-hooks.mak b/xen-hooks.mak
+index 1803094..96e8753 100644
+--- a/xen-hooks.mak
++++ b/xen-hooks.mak
+@@ -39,6 +39,7 @@ OBJS += pci_emulation.o
+ OBJS += helper2.o
+ OBJS += battery_mgmt.o
+ OBJS += xen_acpi_wmi.o
++OBJS += thermal_mgmt.o
+ 
+ CONFIG_AUDIO=1
+ 
+diff --git a/xenstore.c b/xenstore.c
+index 3ccd716..08b4e85 100644
+--- a/xenstore.c
++++ b/xenstore.c
+@@ -1621,6 +1621,11 @@ int xenstore_refresh_battery_status(void)
+     return xenstore_extended_power_mgmt_event_trigger("refreshbatterystatus", "1");
+ }
+ 
++int xenstore_refresh_thermal_info(void)
++{
++    return xenstore_extended_power_mgmt_event_trigger("refreshthermalinfo", "1");
++}
++
+ void xenstore_register_for_pm_events(void)
+ {
+     char *inject_sci_buffer;
+@@ -1674,6 +1679,16 @@ int xenstore_read_lid_state(void)
+     return xenstore_extended_power_mgmt_read_int("lid_state", 1);
+ }
+ 
++int xenstore_read_current_temperature(void)
++{
++    return xenstore_extended_power_mgmt_read_int("current_temperature", 0);
++}
++
++int xenstore_read_critical_temperature(void)
++{
++    return xenstore_extended_power_mgmt_read_int("critical_temperature", 100);
++}
++
+ /*
+  * Create a store entry for a device (e.g., monitor, serial/parallel lines).
+  * The entry is <domain-path><storeString>/tty and the value is the name

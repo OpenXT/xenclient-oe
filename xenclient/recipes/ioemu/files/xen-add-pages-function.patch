@@ -1,0 +1,89 @@
+diff --git a/i386-dm/exec-dm.c b/i386-dm/exec-dm.c
+index 6db990e..5069076 100644
+--- a/i386-dm/exec-dm.c
++++ b/i386-dm/exec-dm.c
+@@ -851,3 +851,71 @@ void cpu_physical_memory_unmap(void *buffer, target_phys_addr_t len,
+     qemu_invalidate_entry(buffer);
+     cpu_notify_map_clients();
+ }
++
++void *xen_populate_pages (uint32_t pfn, uint32_t old_pfn,
++        void *old_map, uint32_t nr_pfn, int do_map)
++{
++    uint32_t i;
++    xen_pfn_t *pfn_list;
++    void *map = NULL;
++
++    pfn_list = (xen_pfn_t*)malloc(nr_pfn * sizeof(xen_pfn_t));
++    for (i = 0; i < nr_pfn; i++) {
++        pfn_list[i] = pfn + i;
++    }
++
++    if (old_pfn > 0) {
++        int rc;
++
++        /* This is not the first time we've been called; move the pages */
++        fprintf(logfile, "mmio_map moving map old_pfn:%x pfn:%x\n", old_pfn, pfn);
++        munmap(old_map, nr_pfn * TARGET_PAGE_SIZE); /* undoes xc_map_foreign_range(); */
++
++        cpu_unregister_physical_memory(pfn * TARGET_PAGE_SIZE);
++
++        for (i = 0; i < nr_pfn; i++) {
++            rc = xen_move_page(old_pfn + i, pfn + i);
++            if (rc) {
++                fprintf(logfile, "moving %x to %x failed %d\n", old_pfn, pfn, rc);
++                goto out;
++            }
++        }
++    }
++    else
++    {
++        fprintf(logfile, "populate_physmap pfn:%x\n", pfn);
++
++        /* allocate event pages as normal memory - xc_domain_memory_populate_physmap */
++        if (xc_domain_populate_physmap_exact(xc_handle, domid, nr_pfn, 0, 0, pfn_list)) {
++            fprintf(logfile, "Failed to populate RAM: %s\n", strerror(errno));
++            exit(2);
++        }
++    }
++
++    if (do_map)
++    {
++        map = xc_map_foreign_batch(xc_handle, domid,
++                PROT_READ|PROT_WRITE,
++                pfn_list, nr_pfn);
++        if (!map)
++            fprintf(logfile, "xc_map_foreign_batch failed errno:%d\n", errno);
++    }
++out:
++    free(pfn_list);
++    return map;
++}
++
++int xen_move_page(uint32_t pfn, uint32_t new_pfn)
++{
++    int rc;
++
++    rc = xc_domain_add_to_physmap(xc_handle, domid, XENMAPSPACE_gmfn, pfn, new_pfn);
++    if (rc)
++    {
++        fprintf(logfile, "xen_move_page: moving %x to %x failed %d\n", pfn, new_pfn, rc);
++        return 0;
++    }
++    return 1;
++}
++
++
+diff --git a/qemu-xen.h b/qemu-xen.h
+index b773f0c..0212134 100644
+--- a/qemu-xen.h
++++ b/qemu-xen.h
+@@ -158,4 +158,8 @@ static void vga_dirty_log_stop(void *s) { }
+ void switcher_connect(void);
+ int switcher_get_pvm(void);
+ 
++void *xen_populate_pages (uint32_t pfn, uint32_t old_pfn,
++        void *old_map, uint32_t nr_pfn, int do_map);
++int xen_move_page(uint32_t pfn, uint32_t new_pfn);
++
+ #endif /*QEMU_XEN_H*/

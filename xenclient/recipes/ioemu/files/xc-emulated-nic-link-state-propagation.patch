@@ -1,0 +1,240 @@
+diff --git a/hw/rtl8139.c b/hw/rtl8139.c
+index 20e486a..34b98f0 100644
+--- a/hw/rtl8139.c
++++ b/hw/rtl8139.c
+@@ -1243,8 +1243,10 @@ static void rtl8139_reset(RTL8139State *s)
+ 
+     s->BasicModeStatus  = 0x7809;
+     //s->BasicModeStatus |= 0x0040; /* UTP medium */
+-    s->BasicModeStatus |= 0x0020; /* autonegotiation completed */
+-    s->BasicModeStatus |= 0x0004; /* link is up */
++    if (!s->vc || !s->vc->link_down) {
++	s->BasicModeStatus |= 0x0020; /* autonegotiation completed */
++	s->BasicModeStatus |= 0x0004; /* link is up */
++    }
+ 
+     s->NWayAdvert    = 0x05e1; /* all modes, full duplex */
+     s->NWayLPAR      = 0x05e1; /* all modes, full duplex */
+@@ -2580,6 +2582,11 @@ static void rtl8139_IntrStatus_write(RTL8139State *s, uint32_t val)
+     s->IntrStatus = 0;
+     rtl8139_update_irq(s);
+ 
++    /* clearing RxUnderrun bit also seems to clear LinkChange bit */
++    if (val & RxUnderrun) {
++	s->CSCR &= ~0x0800;
++    }
++
+     s->IntrStatus = newStatus;
+     rtl8139_update_irq(s);
+ #endif
+@@ -2871,6 +2878,11 @@ static uint32_t rtl8139_io_readb(void *opaque, uint8_t addr)
+ 
+         case MediaStatus:
+             ret = 0xd0;
++	    if (s->vc && s->vc->link_down) {
++		ret = 0xd4;
++	    } else {
++		ret = 0xd0;
++	    }
+             DEBUG_PRINT(("RTL8139: MediaStatus read 0x%x\n", ret));
+             break;
+ 
+@@ -3432,6 +3444,27 @@ static void rtl8139_timer(void *opaque)
+ }
+ #endif /* RTL8139_ONBOARD_TIMER */
+ 
++static void rtl8139_link_status_changed(VLANClientState *vc)
++{
++    RTL8139State *s = vc->opaque;
++    fprintf(stderr, "RTL8139: link status changed, link_down=%d\n", vc->link_down);
++    if (vc->link_down) {
++	s->BasicModeStatus &= ~0x0020; /* autonegotiation not completed */
++	s->BasicModeStatus &= ~0x0004; /* link is down */
++	s->CSCR |= 0x0800; /* Link change bit, undocumented but needed --
++			    * used as a qualifier for RxUnderrun */
++        s->IntrStatus |= RxUnderrun;
++        rtl8139_update_irq(s);
++    } else {
++	s->BasicModeStatus |= 0x0020; /* autonegotiation completed */
++	s->BasicModeStatus |= 0x0004; /* link is up */
++	s->CSCR |= 0x0800; /* Link change bit, undocumented but needed --
++			    * used as a qualifier for RxUnderrun */
++        s->IntrStatus |= RxUnderrun;
++        rtl8139_update_irq(s);
++    }
++}
++
+ PCIDevice *pci_rtl8139_init(PCIBus *bus, NICInfo *nd, int devfn)
+ {
+     PCIRTL8139State *d;
+@@ -3474,6 +3507,9 @@ PCIDevice *pci_rtl8139_init(PCIBus *bus, NICInfo *nd, int devfn)
+     rtl8139_reset(s);
+     s->vc = qemu_new_vlan_client(nd->vlan, nd->model, nd->name,
+                                  rtl8139_receive, rtl8139_can_receive, s);
++    s->vc->link_status_changed = rtl8139_link_status_changed;
++    if (s->vc->link_down)
++	rtl8139_reset(s);
+ 
+     qemu_format_nic_info_str(s->vc, s->macaddr);
+ 
+diff --git a/net.c b/net.c
+index 720027c..61ffa7c 100644
+--- a/net.c
++++ b/net.c
+@@ -326,6 +326,9 @@ static char *assign_name(VLANClientState *vc1, const char *model)
+     return strdup(buf);
+ }
+ 
++
++extern void xenstore_register_vif(VLANClientState *vif);
++
+ VLANClientState *qemu_new_vlan_client(VLANState *vlan,
+                                       const char *model,
+                                       const char *name,
+@@ -350,6 +353,7 @@ VLANClientState *qemu_new_vlan_client(VLANState *vlan,
+     while (*pvc != NULL)
+         pvc = &(*pvc)->next;
+     *pvc = vc;
++    xenstore_register_vif(vc);
+     return vc;
+ }
+ 
+diff --git a/xenstore.c b/xenstore.c
+index c9b6e27..e26d3d8 100644
+--- a/xenstore.c
++++ b/xenstore.c
+@@ -23,6 +23,9 @@
+ #include "pc.h"
+ #include "qemu-timer.h"
+ #include "qemu-xen.h"
++#include "net.h"
++
++#define XEN_BUFSIZE 1024
+ 
+ struct xs_handle *xsh = NULL;
+ static char *media_filename[MAX_DRIVES+1];
+@@ -443,6 +446,8 @@ void xenstore_init(void)
+     }
+ }
+ 
++static void xenstore_process_vif_link_event(int vifid);
++
+ void xenstore_parse_domain_config(int hvm_domid)
+ {
+     char **e_danger = NULL;
+@@ -1029,10 +1034,103 @@ static void xenstore_process_vcpu_set_event(char **vec)
+     return;
+ }
+ 
++/* Handle vif/vwif link state events */
++static void xenstore_update_vif(char *watch, VLANClientState *vif)
++{
++    char *tmp = NULL;
++    size_t len;
++    int val = 0;
++
++    fprintf(stderr, "%s xenstore_update_vif\n", vif->name);
++
++    tmp = xs_read(xsh, XBT_NULL, watch, &len);
++
++    if (!tmp) {
++        fprintf(stderr, "warning: failed to read xenstore path (%s)\n", watch);
++        /* By default the interface is up. It's quiet stupid for me ... */
++        val = 0;
++    }
++    else
++        val = atoi(tmp) ? 1 : 0;
++
++    if (vif->link_down != val) {
++        fprintf(stderr, "%s link status change: link_down=%d\n",
++                vif->name, val);
++        vif->link_down = val;
++        if (vif->link_status_changed)
++            vif->link_status_changed(vif);
++    }
++}
++
++void xenstore_register_vif(VLANClientState *vif)
++{
++    /**
++     * FIXME: return an integer to kill QEMU if someone tries to "hack"
++     * it via xenstore
++     */
++    char *dompath = NULL;
++    char type[5];
++    char path[XEN_BUFSIZE];
++    char token[XEN_BUFSIZE];
++    char *id;
++    char *tmp;
++    int i;
++
++    /* Ignore tapX devices */
++    if (!strncmp(vif->name, "tap", 3)) {
++        fprintf(stderr, "Ignore tap device %s\n", vif->name);
++        return;
++    }
++
++    memset(type, 0, sizeof (type));
++    id = vif->name;
++
++    /* Retrieve the first part of the name (vif or vwif) */
++    for (i = 1; i < sizeof (type) && *id; i++, id++) {
++        if (isdigit(*id))
++            break;
++        if (!isalpha(*id)) { /* The first part is only compose of [a-zA-Z] */
++            fprintf(stderr, "Invalid nic name prefix %s\n", vif->name);
++            return;
++        }
++        type[i - 1] = *id;
++    }
++
++    for (tmp = id; *tmp; tmp++) {
++        if (!isdigit(*tmp)) { /* The second part should only digit */
++            fprintf(stderr, "Invalid nic name suffix %s\n", vif->name);
++            return;
++        }
++    }
++
++    fprintf(stderr, "xenstore_register_vif: registering %s\n", vif->name);
++
++    dompath = xs_get_domain_path(xsh, domid);
++    if (!dompath) {
++        fprintf (stderr, "Unable to retrieve domain path\n");
++        return;
++    }
++    snprintf(token, sizeof (token), "ni:%p", vif);
++    snprintf(path, sizeof (path), "%s/device/%s/%s/disconnect",
++             dompath, type, id);
++    free(dompath);
++    xenstore_update_vif(path, vif);
++
++    if (!xs_watch(xsh, path, token)) {
++        fprintf(stderr, "xen_register_vif: watching nic path (%s) failed\n",
++                path);
++        return;
++    }
++
++    fprintf(stderr, "xenstore_register_vif: %s initial state %d\n",
++            vif->name, vif->link_down);
++}
++
+ void xenstore_process_event(void *opaque)
+ {
+     char **vec, *offset, *bpath = NULL, *buf = NULL, *drv = NULL, *image = NULL;
+     unsigned int len, num, hd_index, i;
++    intptr_t ptr;
+ 
+     vec = xs_read_watch(xsh, &num);
+     if (!vec)
+@@ -1064,6 +1162,11 @@ void xenstore_process_event(void *opaque)
+             xenstore_watch_callbacks[i].cb(vec[XS_WATCH_TOKEN],
+                                            xenstore_watch_callbacks[i].opaque);
+ 
++    if (sscanf(vec[XS_WATCH_TOKEN], "ni:%"PRIxPTR, &ptr) == 1) {
++        xenstore_update_vif(vec[XS_WATCH_PATH], (void*)ptr);
++        goto out;
++    }
++
+     if (!strcmp(vec[XS_WATCH_TOKEN], "acadapterstatechangeevt")) {
+         acpi_ac_adapter_state_changed();
+         goto out;

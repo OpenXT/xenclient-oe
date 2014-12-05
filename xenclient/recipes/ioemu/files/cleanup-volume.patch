@@ -1,0 +1,160 @@
+qmu now removes its volume control when it terminates
+
+diff --git a/audio/alsaaudio.c b/audio/alsaaudio.c
+index 9c3db9c..1a26c61 100644
+--- a/audio/alsaaudio.c
++++ b/audio/alsaaudio.c
+@@ -112,6 +112,7 @@ extern int running_in_stubdomain;
+ #define AUDIO_SND_PCM_WRITEI                   0x09
+ #define AUDIO_SND_PCM_READI                    0x10
+ #define AUDIO_SND_PCM_RESUME                   0x11
++#define AUDIO_VOL_CTRL_REMOVE                  0x12
+ 
+ #define MAX_V4V_MSG_SIZE (V4V_AUDIO_RING_SIZE)
+ 
+@@ -1217,9 +1218,56 @@ static void *alsa_audio_init (void)
+     return &conf;
+ }
+ 
++
++static int removecontrol(const char* hw, const char* name)
++{
++    snd_ctl_t *ctl;
++    int err;
++    err = snd_ctl_open(&ctl, hw, 0);
++    if (err<0){
++	return err;
++    }
++    snd_ctl_elem_id_t *id;
++    snd_ctl_elem_id_alloca(&id);
++    snd_ctl_elem_id_set_interface(id, SND_CTL_ELEM_IFACE_MIXER);
++
++    snd_ctl_elem_id_set_name(id, name);
++    snd_ctl_elem_value_t *control;
++    snd_ctl_elem_value_alloca(&control);
++    snd_ctl_elem_value_set_id(control, id);
++
++    err = snd_ctl_elem_remove(ctl, id);
++    if (err<0) {
++	snd_ctl_close(ctl);
++	return err;
++    }
++    snd_ctl_close(ctl);
++    return 0;
++}
++
++static void remove_mixer_control(void)
++{
++    if (!running_in_stubdomain) {
++	int err = removecontrol("default", conf.volume_control );
++	if (err<0)
++	    {
++		dolog("Could not remove mixer control %s. Error code: %d.\n",conf.volume_control  ,err);
++	    }
++    } else {
++	uint8_t *v4v_buf = ah->io_buf;
++
++        v4v_buf[0] = AUDIO_VOL_CTRL_REMOVE;
++        v4v_buf += 1;
++
++        v4v_sendto(ah->fd, ah->io_buf, v4v_buf - ah->io_buf,
++                   0, &ah->remote_addr);
++    }
++}
++
+ static void alsa_audio_fini (void *opaque)
+ {
+     (void) opaque;
++    remove_mixer_control();
+ }
+ 
+ static void alsa_volume_local(int rvol, int lvol, int mute)
+diff --git a/hw/ac97.c b/hw/ac97.c
+index 9d0da51..7ae5480 100644
+--- a/hw/ac97.c
++++ b/hw/ac97.c
+@@ -117,7 +117,7 @@ enum {
+ 
+ #define VOL_MASK 0x1f
+ #define MUTE_SHIFT 15
+-#define MAX_VOL_MASK 0xff
++#define MAX_VOL_MASK 0x3f
+ 
+ #define REC_MASK 7
+ enum {
+diff --git a/i386-dm/helper2.c b/i386-dm/helper2.c
+index a690cc2..a28cc3c 100644
+--- a/i386-dm/helper2.c
++++ b/i386-dm/helper2.c
+@@ -511,7 +511,6 @@ static void handle_buffered_io(void *opaque)
+ 
+ static void cpu_handle_ioreq(void *opaque)
+ {
+-    extern int shutdown_requested;
+     CPUState *env = opaque;
+     ioreq_t *req = cpu_get_ioreq();
+ 
+@@ -576,7 +575,7 @@ int main_loop(void)
+     qemu_set_fd_handler(xenstore_fd(), xenstore_process_event, NULL, NULL);
+ 
+     while (1) {
+-        while (!(vm_running && (xen_pause_requested || suspend_requested)))
++        while (!(vm_running && (xen_pause_requested || suspend_requested || shutdown_requested)))
+ #ifdef CONFIG_STUBDOM
+             /* Wait up to 10 msec. */
+             main_loop_wait(10);
+@@ -585,6 +584,9 @@ int main_loop(void)
+             main_loop_wait(10000);
+ #endif
+ 
++	if (shutdown_requested)
++	    return 0;
++
+         fprintf(logfile, "device model saving state\n");
+ 
+         /* Pull all outstanding ioreqs through the system */
+diff --git a/qemu-xen.h b/qemu-xen.h
+index ac512c7..3cf96b4 100644
+--- a/qemu-xen.h
++++ b/qemu-xen.h
+@@ -35,6 +35,7 @@ void     qemu_invalidate_map_cache(void);
+ #define mapcache_unlock() ((void)0)
+ 
+ extern int suspend_requested;
++extern int shutdown_requested;
+ 
+ /* helper2.c */
+ extern long time_offset;
+diff --git a/vl.c b/vl.c
+index c875a8e..3a6ecd4 100644
+--- a/vl.c
++++ b/vl.c
+@@ -3684,7 +3684,7 @@ typedef struct QEMUResetEntry {
+ 
+ static QEMUResetEntry *first_reset_entry;
+ static int reset_requested;
+-static int shutdown_requested;
++int shutdown_requested;
+ static int powerdown_requested;
+ int suspend_requested = 0;
+ 
+@@ -4030,6 +4030,7 @@ int main_loop(void)
+ }
+ 
+ #else /* CONFIG_DM */
++
+ void main_loop_prepare(void) {
+     cur_cpu = first_cpu;
+ }
+@@ -6056,11 +6057,9 @@ int main(int argc, char **argv, char **envp)
+     register_savevm_live("ram", 0, 3, ram_save_live, NULL, ram_load, NULL);
+ 
+ #ifndef _WIN32
+-#ifndef CONFIG_DM
+     /* must be after terminal init, SDL library changes signal handlers */
+     termsig_setup();
+ #endif
+-#endif
+ 
+     /* Maintain compatibility with multiple stdio monitors */
+     if (!strcmp(monitor_device,"stdio")) {
