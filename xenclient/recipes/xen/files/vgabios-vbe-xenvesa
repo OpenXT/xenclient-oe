@@ -1,0 +1,82 @@
+
+diff --git a/tools/firmware/vgabios/vbe.c b/tools/firmware/vgabios/vbe.c
+index 52c7b64..9b129a6 100644
+--- a/tools/firmware/vgabios/vbe.c
++++ b/tools/firmware/vgabios/vbe.c
+@@ -1773,6 +1773,43 @@ static void vbe_edid(edid, es, di, ds)
+ 
+ ASM_START
+ 
++vbe_xenvesa_table:
++  .word vesa_EDID        /* VESA EDID addr */
++  .word 0xc000           /* VESA EDID seg */
++
++  .word _mode_info_list  /* VESA mode list addr */
++  .word 0xc000           /* VESA mode list seg */
++
++  .ascii "XENVTBL"
++  .byte  0x00
++
++/** Function to initialize shadow port values for EDID
++ *   and module list for XenVesa.
++ */
++vbe_xenvesa_init:
++  push ds
++  push ax
++  push dx
++
++  mov ax, #0xc000
++  mov ds, ax
++
++  mov dx, # VGA_PORT_VBE_XVTSEG
++  out dx, ax
++
++  mov ax, #vbe_xenvesa_table
++  mov dx, # VGA_PORT_VBE_XVTADDR
++  out dx, ax
++
++  pop dx
++  pop ax
++  pop ds
++  ret
++
++ASM_END
++
++ASM_START
++
+ /** Function 15h - Display Identification Extensions
+  * Input:    AX    = 4F0Ah   VBE 2.0 Protected Mode Interface
+  *           BL    = 00h     Get capabilities
+diff --git a/tools/firmware/vgabios/vgabios.c b/tools/firmware/vgabios/vgabios.c
+index 9ec5726..69f0e22 100644
+--- a/tools/firmware/vgabios/vgabios.c
++++ b/tools/firmware/vgabios/vgabios.c
+@@ -277,6 +277,8 @@ vgabios_init_func:
+ #ifdef VBE  
+ ;; init vbe functions
+   call vbe_init  
++;; init vbe xenvesa support
++  call vbe_xenvesa_init
+ #endif
+ 
+ ;; set int10 vect
+diff --git a/tools/firmware/vgabios/vgatables.h b/tools/firmware/vgabios/vgatables.h
+index 34daa1d..58d600d 100644
+--- a/tools/firmware/vgabios/vgatables.h
++++ b/tools/firmware/vgabios/vgatables.h
+@@ -59,10 +59,11 @@
+ #define VGA_PORT_VS_POINTER    0x382C /* 2 word ports - 4 bytes */
+ #define VGA_PORT_VBE_FLAG      0x3830 /* word */
+ #define VGA_PORT_VBE_MODE      0x3832 /* word */
+-#define VGA_PORT_VBE_POWER     0x3834 /* byte */
+-#define VGA_PORT_VGA_M3RADDR   0x3836 /* byte */
+-#define VGA_PORT_VGA_M3RSEG    0x3838 /* byte */
+-                                      /* 0x303A - 0x303F unused */
++#define VGA_PORT_VBE_POWER     0x3834 /* word */
++#define VGA_PORT_VGA_M3RADDR   0x3836 /* word */
++#define VGA_PORT_VGA_M3RSEG    0x3838 /* word */
++#define VGA_PORT_VBE_XVTADDR   0x383A /* word */
++#define VGA_PORT_VBE_XVTSEG    0x383C /* word */
+ 
+ #define VGA_SHADOW_NONE        0x0000
+ #define VGA_SHADOW_ONLY        0x0001

@@ -1,0 +1,68 @@
+diff --git a/tools/firmware/vgabios/vbe.c b/tools/firmware/vgabios/vbe.c
+index 727b3a2..5485fd8 100644
+--- a/tools/firmware/vgabios/vbe.c
++++ b/tools/firmware/vgabios/vbe.c
+@@ -915,13 +915,17 @@ Bit16u *AX;Bit16u ES;Bit16u DI;
+         ModeInfoListItem  *cur_info=&mode_info_list;
+         Bit16u            xres;
+         Bit16u            yres;
++        Bit16u            bpp32only;
+         
+         status = read_word(ss, AX);
+ 
+ 	xres = edid_get_xres();
+ 	yres = edid_get_yres();
++        outw(VBE_DISPI_IOPORT_INDEX, VBE_DISPI_INDEX_32BPP_ONLY);
++        bpp32only = inw(VBE_DISPI_IOPORT_DATA);
+ 
+ #ifdef DEBUG
++        printf("VBE Mode restriction is %x\n", bpp32only);
+         printf("VBE vbe_biosfn_return_vbe_info ES%x DI%x AX%x lfb_fn0x%x\n",ES,DI,status, lfb_fn);
+ #endif
+ 
+@@ -1001,7 +1005,8 @@ Bit16u *AX;Bit16u ES;Bit16u DI;
+ 
+                 if ((cur_info->info.XResolution <= xres) &&
+ 		    (cur_info->info.YResolution <= yres) &&
+-                    (cur_info->info.BitsPerPixel <= max_bpp)) {
++		    (bpp32only ? cur_info->info.BitsPerPixel == 32 
++		               : cur_info->info.BitsPerPixel <= max_bpp)) {
+ #ifdef DEBUG
+                   printf("VBE found mode %x => %x\n", cur_info->mode,cur_mode);
+ #endif
+@@ -1049,10 +1054,13 @@ Bit16u *AX;Bit16u CX; Bit16u ES;Bit16u DI;
+         ModeInfoBlockCompact   info;
+ 	Bit16u xres = edid_get_xres();
+         Bit16u            stride_align = 0;
+-
++        Bit16u            bpp32only;
++        
+ #ifdef DEBUG
+         printf("VBE vbe_biosfn_return_mode_information ES%x DI%x CX%x\n",ES,DI,CX);
+ #endif
++        outw(VBE_DISPI_IOPORT_INDEX, VBE_DISPI_INDEX_32BPP_ONLY);
++        bpp32only = inw(VBE_DISPI_IOPORT_DATA);
+ 
+         using_lfb=((CX & VBE_MODE_LINEAR_FRAME_BUFFER) == VBE_MODE_LINEAR_FRAME_BUFFER);
+         
+@@ -1079,7 +1087,7 @@ Bit16u *AX;Bit16u CX; Bit16u ES;Bit16u DI;
+ 
+                 size_64k = size64(info.XResolution, info.YResolution, info.BitsPerPixel);
+                 if ((info.XResolution > xres) ||
+-                    (info.BitsPerPixel > max_bpp) ||
++                    (bpp32only ? info.BitsPerPixel != 32 : info.BitsPerPixel > max_bpp) ||
+                     (size_64k > totalMemory))
+                   info.ModeAttributes &= ~VBE_MODE_ATTRIBUTE_SUPPORTED;
+ 
+diff --git a/tools/firmware/vgabios/vbe.h b/tools/firmware/vgabios/vbe.h
+index 258b91d..07772fa 100644
+--- a/tools/firmware/vgabios/vbe.h
++++ b/tools/firmware/vgabios/vbe.h
+@@ -302,6 +302,7 @@ typedef struct ModeInfoListItem
+   #define VBE_DISPI_INDEX_EDID_XRES        0xe
+   #define VBE_DISPI_INDEX_EDID_YRES        0xf
+   #define VBE_DISPI_INDEX_STRIDE_ALIGN     0x10
++  #define VBE_DISPI_INDEX_32BPP_ONLY       0X11
+ 
+   #define VBE_DISPI_LFB_PHYSICAL_ADDRESS   0xF0000000
+   #define VBE_DISPI_ID0                    0xB0C0

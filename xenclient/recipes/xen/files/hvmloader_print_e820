@@ -1,0 +1,61 @@
+diff --git a/tools/firmware/hvmloader/e820.c b/tools/firmware/hvmloader/e820.c
+index 0fc0b1c..a0b149a 100644
+--- a/tools/firmware/hvmloader/e820.c
++++ b/tools/firmware/hvmloader/e820.c
+@@ -68,12 +68,27 @@ void dump_e820_table(struct e820entry *e820, unsigned int nr)
+     }
+ }
+ 
++static char *
++e820_type_string(int type)
++{
++	switch(type)
++	{
++		case E820_RESERVED:
++			return "reserved";
++		case E820_RAM:
++			return "ram";
++		default:
++			return "unknown";
++	}
++}
++
+ /* Create an E820 table based on memory parameters provided in hvm_info. */
+ int build_e820_table(struct e820entry *e820,
+                      unsigned int lowmem_reserved_base,
+                      unsigned int bios_image_base)
+ {
+     unsigned int nr = 0;
++    int i;
+ 
+     if ( !lowmem_reserved_base )
+             lowmem_reserved_base = 0xA0000;
+@@ -169,6 +184,14 @@ int build_e820_table(struct e820entry *e820,
+         nr++;
+     }
+ 
++    for (i=0; i<nr; i++)
++    {
++	long start = e820[i].addr;
++	long end = e820[i].addr + e820[i].size;
++
++	printf("%02d: %08lx - %08lx type %s\n",
++		i, start, end, e820_type_string(e820[i].type));	
++    }
+     return nr;
+ }
+ 
+diff --git a/tools/firmware/hvmloader/pci.c b/tools/firmware/hvmloader/pci.c
+index fd56e50..c52bd77 100644
+--- a/tools/firmware/hvmloader/pci.c
++++ b/tools/firmware/hvmloader/pci.c
+@@ -75,6 +75,9 @@ void pci_setup(void)
+         if ( (vendor_id == 0xffff) && (device_id == 0xffff) )
+             continue;
+ 
++	printf("pci dev %02x:%x vid:did %04x:%04x class %04x\n",
++	       devfn>>3, devfn&7, vendor_id, device_id, class);
++
+         ASSERT((devfn != PCI_ISA_DEVFN) ||
+                ((vendor_id == 0x8086) && (device_id == 0x7000)));
+ 

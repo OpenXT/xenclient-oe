@@ -1,0 +1,65 @@
+diff --git a/tools/firmware/Makefile b/tools/firmware/Makefile
+index aff8e56..072a939 100644
+--- a/tools/firmware/Makefile
++++ b/tools/firmware/Makefile
+@@ -39,6 +39,8 @@ endif
+ install: all
+ 	[ -d $(INST_DIR) ] || $(INSTALL_DIR) $(INST_DIR)
+ 	[ ! -e $(TARGET) ] || $(INSTALL_DATA) $(TARGET) $(INST_DIR)
++	[ -d $(DESTDIR)/usr/share/qemu ] || $(INSTALL_DIR) $(DESTDIR)/usr/share/qemu
++	[ ! -e vgabios/VGABIOS-lgpl-latest.orcvbe.bin ] || $(INSTALL_DATA) vgabios/VGABIOS-lgpl-latest.orcvbe.bin $(DESTDIR)/usr/share/qemu
+ 
+ .PHONY: clean
+ clean: subdirs-clean
+diff --git a/tools/firmware/vgabios/Makefile b/tools/firmware/vgabios/Makefile
+index 26bb871..5c9f003 100644
+--- a/tools/firmware/vgabios/Makefile
++++ b/tools/firmware/vgabios/Makefile
+@@ -14,7 +14,7 @@ VGABIOS_DATE = "-DVGABIOS_DATE=\"$(RELDATE)\""
+ all: bios cirrus-bios
+ 
+ .PHONY: bios
+-bios: biossums vgabios.bin vgabios.debug.bin 
++bios: biossums vgabios.bin vgabios.debug.bin orcvbe.bin
+ 
+ .PHONY: cirrus-bios
+ cirrus-bios: vgabios-cirrus.bin vgabios-cirrus.debug.bin
+@@ -32,6 +32,7 @@ release:
+           temp.awk.* vgabios.*.orig _vgabios_.*.c core *.bak .#*
+ 	cp VGABIOS-lgpl-latest.bin ../$(RELEASE).bin
+ 	cp VGABIOS-lgpl-latest.debug.bin ../$(RELEASE).debug.bin
++	cp VGABIOS-lgpl-latest.orcvbe.bin ../orcvbe.bin
+ 	cp VGABIOS-lgpl-latest.cirrus.bin ../$(RELEASE).cirrus.bin
+ 	cp VGABIOS-lgpl-latest.cirrus.debug.bin ../$(RELEASE).cirrus.debug.bin
+ 	tar czvf ../$(RELEASE).tgz --exclude CVS -C .. $(RELEASE)/
+@@ -56,6 +57,16 @@ vgabios.debug.bin: biossums vgabios.c vgabios.h vgafonts.h vgatables.h vbe.h vbe
+ 	./biossums VGABIOS-lgpl-latest.debug.bin
+ 	ls -l VGABIOS-lgpl-latest.debug.bin
+ 
++orcvbe.bin: biossums vgabios.c vgabios.h vgafonts.h vgatables.h vbe.h vbe.c vbetables.h
++	$(GCC) -E -P vgabios.c $(VGABIOS_VERS) -DVBE -D PCIBIOS $(VGABIOS_DATE) > _orcvbe_.c
++	$(BCC) -o vgabios.s -C-c -D__i86__ -S -0 _orcvbe_.c
++	sed -e 's/^\.text//' -e 's/^\.data//' vgabios.s > _orcvbe_.s
++	$(AS86) _orcvbe_.s -b orcvbe.bin -u -w- -g -0 -j -O -l orcvbe.txt
++	rm -f _orcvbe_.s _orcvbe_.c orcvbe.s
++	cp orcvbe.bin VGABIOS-lgpl-latest.orcvbe.bin
++	./biossums VGABIOS-lgpl-latest.orcvbe.bin
++	ls -l VGABIOS-lgpl-latest.orcvbe.bin
++
+ vgabios-cirrus.bin: biossums vgabios.c vgabios.h vgafonts.h vgatables.h clext.c
+ 	$(GCC) -E -P vgabios.c $(VGABIOS_VERS) -DCIRRUS -DPCIBIOS $(VGABIOS_DATE) > _vgabios-cirrus_.c
+ 	$(BCC) -o vgabios-cirrus.s -C-c -D__i86__ -S -0 _vgabios-cirrus_.c
+diff --git a/tools/firmware/vgabios/vgabios.c b/tools/firmware/vgabios/vgabios.c
+index cdf6fb7..dbfc97d 100644
+--- a/tools/firmware/vgabios/vgabios.c
++++ b/tools/firmware/vgabios/vgabios.c
+@@ -210,7 +210,8 @@ vgabios_pci_data:
+ .word 0x1013
+ .word 0x00b8 // CLGD5446
+ #else
+-#error "Unknown PCI vendor and device id"
++.word 0x1111
++.word 0x1234
+ #endif
+ .word 0 // reserved
+ .word 0x18 // dlen

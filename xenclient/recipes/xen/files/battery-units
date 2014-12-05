@@ -1,0 +1,425 @@
+diff --git a/tools/firmware/hvmloader/acpi/ssdt_pm.asl b/tools/firmware/hvmloader/acpi/ssdt_pm.asl
+index 188b4e1..1637291 100644
+--- a/tools/firmware/hvmloader/acpi/ssdt_pm.asl
++++ b/tools/firmware/hvmloader/acpi/ssdt_pm.asl
+@@ -143,7 +143,7 @@ DefinitionBlock ("SSDT_PM.aml", "SSDT", 2, "Xen", "HVM", 0)
+ 
+             Store (\_SB.P86, Local1)
+             Store (Local1, \_SB.DBG3)
+-            Return (\_SB.P86)
++            Return (Local1)
+         }
+ 
+         /*
+@@ -342,6 +342,21 @@ DefinitionBlock ("SSDT_PM.aml", "SSDT", 2, "Xen", "HVM", 0)
+             Return (BIFP)
+         }
+ 
++	/* Helper routine to get status and notify on BIF changes */
++	Method (STA, 0, NotSerialized)
++	{
++	    Store (\_SB.P88, Local0)
++	    /* Check for battery changed indication */
++	    And (Local0, 0x80, Local1)
++	    And (Local0, 0x7f, Local0)
++	    If (LEqual(Local1, 0x80))
++	    {
++                Store (0x81, \_SB.DBG1)
++	        Notify (\_SB.BAT0, 0x81)
++	    }
++            Return ( Local0 )
++	}
++
+         /* Battery object 0 - Always exposed as present. */
+         Device (BAT0)
+         {
+@@ -352,12 +367,11 @@ DefinitionBlock ("SSDT_PM.aml", "SSDT", 2, "Xen", "HVM", 0)
+                 \_SB
+             })
+ 
+-            /* Always returns 0x1f indicating battery present. */
+             Method (_STA, 0, NotSerialized)
+             {
+-                Store (\_SB.P88, Local0)
+-                Return ( Local0 )
+-            }
++	        Store ( STA (), Local0 )
++	        Return ( Local0 )
++	    }
+ 
+             /* Battery generic info: design capacity, voltage, model # etc. */
+             Method (_BIF, 0, NotSerialized)
+@@ -371,6 +385,9 @@ DefinitionBlock ("SSDT_PM.aml", "SSDT", 2, "Xen", "HVM", 0)
+             /* Battery status including battery charging/discharging rate. */
+             Method (_BST, 0, NotSerialized)
+             {
++	        /* Check for BIF change */
++		STA ()
++		/* Report current status */
+                 Store (1, \_SB.DBG1)
+                 ACQR ()
+                 INIT (0x02)
+diff --git a/tools/xenpmd/Makefile b/tools/xenpmd/Makefile
+index 2d925df..d251ebe 100644
+--- a/tools/xenpmd/Makefile
++++ b/tools/xenpmd/Makefile
+@@ -5,6 +5,7 @@ CFLAGS += -Werror
+ CFLAGS += $(CFLAGS_libxenstore)
+ 
+ LDLIBS += $(LDLIBS_libxenstore)
++LDLIBS += -lrt
+ 
+ .PHONY: all
+ all: xenpmd
+diff --git a/tools/xenpmd/xenpmd.c b/tools/xenpmd/xenpmd.c
+index c6bbf47..7af8c50 100644
+--- a/tools/xenpmd/xenpmd.c
++++ b/tools/xenpmd/xenpmd.c
+@@ -41,6 +41,7 @@
+ #include <unistd.h>
+ #include <sys/stat.h>
+ #include <xenstore.h>
++#include <time.h>
+ 
+ /* #define RUN_STANDALONE */
+ /* #define RUN_IN_SIMULATE_MODE */
+@@ -60,8 +61,14 @@ enum BATTERY_TECHNOLOGY {
+     RECHARGEABLE 
+ };
+ 
++enum BATTERY_UNITS {
++    MILLI_WATT_HOURS = 0,
++    MILLI_AMP_HOURS = 1
++};
++
+ struct battery_info {
+     enum BATTERY_PRESENT    present;
++    enum BATTERY_UNITS      units;
+     unsigned long           design_capacity;
+     unsigned long           last_full_capacity;
+     enum BATTERY_TECHNOLOGY battery_technology;
+@@ -78,6 +85,7 @@ struct battery_info {
+ 
+ struct battery_status {
+     enum BATTERY_PRESENT    present;
++    enum BATTERY_UNITS      units;
+     unsigned long           state;
+     unsigned long           present_rate;
+     unsigned long           remaining_capacity;
+@@ -174,6 +182,10 @@ void set_attribute_battery_info(char *attrib_name,
+     if ( strstr(attrib_name, "design capacity") ) 
+     { 
+         info->design_capacity = strtoull(attrib_value, NULL, 10);
++	if (strstr(attrib_value, "mAh"))
++            info->units = MILLI_AMP_HOURS;
++        else
++            info->units = MILLI_WATT_HOURS;
+         return;
+     }
+ 
+@@ -247,8 +259,10 @@ void set_attribute_battery_status(char *attrib_name,
+         /* Check this, below is half baked */
+         if ( strstr(attrib_value, "charged") ) 
+             status->state = 0;
+-        else 
++	else if ( strstr(attrib_value, "discharging") )
+             status->state = 1;
++        else 
++            status->state = 2;
+         return;
+     }
+ 
+@@ -261,6 +275,10 @@ void set_attribute_battery_status(char *attrib_name,
+     if ( strstr(attrib_name, "remaining capacity") ) 
+     {
+         status->remaining_capacity = strtoull(attrib_value, NULL, 10);
++	if (strstr(attrib_value, "mAh"))
++            status->units = MILLI_AMP_HOURS;
++        else
++            status->units = MILLI_WATT_HOURS;
+         return;
+     }
+ 
+@@ -293,15 +311,13 @@ void parse_battery_info_or_status(char *line_info,
+          (delimiter == line_info + length) ) 
+         return;
+ 
+-    strncpy(attrib_name, line_info, delimiter-line_info);
++    *delimiter = '\0';
++    strncpy(attrib_name, line_info, sizeof(attrib_name));
++
+     while ( *(delimiter+1) == ' ' ) 
+-    {
+         delimiter++;
+-        if ( delimiter+1 == line_info + length)
+-            return;
+-    }
+-    strncpy(attrib_value, delimiter+1, 
+-            (unsigned long)line_info + length -(unsigned long)delimiter); 
++    strncpy(attrib_value, delimiter+1, sizeof(attrib_value));
++
+     
+     if ( type == BIF ) 
+         set_attribute_battery_info(attrib_name, attrib_value,
+@@ -343,14 +359,16 @@ int get_next_battery_info_or_status(DIR *battery_dir,
+ void print_battery_info(struct battery_info *info)
+ {
+     printf("present:                %d\n", info->present);
+-    printf("design capacity:        %d\n", info->design_capacity);
+-    printf("last full capacity:     %d\n", info->last_full_capacity);
++    printf("design capacity:        %ld\n", info->design_capacity);
++    printf("last full capacity:     %ld\n", info->last_full_capacity);
++    printf("battery units           %s\n",
++	   info->units == MILLI_WATT_HOURS? "mWh":"mAh");
+     printf("battery technology:     %d\n", info->battery_technology);
+-    printf("design voltage:         %d\n", info->design_voltage);
+-    printf("design capacity warning:%d\n", info->design_capacity_warning);
+-    printf("design capacity low:    %d\n", info->design_capacity_low);
+-    printf("capacity granularity 1: %d\n", info->capacity_granularity_1);
+-    printf("capacity granularity 2: %d\n", info->capacity_granularity_2);
++    printf("design voltage:         %ld\n", info->design_voltage);
++    printf("design capacity warning:%ld\n", info->design_capacity_warning);
++    printf("design capacity low:    %ld\n", info->design_capacity_low);
++    printf("capacity granularity 1: %ld\n", info->capacity_granularity_1);
++    printf("capacity granularity 2: %ld\n", info->capacity_granularity_2);
+     printf("model number:           %s\n", info->model_number);
+     printf("serial number:          %s\n", info->serial_number);
+     printf("battery type:           %s\n", info->battery_type);
+@@ -367,92 +385,79 @@ void write_ulong_lsb_first(char *temp_val, unsigned long val)
+ 
+ void write_battery_info_to_xenstore(struct battery_info *info)
+ {
+-    char val[1024], string_info[256];
++    static struct battery_info cur_info;
++    char val[1024];
+ 
+-    xs_mkdir(xs, XBT_NULL, "/pm");
++    if (bcmp(&cur_info, info, sizeof(cur_info))) {
++#ifdef RUN_STANDALONE
++	print_battery_info(info);
++#endif
+    
+-    memset(val, 0, 1024);
+-    memset(string_info, 0, 256);
+-    /* write 9 dwords (so 9*4) + length of 4 strings + 4 null terminators */
+-    snprintf(val, 3, "%02x", 
++	/* write 9 dwords (so 9*4) + length of 4 strings + 4 null terminators */
++	snprintf(val, 3, "%02x", 
+              (unsigned int)(9*4 +
+                             strlen(info->model_number) +
+                             strlen(info->serial_number) +
+                             strlen(info->battery_type) +
+                             strlen(info->oem_info) + 4));
+-    write_ulong_lsb_first(val+2, info->present);
+-    write_ulong_lsb_first(val+10, info->design_capacity);
+-    write_ulong_lsb_first(val+18, info->last_full_capacity);
+-    write_ulong_lsb_first(val+26, info->battery_technology);
+-    write_ulong_lsb_first(val+34, info->design_voltage);
+-    write_ulong_lsb_first(val+42, info->design_capacity_warning);
+-    write_ulong_lsb_first(val+50, info->design_capacity_low);
+-    write_ulong_lsb_first(val+58, info->capacity_granularity_1);
+-    write_ulong_lsb_first(val+66, info->capacity_granularity_2);
+-
+-    snprintf(string_info, 256, "%02x%s%02x%s%02x%s%02x%s", 
+-             (unsigned int)strlen(info->model_number), info->model_number,
+-             (unsigned int)strlen(info->serial_number), info->serial_number,
+-             (unsigned int)strlen(info->battery_type), info->battery_type,
+-             (unsigned int)strlen(info->oem_info), info->oem_info);
+-    strncat(val+73, string_info, 1024-73-1);
+-    xs_write(xs, XBT_NULL, "/pm/bif", 
+-             val, 73+8+strlen(info->model_number)+strlen(info->serial_number)+
+-             strlen(info->battery_type)+strlen(info->oem_info)+1);
+-}
+-
+-int write_one_time_battery_info(void)
+-{
+-    DIR *dir;
+-    int ret = 0;
+-    struct battery_info info;
+-    
+-    dir = opendir(BATTERY_DIR_PATH);
+-    if ( !dir )
+-        return 0;
+-
+-    while ( get_next_battery_info_or_status(dir, BIF, (void *)&info) ) 
+-    {
+-#ifdef RUN_STANDALONE
+-        print_battery_info(&info);
+-#endif
+-        if ( info.present == YES ) 
+-        {
+-            write_battery_info_to_xenstore(&info);
+-            ret = 1;
+-            break; /* rethink this... */
+-        }
++	write_ulong_lsb_first(val+2, info->units);
++	write_ulong_lsb_first(val+10, info->design_capacity);
++	write_ulong_lsb_first(val+18, info->last_full_capacity);
++	write_ulong_lsb_first(val+26, info->battery_technology);
++	write_ulong_lsb_first(val+34, info->design_voltage);
++	write_ulong_lsb_first(val+42, info->design_capacity_warning);
++	write_ulong_lsb_first(val+50, info->design_capacity_low);
++	write_ulong_lsb_first(val+58, info->capacity_granularity_1);
++	write_ulong_lsb_first(val+66, info->capacity_granularity_2);
++
++	snprintf(val+74, 1024-74-1, "%02x%s%02x%s%02x%s%02x%s", 
++		 (unsigned int)strlen(info->model_number), info->model_number,
++		 (unsigned int)strlen(info->serial_number), info->serial_number,
++		 (unsigned int)strlen(info->battery_type), info->battery_type,
++		 (unsigned int)strlen(info->oem_info), info->oem_info);
++
++	xs_mkdir(xs, XBT_NULL, "/pm");
++	xs_write(xs, XBT_NULL, "/pm/bif", val, strlen(val)+1);
++
++	/* Save new battery info */
++	memcpy(&cur_info, info, sizeof(cur_info));
+     }
+-
+-    closedir(dir);
+-    return ret;
+ }
+ 
+ #ifdef RUN_STANDALONE
+ void print_battery_status(struct battery_status *status)
+ {
+-    printf("present:                     %d\n", status->present);
+-    printf("Battery state                %d\n", status->state);
+-    printf("Battery present rate         %d\n", status->present_rate);
+-    printf("Battery remining capacity    %d\n", status->remaining_capacity);
+-    printf("Battery present voltage      %d\n", status->present_voltage);
++    printf("Battery state                %ld\n", status->state);
++    printf("Battery units                %s\n",
++	   status->units == MILLI_WATT_HOURS? "mWh":"mAh");
++    printf("Battery present rate         %ld\n", status->present_rate);
++    printf("Battery remining capacity    %ld\n", status->remaining_capacity);
++    printf("Battery present voltage      %ld\n", status->present_voltage);
+ }
+ #endif /*RUN_STANDALONE*/
+ 
+ void write_battery_status_to_xenstore(struct battery_status *status)
+ {
++    static struct battery_status cur_status;
+     char val[35];
+ 
+-    xs_mkdir(xs, XBT_NULL, "/pm");
++    if (bcmp(&cur_status, status, sizeof(cur_status))) {
++#ifdef RUN_STANDALONE
++	print_battery_status(status);
++#endif
++
++	snprintf(val, 3, "%02x", 16);
++	write_ulong_lsb_first(val+2, status->state);
++	write_ulong_lsb_first(val+10, status->present_rate);
++	write_ulong_lsb_first(val+18, status->remaining_capacity);
++	write_ulong_lsb_first(val+26, status->present_voltage);
+ 
+-    memset(val, 0, 35);
+-    snprintf(val, 3, "%02x", 16);
+-    write_ulong_lsb_first(val+2, status->state);
+-    write_ulong_lsb_first(val+10, status->present_rate);
+-    write_ulong_lsb_first(val+18, status->remaining_capacity);
+-    write_ulong_lsb_first(val+26, status->present_voltage);
++	xs_mkdir(xs, XBT_NULL, "/pm");
++	xs_write(xs, XBT_NULL, "/pm/bst", val, sizeof(val));
+ 
+-    xs_write(xs, XBT_NULL, "/pm/bst", val, 35);
++	/* Save new status */
++	memcpy(&cur_status, status, sizeof(cur_status));
++    }
+ }
+ 
+ int get_psr_status(void)
+@@ -483,13 +488,12 @@ int get_psr_status(void)
+     return(retval);
+ }
+ 
+-int wait_for_and_update_battery_status_request(void)
++void wait_for_and_update_battery_status_request(void)
+ {
+     DIR *dir;
+-    int ret = 0;
+-    unsigned int count;
+     unsigned int psr_status;
+     struct battery_status status;
++    struct battery_info info;
+     char val[4];
+ 
+     while ( true )
+@@ -499,17 +503,24 @@ int wait_for_and_update_battery_status_request(void)
+          */
+         dir = opendir(BATTERY_DIR_PATH);
+         if ( !dir )
+-            return 0;
++            return;
++
++        while ( get_next_battery_info_or_status(dir, BIF, (void *)&info) ) 
++        {
++            if ( info.present == YES ) 
++            {
++                write_battery_info_to_xenstore(&info);
++                break; /* rethink this... maybe there is >1 battery... */
++            }
++        }
++
++        rewinddir(dir);
+ 
+         while ( get_next_battery_info_or_status(dir, BST, (void *)&status) ) 
+         {
+-#ifdef RUN_STANDALONE
+-            print_battery_status(&status);
+-#endif
+             if ( status.present == YES ) 
+             {
+                 write_battery_status_to_xenstore(&status);
+-                ret = 1;
+                 /* rethink this; though I have never seen, there might be
+                  * systems out there with more than one battery device 
+                  * present
+@@ -517,19 +528,21 @@ int wait_for_and_update_battery_status_request(void)
+                 break;
+             }
+         }
++
++	closedir(dir);
++
+         psr_status = get_psr_status();
+         snprintf(val, 2, "%1d", psr_status);
+         xs_write(xs, XBT_NULL, "/pm/psr", val, 2);
+ 
+-        closedir(dir);
+-
+-        xs_watch(xs, "/pm/events", "refreshbatterystatus");
+-        xs_read_watch(xs, &count); 
++	/* Update xenstore every 10 seconds */
++	sleep(10);
+     }
+ 
+-    return ret;
++    return;
+ }
+ 
++#ifndef RUN_STANDALONE
+ /* Borrowed daemonize from xenstored - Initially written by Stevens. */
+ static void daemonize(void)
+ {
+@@ -554,6 +567,7 @@ static void daemonize(void)
+ 
+     umask(0);
+ }
++#endif
+ 
+ int main(int argc, char *argv[])
+ {
+@@ -564,12 +578,6 @@ int main(int argc, char *argv[])
+     if ( xs == NULL ) 
+         return -1;
+ 
+-    if ( write_one_time_battery_info() == 0 ) 
+-    {
+-        xs_daemon_close(xs);
+-        return -1;
+-    }
+-
+     wait_for_and_update_battery_status_request();
+     xs_daemon_close(xs);
+     return 0;

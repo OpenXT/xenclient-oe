@@ -1,0 +1,83 @@
+diff --git a/tools/xenstore/xenstored_core.c b/tools/xenstore/xenstored_core.c
+index 3792d79..afa671a 100644
+--- a/tools/xenstore/xenstored_core.c
++++ b/tools/xenstore/xenstored_core.c
+@@ -179,11 +179,15 @@ static void trace_io(const struct connection *conn,
+ 	if (tracefd < 0)
+ 		return;
+ 
++	/* Ignore noisy messages unless verbose specified. */
++	if (!verbose && conn->verbose_log)
++		return;
++
+ 	now = time(NULL);
+ 	tm = localtime(&now);
+ 
+ 	trace("%s %p %04d%02d%02d %02d:%02d:%02d %s (",
+-	      out ? "OUT" : "IN", conn,
++	      out ? "OUT" : "IN ", conn,
+ 	      tm->tm_year + 1900, tm->tm_mon + 1,
+ 	      tm->tm_mday, tm->tm_hour, tm->tm_min, tm->tm_sec,
+ 	      sockmsg_string(data->hdr.msg.type));
+@@ -195,12 +199,14 @@ static void trace_io(const struct connection *conn,
+ 
+ void trace_create(const void *data, const char *type)
+ {
+-	trace("CREATE %s %p\n", type, data);
++	if (verbose)
++		trace("CREATE %s %p\n", type, data);
+ }
+ 
+ void trace_destroy(const void *data, const char *type)
+ {
+-	trace("DESTROY %s %p\n", type, data);
++	if (verbose)
++		trace("DESTROY %s %p\n", type, data);
+ }
+ 
+ /**
+@@ -1192,6 +1198,22 @@ static void process_message(struct connection *conn, struct buffered_data *in)
+ {
+ 	struct transaction *trans;
+ 
++	if (tracefd >= 0) {
++		/* Only output noisy messages in verbose mode */
++		switch (in->hdr.msg.type) {
++		case XS_READ:
++		case XS_TRANSACTION_START:
++		case XS_TRANSACTION_END:
++			conn->verbose_log = true;
++			break;
++
++		default:
++			conn->verbose_log = false;
++			break;
++		}
++		trace_io(conn, in, 0);
++	}
++
+ 	trans = transaction_lookup(conn, in->hdr.msg.tx_id);
+ 	if (IS_ERR(trans)) {
+ 		send_error(conn, -PTR_ERR(trans));
+@@ -1339,7 +1361,6 @@ static void handle_input(struct connection *conn)
+ 	if (in->used != in->hdr.msg.len)
+ 		return;
+ 
+-	trace_io(conn, in, 0);
+ 	consider_message(conn);
+ 	return;
+ 
+diff --git a/tools/xenstore/xenstored_core.h b/tools/xenstore/xenstored_core.h
+index cfbcf6f..a1f4059 100644
+--- a/tools/xenstore/xenstored_core.h
++++ b/tools/xenstore/xenstored_core.h
+@@ -69,6 +69,9 @@ struct connection
+ 	/* Is this a read-only connection? */
+ 	bool can_write;
+ 
++	/* Is verbose logging required currently? */
++	bool verbose_log;
++
+ 	/* Buffered incoming data. */
+ 	struct buffered_data *in;
+ 

@@ -1,0 +1,154 @@
+# HG changeset patch
+# Parent efceb8ad049402d205f8690dbfde692d90dc2064
+
+diff --git a/tools/blktap2/include/libvhd.h b/tools/blktap2/include/libvhd.h
+index 7c89c80..78fef61 100644
+--- a/tools/blktap2/include/libvhd.h
++++ b/tools/blktap2/include/libvhd.h
+@@ -282,6 +282,7 @@ int vhd_validate_header(vhd_header_t *header);
+ int vhd_validate_batmap_header(vhd_batmap_t *batmap);
+ int vhd_validate_batmap(vhd_batmap_t *batmap);
+ int vhd_validate_platform_code(uint32_t code);
++int vhd_validate_dynamic_size(uint64_t size);
+ 
+ int vhd_open(vhd_context_t *, const char *file, int flags);
+ void vhd_close(vhd_context_t *);
+diff --git a/tools/blktap2/include/vhd-util.h b/tools/blktap2/include/vhd-util.h
+index eb5afa1..387f940 100644
+--- a/tools/blktap2/include/vhd-util.h
++++ b/tools/blktap2/include/vhd-util.h
+@@ -44,6 +44,8 @@ int vhd_util_scan(int argc, char **argv);
+ int vhd_util_check(int argc, char **argv);
+ int vhd_util_revert(int argc, char **argv);
+ 
++uint64_t vhd_util_curr_size(const char *file);
++
+ typedef int (coalesce_block_callback_t)(int64_t block, void *data);
+ typedef void (coalesce_state_callback_t)(void);
+ 
+diff --git a/tools/blktap2/vhd/lib/Makefile b/tools/blktap2/vhd/lib/Makefile
+index eee3444..c0cde05 100644
+--- a/tools/blktap2/vhd/lib/Makefile
++++ b/tools/blktap2/vhd/lib/Makefile
+@@ -33,6 +33,7 @@ LIB-SRCS        += vhd-util-coalesce.c
+ LIB-SRCS        += vhd-util-coalesce-multi.c
+ LIB-SRCS        += vhd-util-create.c
+ LIB-SRCS        += vhd-util-fill.c
++LIB-SRCS        += vhd-util-misc.c
+ LIB-SRCS        += vhd-util-modify.c
+ LIB-SRCS        += vhd-util-query.c
+ LIB-SRCS        += vhd-util-read.c
+diff --git a/tools/blktap2/vhd/lib/libvhd.c b/tools/blktap2/vhd/lib/libvhd.c
+index 4848a87..0292ac2 100644
+--- a/tools/blktap2/vhd/lib/libvhd.c
++++ b/tools/blktap2/vhd/lib/libvhd.c
+@@ -57,6 +57,13 @@ vhd_getopt_unlock(void)
+ 	pthread_mutex_unlock(&getopt_mutex);
+ }
+ 
++int
++vhd_validate_dynamic_size(uint64_t size)
++{
++	/* max size of a dynamic VHD is 2040 GB */
++	return (size <= 2040*1024);
++}
++
+ void
+ libvhd_set_log_level(int level)
+ {
+diff --git a/tools/blktap2/vhd/lib/vhd-util-create.c b/tools/blktap2/vhd/lib/vhd-util-create.c
+index 5eddb3a..13d668e 100644
+--- a/tools/blktap2/vhd/lib/vhd-util-create.c
++++ b/tools/blktap2/vhd/lib/vhd-util-create.c
+@@ -36,7 +36,7 @@ vhd_util_create(int argc, char **argv)
+ {
+ 	char *name;
+ 	uint64_t size;
+-	int c, sparse, err;
++	int c, type, err;
+ 	vhd_uuid_t uuid;
+ 	vhd_flag_creat_t flags;
+ 
+@@ -44,7 +44,7 @@ vhd_util_create(int argc, char **argv)
+ 
+ 	err       = -EINVAL;
+ 	size      = 0;
+-	sparse    = 1;
++	type      = HD_TYPE_DYNAMIC;
+ 	name      = NULL;
+ 	flags     = 0;
+ 
+@@ -67,7 +67,7 @@ vhd_util_create(int argc, char **argv)
+ 			vhd_uuid_from_string(&uuid, optarg);
+ 			break;
+ 		case 'r':
+-			sparse = 0;
++			type = HD_TYPE_FIXED;
+ 			break;
+ 		case 'M':
+ 			vhd_flag_set(flags, VHD_FLAG_CREAT_MS_COMPAT);
+@@ -83,8 +83,13 @@ vhd_util_create(int argc, char **argv)
+ 
+ 	vhd_getopt_unlock();
+ 
+-	return vhd_create(name, NULL, &uuid, size << 20,
+-		 	  (sparse ? HD_TYPE_DYNAMIC : HD_TYPE_FIXED), flags);
++	if ((type == HD_TYPE_DYNAMIC) && !vhd_validate_dynamic_size(size)) {
++		printf("size of %"PRIu64" MB is too large for a dynamic VHD\n",
++		    size);
++		return -EINVAL;
++	} 
++
++	return vhd_create(name, NULL, &uuid, size << 20, type, flags);
+ 
+ usage:
+ 	vhd_getopt_unlock();
+diff --git a/tools/blktap2/vhd/lib/vhd-util-misc.c b/tools/blktap2/vhd/lib/vhd-util-misc.c
+new file mode 100644
+index 0000000..4a52061
+--- /dev/null
++++ b/tools/blktap2/vhd/lib/vhd-util-misc.c
+@@ -0,0 +1,26 @@
++/*
++ *
++ */
++
++#include <unistd.h>
++
++#include "libvhd.h"
++#include "vhd-util.h"
++
++uint64_t
++vhd_util_curr_size(const char *file)
++{
++	uint64_t size;
++	vhd_context_t vhd;
++	int err;
++
++	err = vhd_open(&vhd, file, VHD_OPEN_RDONLY | VHD_OPEN_IGNORE_DISABLED);
++	if (err) {
++		size = 0;
++	} else {
++		size = vhd.footer.curr_size;
++		vhd_close(&vhd);
++	}
++
++	return (size);
++}
+diff --git a/tools/blktap2/vhd/lib/vhd-util-resize.c b/tools/blktap2/vhd/lib/vhd-util-resize.c
+index 8b7d70f..3993682 100644
+--- a/tools/blktap2/vhd/lib/vhd-util-resize.c
++++ b/tools/blktap2/vhd/lib/vhd-util-resize.c
+@@ -998,6 +998,12 @@ vhd_dynamic_resize(vhd_journal_t *journal, uint64_t size)
+ 	vhd_context_t *vhd;
+ 	uint64_t cur_secs, new_secs;
+ 
++	if (!vhd_validate_dynamic_size(size)) {
++		printf("size of %"PRIu64" MB is too large for a dynamic VHD\n",
++		    size);
++		return -EINVAL;
++	}
++
+ 	vhd      = &journal->vhd;
+ 	cur_secs = vhd->footer.curr_size >> VHD_SECTOR_SHIFT;
+ 	new_secs = size << (20 - VHD_SECTOR_SHIFT);

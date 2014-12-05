@@ -1,0 +1,168 @@
+diff --git a/tools/firmware/vgabios/vbe.c b/tools/firmware/vgabios/vbe.c
+index 42224f0..d63dc9b 100644
+--- a/tools/firmware/vgabios/vbe.c
++++ b/tools/firmware/vgabios/vbe.c
+@@ -647,6 +647,72 @@ vga_compat_end:
+   pop  ax
+ ASM_END
+ 
++ASM_START
++// PCI Configuration Mechanism #1
++// From:
++// Willse, George and Solari, Edward. "PCI Hardware and Software 4th Ed."
++// San Diego: Annabooks 4th ed, 1998
++// Chapter 17.7
++_pci_read:
++    push  bp
++    mov   bp, sp
++    push  dx
++    mov   eax, #0x00800000
++    mov   ax, 4[bp]
++    shl   eax, #8
++    mov   dx, 6[bp]
++    mov   al, dl
++    mov   dx, #0xcf8
++    out   dx, eax
++    add   dl, #4
++    in    eax, dx
++    mov   dx, 8[bp]
++    cmp   dx, #16
++    jne   read_no_shift
++    shr   eax, 16
++read_no_shift:
++    pop   dx
++    mov   sp, bp
++    pop   bp
++    ret
++ASM_END
++
++static Bit16u get_lfb_addr() {
++        Bit16u devfn;
++
++        // Bottom 3 bits of devfn is for the function ID
++        // Add 8 to get the next device.
++        for(devfn = 0; devfn <= 0x200; devfn += 0x8) {
++                Bit16u device, vendor;
++                Bit16u barh, barl;
++
++                // Vendor/Device at config offset 0x0
++                vendor = pci_read(devfn, 0x0, 0);
++                device = pci_read(devfn, 0x0, 16);
++#if defined(DEBUG)
++                printf("Found vendor 0x%x device 0x%x\n", vendor, device);
++#endif
++                if (device == 0xFFFF)
++                        break;
++
++                if (vendor != 0x1234 /* BOCHS/QEMU */ ||
++                    device != 0x1111 /* QEMU-VGA */)
++                        continue;
++
++                // BAR0 offset at 0x10
++                barl = pci_read(devfn, 0x10, 0);
++                barh = pci_read(devfn, 0x10, 16);
++#if defined(DEBUG)
++                printf("Read bar value 0x%x%04x\n", barh, barl);
++#endif
++                if (barl & 0xfff1)
++                        return 0;
++
++                return barh;
++        }
++
++        return 0;
++}
+ 
+ // ModeInfo helper function
+ static ModeInfoListItem* mode_info_find_mode(mode, using_lfb)
+@@ -680,6 +746,21 @@ static ModeInfoListItem* mode_info_find_mode(mode, using_lfb)
+   return 0;
+ }
+ 
++void update_tables()
++{
++  ModeInfoListItem  *cur_info=&mode_info_list;
++  Bit16u lfb_fn = get_lfb_addr();
++
++  while (cur_info->mode != VBE_VESA_MODE_END_OF_LIST)
++  {
++    *(Bit16u *)&(cur_info->info.PhysBasePtr) = 0;
++    *(Bit16u *)((Bit8u *)(&cur_info->info.PhysBasePtr) + 2) = lfb_fn;
++
++    cur_info++;
++  }
++
++}
++
+ ASM_START
+ 
+ ; Has VBE display - Returns true if VBE display detected
+@@ -706,6 +787,19 @@ vbe_init:
+   call dispi_get_id
+   cmp  ax, # VBE_DISPI_ID0
+   jne  no_vbe_interface
++
++  push es
++  push ds
++  pusha
++
++  mov   bx, #0xc000
++  mov   ds, bx
++  call _update_tables
++
++  popa
++  pop ds
++  pop es
++
+   push ds
+   push bx
+   mov  ax, # BIOSMEM_SEG
+@@ -782,6 +876,7 @@ void vbe_biosfn_return_controller_information(AX, ES, DI)
+ Bit16u *AX;Bit16u ES;Bit16u DI;
+ {
+         Bit16u            ss=get_SS();
++	Bit16u		  lfb_fn=get_lfb_addr();
+         VbeInfoBlock      vbe_info_block;
+         Bit16u            status;
+         Bit16u            result;
+@@ -793,7 +888,7 @@ Bit16u *AX;Bit16u ES;Bit16u DI;
+         status = read_word(ss, AX);
+         
+ #ifdef DEBUG
+-        printf("VBE vbe_biosfn_return_vbe_info ES%x DI%x AX%x\n",ES,DI,status);
++        printf("VBE vbe_biosfn_return_vbe_info ES%x DI%x AX%x lfb_fn0x%x\n",ES,DI,status, lfb_fn);
+ #endif
+ 
+         vbe2_info = 0;
+@@ -875,6 +970,10 @@ Bit16u *AX;Bit16u ES;Bit16u DI;
+ #ifdef DEBUG
+                   printf("VBE found mode %x => %x\n", cur_info->mode,cur_mode);
+ #endif
++                  if (lfb_fn != 0) {
++                      *(Bit16u *)&(cur_info->info.PhysBasePtr) = 0; 
++                      *(Bit16u *)((Bit8u *)(&cur_info->info.PhysBasePtr) + 2) = lfb_fn;
++                  }
+                   write_word(ES, DI + cur_ptr, cur_info->mode);
+                   cur_mode++;
+                   cur_ptr+=2;
+@@ -894,7 +993,6 @@ Bit16u *AX;Bit16u ES;Bit16u DI;
+         write_word(ss, AX, result);
+ }
+ 
+-
+ /** Function 01h - Return VBE Mode Information
+  * 
+  * Input:
+@@ -951,6 +1049,12 @@ Bit16u *AX;Bit16u CX; Bit16u ES;Bit16u DI;
+                   *(Bit16u *)&(info.WinFuncPtr) = (Bit16u)(dispi_set_bank_farcall);
+                 }
+ 
++#ifdef DEBUG
++		printf("PhysBasePtr is %04x%04x\n",
++		       *(Bit16u *)((Bit8u *)(&info.PhysBasePtr) + 2),
++                       *(Bit16u *)(&info.PhysBasePtr));
++#endif
++
+                 result = 0x4f;
+ 
+                 // copy updates in mode_info_block back

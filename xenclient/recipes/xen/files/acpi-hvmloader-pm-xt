@@ -1,0 +1,371 @@
+diff --git a/tools/firmware/hvmloader/acpi/build.c b/tools/firmware/hvmloader/acpi/build.c
+index b9b64a0..9fe560d 100644
+--- a/tools/firmware/hvmloader/acpi/build.c
++++ b/tools/firmware/hvmloader/acpi/build.c
+@@ -75,7 +75,13 @@ static void set_checksum(
+ 
+ static uint8_t battery_port_exists(void)
+ {
+-    return (inb(0x88) != 0xff);
++    uint8_t val;
++
++    val = inb(0x88);
++    if ( (val == 0xff) || (val == 0x0) )
++        return 0;
++
++    return 1;
+ }
+ 
+ static struct acpi_20_madt *construct_madt(struct acpi_info *info)
+diff --git a/tools/firmware/hvmloader/acpi/ssdt_pm.asl b/tools/firmware/hvmloader/acpi/ssdt_pm.asl
+index 13af0ed..4c903b0 100644
+--- a/tools/firmware/hvmloader/acpi/ssdt_pm.asl
++++ b/tools/firmware/hvmloader/acpi/ssdt_pm.asl
+@@ -43,6 +43,7 @@
+  * 0x7c - Type of battery operation
+  * 0x79 - Get battery data length
+  * 0x7d - Get battery data
++ * Battery number port 0xb4 - Which battery? i.e. battery 1 or 2 etc.
+  *
+  * Also the following ports are used for debugging/logging:
+  * 0xB040, 0xB044, 0xB046, 0xB048 
+@@ -83,6 +84,12 @@ DefinitionBlock ("SSDT_PM.aml", "SSDT", 2, "Xen", "HVM", 0)
+             PB2A,   8
+         }
+ 
++        OperationRegion (PNUM, SystemIO, 0xB4, 0x01)
++        Field (PNUM, ByteAcc, NoLock, Preserve)
++        {
++            PB4,   8,
++        }
++
+         OperationRegion (PRT2, SystemIO, 0x86, 0x01)
+         Field (PRT2, ByteAcc, NoLock, Preserve)
+         {
+@@ -103,6 +110,20 @@ DefinitionBlock ("SSDT_PM.aml", "SSDT", 2, "Xen", "HVM", 0)
+             P9E,  16
+         }
+ 
++        OperationRegion (PRT5, SystemIO, 0x90, 0x01)
++        Field (PRT5, ByteAcc, NoLock, Preserve)
++        {
++            P90,  8
++        }
++
++        /* OperationRegion for Power Button */
++        OperationRegion (PBOP, SystemIO, 0x200, 0x01)
++        Field (PBOP, ByteAcc, NoLock, WriteAsZeros)
++        {
++            SLP, 1,
++            WAK, 1
++        }
++
+         Mutex (SYNC, 0x01)
+         Name (BUF0, Buffer (0x0100) {})
+         Name (BUF1, Buffer (0x08) {})
+@@ -298,8 +319,111 @@ DefinitionBlock ("SSDT_PM.aml", "SSDT", 2, "Xen", "HVM", 0)
+             Release (SYNC)
+         }
+ 
+-        /* Future patches will extend AC object to better account for
+-         * AC to DC transition and more. */
++        Method (E0, 0, NotSerialized)
++        {
++            If (\_SB.SLP)
++            {
++                Store (One, \_SB.SLP)
++                Notify (\_SB.SLPB, 0x80)
++            }
++
++            if (\_SB.WAK)
++            {
++                Store (One, \_SB.WAK)
++                Notify (\_SB.SLPB, 0x2)
++            }
++        }
++
++        Method (E1, 0, NotSerialized)
++        {
++            If (\_SB.SLP)
++            {
++                Store (One, \_SB.SLP)
++                Notify (\_SB.PBTN, 0x80)
++            }
++
++            if (\_SB.WAK)
++            {
++                Store (One, \_SB.WAK)
++                Notify (\_SB.PBTN, 0x2)
++            }
++        }
++
++        Method (E1C, 0, NotSerialized)
++        {
++            Notify (\_SB.AC, 0x80)
++        }
++
++        Method (E17, 0, NotSerialized)
++        {
++            Notify (\_SB.LID, 0x80)
++        }
++
++        Method (E1D, 0, NotSerialized)
++        {
++            Notify(\_SB.BAT0, 0x80)
++            Notify(\_SB.BAT1, 0x80)
++        }
++
++        Method (E1E, 0, NotSerialized)
++        {
++            Notify(\_SB.BAT0, 0x81)
++            Notify(\_SB.BAT1, 0x81)
++        }
++
++        Device (LID)
++        {
++            Name (_HID, EisaId ("PNP0C0D"))
++            Method (_LID, 0, NotSerialized)
++            {
++                Store (\_SB.P88, Local0)
++                If (And (Local0, 0x4))
++                {
++                    Return (0x1)
++                }
++
++                Return (0x0)
++            }
++
++            Name (_PRW, Package (0x02)
++            {
++                0x17,
++                0x03
++            })
++
++            Method (_PSW, 1, NotSerialized)
++            {
++                Store (\_SB.P88, Local0)
++                If (And (Local0, 0x4))
++                {
++                    Return (0x1)
++                }
++                Return (0x0)
++            }
++        }
++
++        Device (PBTN)
++        {
++            Name (_HID, EisaId ("PNP0C0C"))
++
++            Name (_PRW, Package (0x02)
++            {
++                0x01,
++                0x04
++            })
++        }
++
++        Device (SLPB)
++        {
++            Name (_HID, EisaId ("PNP0C0E"))
++
++            Name (_PRW, Package (0x02)
++            {
++                0x01,
++                0x04
++            })
++        }
++
+         Device (AC)
+         {
+             Name (_HID, "ACPI0003")
+@@ -311,11 +435,13 @@ DefinitionBlock ("SSDT_PM.aml", "SSDT", 2, "Xen", "HVM", 0)
+             })
+             Method (_PSR, 0, NotSerialized)
+             {
+-		ACQR ()
+-		WPRT(0x7B, 0x00)
+-    		Store(WPRT (0x7C, 3), Local0)
+-		REL ()
+-    		Return(Local0)
++                Store (\_SB.P88, Local0)
++                If (And (Local0, 0x1))
++                {
++                    Return (0x1)
++                }
++
++                Return (0x0)
+             }
+ 
+             Method (_STA, 0, NotSerialized)
+@@ -331,6 +457,7 @@ DefinitionBlock ("SSDT_PM.aml", "SSDT", 2, "Xen", "HVM", 0)
+             ACQR ()
+             INIT (0x01)
+             INIT (Arg0)
++            Store (Arg0, PB4)
+             HLP5 ()
+             Store (HLP7 (), Index (BIFP, 0x00))
+             Store (HLP7 (), Index (BIFP, 0x01))
+@@ -379,8 +506,13 @@ DefinitionBlock ("SSDT_PM.aml", "SSDT", 2, "Xen", "HVM", 0)
+ 
+             Method (_STA, 0, NotSerialized)
+             {
+-	        Store ( STA (0x01), Local0 )
+-	        Return ( Local0 )
++                Store (\_SB.P88, Local0)
++                If (And (Local0, 0x2))
++                {
++                    Return (0x1F)
++                }
++
++                Return (0x0F)
+ 	    }
+ 
+             /* Battery generic info: design capacity, voltage, model # etc. */
+@@ -395,13 +527,10 @@ DefinitionBlock ("SSDT_PM.aml", "SSDT", 2, "Xen", "HVM", 0)
+             /* Battery status including battery charging/discharging rate. */
+             Method (_BST, 0, NotSerialized)
+             {
+-	        /* Check for BIF change */
+-		STA (0x01)
+-		/* Report current status */
+-                Store (1, \_SB.DBG1)
+                 ACQR ()
+                 INIT (0x02)
+                 INIT (0x01)
++                Store (0x01, PB4)
+                 HLP5 ()
+                 Name (BST0, Package (0x04) {})
+                 Store (HLP7 (), Index (BST0, 0x00))
+@@ -409,7 +538,6 @@ DefinitionBlock ("SSDT_PM.aml", "SSDT", 2, "Xen", "HVM", 0)
+                 Store (HLP7 (), Index (BST0, 0x02))
+                 Store (HLP7 (), Index (BST0, 0x03))
+                 REL ()
+-                Store (2, \_SB.DBG1)
+                 Return (BST0)
+             }
+         }
+@@ -425,14 +553,19 @@ DefinitionBlock ("SSDT_PM.aml", "SSDT", 2, "Xen", "HVM", 0)
+             })
+             Method (_STA, 0, NotSerialized)
+             {
+-		Store ( STA(0x02) , Local0 )
+-                Return ( Local0 )
++                Store (\_SB.P90, Local0)
++                If (And (Local0, 0x1))
++                {
++                    Return (0x1F)
++                }
++
++                Return (0x0F)
+             }
+ 
+             Method (_BIF, 0, NotSerialized)
+             {
+-                Store (\_SB.PB2, Local0)
+-                Return (BIF (0x02))
++                Store (BIF (0x02), Local0)
++                Return( Local0 )
+             }
+ 
+             Method (_BST, 0, NotSerialized)
+@@ -442,6 +575,7 @@ DefinitionBlock ("SSDT_PM.aml", "SSDT", 2, "Xen", "HVM", 0)
+                 ACQR ()
+                 INIT (0x02)
+                 INIT (0x02)
++                Store (0x02, PB4)
+                 HLP5 ()
+                 Name (BST1, Package (0x04) {})
+                 Store (HLP7 (), Index (BST1, 0x00))
+@@ -471,5 +605,46 @@ DefinitionBlock ("SSDT_PM.aml", "SSDT", 2, "Xen", "HVM", 0)
+             }
+         }
+     }
++
++    /*  Wire GPE events to notify power state
++     *  changes like ac power to battery use etc.
++     */
++    Scope (\_GPE)
++    {
++        /* Note:  If we run out of level event handlers or there should be a conflict
++         *        in future, we could consolidate the below under one handler and use
++         *        an io port to get the type of event.
++         */
++
++        Method (_L00, 0, NotSerialized)
++        {
++            \_SB.E0()
++        }
++
++        Method (_L01, 0, NotSerialized)
++        {
++            \_SB.E1()
++        }
++
++        Method (_L1C, 0, NotSerialized)
++        {
++            \_SB.E1C()
++        }
++
++        Method (_L17, 0, NotSerialized)
++        {
++            \_SB.E17()
++        }
++
++        Method (_L1D, 0, NotSerialized)
++        {
++            \_SB.E1D()
++        }
++
++        Method (_L1E, 0, NotSerialized)
++        {
++            \_SB.E1E()
++        }
++    }
+ }
+ 
+diff --git a/tools/firmware/hvmloader/acpi/static_tables.c b/tools/firmware/hvmloader/acpi/static_tables.c
+index 323ae31..a73f2ef 100644
+--- a/tools/firmware/hvmloader/acpi/static_tables.c
++++ b/tools/firmware/hvmloader/acpi/static_tables.c
+@@ -62,7 +62,7 @@ struct acpi_20_fadt Fadt = {
+     .pm1_evt_len = ACPI_PM1A_EVT_BLK_BIT_WIDTH / 8,
+     .pm1_cnt_len = ACPI_PM1A_CNT_BLK_BIT_WIDTH / 8,
+     .pm_tmr_len = ACPI_PM_TMR_BLK_BIT_WIDTH / 8,
+-    .gpe0_blk_len = ACPI_GPE0_BLK_LEN_V1,
++    .gpe0_blk_len = ACPI_GPE0_BLK_LEN_V0,
+ 
+     .p_lvl2_lat = 0x0fff, /* >100,  means we do not support C2 state */
+     .p_lvl3_lat = 0x0fff, /* >1000, means we do not support C3 state */
+@@ -70,7 +70,8 @@ struct acpi_20_fadt Fadt = {
+     .flags = (ACPI_PROC_C1 |
+               ACPI_WBINVD |
+               ACPI_FIX_RTC | ACPI_TMR_VAL_EXT |
+-              ACPI_USE_PLATFORM_CLOCK),
++              ACPI_USE_PLATFORM_CLOCK |
++              ACPI_RESET_REG_SUP),
+ 
+     .reset_reg = {
+         .address_space_id    = ACPI_SYSTEM_IO,
+diff --git a/tools/firmware/hvmloader/seabios.c b/tools/firmware/hvmloader/seabios.c
+index dc298ea..6740a2a 100644
+--- a/tools/firmware/hvmloader/seabios.c
++++ b/tools/firmware/hvmloader/seabios.c
+@@ -44,6 +44,8 @@
+ 
+ extern unsigned char dsdt_anycpu_qemu_xen[];
+ extern int dsdt_anycpu_qemu_xen_len;
++extern unsigned char dsdt_anycpu[];
++extern int dsdt_anycpu_len;
+ 
+ struct seabios_info {
+     char signature[14]; /* XenHVMSeaBIOS\0 */
+@@ -106,8 +108,8 @@ static void seabios_acpi_build_tables(void)
+ {
+     uint32_t rsdp = (uint32_t)scratch_alloc(sizeof(struct acpi_20_rsdp), 0);
+     struct acpi_config config = {
+-        .dsdt_anycpu = dsdt_anycpu_qemu_xen,
+-        .dsdt_anycpu_len = dsdt_anycpu_qemu_xen_len,
++        .dsdt_anycpu = dsdt_anycpu,
++        .dsdt_anycpu_len = dsdt_anycpu_len,
+         .dsdt_15cpu = NULL,
+         .dsdt_15cpu_len = 0,
+     };

@@ -1,0 +1,2360 @@
+diff --git a/tools/Makefile b/tools/Makefile
+index 9f5769c..5df84c8 100644
+--- a/tools/Makefile
++++ b/tools/Makefile
+@@ -29,6 +29,7 @@ SUBDIRS-$(CONFIG_NetBSD) += xenbackendd
+ SUBDIRS-y += libfsimage
+ SUBDIRS-$(LIBXENAPI_BINDINGS) += libxen
+ SUBDIRS-$(CONFIG_Linux) += libvchan
++SUBDIRS-$(CONFIG_X86) += xen-libhvm
+ 
+ # do not recurse in to a dir we are about to delete
+ ifneq "$(MAKECMDGOALS)" "distclean"
+diff --git a/tools/xen-libhvm/LICENSE b/tools/xen-libhvm/LICENSE
+new file mode 100644
+index 0000000..d4e1b01
+--- /dev/null
++++ b/tools/xen-libhvm/LICENSE
+@@ -0,0 +1,23 @@
++Copyright (c) 2013 Ross Philipson
++
++Redistribution and use in source and binary forms, with or without
++modification, are permitted provided that the following conditions
++are met:
++1. Redistributions of source code must retain the above copyright
++   notice, this list of conditions and the following disclaimer.
++2. Redistributions in binary form must reproduce the above copyright
++   notice, this list of conditions and the following disclaimer in the
++   documentation and/or other materials provided with the distribution.
++
++THIS SOFTWARE IS PROVIDED BY AUTHOR AND CONTRIBUTORS ``AS IS'' AND
++ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ARE DISCLAIMED.  IN NO EVENT SHALL AUTHOR OR CONTRIBUTORS BE LIABLE
++FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
++DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
++OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
++HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
++LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
++OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
++SUCH DAMAGE.
++
+diff --git a/tools/xen-libhvm/Makefile b/tools/xen-libhvm/Makefile
+new file mode 100644
+index 0000000..0ad9db4
+--- /dev/null
++++ b/tools/xen-libhvm/Makefile
+@@ -0,0 +1,11 @@
++XEN_ROOT = $(CURDIR)/../..
++include $(XEN_ROOT)/tools/Rules.mk
++
++SUBDIRS-y :=
++SUBDIRS-y += libhvm
++
++clean:
++	rm -rf *.a *.so *.o *.rpm $(LIB) *~ $(DEPS) TAGS
++
++.PHONY: all clean install
++all clean install: %: subdirs-%
+diff --git a/tools/xen-libhvm/README b/tools/xen-libhvm/README
+new file mode 100644
+index 0000000..6382a85
+--- /dev/null
++++ b/tools/xen-libhvm/README
+@@ -0,0 +1,19 @@
++This package contains a helper library for reading ACPI
++and SMBIOS firmware values from the host system for use
++with the HVM guest firmware pass-through feature in Xen.
++
++The contents:
++
++./libhvm:
++A shared library that can be built within the Xen
++source tree. It should be places under tools/firmware
++and built/installed from there. It creates:
++
++/usr/include/xenhvm.h - public header
++/usr/lib/libxenhvm.so.* - shared libs
++
++./biospt
++A simple test app than can use the library to generate
++ACPI and SMBIOS firmware files that can be used with the
++firmware pass-through feature.
++
+diff --git a/tools/xen-libhvm/biospt/Makefile b/tools/xen-libhvm/biospt/Makefile
+new file mode 100755
+index 0000000..1a4f796
+--- /dev/null
++++ b/tools/xen-libhvm/biospt/Makefile
+@@ -0,0 +1,14 @@
++PROG=	biospt
++SRCS=	biospt.c
++
++CFLAGS+= -Wall -g -D_LINUX -Wstrict-prototypes
++
++all: $(PROG)
++
++$(PROG) : $(SRCS)
++	$(CC) $(CFLAGS) $(SRCS) -o $(PROG) -lxenhvm
++
++CLEANFILES= $(PROG)
++
++clean :
++	rm -f $(CLEANFILES) $(patsubst %.c,%.o, $(SRCS))
+diff --git a/tools/xen-libhvm/biospt/biospt.c b/tools/xen-libhvm/biospt/biospt.c
+new file mode 100644
+index 0000000..aae5296
+--- /dev/null
++++ b/tools/xen-libhvm/biospt/biospt.c
+@@ -0,0 +1,491 @@
++/*
++ * biospt.c: test/sample application using libhvm.
++ *
++ * Copyright (c) 2013 Ross Philipson
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ * 1. Redistributions of source code must retain the above copyright
++ *    notice, this list of conditions and the following disclaimer.
++ * 2. Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in the
++ *    documentation and/or other materials provided with the distribution.
++ *
++ * THIS SOFTWARE IS PROVIDED BY AUTHOR AND CONTRIBUTORS ``AS IS'' AND
++ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED.  IN NO EVENT SHALL AUTHOR OR CONTRIBUTORS BE LIABLE
++ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
++ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
++ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
++ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
++ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
++ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
++ * SUCH DAMAGE.
++ */
++
++#include <stdint.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <limits.h>
++#include <ctype.h>
++#include <sys/types.h>
++#include <sys/stat.h>
++#include <unistd.h>
++#include <errno.h>
++#include <dirent.h>
++#include <xenhvm.h>
++
++#define XH_SMBIOS_SYSFS_PARENT "/sys/firmware/dmi/entries"
++
++static void hexdump(void *_p, int len)
++{
++    uint8_t *buf = (uint8_t *)_p;
++    int i, j;
++
++    for ( i = 0; i < len; i += 16 )
++    {
++        printf("%8.8x:", i);
++        /*printf ("%p:", &buf[i]);*/
++        for ( j = 0; j < 16; ++j )
++        {
++            int k = i + j;
++            if ( k < len )
++                printf(" %02x", buf[k]);
++            else
++                printf("   ");
++        }
++        printf(" ");
++
++        for ( j = 0; j < 16; ++j )
++        {
++            int k = i + j;
++            if ( k < len )
++                printf("%c", ((buf[k] > 32) && (buf[k] < 127)) ? buf[k] : '.');
++            else
++                printf(" ");
++        }
++
++        printf("\n");
++    }
++}
++
++static uint8_t *xh_read_table_sysfs(const char *table_dir,
++                                    uint32_t *length)
++{
++#define XH_LENGTH_BUF_SIZE 64 /* plenty of room */
++    FILE *fs = NULL;
++    uint8_t *data = NULL;
++    size_t rs;
++    unsigned long int raw_length;
++    uint32_t str_length;
++    char *table_file;
++    char length_buf[XH_LENGTH_BUF_SIZE];
++
++    /* First open the length file to find the size of the table to read */
++    str_length = strlen(table_dir) + 16;
++    table_file = malloc(str_length);
++    if ( table_file == NULL )
++        return NULL;
++
++    snprintf(table_file, str_length, "%s/length", table_dir);
++
++    fs = fopen(table_file, "rb");
++    if ( fs == NULL )
++        goto error_out;
++
++    rs = fread(length_buf, 1, XH_LENGTH_BUF_SIZE, fs);
++    if ( rs == 0 )
++    {
++        errno = ENODATA;
++        goto error_out;
++    }
++
++    fclose(fs);
++    fs = NULL;
++
++    length_buf[rs - 1] = '\0';
++    raw_length = strtoul(length_buf, NULL, 10);
++
++    if ( raw_length == ULONG_MAX )
++        goto error_out;
++
++    if ( raw_length == 0 )
++    {
++        errno = ENODATA;
++        goto error_out;
++    }
++
++    /* Have some reasonable size for the SMBIOS table, read it */
++    data = malloc(raw_length);
++    if ( data == NULL )
++        goto error_out;
++
++    snprintf(table_file, str_length, "%s/raw", table_dir);
++
++    fs = fopen(table_file, "rb");
++    if ( fs == NULL )
++        goto error_out;
++
++    rs = fread(data, 1, raw_length, fs);
++    if ( rs != raw_length )
++    {
++        errno = ENODATA;
++        goto error_out;
++    }
++
++    fclose(fs);
++
++    *length = raw_length;
++    return data;
++
++error_out:
++    if ( fs != NULL )
++        fclose(fs);
++
++    free(data);
++
++    return NULL;
++}
++
++uint8_t *xh_read_file(const char *filename,
++                      unsigned long *size)
++{
++    FILE *fs = NULL;
++    uint8_t *data = NULL;
++    off_t datalen = 0;
++    struct stat st;
++    size_t rs;
++
++    fs = fopen(filename, "rb");
++    if ( fs == NULL )
++    {
++        printf("Open file %s failed - errno: %d\n", filename, errno);
++        goto out;
++    }
++
++    if ( fstat(fileno(fs), &st) )
++    {
++        printf("Stat file %s failed\n", filename);
++        goto out;
++    }
++
++    if ( st.st_size > INT_MAX )
++    {
++        printf("file %s is too large\n", filename);
++        errno = EFBIG;
++        goto out;
++    }
++
++    if ( st.st_size == 0 )
++    {
++        printf("file %s is empty\n", filename);
++        errno = ENODATA;
++        goto out;
++    }
++
++    datalen = st.st_size;
++
++    data = malloc(datalen);
++    if ( data == NULL )
++        goto out;
++
++    /* sysfs files do not report their actual size */
++    rs = fread(data, 1, datalen, fs);
++    if ( rs == 0 )
++    {
++        printf("No data while reading %s", filename);
++        errno = ENODATA;
++        goto out;
++    }
++
++    fclose(fs);
++
++    if ( size != NULL )
++        *size = rs;
++
++    return data;
++
++out:
++    if ( fs != NULL )
++        fclose(fs);
++
++    free(data);
++
++    return NULL;
++}
++
++static void dmifiles(const char *subdir)
++{
++    DIR *d;
++    struct dirent *de;
++    char namestr[512];
++    uint8_t *buf;
++    unsigned long len = 0;
++    uint32_t tlen = 0;
++
++    snprintf(namestr, sizeof(namestr), "%s/%s", XH_SMBIOS_SYSFS_PARENT, subdir);
++
++    d = opendir(namestr);
++    if ( d == NULL )
++    {
++        printf("Failed subdir opendir() - errno: %d\n", errno);
++        return;
++    }
++
++    de = readdir(d);
++    while ( de != NULL )
++    {
++        if ( de->d_name[0] != '.' )
++            printf("DMI File: %s\n", de->d_name);
++        de = readdir(d);
++    }
++
++    strcat(namestr, "/length");
++    buf = xh_read_file(namestr, &len);
++    if ( buf != NULL )
++    {
++        printf("Length file size: %lu\n", len);
++        buf[len - 1] = '\0';
++        printf("Length file data: %s\n", buf);
++        free(buf);
++    }
++
++    snprintf(namestr, sizeof(namestr), "%s/%s", XH_SMBIOS_SYSFS_PARENT, subdir);
++    printf("Reading table from dir: %s\n", namestr);
++    buf = xh_read_table_sysfs(namestr, &tlen);
++    printf("Read table, length: %x\n", tlen);
++    printf("==== START DATA ====\n");
++    hexdump(buf, tlen);
++    printf("==== END   DATA ====\n");
++    free(buf);
++    closedir(d);
++}
++
++static int xenhvm_read_dmi_files(void)
++{
++    DIR *d;
++    struct dirent *de;
++
++    d = opendir(XH_SMBIOS_SYSFS_PARENT);
++    if ( d == NULL )
++    {
++        printf("opendir() failed - errno: %d\n", errno);
++        return -1;
++    }
++
++    de = readdir(d);
++    while ( de != NULL )
++    {
++        if ( de->d_name[0] != '.' )
++        {
++            printf("Directory: %s\n", de->d_name);
++            dmifiles(de->d_name);
++        }
++        de = readdir(d);
++    }
++
++    closedir(d);
++
++    return 0;
++}
++
++int xenhvm_smbios_fw(int i)
++{
++    struct xh_smbios_spec tl[5] = {
++        {0, XH_SMBIOS_FLAG_FIRST},
++        {1, XH_SMBIOS_FLAG_FIRST},
++        {3, XH_SMBIOS_FLAG_FIRST},
++        {11, XH_SMBIOS_FLAG_FIRST},
++        {218, XH_SMBIOS_FLAG_ALL}
++    };
++    int r = 0;
++    uint8_t *b;
++    uint32_t l;
++
++    if ( i == 1 )
++    {
++       printf("Running SMBIOS read from firmware using mmap.\n");
++       r = xh_find_smbios_structures(XH_DECODE_MMAP, &tl[0], 5, &b, &l);
++    }
++    else if ( i == 2 )
++    {
++       printf("Running SMBIOS read from firmware using sysfs.\n");
++       r = xh_find_smbios_structures(XH_DECODE_SYSFS, &tl[0], 5, &b, &l);
++    }
++
++    if ( r )
++    {
++        printf("xh_find_smbios_structures failed, errno: %d\n", errno);
++        return -1;
++    }
++
++    printf("==== START DATA ====\n");
++    hexdump(b, l);
++    printf("==== END   DATA ====\n");
++    free(b);
++
++    return 0;
++}
++
++int xenhvm_acpi_fw(int i)
++{
++    struct xh_acpi_spec tl[2] = {
++        {"SLIC", XH_ACPI_ORDINAL_UNSPECIFIED},
++        {"SSDT", 0}
++    };
++    int r = 0;
++    uint8_t *b;
++    uint32_t l;
++
++    if ( i == 3 )
++    {
++       printf("Running ACPI read from firmware using mmap.\n");
++       r = xh_find_acpi_tables(XH_DECODE_MMAP, &tl[0], 2, &b, &l);
++    }
++    else if ( i == 4 )
++    {
++       printf("Running ACPI read from firmware using sysfs.\n");
++       r = xh_find_acpi_tables(XH_DECODE_SYSFS, &tl[0], 2, &b, &l);
++    }
++
++    if ( r )
++    {
++        printf("xh_find_acpi_tables failed, errno: %d\n", errno);
++        return -1;
++    }
++
++    printf("==== START DATA ====\n");
++    hexdump(b, l);
++    printf("==== END   DATA ====\n");
++    free(b);
++
++    return 0;
++}
++
++/* Read a set of SMBIOS structures and one ACPI table
++ * and write them to files. These files can be used
++ * with the HVM BIOS pass-through feature.
++ */
++int xenhvm_make_bins(void)
++{
++    struct xh_smbios_spec tl[8] = {
++        {0, XH_SMBIOS_FLAG_FIRST},
++        {1, XH_SMBIOS_FLAG_FIRST},
++        {3, XH_SMBIOS_FLAG_FIRST},
++        {11, XH_SMBIOS_FLAG_FIRST},
++        {129, XH_SMBIOS_FLAG_FIRST},
++        {130, XH_SMBIOS_FLAG_FIRST},
++        {131, XH_SMBIOS_FLAG_FIRST},
++        {218, XH_SMBIOS_FLAG_ALL}
++    };
++    struct xh_acpi_spec al[1] = {
++        {"SLIC", XH_ACPI_ORDINAL_UNSPECIFIED}
++    };
++    FILE *fs;
++    int r;
++    uint8_t *b;
++    uint32_t l, c;
++    struct xh_data_item di;
++
++    printf("Make SMBIOS file from FW.\n");
++    r = xh_find_smbios_structures(XH_DECODE_SYSFS, &tl[0], 8, &b, &l);
++    if ( r )
++    {
++        printf("Fail(1), errno: %d\n", errno);
++        return -1;
++    }
++
++    /* The libxenhvm lib formats the fw blocks with 32b length integers
++     * between each SMBIOS struct which is exactly what we want to pass
++     * to the hvmloader code.
++     */
++    fs = fopen("./smbios_fw.bin", "wb");
++    c = ((struct xh_firmware_block*)b)->count;
++    fwrite(b + sizeof(struct xh_firmware_block),
++                      l - sizeof(struct xh_firmware_block), 1, fs);
++    free(b);
++
++    printf("Make SMBIOS Xen vendor struct.\n");
++    r = xh_xen_vendor_smbios_structure("XenVendor", "XenValues", 0x80001031,
++                                       0x401, &di.data, &di.length);
++    if ( r )
++    {
++        printf("Fail(2), errno: %d\n", errno);
++        return -1;
++    }
++    fwrite((uint8_t*)(&di.length), 4, 1, fs);
++    fwrite(di.data, di.length, 1, fs);
++    printf("Wrote SMBIOS structures file: smbios_fw.bin count: %d\n", c + 1);
++    fclose(fs);
++
++    printf("Make ACPI SLIC file from FW.\n");
++    r = xh_find_acpi_tables(XH_DECODE_SYSFS, &al[0], 1, &b, &l);
++    if ( r )
++    {
++        printf("Fail(3), errno: %d\n", errno);
++        return -1;
++    }
++
++    /* The libxenhvm lib formats the fw blocks with 32b length integers
++     * between each ACPI table. These must be removed because the ACPI
++     * tables are just packed together for passing to hvmloader. Since
++     * only one table was fetched here, the code is just skipping the
++     * one length specifier below.
++     */
++    fs = fopen("./acpi_slic.bin", "wb");
++    fwrite(b + (sizeof(struct xh_firmware_block) + 4), l - (sizeof(struct xh_firmware_block) + 4), 1, fs);
++    fclose(fs);
++    free(b);
++    printf("Writing ACPI SLIC table file: acpi_slic.bin\n");
++
++    return 0;
++}
++
++static void usage(void)
++{
++    printf("Usage:\n");
++    printf("$ biospt <n>\n");
++    printf(" 1 - Write some SMBIOS tables using MMAP\n");
++    printf(" 2 - Write some SMBIOS tables using SYSFS\n");
++    printf(" 3 - Write some ACPI tables using MMAP\n");
++    printf(" 4 - Write some ACPI using SYSFS\n");
++    printf(" 5 - Read and trace DMI files\n");
++    printf(" 6 - Write out some test files\n");
++}
++
++int main(int argc, char *argv[])
++{
++    if ( argc != 2 )
++    {
++        usage();
++        return -1;
++    }
++
++    if ( argv[1][0] == '1' )
++        return xenhvm_smbios_fw(1);
++    if ( argv[1][0] == '2' )
++        return xenhvm_smbios_fw(2);
++    if ( argv[1][0] == '3' )
++        return xenhvm_acpi_fw(3);
++    if ( argv[1][0] == '4' )
++        return xenhvm_acpi_fw(4);
++    if ( argv[1][0] == '5' )
++        return xenhvm_read_dmi_files();
++    if ( argv[1][0] == '6' )
++        return xenhvm_make_bins();
++
++    return 0;
++}
++
++/*
++ * Local variables:
++ * mode: C
++ * c-set-style: "BSD"
++ * c-basic-offset: 4
++ * tab-width: 4
++ * indent-tabs-mode: nil
++ * End:
++ */
+diff --git a/tools/xen-libhvm/libhvm/Makefile b/tools/xen-libhvm/libhvm/Makefile
+new file mode 100644
+index 0000000..ca08efc
+--- /dev/null
++++ b/tools/xen-libhvm/libhvm/Makefile
+@@ -0,0 +1,46 @@
++XEN_ROOT = $(CURDIR)/../../..
++include $(XEN_ROOT)/tools/Rules.mk
++
++LIBHVM_OBJS = xenhvm.o smbios_module.o acpi_module.o xh_internal.o
++
++LIBHVM_PIC_OBJS = $(patsubst %.o,%.opic,$(LIBHVM_OBJS))
++LIBHVM_LIBS = $(LDLIBS_libxenstore)
++$(LIBHVM_OBJS) $(LIBHVM_PIC_OBJS): CFLAGS += $(CFLAGS_libxenstore)
++
++MAJOR = 1.0
++MINOR = 0
++
++CFLAGS += -I.
++
++.PHONY: all
++all: libxenhvm.so libxenhvm.a
++
++libxenhvm.so: libxenhvm.so.$(MAJOR)
++	ln -sf $< $@
++
++libxenhvm.so.$(MAJOR): libxenhvm.so.$(MAJOR).$(MINOR)
++	ln -sf $< $@
++
++libxenhvm.so.$(MAJOR).$(MINOR): $(LIBHVM_PIC_OBJS)
++	$(CC) $(LDFLAGS) -Wl,$(SONAME_LDFLAG) -Wl,libxenhvm.so.$(MAJOR) $(SHLIB_LDFLAGS) -o $@ $^ $(LIBHVM_LIBS) $(APPEND_LDFLAGS)
++
++libxenhvm.a: $(LIBHVM_OBJS)
++	$(AR) rcs libxenhvm.a $^
++
++.PHONY: install
++install: all
++	$(INSTALL_DIR) $(DESTDIR)$(LIBDIR)
++	$(INSTALL_DIR) $(DESTDIR)$(INCLUDEDIR)
++	$(INSTALL_PROG) libxenhvm.so.$(MAJOR).$(MINOR) $(DESTDIR)$(LIBDIR)
++	ln -sf libxenhvm.so.$(MAJOR).$(MINOR) $(DESTDIR)$(LIBDIR)/libxenhvm.so.$(MAJOR)
++	ln -sf libxenhvm.so.$(MAJOR) $(DESTDIR)$(LIBDIR)/libxenhvm.so
++	$(INSTALL_DATA) libxenhvm.a $(DESTDIR)$(LIBDIR)
++	$(INSTALL_DATA) xenhvm.h $(DESTDIR)$(INCLUDEDIR)
++
++.PHONY: clean
++clean:
++	$(RM) -f *.o *.opic *.so* *.a $(DEPS)
++
++distclean: clean
++
++-include $(DEPS)
+diff --git a/tools/xen-libhvm/libhvm/acpi_module.c b/tools/xen-libhvm/libhvm/acpi_module.c
+new file mode 100644
+index 0000000..5e8017f
+--- /dev/null
++++ b/tools/xen-libhvm/libhvm/acpi_module.c
+@@ -0,0 +1,527 @@
++/*
++ * acpi_module.c: routines for reading ACPI tables from host memory
++ * or sysfs.
++ *
++ * Copyright (c) 2013 Ross Philipson
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ * 1. Redistributions of source code must retain the above copyright
++ *    notice, this list of conditions and the following disclaimer.
++ * 2. Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in the
++ *    documentation and/or other materials provided with the distribution.
++ *
++ * THIS SOFTWARE IS PROVIDED BY AUTHOR AND CONTRIBUTORS ``AS IS'' AND
++ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED.  IN NO EVENT SHALL AUTHOR OR CONTRIBUTORS BE LIABLE
++ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
++ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
++ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
++ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
++ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
++ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
++ * SUCH DAMAGE.
++ */
++
++#include <stdlib.h>
++#include <stdio.h>
++#include <stdint.h>
++#include <string.h>
++#include <limits.h>
++#include <errno.h>
++#include <unistd.h>
++#include <sys/stat.h>
++#include "xenhvm.h"
++#include "xen_smbios.h"
++#include "xh_internal.h"
++
++struct xh_acpi_ctx {
++    struct xh_common_ctx common_ctx;
++
++    struct xh_acpi_spec *table_list;
++    uint32_t table_count;
++
++    union {
++        struct {
++            off_t rsdt_paddr;
++            uint8_t *rsdt_vaddr;
++            uint32_t rsdt_length;
++            off_t xsdt_paddr;
++            uint8_t *xsdt_vaddr;
++            uint32_t xsdt_length;
++            int is_rev1;
++        } mmap;
++        struct {
++            uint32_t reserved;
++        } sysfs;
++    } source;
++};
++
++struct xh_acpi_table_info {
++    off_t paddr;
++    uint8_t *vaddr;
++    uint32_t length;
++};
++
++enum xh_match_table {
++    XH_MATCH_ERROR = 0,
++    XH_MATCH_MISS,
++    XH_MATCH_FOUND
++};
++
++#define XH_ACPI_SYSFS_PARENT "/sys/firmware/acpi/tables/"
++
++static int xh_process_rsdp_mmap(struct xh_acpi_ctx *acctx, uint8_t *rsdp)
++{
++    uint8_t sum;
++    uint32_t count, length;
++    XH_ERR;
++
++    /* Checksum sanity check over the RSDP */
++    if ( rsdp[XH_ACPI_RSDP_REVISION] < 2 )
++    {
++        length = XH_ACPI_RSDP_CS_LENGTH;
++        acctx->source.mmap.is_rev1 = 1;
++    }
++    else
++        length = XH_ACPI_RSDP_XCS_LENGTH;
++
++    for ( sum = 0, count = 0; count < length; count++ )
++        sum += rsdp[count];
++
++    if ( sum != 0 )
++    {
++        errno = ENOENT;
++        goto error_out;
++    }
++
++    /* looks like the RSDP, get RSDT table */
++    acctx->source.mmap.rsdt_paddr =
++        (*(uint32_t*)(rsdp + XH_ACPI_RSDP_RSDT_BASE));
++    acctx->source.mmap.rsdt_length =
++        XH_ACPI_HEADER_LENGTH;
++    acctx->source.mmap.rsdt_vaddr =
++        xh_mmap(acctx->source.mmap.rsdt_paddr, XH_ACPI_HEADER_LENGTH);
++    if ( acctx->source.mmap.rsdt_vaddr == NULL )
++        goto error_out;
++
++    /* Check the signatures for the RSDT */
++    if ( memcmp(acctx->source.mmap.rsdt_vaddr, "RSDT", 4) != 0)
++    {
++        errno = ENOENT;
++        goto error_out;
++    }
++
++    /* Remap the entire table */
++    acctx->source.mmap.rsdt_length =
++        (*(uint32_t*)(acctx->source.mmap.rsdt_vaddr + XH_ACPI_TABLE_LENGTH));
++    xh_unmmap(acctx->source.mmap.rsdt_vaddr, XH_ACPI_HEADER_LENGTH);
++
++    acctx->source.mmap.rsdt_vaddr =
++        xh_mmap(acctx->source.mmap.rsdt_paddr,
++                acctx->source.mmap.rsdt_length);
++    if ( acctx->source.mmap.rsdt_vaddr == NULL )
++        goto error_out;
++
++    if ( acctx->source.mmap.is_rev1 )
++        goto done_out;
++
++    /* Else, also have an XSDT */
++    acctx->source.mmap.xsdt_paddr =
++        (*(uint64_t*)(rsdp + XH_ACPI_RSDP_XSDT_BASE));
++    acctx->source.mmap.xsdt_length =
++        XH_ACPI_HEADER_LENGTH;
++    acctx->source.mmap.xsdt_vaddr =
++        xh_mmap(acctx->source.mmap.xsdt_paddr, XH_ACPI_HEADER_LENGTH);
++    if ( acctx->source.mmap.xsdt_vaddr == NULL )
++        goto error_out;
++
++    /* Check the signatures for the XSDT */
++    if ( memcmp(acctx->source.mmap.xsdt_vaddr, "XSDT", 4) != 0)
++    {
++        errno = ENOENT;
++        goto error_out;
++    }
++
++    /* Remap the entire table */
++    acctx->source.mmap.xsdt_length =
++        (*(uint32_t*)(acctx->source.mmap.xsdt_vaddr + XH_ACPI_TABLE_LENGTH));
++    xh_unmmap(acctx->source.mmap.xsdt_vaddr, XH_ACPI_HEADER_LENGTH);
++
++    acctx->source.mmap.xsdt_vaddr =
++        xh_mmap(acctx->source.mmap.xsdt_paddr,
++                acctx->source.mmap.xsdt_length);
++    if ( acctx->source.mmap.xsdt_vaddr == NULL )
++        goto error_out;
++
++done_out:
++    return 0;
++
++error_out:
++    XH_PUSHERR();
++    if ( acctx->source.mmap.rsdt_vaddr != NULL )
++        xh_unmmap(acctx->source.mmap.rsdt_vaddr,
++                  acctx->source.mmap.rsdt_length);
++    if ( acctx->source.mmap.xsdt_vaddr != NULL )
++        xh_unmmap(acctx->source.mmap.xsdt_vaddr,
++                  acctx->source.mmap.xsdt_length);
++    XH_POPERR();
++
++    return -1;
++}
++
++static int xh_locate_acpi_mmap(struct xh_acpi_ctx *acctx)
++{
++    size_t loc = 0;
++    uint8_t *vaddr;
++    int rc = -1;
++    XH_ERR;
++
++    /* Use EFI tables if present */
++    rc = xh_efi_locate("ACPI20", 6, &loc);
++    if ( (rc == 0) && (loc != 0) )
++    {
++        vaddr = xh_mmap(loc, XH_ACPI_RSDP_LENGTH);
++        if ( vaddr == NULL )
++            return -1;
++
++        rc = xh_process_rsdp_mmap(acctx, vaddr);
++        XH_PUSHERR();
++        xh_unmmap(vaddr, XH_ACPI_RSDP_LENGTH);
++        XH_POPERR();
++        return rc;
++    }
++
++    /* Locate ACPI entry via memory scan of ROM region */
++    vaddr = xh_mmap(XH_SCAN_ROM_BIOS_BASE, XH_SCAN_ROM_BIOS_SIZE);
++    if ( vaddr == NULL )
++        return -1;
++
++    for ( loc = 0; loc <= (XH_SCAN_ROM_BIOS_SIZE - XH_ACPI_RSDP_LENGTH); loc += 16)
++    {
++        /* Stop before 0xFFDC */
++        /* look for RSD PTR  signature */
++        if ( memcmp(vaddr + loc, "RSD PTR ", 8) == 0 )
++        {
++            rc = xh_process_rsdp_mmap(acctx, vaddr + loc);
++            if ( rc == 0 ) /* found it */
++                break;
++        }
++    }
++
++    XH_PUSHERR();
++    xh_unmmap(vaddr, XH_SCAN_ROM_BIOS_SIZE);
++    XH_POPERR();
++
++    return rc;
++}
++
++static enum xh_match_table xh_match_table(off_t paddr,
++                                          struct xh_acpi_spec *table,
++                                          struct xh_acpi_table_info *ti,
++                                          uint32_t *pord)
++{
++    uint8_t *vaddr;
++
++    vaddr = xh_mmap(paddr, XH_ACPI_HEADER_LENGTH);
++    if ( vaddr == NULL )
++        return XH_MATCH_ERROR;
++
++    if ( memcmp(vaddr, table->signature, 4) != 0 )
++    {
++        xh_unmmap(vaddr, XH_ACPI_HEADER_LENGTH);
++        return XH_MATCH_MISS;
++    }
++
++    if ( (table->ordinal != XH_ACPI_ORDINAL_UNSPECIFIED)&&
++         (table->ordinal != *pord) )
++    {
++        (*pord)++;
++        xh_unmmap(vaddr, XH_ACPI_HEADER_LENGTH);
++        return XH_MATCH_MISS;
++    }
++
++    /* Found it, map the entire table and return it. */
++    ti->length = (*(uint32_t*)(vaddr + XH_ACPI_TABLE_LENGTH));
++    xh_unmmap(vaddr, XH_ACPI_HEADER_LENGTH);
++    vaddr = xh_mmap(paddr, ti->length);
++    if ( vaddr == NULL )
++        return XH_MATCH_ERROR;
++    ti->paddr = paddr;
++    ti->vaddr = vaddr;
++
++    return XH_MATCH_FOUND;
++}
++
++static int xh_xsdt_find_table(struct xh_acpi_ctx *acctx,
++                              struct xh_acpi_spec *table,
++                              struct xh_acpi_table_info *ti)
++{
++    uint64_t *paddr_list;
++    uint32_t length, count, i, ordinal = 0;
++    int rc = 0;
++    enum xh_match_table match;
++
++    length = acctx->source.mmap.xsdt_length - XH_ACPI_HEADER_LENGTH;
++    count = length/sizeof(uint64_t);
++    paddr_list =
++        (uint64_t*)(acctx->source.mmap.xsdt_vaddr + XH_ACPI_HEADER_LENGTH);
++
++    for ( i = 0; i < count; i++, paddr_list++ )
++    {
++        match = xh_match_table(*paddr_list, table, ti, &ordinal);
++        if ( match == XH_MATCH_MISS )
++            continue;
++
++        if ( match == XH_MATCH_ERROR )
++            rc = -1;
++
++        /* Else it was found */
++        break;
++    }
++
++    return rc;
++}
++
++static int xh_rsdt_find_table(struct xh_acpi_ctx *acctx,
++                              struct xh_acpi_spec *table,
++                              struct xh_acpi_table_info *ti)
++{
++    uint32_t *paddr_list;
++    uint32_t length, count, i, ordinal = 0;
++    int rc = -1;
++    enum xh_match_table match;
++
++    length = acctx->source.mmap.rsdt_length - XH_ACPI_HEADER_LENGTH;
++    count = length/sizeof(uint32_t);
++    paddr_list =
++        (uint32_t*)(acctx->source.mmap.rsdt_vaddr + XH_ACPI_HEADER_LENGTH);
++
++    for ( i = 0; i < count; i++, paddr_list++ )
++    {
++        match = xh_match_table(*paddr_list, table, ti, &ordinal);
++        if ( match == XH_MATCH_MISS )
++            continue;
++
++        if ( match == XH_MATCH_ERROR )
++            rc = -1;
++
++        /* Else it was found */
++        break;
++    }
++
++    return rc;
++}
++
++static int xh_decode_acpi_mmap(struct xh_acpi_ctx *acctx)
++{
++    struct xh_acpi_table_info ti;
++    uint32_t i, copied;
++    int rc = 0;
++    XH_ERR;
++
++    if ( xh_locate_acpi_mmap(acctx) )
++        return -1;
++
++    /* Sanity check: make sure there are tables to locate. */
++    if ( !acctx->source.mmap.is_rev1 )
++    {
++        if ( acctx->source.mmap.xsdt_length <= XH_ACPI_TABLE_LENGTH )
++        {
++            errno = ENOENT;
++            return -1; /* invalid - no tables?? */
++        }
++    }
++    else
++    {
++        if ( acctx->source.mmap.rsdt_length <= XH_ACPI_TABLE_LENGTH )
++        {
++            errno = ENOENT;
++            return -1; /* invalid - no tables?? */
++        }
++    }
++
++    for ( i = 0; i < acctx->table_count; i++ )
++    {
++        memset(&ti, 0, sizeof(struct xh_acpi_table_info));
++
++        /* Try to find each requested table. */
++        if ( !acctx->source.mmap.is_rev1 )
++            rc = xh_xsdt_find_table(acctx, &acctx->table_list[i], &ti);
++        else
++            rc = xh_rsdt_find_table(acctx, &acctx->table_list[i], &ti);
++        if ( rc )
++            break;
++
++        copied = xh_copy_common(&(acctx->common_ctx),
++                                ti.vaddr,
++                                ti.length);
++
++        XH_PUSHERR();
++        xh_unmmap(ti.vaddr, ti.length);
++        if ( copied == 0 )
++        {
++            XH_POPERR();
++            rc = -1;
++            break;
++        }
++    }
++
++    return rc;
++}
++
++static int xh_decode_acpi_sysfs(struct xh_acpi_ctx *acctx)
++{
++#define XH_ACPI_DIR_MAX 64
++    uint32_t i, table_length, copied;
++    int rc = 0;
++    struct stat st;
++    uint8_t *table_buf;
++    char table_file[sizeof(XH_ACPI_SYSFS_PARENT) + XH_ACPI_DIR_MAX + 1];
++    char ordinal[XH_ACPI_DIR_MAX + 1];
++    XH_ERR;
++
++    for ( i = 0; i < acctx->table_count; i++ )
++    {
++        strcpy(table_file, XH_ACPI_SYSFS_PARENT);
++        strncat(table_file, acctx->table_list[i].signature,
++                XH_ACPI_SIGNATURE_SIZE);
++        if ( (acctx->table_list[i].ordinal == 0)||
++             (acctx->table_list[i].ordinal == XH_ACPI_ORDINAL_UNSPECIFIED) )
++        {
++            /* When more than one table with a given signature is present, an
++             * ordinal value is appeded (1 - n). If only one is present then
++             * the tables base signature is used.
++             */
++            rc = stat(table_file, &st);
++            if ( rc )
++            {
++                strncat(table_file, "1", XH_ACPI_DIR_MAX);
++                rc = stat(table_file, &st);
++                if ( rc )
++                    break;
++            }
++        }
++        else
++        {
++            /* If an ordinal value is specified other than 0, look for an
++             * exact match on the file name.
++             */
++            snprintf(ordinal, XH_ACPI_DIR_MAX, "%d",
++                     (acctx->table_list[i].ordinal + 1));
++            strncat(table_file, ordinal, XH_ACPI_DIR_MAX);
++            rc = stat(table_file, &st);
++            if ( rc )
++                break;
++        }
++
++        table_buf = xh_read_bin_sysfs(table_file, &table_length);
++        if ( table_buf == NULL )
++        {
++            rc = -1;
++            break;
++        }
++
++        copied = xh_copy_common(&(acctx->common_ctx),
++                                table_buf,
++                                table_length);
++        XH_PUSHERR();
++        free(table_buf);
++        XH_POPERR();
++        if ( copied == 0 )
++        {
++            rc = -1;
++            break;
++        }
++    }
++
++    return rc;
++}
++
++static void xh_acpi_context_cleanup(struct xh_acpi_ctx *acctx)
++{
++    if ( acctx->source.mmap.rsdt_vaddr != NULL )
++        xh_unmmap(acctx->source.mmap.rsdt_vaddr,
++                  acctx->source.mmap.rsdt_length);
++    if ( acctx->source.mmap.xsdt_vaddr != NULL )
++        xh_unmmap(acctx->source.mmap.xsdt_vaddr,
++                  acctx->source.mmap.xsdt_length);
++
++    if ( acctx->common_ctx.buffer != NULL )
++        free(acctx->common_ctx.buffer);
++}
++
++int xh_find_acpi_tables(enum xh_decode_mode mode,
++                        struct xh_acpi_spec *table_list,
++                        uint32_t table_count,
++                        uint8_t **out_buffer,
++                        uint32_t *out_length)
++{
++    struct xh_acpi_ctx acctx;
++    int rc = 0;
++    XH_ERR;
++
++    if ( (table_list == NULL)||(table_count == 0)||
++         (out_buffer == NULL)||(out_length == NULL) )
++    {
++        errno = EINVAL;
++        return -1;
++    }
++
++    memset(&acctx, 0, sizeof(struct xh_acpi_ctx));
++
++    /* Store a pointer to the table list for processing. */
++    acctx.table_list = table_list;
++    acctx.table_count = table_count;
++
++    if ( xh_init_common(mode, &(acctx.common_ctx)) )
++        goto error_out;
++
++    /* Use the mode specified. If XH_DECODE_BOTH is specified then try
++     * to use sysfs first, fall back to mmap if that fails.
++     */
++    if ( mode == XH_DECODE_BOTH )
++    {
++        rc = xh_decode_acpi_sysfs(&acctx);
++        if ( rc )
++            rc = xh_decode_acpi_mmap(&acctx);
++    }
++    else if ( mode == XH_DECODE_SYSFS )
++        rc = xh_decode_acpi_sysfs(&acctx);
++    else if ( mode == XH_DECODE_MMAP )
++        rc = xh_decode_acpi_mmap(&acctx);
++
++    if ( rc )
++        goto error_out;
++
++    /* Final format of the module header */
++    xh_format_common(&(acctx.common_ctx), XH_FIRMWARE_ACPI);
++
++    *out_buffer = acctx.common_ctx.buffer;
++    *out_length = acctx.common_ctx.total_length;
++    acctx.common_ctx.buffer = NULL;
++
++    xh_acpi_context_cleanup(&acctx);
++    return 0;
++
++error_out:
++
++    XH_PUSHERR();
++    xh_acpi_context_cleanup(&acctx);
++    XH_POPERR();
++
++    return rc;
++}
++
++/*
++ * Local variables:
++ * mode: C
++ * c-set-style: "BSD"
++ * c-basic-offset: 4
++ * tab-width: 4
++ * indent-tabs-mode: nil
++ * End:
++ */
+diff --git a/tools/xen-libhvm/libhvm/smbios_module.c b/tools/xen-libhvm/libhvm/smbios_module.c
+new file mode 100644
+index 0000000..9f1a836
+--- /dev/null
++++ b/tools/xen-libhvm/libhvm/smbios_module.c
+@@ -0,0 +1,483 @@
++/*
++ * smbios_module.c: routines for reading SMBIOS structs from host memory
++ * or sysfs.
++ *
++ * Copyright (c) 2013 Ross Philipson
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ * 1. Redistributions of source code must retain the above copyright
++ *    notice, this list of conditions and the following disclaimer.
++ * 2. Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in the
++ *    documentation and/or other materials provided with the distribution.
++ *
++ * THIS SOFTWARE IS PROVIDED BY AUTHOR AND CONTRIBUTORS ``AS IS'' AND
++ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED.  IN NO EVENT SHALL AUTHOR OR CONTRIBUTORS BE LIABLE
++ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
++ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
++ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
++ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
++ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
++ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
++ * SUCH DAMAGE.
++ */
++
++#include <stdlib.h>
++#include <stdio.h>
++#include <stdint.h>
++#include <string.h>
++#include <limits.h>
++#include <errno.h>
++#include <unistd.h>
++#include <dirent.h>
++#include "xenhvm.h"
++#include "xen_smbios.h"
++#include "xh_internal.h"
++
++#define XH_SMBIOS_FLAG_FOUND   0x80
++
++struct xh_smbios_ctx {
++    struct xh_common_ctx common_ctx;
++
++    struct xh_smbios_spec *type_list;
++    uint32_t type_count;
++
++    union {
++        struct {
++            off_t paddr;
++            uint16_t length;
++            uint16_t count;
++            uint8_t *vaddr;
++        } mmap;
++        struct {
++            uint32_t reserved;
++        } sysfs;
++    } source;
++};
++
++#define XH_SMBIOS_SYSFS_PARENT "/sys/firmware/dmi/entries/"
++#define XH_SMBIOS_SYSFS_DIRFMT "%d-%d"
++
++static int xh_check_smbios_table(struct xh_smbios_ctx *smctx,
++                                 uint8_t type,
++                                 uint16_t ordinal)
++{
++    uint32_t i;
++
++    /* Check if this table is wanted. Note that this module building code
++     * will take any table type requested, be it DMTF defined or vendor
++     * specific. The hvmloader code that processes it though will be limited
++     * in what tables will accepted for pass-through.
++     */
++
++    for ( i = 0; i < smctx->type_count; i++ )
++    {
++        if ( smctx->type_list[i].flags & XH_SMBIOS_FLAG_GE ) {
++            if (smctx->type_list[i].type > type)
++                continue;
++        } else if ( smctx->type_list[i].type != type ) {
++            continue;
++        }
++
++        /* Match, see if it is the first or all are wanted */
++        if ( smctx->type_list[i].flags & XH_SMBIOS_FLAG_ALL )
++            return 1;
++
++        /* Only one is wanted */
++        if ( (smctx->type_list[i].flags & XH_SMBIOS_FLAG_FOUND) == 0 )
++        {
++            /* Take the one at the ordinal value 0 if ordinal is specified */
++            if ( (ordinal == XH_ORDINAL_UNSPECIFIED)||(ordinal == 0) )
++            {
++                smctx->type_list[i].flags |= XH_SMBIOS_FLAG_FOUND;
++                return 1;
++            }
++        }
++
++        break;
++    }
++
++    return 0;
++}
++
++static int xh_smbios_entry_point_mmap(struct xh_smbios_ctx *smctx,
++                                      uint8_t *entry_point,
++                                      int is_eps)
++{
++    uint8_t sum = 0;
++    uint32_t count;
++
++    /* For any of the failures scanning or running checksums */
++    errno = ENOENT;
++
++    if ( is_eps )
++    {
++        /* Checksum sanity check on _SM_ entry point */
++        for ( count = 0; count < entry_point[XH_SMBIOS_EPS_LENGTH]; count++ )
++            sum += entry_point[count];
++
++        if ( sum != 0 )
++            return -1;
++
++        /* Nothing else really interesting in the EPS, move to the IEPS */
++        entry_point += XH_SMBIOS_IEPS_STRING;
++        if ( memcmp(entry_point, "_DMI_", 5) != 0 )
++            return -1;
++    }
++
++    /* Entry point is IEPS, do checksum of this portion */
++    for ( count = 0; count < XH_SMBIOS_DMI_LENGTH; count++ )
++        sum += entry_point[count];
++
++    if ( sum != 0 )
++        return -1;
++
++    /* Now get structure table values */
++    smctx->source.mmap.paddr =
++        (*(uint32_t*)(entry_point +
++            XH_SMBIOS_TABLE_ADDRESS - XH_SMBIOS_IEPS_STRING));
++    smctx->source.mmap.length =
++        (*(uint16_t*)(entry_point +
++            XH_SMBIOS_TABLE_LENGTH - XH_SMBIOS_IEPS_STRING));
++    smctx->source.mmap.count =
++        (*(uint16_t*)(entry_point +
++            XH_SMBIOS_STRUCT_COUNT - XH_SMBIOS_IEPS_STRING));
++
++    /* Make sure these values are realistic, like not enough room for even
++     * one structure header.
++     */
++    if ( (smctx->source.mmap.length < 4)||(smctx->source.mmap.count == 0) )
++        return -1;
++
++    smctx->source.mmap.vaddr =
++        xh_mmap(smctx->source.mmap.paddr, smctx->source.mmap.length);
++    if ( smctx->source.mmap.vaddr == NULL )
++        return -1;
++
++    return 0;
++}
++
++static int xh_locate_smbios_mmap(struct xh_smbios_ctx *smctx)
++{
++    size_t loc = 0;
++    uint8_t *vaddr;
++    int rc = -1;
++    XH_ERR;
++
++    /* Use EFI tables if present */
++    rc = xh_efi_locate("SMBIOS", 6, &loc);
++    if ( (rc == 0)&&(loc != 0) )
++    {
++        vaddr = xh_mmap(loc, XH_SMBIOS_SM_LENGTH);
++        if ( vaddr == NULL )
++            return -1;
++
++        rc = xh_smbios_entry_point_mmap(smctx, vaddr, 1);
++        XH_PUSHERR();
++        xh_unmmap(vaddr, XH_SMBIOS_SM_LENGTH);
++        XH_POPERR();
++        return rc;
++    }
++
++    /* Locate SMBIOS entry via memory scan of ROM region */
++    vaddr = xh_mmap(XH_SCAN_ROM_BIOS_BASE, XH_SCAN_ROM_BIOS_SIZE);
++    if ( vaddr == NULL )
++        return -1;
++
++    for ( loc = 0; loc <= (XH_SCAN_ROM_BIOS_SIZE - XH_SMBIOS_SM_LENGTH); loc += 16)
++    {
++        /* Stop before 0xFFE0. Look for _SM_ signature for newer entry point
++         * which preceeds _DMI_, else look for only the older _DMI_
++         */
++        if ( memcmp(vaddr + loc, "_SM_", 4) == 0 )
++        {
++            rc = xh_smbios_entry_point_mmap(smctx, vaddr + loc, 1);
++            if ( rc == 0 ) /* found it */
++                break;
++        }
++        else if ( memcmp(vaddr + loc, "_DMI_", 5) == 0 )
++        {
++            rc = xh_smbios_entry_point_mmap(smctx, vaddr + loc, 0);
++            if ( rc == 0 ) /* found it */
++                break;
++        }
++    }
++
++    XH_PUSHERR();
++    xh_unmmap(vaddr, XH_SCAN_ROM_BIOS_SIZE);
++    XH_POPERR();
++
++    return rc;
++}
++
++static int xh_decode_smbios_mmap(struct xh_smbios_ctx *smctx)
++{
++    uint16_t idx;
++    uint8_t *ptr, *tail;
++    uint32_t copied;
++
++    if ( xh_locate_smbios_mmap(smctx) )
++        return -1;
++
++    ptr = smctx->source.mmap.vaddr;
++
++    for ( idx = 0; idx < smctx->source.mmap.count; idx++ )
++    {
++        if ( (ptr[XH_SMBIOS_STRUCT_LENGTH] < 4)||
++            ((ptr + ptr[XH_SMBIOS_STRUCT_LENGTH]) >
++             (ptr + smctx->source.mmap.length)) )
++        {
++            errno = ENOENT;
++            return -1;
++        }
++
++        /* Run the tail pointer past the end of this struct and all strings */
++        tail = ptr + ptr[XH_SMBIOS_STRUCT_LENGTH];
++        while ( (tail - ptr + 1) < smctx->source.mmap.length )
++        {
++            if ( (tail[0] == 0)&&(tail[1] == 0) )
++                break;
++            tail++;
++        }
++        tail += 2;
++
++        if ( xh_check_smbios_table(smctx,
++                                   ptr[XH_SMBIOS_STRUCT_TYPE],
++                                   XH_ORDINAL_UNSPECIFIED) )
++        {
++            copied = xh_copy_common(&(smctx->common_ctx), ptr, tail - ptr);
++            if ( copied == 0 ) /* Memory allocation failure, drop out. */
++                return -1;
++        }
++
++        /* Test for terminating structure */
++        if ( ptr[XH_SMBIOS_STRUCT_TYPE] == XH_SMBIOS_TYPE_EOT )
++        {
++            /* Table is done - sanity check */
++            if ( idx != smctx->source.mmap.count - 1 )
++            {
++                errno = ENOENT;
++                return -1;
++            }
++        }
++
++        ptr = tail;
++    }
++
++    return 0;
++}
++
++static int xh_decode_smbios_sysfs(struct xh_smbios_ctx *smctx)
++{
++#define XH_SMBIOS_DIR_MAX 64
++    DIR *parent;
++    struct dirent *de;
++    uint8_t *table_buf;
++    uint32_t table_length, copied;
++    int ret, tid, ord, rc = 0;
++    char table_file[sizeof(XH_SMBIOS_SYSFS_PARENT) + XH_SMBIOS_DIR_MAX + 1];
++    XH_ERR;
++
++    parent = opendir(XH_SMBIOS_SYSFS_PARENT);
++    if ( parent == NULL )
++        return -1;
++
++    de = readdir(parent);
++    while ( de != NULL )
++    {
++        if ( de->d_name[0] == '.' )
++        {
++            de = readdir(parent);
++            continue;
++        }
++
++        /* Dir of the form M-N where M is the table ID and N is the
++         * table instance (0 - n).
++         */
++        ret = sscanf(de->d_name, "%d-%d", &tid, &ord);
++        if ( ret != 2 )
++        {
++            rc = -1;
++            break;
++        }
++
++        if ( xh_check_smbios_table(smctx, tid, ord) )
++        {
++            strcpy(table_file, XH_SMBIOS_SYSFS_PARENT);
++            strncat(table_file, de->d_name, XH_SMBIOS_DIR_MAX);
++            strncat(table_file, "/raw", XH_SMBIOS_DIR_MAX);
++
++            table_buf = xh_read_bin_sysfs(table_file, &table_length);
++            if ( table_buf == NULL )
++            {
++                rc = -1;
++                break;
++            }
++
++            copied = xh_copy_common(&(smctx->common_ctx),
++                                    table_buf,
++                                    table_length);
++            XH_PUSHERR();
++            free(table_buf);
++            XH_POPERR();
++            if ( copied == 0 )
++            {
++                rc = -1;
++                break;
++            }
++        }
++
++        de = readdir(parent);
++    }
++
++    XH_PUSHERR();
++    closedir(parent);
++    XH_POPERR();
++
++    return rc;
++}
++
++static void xh_smbios_context_cleanup(struct xh_smbios_ctx *smctx)
++{
++    if ( smctx->source.mmap.vaddr != NULL )
++        xh_unmmap(smctx->source.mmap.vaddr, smctx->source.mmap.length);
++
++    free(smctx->type_list);
++    xh_cleanup_common(&(smctx->common_ctx));
++}
++
++int xh_find_smbios_structures(enum xh_decode_mode mode,
++                              struct xh_smbios_spec *type_list,
++                              uint32_t type_count,
++                              uint8_t **out_buffer,
++                              uint32_t *out_length)
++{
++    struct xh_smbios_ctx smctx;
++    int rc = 0;
++    XH_ERR;
++
++    if ( (type_list == NULL)||(type_count == 0)||
++         (out_buffer == NULL)||(out_length == NULL) )
++    {
++        errno = EINVAL;
++        return -1;
++    }
++
++    memset(&smctx, 0, sizeof(struct xh_smbios_ctx));
++
++    /* Copy the type list size it will be used to track state. */
++    smctx.type_list = calloc(type_count, sizeof(struct xh_smbios_spec));
++    if ( smctx.type_list == NULL )
++        return -1;
++
++    memcpy(smctx.type_list, type_list,
++        (type_count*sizeof(struct xh_smbios_spec)));
++    smctx.type_count = type_count;
++
++    if ( xh_init_common(mode, &(smctx.common_ctx)) )
++        goto error_out;
++
++    /* Use the mode specified. If XH_DECODE_BOTH is specified then try
++     * to use sysfs first, fall back to mmap if that fails.
++     */
++    if ( mode == XH_DECODE_BOTH )
++    {
++        rc = xh_decode_smbios_sysfs(&smctx);
++        if ( rc )
++            rc = xh_decode_smbios_mmap(&smctx);
++    }
++    else if ( mode == XH_DECODE_SYSFS )
++        rc = xh_decode_smbios_sysfs(&smctx);
++    else if ( mode == XH_DECODE_MMAP )
++        rc = xh_decode_smbios_mmap(&smctx);
++
++    if ( rc )
++        goto error_out;
++
++    /* Final format of the module header */
++    xh_format_common(&(smctx.common_ctx), XH_FIRMWARE_SMBIOS);
++
++    *out_buffer = smctx.common_ctx.buffer;
++    *out_length = smctx.common_ctx.total_length;
++    smctx.common_ctx.buffer = NULL;
++
++    xh_smbios_context_cleanup(&smctx);
++    return 0;
++
++error_out:
++
++    XH_PUSHERR();
++    xh_smbios_context_cleanup(&smctx);
++    XH_POPERR();
++
++    return rc;
++}
++
++int xh_xen_vendor_smbios_structure(const char *manufacturer,
++                                   const char *product,
++                                   uint32_t features,
++                                   uint32_t quirks,
++                                   uint8_t **out_buffer,
++                                   uint32_t *out_length)
++{
++    struct xen_vendor_smbios_rev1 *xvt;
++    char *ptr;
++    uint32_t length;
++
++    /* Determine size which includes the strings and terminator. */
++    if ( manufacturer == NULL )
++        manufacturer = "Xen";
++    if ( product == NULL )
++        product = "HVM domU";
++
++    /* Add a terminator for each string + one for the table end. */
++    length = sizeof(struct xen_vendor_smbios_rev1);
++    length += strlen(manufacturer) + strlen(product);
++    length += strlen(XEN_SMBIOS_TAG_STRING) + 4;
++    xvt = malloc(length);
++    if ( xvt == NULL )
++        return -1;
++    memset(xvt, 0, length);
++
++    /* Setup header, use a handle value that is unlikely to conflict. */
++    xvt->type = XEN_SMBIOS_VENDOR_TYPE;
++    xvt->length = sizeof(struct xen_vendor_smbios_rev1);
++    xvt->handle = (XEN_SMBIOS_VENDOR_TYPE << 8) | 0xA5;
++
++    xvt->magic = XEN_SMBIOS_MAGIC;
++    xvt->revision = XEN_SMBIOS_REVISION;
++    xvt->tag_str = XEN_SMBIOS_TAG_STRING_NUM;
++    xvt->manufacturer_str = XEN_SMBIOS_MANUFACTURER_STRING_NUM;
++    xvt->product_str = XEN_SMBIOS_PRODUCT_STRING_NUM;
++    xvt->features = features;
++    xvt->quirks = quirks;
++
++    ptr = (char*)xvt + sizeof(struct xen_vendor_smbios_rev1);
++
++    strcpy(ptr, XEN_SMBIOS_TAG_STRING);
++    ptr += strlen(XEN_SMBIOS_TAG_STRING) + 1;
++
++    strcpy(ptr, manufacturer);
++    ptr += strlen(manufacturer) + 1;
++
++    strcpy(ptr, product);
++
++    *out_buffer = (uint8_t*)xvt;
++    *out_length = length;
++
++    return 0;
++}
++
++/*
++ * Local variables:
++ * mode: C
++ * c-set-style: "BSD"
++ * c-basic-offset: 4
++ * tab-width: 4
++ * indent-tabs-mode: nil
++ * End:
++ */
+diff --git a/tools/xen-libhvm/libhvm/xen_smbios.h b/tools/xen-libhvm/libhvm/xen_smbios.h
+new file mode 100644
+index 0000000..aa578ed
+--- /dev/null
++++ b/tools/xen-libhvm/libhvm/xen_smbios.h
+@@ -0,0 +1,95 @@
++/*
++ * xen_smbios.c: definitions for a Xen vendor SMBIOS structure.
++ *
++ * Copyright (c) 2013 Ross Philipson
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ * 1. Redistributions of source code must retain the above copyright
++ *    notice, this list of conditions and the following disclaimer.
++ * 2. Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in the
++ *    documentation and/or other materials provided with the distribution.
++ *
++ * THIS SOFTWARE IS PROVIDED BY AUTHOR AND CONTRIBUTORS ``AS IS'' AND
++ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED.  IN NO EVENT SHALL AUTHOR OR CONTRIBUTORS BE LIABLE
++ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
++ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
++ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
++ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
++ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
++ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
++ * SUCH DAMAGE.
++ */
++
++#ifndef XEN_SMBIOS_H
++#define XEN_SMBIOS_H
++
++/* The following defines a possible Xen vendor specific SMBIOS struct
++ * that could be passed to an HVM guest. Such a structure could be
++ * useful for passing information to a guest that has no other Xen tools
++ * installed, for expample, passing information to installer packages
++ * to control their behavior.
++ *
++ * See xh_xen_vendor_smbios_structure
++ */
++
++/* SMBIOS Vendor type value for Xen */
++#define XEN_SMBIOS_VENDOR_TYPE 251
++
++/* Length in bytes of the fixed portion of the table for a given revision */
++#define XEN_SMBIOS_TABLE_LENGTH 20
++
++/* Magic value to help identify the XenClient table */
++#define XEN_SMBIOS_MAGIC 0x222D3338  /* "XSMB" */
++
++/* Current revision value */
++#define XEN_SMBIOS_REVISION 1
++
++/* String number for the tag string */
++#define XEN_SMBIOS_TAG_STRING_NUM 1
++
++/* String number for the manufacturer name */
++#define XEN_SMBIOS_MANUFACTURER_STRING_NUM 2
++
++/* String number for the product name */
++#define XEN_SMBIOS_PRODUCT_STRING_NUM 3
++
++/* Usage specific feature flags */
++#define XEN_SMBIOS_FEATURES_NONE 0x00000000
++
++/* Platform quirks flags */
++#define XEN_SMBIOS_QUIRKS_NONE   0x00000000
++
++/* Table tag string identifier following fixed portion of the table */
++#define XEN_SMBIOS_TAG_STRING "XEN-SMBIOS-TABLE"
++
++struct xen_vendor_smbios_rev1 {
++    /* standard structure header */
++    uint8_t type;
++    uint8_t length;
++    uint16_t handle;
++    /* xen smbios fixed table area */
++    uint32_t magic;
++    uint8_t revision;
++    uint8_t tag_str;
++    uint8_t manufacturer_str;
++    uint8_t product_str;
++    uint32_t features;
++    uint32_t quirks;
++} __attribute__ ((packed));
++
++#endif /* XEN_SMBIOS_H */
++
++/*
++ * Local variables:
++ * mode: C
++ * c-set-style: "BSD"
++ * c-basic-offset: 4
++ * tab-width: 4
++ * indent-tabs-mode: nil
++ * End:
++ */
+diff --git a/tools/xen-libhvm/libhvm/xenhvm.c b/tools/xen-libhvm/libhvm/xenhvm.c
+new file mode 100644
+index 0000000..06f8b13
+--- /dev/null
++++ b/tools/xen-libhvm/libhvm/xenhvm.c
+@@ -0,0 +1,48 @@
++/*
++ * xenhvm.c: base HVM support library module.
++ *
++ * Copyright (c) 2013 Ross Philipson
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ * 1. Redistributions of source code must retain the above copyright
++ *    notice, this list of conditions and the following disclaimer.
++ * 2. Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in the
++ *    documentation and/or other materials provided with the distribution.
++ *
++ * THIS SOFTWARE IS PROVIDED BY AUTHOR AND CONTRIBUTORS ``AS IS'' AND
++ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED.  IN NO EVENT SHALL AUTHOR OR CONTRIBUTORS BE LIABLE
++ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
++ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
++ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
++ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
++ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
++ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
++ * SUCH DAMAGE.
++ */
++
++#include <stdlib.h>
++#include <stdio.h>
++#include <stdint.h>
++#include "xenhvm.h"
++#include "xh_internal.h"
++
++void xh_free_buffer(void *buf)
++{
++    if ( buf != NULL )
++        free(buf);
++}
++
++/*
++ * Local variables:
++ * mode: C
++ * c-set-style: "BSD"
++ * c-basic-offset: 4
++ * tab-width: 4
++ * indent-tabs-mode: nil
++ * End:
++ */
+diff --git a/tools/xen-libhvm/libhvm/xenhvm.h b/tools/xen-libhvm/libhvm/xenhvm.h
+new file mode 100644
+index 0000000..a2704e0
+--- /dev/null
++++ b/tools/xen-libhvm/libhvm/xenhvm.h
+@@ -0,0 +1,133 @@
++/*
++ * xenhvm.h: public header for the libxenhvm lib.
++ *
++ * Copyright (c) 2013 Ross Philipson
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ * 1. Redistributions of source code must retain the above copyright
++ *    notice, this list of conditions and the following disclaimer.
++ * 2. Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in the
++ *    documentation and/or other materials provided with the distribution.
++ *
++ * THIS SOFTWARE IS PROVIDED BY AUTHOR AND CONTRIBUTORS ``AS IS'' AND
++ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED.  IN NO EVENT SHALL AUTHOR OR CONTRIBUTORS BE LIABLE
++ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
++ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
++ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
++ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
++ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
++ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
++ * SUCH DAMAGE.
++ */
++
++#ifndef XEN_LIBHVM_H
++#define XEN_LIBHVM_H
++
++/* The mode by which the firmware is to be read. When both is specified,
++ * sysfs is attempted first and then memory mapping is tried.
++ */
++enum xh_decode_mode {
++    XH_DECODE_SYSFS = 1,
++    XH_DECODE_MMAP,
++    XH_DECODE_BOTH
++};
++
++struct xh_data_item {
++    uint8_t  *data;
++    uint32_t  length;
++};
++
++#define XH_SMBIOS_FLAG_FIRST 0x01
++#define XH_SMBIOS_FLAG_ALL   0x02
++#define XH_SMBIOS_FLAG_GE    0x04
++
++/* Specifier for a desired SMBIOS type. There may be multiple instances
++ * of a given SMBIOS structure. The flags above allow reading just their
++ * first or all of a given type. This specifier structure could be expanded
++ * to specify an ordinal if desired.
++ */
++struct xh_smbios_spec {
++    uint8_t type;
++    uint8_t flags;
++};
++
++#define XH_ACPI_SIGNATURE_SIZE       0x4
++#define XH_ACPI_ORDINAL_UNSPECIFIED  0xFFFFFFFF
++
++/* Specified for a desired ACPI table. There may be multiple instances
++ * of ACPI tables with the same signature (e.g. SSDTs). The ordinal allows
++ * a specific one to be selected. If XH_ACPI_ORDINAL_UNSPECIFIED is set
++ * then the fist match will be used. At most 1 table will be returned for
++ * each specifier.
++ */
++struct xh_acpi_spec {
++    const char signature[XH_ACPI_SIGNATURE_SIZE];
++    uint32_t ordinal;
++};
++
++#define XH_FIRMWARE_SMBIOS           0x00000001
++#define XH_FIRMWARE_ACPI             0x00000002
++
++/* Returned structure with a set of fw tables/structs. Each
++ * is preceded by a 32b length specifier.
++ */
++struct xh_firmware_block {
++    /* Type of firmware entries in block */
++    uint32_t     type;
++    /* Length of entire block including this header */
++    uint32_t     length;
++    /* Number of entries that follow */
++    uint32_t     count;
++
++    /* Firmware blocks start here */
++};
++
++/* Fetch ACPI tables specified by the table_list using
++ * the mode requested. The table_count argument indicates
++ * how may entries are in table_list.
++ */
++int xh_find_acpi_tables(enum xh_decode_mode mode,
++                        struct xh_acpi_spec *table_list,
++                        uint32_t table_count,
++                        uint8_t **out_buffer,
++                        uint32_t *out_length);
++
++/* Fetch SMBIOS structures specified by the type_list using
++ * the mode requested. The type_count argument indicates
++ * how may entries are in type_list.
++ */
++int xh_find_smbios_structures(enum xh_decode_mode mode,
++                              struct xh_smbios_spec *type_list,
++                              uint32_t type_count,
++                              uint8_t **out_buffer,
++                              uint32_t *out_length);
++
++/* Form and return a Xen SMBIOS vendor structure. See xen_smbios.h
++ * for more information on this structure.
++ */
++int xh_xen_vendor_smbios_structure(const char *manufacturer,
++                                   const char *product,
++                                   uint32_t features,
++                                   uint32_t quirks,
++                                   uint8_t **out_buffer,
++                                   uint32_t *out_length);
++
++/* Call to free buffers returned in the above routines. */
++void xh_free_buffer(void *buf);
++
++#endif /* XEN_LIBHVM_H */
++
++/*
++ * Local variables:
++ * mode: C
++ * c-set-style: "BSD"
++ * c-basic-offset: 4
++ * tab-width: 4
++ * indent-tabs-mode: nil
++ * End:
++ */
+diff --git a/tools/xen-libhvm/libhvm/xh_internal.c b/tools/xen-libhvm/libhvm/xh_internal.c
+new file mode 100644
+index 0000000..6dbedff
+--- /dev/null
++++ b/tools/xen-libhvm/libhvm/xh_internal.c
+@@ -0,0 +1,248 @@
++/*
++ * xh_internal.c: internal support routines.
++ *
++ * Copyright (c) 2013 Ross Philipson
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ * 1. Redistributions of source code must retain the above copyright
++ *    notice, this list of conditions and the following disclaimer.
++ * 2. Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in the
++ *    documentation and/or other materials provided with the distribution.
++ *
++ * THIS SOFTWARE IS PROVIDED BY AUTHOR AND CONTRIBUTORS ``AS IS'' AND
++ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED.  IN NO EVENT SHALL AUTHOR OR CONTRIBUTORS BE LIABLE
++ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
++ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
++ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
++ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
++ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
++ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
++ * SUCH DAMAGE.
++ */
++
++#include <stdlib.h>
++#include <stdio.h>
++#include <stdint.h>
++#include <string.h>
++#include <errno.h>
++#include <limits.h>
++#include <fcntl.h>
++#include <unistd.h>
++#include <sys/mman.h>
++#include <sys/stat.h>
++#include "xenhvm.h"
++#include "xh_internal.h"
++
++#define XH_EFI_LINE_SIZE 64
++
++uint8_t* xh_mmap(off_t phys_addr, size_t length)
++{
++    uint32_t page_offset = phys_addr % sysconf(_SC_PAGESIZE);
++    uint8_t *vaddr;
++    int fd;
++    XH_ERR;
++
++    fd = open("/dev/mem", O_RDONLY);
++    if ( fd == -1 )
++        return NULL;
++
++    vaddr = (uint8_t*)mmap(0, page_offset + length,
++        PROT_READ, MAP_PRIVATE, fd, phys_addr - page_offset);
++    XH_PUSHERR();
++    close(fd);
++
++    if ( vaddr == MAP_FAILED )
++    {
++        XH_POPERR();
++        return NULL;
++    }
++
++    return vaddr + page_offset;
++}
++
++void xh_unmmap(uint8_t *vaddr, size_t length)
++{
++    uint32_t page_offset = (size_t)vaddr % sysconf(_SC_PAGESIZE);
++
++    munmap(vaddr - page_offset, length + page_offset);
++}
++
++int xh_efi_locate(const char *efi_entry,
++                  uint32_t length,
++                  size_t *location)
++{
++    FILE *systab = NULL;
++    char efiline[XH_EFI_LINE_SIZE];
++    char *val;
++    off_t loc = 0;
++
++    *location = 0;
++
++    /* use EFI tables if present */
++    systab = fopen("/sys/firmware/efi/systab", "r");
++    if ( systab != NULL )
++    {
++        while( (fgets(efiline, XH_EFI_LINE_SIZE - 1, systab)) != NULL )
++        {
++            if ( strncmp(efiline, efi_entry, 6) == 0 )
++            {
++                /* found EFI entry, get the associated value */
++                val = memchr(efiline, '=', strlen(efiline)) + 1;
++                loc = strtol(val, NULL, 0);
++                break;
++            }
++        }
++        fclose(systab);
++
++        if ( loc != 0 )
++        {
++            *location = loc;
++            return 0;
++        }
++    }
++
++    return -1;
++}
++
++uint8_t *xh_read_bin_sysfs(const char *file,
++                           uint32_t *length_out)
++{
++    uint32_t alloc_size = sysconf(_SC_PAGE_SIZE);
++    FILE *fs = NULL;
++    size_t rs;
++    uint32_t total_length = 0;
++    uint8_t *buffer, *tmp;
++    XH_ERR;
++
++    /* Allocate an initial buffer of the default size of a sysfs buffer */
++    buffer = malloc(alloc_size);
++    if ( buffer == NULL )
++        return NULL;
++
++    fs = fopen(file, "rb");
++    if ( fs == NULL )
++        goto error_out;
++
++    for ( ; ; )
++    {
++        rs = fread((buffer + total_length), 1, alloc_size, fs);
++
++        /* Done reading file? */
++        if ( feof(fs) )
++        {
++            total_length += rs;
++            break;
++        }
++
++        if ( rs != alloc_size )
++        {
++            /* Not EOF so an error must have occured */
++            goto error_out;
++        }
++
++        /* Else a bigger buffer is needed, more to read. */
++        total_length += alloc_size;
++        tmp = realloc(buffer, total_length + alloc_size);
++        if ( tmp == NULL )
++            goto error_out;
++        buffer = tmp;
++    }
++
++
++    if ( fs != NULL )
++        fclose(fs);
++
++    *length_out = total_length;
++    return buffer;
++
++error_out:
++    XH_PUSHERR();
++    if ( fs != NULL )
++        fclose(fs);
++
++    free(buffer);
++    XH_POPERR();
++
++    return NULL;
++}
++
++int xh_init_common(enum xh_decode_mode mode,
++                   struct xh_common_ctx *cctx)
++{
++    cctx->mode = mode;
++
++    /* Create an initial buffer that should be big enough in most cases. */
++    cctx->buffer = malloc(XH_INITIAL_ALLOC);
++    if ( cctx->buffer == NULL )
++        return -1;
++    memset(cctx->buffer, 0, XH_INITIAL_ALLOC);
++
++    cctx->buffer_length = XH_INITIAL_ALLOC;
++    cctx->total_length = sizeof(struct xh_firmware_block);
++
++    return 0;
++}
++
++uint32_t xh_copy_common(struct xh_common_ctx *cctx,
++                        uint8_t *ptr,
++                        uint32_t length)
++{
++    uint32_t add, inc;
++    uint8_t *tmp;
++    uint32_t *header;
++
++    add = sizeof(uint32_t) + length;
++
++    if ( (cctx->total_length + add) >= cctx->buffer_length )
++    {
++        inc = (add > XH_INITIAL_ALLOC) ? add : XH_INITIAL_ALLOC;
++        tmp = realloc(cctx->buffer, cctx->buffer_length + inc);
++        if ( tmp == NULL )
++            return 0;
++        cctx->buffer = tmp;
++        cctx->buffer_length += inc;
++    }
++
++    header = (uint32_t*)(cctx->buffer + cctx->total_length);
++    *header = length;
++    header++;
++    memcpy((uint8_t*)header, ptr, length);
++
++    cctx->total_length += add;
++    cctx->count++;
++
++    return add;
++}
++
++void xh_format_common(struct xh_common_ctx *cctx, uint32_t type)
++{
++    struct xh_firmware_block *xfb;
++
++    /* Format the module header */
++    xfb = (struct xh_firmware_block*)cctx->buffer;
++    xfb->type = type;
++    xfb->length = cctx->total_length;
++    xfb->count = cctx->count;
++}
++
++void xh_cleanup_common(struct xh_common_ctx *cctx)
++{
++    if ( cctx->buffer != NULL )
++        free(cctx->buffer);
++    memset(cctx, 0, sizeof(struct xh_common_ctx));
++}
++
++/*
++ * Local variables:
++ * mode: C
++ * c-set-style: "BSD"
++ * c-basic-offset: 4
++ * tab-width: 4
++ * indent-tabs-mode: nil
++ * End:
++ */
+diff --git a/tools/xen-libhvm/libhvm/xh_internal.h b/tools/xen-libhvm/libhvm/xh_internal.h
+new file mode 100644
+index 0000000..d8f0dfe
+--- /dev/null
++++ b/tools/xen-libhvm/libhvm/xh_internal.h
+@@ -0,0 +1,132 @@
++/*
++ * xh_internal.h: internal support routines.
++ *
++ * Copyright (c) 2013 Ross Philipson
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ * 1. Redistributions of source code must retain the above copyright
++ *    notice, this list of conditions and the following disclaimer.
++ * 2. Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in the
++ *    documentation and/or other materials provided with the distribution.
++ *
++ * THIS SOFTWARE IS PROVIDED BY AUTHOR AND CONTRIBUTORS ``AS IS'' AND
++ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED.  IN NO EVENT SHALL AUTHOR OR CONTRIBUTORS BE LIABLE
++ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
++ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
++ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
++ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
++ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
++ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
++ * SUCH DAMAGE.
++ */
++
++#ifndef XEN_XH_INTERNAL_H
++#define XEN_XH_INTERNAL_H
++
++/* Common definitions */
++#define XH_SCAN_ROM_BIOS_BASE 0xF0000
++#define XH_SCAN_ROM_BIOS_SIZE 0x10000
++
++/* SMBIOS Definitions */
++#define XH_SMBIOS_SM_LENGTH       0x20
++#define XH_SMBIOS_DMI_LENGTH      0x0F
++#define XH_SMBIOS_HEADER_LENGTH   0x04
++
++#define XH_SMBIOS_EPS_STRING      0x00 /* 4 BYTES "_SM_" anchor string */
++#define XH_SMBIOS_EPS_CHECKSUM    0x04 /* BYTE CS sums to zero when added to bytes in EPS */
++#define XH_SMBIOS_EPS_LENGTH      0x05 /* BYTE Length of the Entry Point Structure */
++#define XH_SMBIOS_MAJOR_VERSION   0x06 /* BYTE */
++#define XH_SMBIOS_MINOR_VERSION   0x07 /* BYTE */
++#define XH_SMBIOS_MAX_STRUCT_SIZE 0x08 /* WORD Size of the largest SMBIOS structure */
++#define XH_SMBIOS_REVISION        0x0A /* BYTE */
++#define XH_SMBIOS_FORMATTED_AREA  0x0B /* 5 BYTES, see spec for revision */
++#define XH_SMBIOS_IEPS_STRING     0x10 /* 5 BYTES "_DMI_" intermediate anchor string */
++#define XH_SMBIOS_IEPS_CHECKSUM   0x15 /* BYTE CS sums to zero when added to bytes in IEPS */
++#define XH_SMBIOS_TABLE_LENGTH    0x16 /* WORD Total length of SMBIOS Structure Table */
++#define XH_SMBIOS_TABLE_ADDRESS   0x18 /* DWORD The 32-bit physical starting address of the read-only SMBIOS Structures */
++#define XH_SMBIOS_STRUCT_COUNT    0x1C /* WORD Total number of structures present in the SMBIOS Structure Table */
++#define XH_SMBIOS_BCD_REVISION    0x1E /* BYTE */
++
++#define XH_SMBIOS_STRUCT_TYPE     0x00 /* BYTE Specifies the type of structure */
++#define XH_SMBIOS_STRUCT_LENGTH   0x01 /* BYTE Specifies the length of the formatted area of the structure */
++#define XH_SMBIOS_STRUCT_HANDLE   0x02 /* WORD Specifies 16-bit number in the range 0 to 0FFFEh */
++
++#define XH_SMBIOS_TYPE_EOT        127
++
++/* ACPI Definitions */
++#define XH_ACPI_RSDP_LENGTH            0x24
++#define XH_ACPI_RSDP_CS_LENGTH         0x14
++#define XH_ACPI_RSDP_XCS_LENGTH        0x24
++#define XH_ACPI_HEADER_LENGTH          0x24
++
++#define XH_ACPI_RSDP_SIGNATURE         0x00 /* 8 BYTES ASCII "RSD PTR " anchor string */
++#define XH_ACPI_RSDP_CHECKSUM          0x08 /* BYTE ACPI 1.0 CS sums to zero when added to bytes in RSDP */
++#define XH_ACPI_RSDP_OEM_ID            0x09 /* 6 BYTES ASCII OEM ID */
++#define XH_ACPI_RSDP_REVISION          0x0F /* BYTE 0 for ACPI 1.0 or 2 for ACPI 2.0 */
++#define XH_ACPI_RSDP_RSDT_BASE         0x10 /* 4 BYTES 32b physical base address of the RSDT */
++#define XH_ACPI_RSDP_RSDP_LENGTH       0x14 /* 4 BYTES length of this table */
++#define XH_ACPI_RSDP_XSDT_BASE         0x18 /* 8 BYTES 64b physical base address of the XSDT */
++#define XH_ACPI_RSDP_EXT_CHECKSUM      0x20 /* BYTE ACPI 2.0 CS sums to zero when added to bytes in RSDP */
++#define XH_ACPI_RSDP_RESERVED          0x21 /* 3 BYTES align table */
++
++#define XH_ACPI_TABLE_SIGNATURE        0x00 /* 4 BYTES signature string */
++#define XH_ACPI_TABLE_LENGTH           0x04 /* 4 BYTES length of the table in bytes including header */
++#define XH_ACPI_TABLE_REVISION         0x08 /* BYTE minor rev number */
++#define XH_ACPI_TABLE_CHECKSUM         0x09 /* BYTE sums to zero when added to bytes in table */
++#define XH_ACPI_TABLE_OEM_ID           0x0A /* 6 BYTES ASCII OEM ID */
++#define XH_ACPI_TABLE_OEM_TABLE_ID     0x10 /* 8 BYTES ASCII OEM TABLE ID */
++#define XH_ACPI_TABLE_OEM_REVISION     0x18 /* 4 BYTES OEM rev number */
++#define XH_ACPI_TABLE_CREATOR_ID       0x1C /* 4 BYTES ASCII CREATOR ID */
++#define XH_ACPI_TABLE_CREATOR_REVISION 0x20 /* 4 BYTES CREATOR REVISION */
++
++/* Common context pieces */
++#define XH_INITIAL_ALLOC       0x1000
++#define XH_ORDINAL_UNSPECIFIED 0xFFFF
++
++struct xh_common_ctx {
++    enum xh_decode_mode mode;
++
++    uint8_t *buffer;
++    uint32_t buffer_length;
++    uint32_t total_length;
++    uint32_t count;
++};
++
++/* Utility macros and routines */
++#define XH_ERR       int __err
++#define XH_PUSHERR() __err = errno
++#define XH_POPERR()  errno = __err
++
++uint8_t* xh_mmap(off_t phys_addr, size_t length);
++void xh_unmmap(uint8_t *vaddr, size_t length);
++int xh_efi_locate(const char *efi_entry,
++                  uint32_t length,
++                  size_t *location);
++uint8_t *xh_read_bin_sysfs(const char *file,
++                           uint32_t *length_out);
++
++int xh_init_common(enum xh_decode_mode mode,
++                   struct xh_common_ctx *cctx);
++uint32_t xh_copy_common(struct xh_common_ctx *cctx,
++                        uint8_t *ptr,
++                        uint32_t length);
++void xh_format_common(struct xh_common_ctx *cctx,
++                      uint32_t type);
++void xh_cleanup_common(struct xh_common_ctx *cctx);
++
++#endif /* XEN_XH_INTERNAL_H */
++
++/*
++ * Local variables:
++ * mode: C
++ * c-set-style: "BSD"
++ * c-basic-offset: 4
++ * tab-width: 4
++ * indent-tabs-mode: nil
++ * End:
++ */

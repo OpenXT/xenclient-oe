@@ -1,0 +1,128 @@
+diff -r a74ea5de4655 tools/firmware/hvmloader/acpi/ssdt_pm.asl
+--- a/tools/firmware/hvmloader/acpi/ssdt_pm.asl	Wed Mar 02 12:39:25 2011 -0500
++++ b/tools/firmware/hvmloader/acpi/ssdt_pm.asl	Wed Mar 02 13:39:04 2011 -0500
+@@ -304,7 +304,11 @@
+             })
+             Method (_PSR, 0, NotSerialized)
+             {
+-                Return (0x0)
++		ACQR ()
++		WPRT(0x7B, 0x00)
++    		Store(WPRT (0x7C, 3), Local0)
++		REL ()
++    		Return(Local0)
+             }
+ 
+             Method (_STA, 0, NotSerialized)
+diff -r a74ea5de4655 tools/xenpmd/xenpmd.c
+--- a/tools/xenpmd/xenpmd.c	Wed Mar 02 12:39:25 2011 -0500
++++ b/tools/xenpmd/xenpmd.c	Wed Mar 02 13:39:04 2011 -0500
+@@ -43,7 +43,7 @@
+ #include <xs.h>
+ 
+ /* #define RUN_STANDALONE */
+-#define RUN_IN_SIMULATE_MODE
++/* #define RUN_IN_SIMULATE_MODE */
+ 
+ enum BATTERY_INFO_TYPE {
+     BIF, 
+@@ -90,10 +90,14 @@
+     #define BATTERY_DIR_PATH "/tmp/battery"
+     #define BATTERY_INFO_FILE_PATH "/tmp/battery/%s/info" 
+     #define BATTERY_STATE_FILE_PATH "/tmp/battery/%s/state"
++    #define AC_STATE_PATH "/tmp/acpi/ac_adapter"
++    #define AC_STATE_FILE_PATH "/tmp/acpi/ac_adapter/%s/state"
+ #else
+     #define BATTERY_DIR_PATH "/proc/acpi/battery"
+     #define BATTERY_INFO_FILE_PATH "/proc/acpi/battery/%s/info"
+     #define BATTERY_STATE_FILE_PATH "/proc/acpi/battery/%s/state"
++    #define AC_STATE_PATH "/proc/acpi/ac_adapter"
++    #define AC_STATE_FILE_PATH "/proc/acpi/ac_adapter/%s/state"
+ #endif
+ 
+ FILE *get_next_battery_file(DIR *battery_dir, 
+@@ -122,6 +126,28 @@
+     return file;
+ }
+ 
++FILE *get_next_ac_state(DIR *ac_dir)
++{
++    FILE *file = 0;
++    struct dirent *dir_entries;
++    char file_name[64];
++
++    do 
++    {
++        dir_entries = readdir(ac_dir);
++        if ( !dir_entries ) 
++            return 0;
++        if ( strlen(dir_entries->d_name) < strlen("AC") && 
++	     dir_entries->d_name[0] == '.')
++            continue;
++	snprintf(file_name, sizeof(file_name), AC_STATE_FILE_PATH,
++		dir_entries->d_name);
++	file = fopen(file_name, "r");
++    } while ( !file );
++
++    return file;
++}
++
+ void set_attribute_battery_info(char *attrib_name,
+                                 char *attrib_value,
+                                 struct battery_info *info)
+@@ -429,12 +455,42 @@
+     xs_write(xs, XBT_NULL, "/pm/bst", val, 35);
+ }
+ 
++int get_psr_status(void)
++{
++    DIR *dir;
++    FILE *file;
++    char line_info[64];
++    int retval = 0;
++
++    dir = opendir(AC_STATE_PATH);
++    if ( !dir )
++        return retval;
++
++    while ( (file = get_next_ac_state(dir)) != NULL ) {
++        if ( fgets(line_info, sizeof(line_info), file) != NULL ) {
++            if(strstr(line_info, "on-line")) {
++                retval = 1;
++                break;
++	    }
++    	    fclose(file);
++        }
++    }
++
++    if(file)
++        fclose(file);
++    closedir(dir);
++
++    return(retval);
++}
++
+ int wait_for_and_update_battery_status_request(void)
+ {
+     DIR *dir;
+     int ret = 0;
+     unsigned int count;
++    unsigned int psr_status;
+     struct battery_status status;
++    char val[4];
+ 
+     while ( true )
+     {
+@@ -461,7 +517,12 @@
+                 break;
+             }
+         }
++        psr_status = get_psr_status();
++        snprintf(val, 2, "%1d", psr_status);
++        xs_write(xs, XBT_NULL, "/pm/psr", val, 2);
++
+         closedir(dir);
++
+         xs_watch(xs, "/pm/events", "refreshbatterystatus");
+         xs_read_watch(xs, &count); 
+     }

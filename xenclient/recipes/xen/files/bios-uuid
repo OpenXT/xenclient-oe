@@ -1,0 +1,172 @@
+diff --git a/tools/firmware/hvmloader/smbios.c b/tools/firmware/hvmloader/smbios.c
+index 7f73f67..3049012 100644
+--- a/tools/firmware/hvmloader/smbios.c
++++ b/tools/firmware/hvmloader/smbios.c
+@@ -278,7 +278,7 @@ hvm_write_smbios_tables(
+     unsigned tmp_len; /* length of next string to add */
+     unsigned nr_structs = 0, max_struct_size = 0;
+ 
+-    hypercall_xen_version(XENVER_guest_handle, uuid);
++    hypercall_xen_version(XENVER_guest_biosuuid, uuid);
+     BUILD_BUG_ON(sizeof(xen_domain_handle_t) != 16);
+ 
+     /* xen_version major and minor */
+diff --git a/tools/libxc/xc_domain.c b/tools/libxc/xc_domain.c
+index 7232f54..6b009c5 100644
+--- a/tools/libxc/xc_domain.c
++++ b/tools/libxc/xc_domain.c
+@@ -1059,6 +1059,16 @@ int xc_domain_sethandle(xc_interface *xch, uint32_t domid,
+     return do_domctl(xch, &domctl);
+ }
+ 
++int xc_domain_set_bios_uuid(xc_interface *xc_handle, uint32_t domid,
++                            xen_domain_handle_t uuid)
++{
++    DECLARE_DOMCTL;
++    domctl.cmd = XEN_DOMCTL_setbiosuuid;
++    domctl.domain = (domid_t)domid;
++    memcpy(domctl.u.setdomainhandle.handle, uuid, sizeof(xen_domain_handle_t));
++    return do_domctl(xc_handle, &domctl);
++}
++
+ int xc_vcpu_getinfo(xc_interface *xch,
+                     uint32_t domid,
+                     uint32_t vcpu,
+diff --git a/tools/libxc/xenctrl.h b/tools/libxc/xenctrl.h
+index 0c9869d..2a12f03 100644
+--- a/tools/libxc/xenctrl.h
++++ b/tools/libxc/xenctrl.h
+@@ -719,6 +719,9 @@ long long xc_domain_get_cpu_usage(xc_interface *xch,
+ int xc_domain_sethandle(xc_interface *xch, uint32_t domid,
+                         xen_domain_handle_t handle);
+ 
++int xc_domain_set_bios_uuid(xc_interface *xc_handle, uint32_t domid,
++                            xen_domain_handle_t uuid);
++
+ typedef xen_domctl_shadow_op_stats_t xc_shadow_op_stats_t;
+ int xc_shadow_control(xc_interface *xch,
+                       uint32_t domid,
+diff --git a/xen/common/domctl.c b/xen/common/domctl.c
+index 9bd8f80..03714e2 100644
+--- a/xen/common/domctl.c
++++ b/xen/common/domctl.c
+@@ -462,6 +462,8 @@ long do_domctl(XEN_GUEST_HANDLE_PARAM(xen_domctl_t) u_domctl)
+ 
+         memcpy(d->handle, op->u.createdomain.handle,
+                sizeof(xen_domain_handle_t));
++        memcpy(d->biosuuid, op->u.createdomain.handle,
++               sizeof(xen_domain_handle_t));
+ 
+         op->domain = d->domain_id;
+         copyback = 1;
+@@ -760,6 +762,14 @@ long do_domctl(XEN_GUEST_HANDLE_PARAM(xen_domctl_t) u_domctl)
+     }
+     break;
+ 
++    case XEN_DOMCTL_setbiosuuid:
++    {
++        memcpy(d->biosuuid, op->u.setdomainhandle.handle,
++               sizeof(xen_domain_handle_t));
++        ret = 0;
++    }
++    break;
++
+     case XEN_DOMCTL_setdebugging:
+     {
+         ret = -EINVAL;
+diff --git a/xen/common/kernel.c b/xen/common/kernel.c
+index 72fb905..71509f5 100644
+--- a/xen/common/kernel.c
++++ b/xen/common/kernel.c
+@@ -327,6 +327,15 @@ DO(xen_version)(int cmd, XEN_GUEST_HANDLE_PARAM(void) arg)
+             return -EFAULT;
+         return 0;
+     }
++
++    case XENVER_guest_biosuuid:
++    {
++        if ( copy_to_guest(arg, current->domain->biosuuid,
++                           ARRAY_SIZE(current->domain->biosuuid)) )
++            return -EFAULT;
++        return 0;
++    }
++
+     }
+ 
+     return -ENOSYS;
+diff --git a/xen/include/public/domctl.h b/xen/include/public/domctl.h
+index 4c5b2bb..9e26cee 100644
+--- a/xen/include/public/domctl.h
++++ b/xen/include/public/domctl.h
+@@ -658,7 +658,6 @@ typedef struct xen_domctl_disable_migrate {
+     uint32_t disable; /* IN: 1: disable migration and restore */
+ } xen_domctl_disable_migrate_t;
+ 
+-
+ /* XEN_DOMCTL_gettscinfo */
+ /* XEN_DOMCTL_settscinfo */
+ struct xen_guest_tsc_info {
+@@ -920,6 +919,8 @@ struct xen_domctl {
+ #define XEN_DOMCTL_set_broken_page_p2m           67
+ #define XEN_DOMCTL_setnodeaffinity               68
+ #define XEN_DOMCTL_getnodeaffinity               69
++#define XEN_DOMCTL_setbiosuuid                   90
++
+ #define XEN_DOMCTL_gdbsx_guestmemio            1000
+ #define XEN_DOMCTL_gdbsx_pausevcpu             1001
+ #define XEN_DOMCTL_gdbsx_unpausevcpu           1002
+diff --git a/xen/include/public/version.h b/xen/include/public/version.h
+index 44f26b0..cce6eb6 100644
+--- a/xen/include/public/version.h
++++ b/xen/include/public/version.h
+@@ -83,6 +83,9 @@ typedef struct xen_feature_info xen_feature_info_t;
+ #define XENVER_commandline 9
+ typedef char xen_commandline_t[1024];
+ 
++/* arg == xen_domain_handle_t. */
++#define XENVER_guest_biosuuid 10
++
+ #endif /* __XEN_PUBLIC_VERSION_H__ */
+ 
+ /*
+diff --git a/xen/include/xen/sched.h b/xen/include/xen/sched.h
+index ae6a3b8..c1b0df6 100644
+--- a/xen/include/xen/sched.h
++++ b/xen/include/xen/sched.h
+@@ -341,6 +341,9 @@ struct domain
+     /* Control-plane tools handle for this domain. */
+     xen_domain_handle_t handle;
+ 
++    /* UUID to set in SMBIOS */
++    xen_domain_handle_t biosuuid;
++
+     /* OProfile support. */
+     struct xenoprof *xenoprof;
+     int32_t time_offset_seconds;
+diff --git a/xen/xsm/flask/hooks.c b/xen/xsm/flask/hooks.c
+index 5497a88..2fcdeb4 100644
+--- a/xen/xsm/flask/hooks.c
++++ b/xen/xsm/flask/hooks.c
+@@ -635,6 +635,9 @@ static int flask_domctl(struct domain *d, int cmd)
+     case XEN_DOMCTL_setdomainhandle:
+         return current_has_perm(d, SECCLASS_DOMAIN, DOMAIN__SETDOMAINHANDLE);
+ 
++    case XEN_DOMCTL_setbiosuuid:
++        return current_has_perm(d, SECCLASS_DOMAIN2, DOMAIN2__SETBIOSUUID);
++
+     case XEN_DOMCTL_setvcpucontext:
+         return current_has_perm(d, SECCLASS_DOMAIN, DOMAIN__SETVCPUCONTEXT);
+ 
+diff --git a/xen/xsm/flask/policy/access_vectors b/xen/xsm/flask/policy/access_vectors
+index caf7d17..7da1a86 100644
+--- a/xen/xsm/flask/policy/access_vectors
++++ b/xen/xsm/flask/policy/access_vectors
+@@ -196,6 +196,8 @@ class domain2
+     setclaim
+ # XEN_DOMCTL_setcorespersocket
+     setcorespersocket
++# XEN_DOMCTL_setbiosuuid
++    setbiosuuid
+ }
+ 
+ # Similar to class domain, but primarily contains domctls related to HVM domains

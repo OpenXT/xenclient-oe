@@ -1,0 +1,57 @@
+diff -r e226e8c9ca13 xen/arch/x86/hvm/hvm.c
+--- a/xen/arch/x86/hvm/hvm.c	Fri Jun 17 15:47:49 2011 -0400
++++ b/xen/arch/x86/hvm/hvm.c	Fri Jun 17 15:48:26 2011 -0400
+@@ -2742,6 +2742,16 @@
+ 
+     switch ( op )
+     {
++    case HVMOP_set_crash_flag:
++    {
++       struct domain *d;
++
++       d = rcu_lock_current_domain();
++       d->treat_shutdown_as_crash = 1;
++       rcu_unlock_domain(d);
++       gdprintk(XENLOG_INFO, "Set crash flag on domain %d\n", d->domain_id);
++       break;
++    }
+     case HVMOP_set_pio:
+     {
+        struct xen_hvm_param a;
+diff -r e226e8c9ca13 xen/common/domain.c
+--- a/xen/common/domain.c	Fri Jun 17 15:47:49 2011 -0400
++++ b/xen/common/domain.c	Fri Jun 17 15:48:26 2011 -0400
+@@ -491,6 +491,11 @@
+         d->shutdown_code = reason;
+     reason = d->shutdown_code;
+ 
++    if (d->treat_shutdown_as_crash) {
++    	reason = SHUTDOWN_crash;
++	gdprintk(XENLOG_INFO, "Converting domain %d shutdown into a crash",
++	    d->domain_id);
++    }
+     if ( d->domain_id == 0 )
+         dom0_shutdown(reason);
+ 
+diff -r e226e8c9ca13 xen/include/public/hvm/hvm_op.h
+--- a/xen/include/public/hvm/hvm_op.h	Fri Jun 17 15:47:49 2011 -0400
++++ b/xen/include/public/hvm/hvm_op.h	Fri Jun 17 15:48:26 2011 -0400
+@@ -128,6 +128,7 @@
+ DEFINE_XEN_GUEST_HANDLE(xen_hvm_set_mem_type_t);
+ 
+ #define HVMOP_set_pio          255
++#define HVMOP_set_crash_flag   256
+ 
+ #endif /* defined(__XEN__) || defined(__XEN_TOOLS__) */
+ 
+diff -r e226e8c9ca13 xen/include/xen/sched.h
+--- a/xen/include/xen/sched.h	Fri Jun 17 15:47:49 2011 -0400
++++ b/xen/include/xen/sched.h	Fri Jun 17 15:48:26 2011 -0400
+@@ -254,6 +254,7 @@
+     spinlock_t       shutdown_lock;
+     bool_t           is_shutting_down; /* in process of shutting down? */
+     bool_t           is_shut_down;     /* fully shut down? */
++    bool_t           treat_shutdown_as_crash;
+     int              shutdown_code;
+ 
+     /* If this is not 0, send suspend notification here instead of
