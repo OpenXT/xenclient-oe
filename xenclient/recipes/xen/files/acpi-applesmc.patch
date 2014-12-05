@@ -1,0 +1,90 @@
+diff --git a/tools/firmware/hvmloader/acpi/build.c b/tools/firmware/hvmloader/acpi/build.c
+index 4dc6173..b9b64a0 100644
+--- a/tools/firmware/hvmloader/acpi/build.c
++++ b/tools/firmware/hvmloader/acpi/build.c
+@@ -48,6 +48,7 @@ struct acpi_info {
+     uint8_t  com2_present:1;    /* 0[1] - System has COM2? */
+     uint8_t  lpt1_present:1;    /* 0[2] - System has LPT1? */
+     uint8_t  hpet_present:1;    /* 0[3] - System has HPET? */
++    uint8_t  applesmc_present:1; /* 0[4] - System has APPLESMC? */
+     uint32_t pci_min, pci_len;  /* 4, 8 - PCI I/O hole boundaries */
+     uint32_t madt_csum_addr;    /* 12   - Address of MADT checksum */
+     uint32_t madt_lapic0_addr;  /* 16   - Address of first MADT LAPIC struct */
+@@ -639,6 +640,7 @@ void acpi_build_tables(struct acpi_config *config, unsigned int physical)
+     acpi_info->com2_present = uart_exists(0x2f8);
+     acpi_info->lpt1_present = lpt_exists(0x378);
+     acpi_info->hpet_present = hpet_exists(ACPI_HPET_ADDRESS);
++    acpi_info->applesmc_present = applesmc_exists();
+     acpi_info->pci_min = pci_mem_start;
+     acpi_info->pci_len = pci_mem_end - pci_mem_start;
+ 
+diff --git a/tools/firmware/hvmloader/acpi/dsdt.asl b/tools/firmware/hvmloader/acpi/dsdt.asl
+index 8271a0d..6eca67f 100644
+--- a/tools/firmware/hvmloader/acpi/dsdt.asl
++++ b/tools/firmware/hvmloader/acpi/dsdt.asl
+@@ -51,6 +51,7 @@ DefinitionBlock ("DSDT.aml", "DSDT", 2, "Xen", "HVM", 0)
+            UAR2, 1,
+            LTP1, 1,
+            HPET, 1,
++           SMC, 1,
+            Offset(4),
+            PMIN, 32,
+            PLEN, 32,
+@@ -204,6 +205,29 @@ DefinitionBlock ("DSDT.aml", "DSDT", 2, "Xen", "HVM", 0)
+                 })
+             }
+ 
++            Device(SMC) {
++                Name(_HID, EisaId ("APP0001"))
++                Name (_CID, "smc-napa")
++                Method (_STA, 0, NotSerialized) {
++                    If(LEqual(\_SB.SMC, 0)) {
++                        Return(0x00)
++                    } Else {
++                        Return(0x0B)
++                    }
++                }
++                Name (_CRS, ResourceTemplate ()
++                {
++                        IO (Decode16,
++                            0x0300,             // Range Minimum
++                            0x0300,             // Range Maximum
++                            0x01,               // Alignment
++                            0x20,               // Length
++                        )
++                        IRQNoFlags ()
++                        {6}
++                })
++            }
++
+             Device (ISA)
+             {
+                 Name (_ADR, 0x00010000) /* device 1, fn 0 */
+diff --git a/tools/firmware/hvmloader/util.c b/tools/firmware/hvmloader/util.c
+index 80d822f..3e08ba8 100644
+--- a/tools/firmware/hvmloader/util.c
++++ b/tools/firmware/hvmloader/util.c
+@@ -828,6 +828,11 @@ int hpet_exists(unsigned long hpet_base)
+     return ((hpet_id >> 16) == 0x8086);
+ }
+ 
++int applesmc_exists(void)
++{
++    return (inl(0x31c)==0x434d5341UL);
++}
++
+ /*
+  * Local variables:
+  * mode: C
+diff --git a/tools/firmware/hvmloader/util.h b/tools/firmware/hvmloader/util.h
+index 7913259..c18eec5 100644
+--- a/tools/firmware/hvmloader/util.h
++++ b/tools/firmware/hvmloader/util.h
+@@ -95,6 +95,7 @@ uint16_t get_cpu_mhz(void);
+ int uart_exists(uint16_t uart_base);
+ int lpt_exists(uint16_t lpt_base);
+ int hpet_exists(unsigned long hpet_base);
++int applesmc_exists(void);
+ 
+ /* Do cpuid instruction, with operation 'idx' */
+ void cpuid(uint32_t idx, uint32_t *eax, uint32_t *ebx,

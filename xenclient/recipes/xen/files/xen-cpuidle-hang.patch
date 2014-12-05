@@ -1,0 +1,78 @@
+diff -r fc9dd79fe91a tools/misc/xenpm.c
+--- a/tools/misc/xenpm.c	Thu Mar 03 17:21:16 2011 -0500
++++ b/tools/misc/xenpm.c	Thu Mar 03 17:35:57 2011 -0500
+@@ -60,6 +60,7 @@
+             " set-vcpu-migration-delay      <num> set scheduler vcpu migration delay in us\n"
+             " get-vcpu-migration-delay            get scheduler vcpu migration delay\n"
+             " set-max-cstate        <num>         set the C-State limitation (<num> >= 0)\n"
++            " get-max-cstate                      get the current C-State limitation\n"
+             " start [seconds]                     start collect Cx/Px statistics,\n"
+             "                                     output after CTRL-C or SIGINT or several seconds.\n"
+             " enable-turbo-mode     [cpuid]       enable Turbo Mode in DBS governor.\n"
+@@ -999,6 +1000,25 @@
+         xc_disable_turbo(xc_fd, cpuid);
+ }
+ 
++void get_max_cstate_func(int argc, char *argv[])
++{
++    uint32_t value;
++    int rc;
++
++    if (argc) {
++        show_help();
++        exit(-1);
++    }
++
++    rc = xc_get_cpuidle_max_cstate(xc_fd, &value);
++    if (rc)
++	    printf("failed to read current max_cstate\n");
++    else
++	    printf("current max_cstate is C%d\n", value);
++
++    return;
++}
++
+ struct {
+     const char *name;
+     void (*function)(int argc, char *argv[]);
+@@ -1018,6 +1038,7 @@
+     { "set-sched-smt", set_sched_smt_func},
+     { "get-vcpu-migration-delay", get_vcpu_migration_delay_func},
+     { "set-vcpu-migration-delay", set_vcpu_migration_delay_func},
++    { "get-max-cstate", get_max_cstate_func},
+     { "set-max-cstate", set_max_cstate_func},
+     { "enable-turbo-mode", enable_turbo_mode },
+     { "disable-turbo-mode", disable_turbo_mode },
+diff -r fc9dd79fe91a xen/arch/x86/hpet.c
+--- a/xen/arch/x86/hpet.c	Thu Mar 03 17:21:16 2011 -0500
++++ b/xen/arch/x86/hpet.c	Thu Mar 03 17:35:57 2011 -0500
+@@ -520,13 +520,28 @@
+ 
+     if ( index != RTC_REG_B )
+         return;
+-    
++
++    /*
++     * ORC - Wake on RTC alarm does not conflict with hpet.
++     * The HW will wake up the CPU when the RTC alarm kicks off
++     * even thought the interrupt is not routed to the APIC.
++     *
++     * In our distro, xen will always own the interrupt so
++     * that we never disable deep cstates.  We do not run
++     * dom0 apps/drivers that require RTC interrupts other
++     * than wakeup functionality.
++     */
++#if 0   
+     /* RTC Reg B, contain PIE/AIE/UIE */
+     if ( value & (RTC_PIE | RTC_AIE | RTC_UIE ) )
+     {
+         cpuidle_disable_deep_cstate();
+         pv_rtc_handler = NULL;
+     }
++#else
++    if ( value & (RTC_PIE | RTC_UIE ) )
++	    printk("WARNING: dom0 attempting to use RTC interrupts!\n");
++#endif
+ }
+ 
+ void hpet_broadcast_init(void)

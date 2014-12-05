@@ -1,0 +1,89 @@
+diff --git a/tools/firmware/vgabios/vbe.c b/tools/firmware/vgabios/vbe.c
+index a49f9b4..212bf84 100644
+--- a/tools/firmware/vgabios/vbe.c
++++ b/tools/firmware/vgabios/vbe.c
+@@ -1534,3 +1534,58 @@ _fail:
+   mov ax, #0x014f
+   ret
+ ASM_END
++
++/*
++ * Function 15h - DDC Interface
++ * Input:    AX   = 4F15h
++ *           BX   =         Function
++ *                          0 = Support level
++ *                          1 = ReadEdid
++ *           ES   =         Segment address
++ *           DI   =         Segment Offset
++ *
++ * Support Output (BX=0):
++ *           AX   =         VBE Return Status
++ *           BX   =         DDC support level
++ *                          0 = none
++ *                          1 = DDC1
++ *                          2 = DDC2 (this is what we want)
++ *                          3 = DDC1+2
++ * ReadEdid Output (BX=1):
++ *           AX   =         VBE Return Status
++ */
++#define	DDC_QUERY_CAPS 0
++#define DDC_READ_EDID 1
++#define DDC_SUPPORTED 2
++#define DDC_SUCCESS 0x4F
++#define DDC_FAILURE 0
++#define	VBE_DISPI_DDC 0x4F00
++#define	EDID_SIZE 128
++void vbe_biosfn_ddc(AX, BX, ES, DI)
++    Bit16u *AX;Bit16u *BX; Bit16u ES;Bit16u DI;
++{
++    Bit16u  result, val, e;
++    Bit8u i;
++    Bit16u  ss = get_SS();
++
++    val = read_word(ss, BX);
++    switch (val) {
++    case DDC_QUERY_CAPS:
++        write_word(ss, BX, DDC_SUPPORTED);
++        result = DDC_SUCCESS;
++        break;
++    case DDC_READ_EDID:
++	/* read the edid a byte at a time, and copy it */
++        for(i = 0; i < EDID_SIZE; i++) {
++            outw(VBE_DISPI_IOPORT_INDEX, VBE_DISPI_DDC | i);
++            e = inw(VBE_DISPI_IOPORT_DATA);
++            memcpyb(ES, DI + i, ss, &e, 1);
++	}
++        result = DDC_SUCCESS;
++        break;
++    default:
++        result = DDC_FAILURE;
++        break;
++    }
++    write_word(ss, AX, result);
++}
+diff --git a/tools/firmware/vgabios/vbe.h b/tools/firmware/vgabios/vbe.h
+index 8ef9b75..5a34b2a 100644
+--- a/tools/firmware/vgabios/vbe.h
++++ b/tools/firmware/vgabios/vbe.h
+@@ -17,6 +17,7 @@ void vbe_biosfn_set_mode(AX, BX, ES, DI);
+ void vbe_biosfn_save_restore_state(AX, CX, DX, ES, BX);
+ void vbe_biosfn_set_get_palette_data(AX);
+ void vbe_biosfn_return_protected_mode_interface(AX);
++void vbe_biosfn_ddc(AX, BX, ES, DI);
+ 
+ // The official VBE Information Block
+ typedef struct VbeInfoBlock
+diff --git a/tools/firmware/vgabios/vgabios.c b/tools/firmware/vgabios/vgabios.c
+index a9dbe00..cdf6fb7 100644
+--- a/tools/firmware/vgabios/vgabios.c
++++ b/tools/firmware/vgabios/vgabios.c
+@@ -795,6 +795,9 @@ static void int10_func(DI, SI, BP, SP, BX, DX, CX, AX, DS, ES, FLAGS)
+           // function failed
+           AX=0x100;
+           break;
++	 case 0x15:
++	  vbe_biosfn_ddc(&AX,&BX,ES,DI);
++	  break;
+          default:
+ #ifdef DEBUG
+           unknown();

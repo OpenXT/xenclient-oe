@@ -1,0 +1,149 @@
+diff --git a/tools/firmware/Makefile b/tools/firmware/Makefile
+index 9e5cbc0..86c3b96 100644
+--- a/tools/firmware/Makefile
++++ b/tools/firmware/Makefile
+@@ -7,7 +7,7 @@ INST_DIR := $(DESTDIR)$(XENFIRMWAREDIR)
+ 
+ SUBDIRS-y :=
+ SUBDIRS-$(CONFIG_OVMF) += ovmf
+-SUBDIRS-$(CONFIG_SEABIOS) += seabios-dir
++#SUBDIRS-$(CONFIG_SEABIOS) += seabios-dir
+ SUBDIRS-$(CONFIG_ROMBIOS) += rombios
+ SUBDIRS-$(CONFIG_ROMBIOS) += vgabios
+ #SUBDIRS-$(CONFIG_ROMBIOS) += etherboot
+diff --git a/tools/firmware/hvmloader/Makefile b/tools/firmware/hvmloader/Makefile
+index f8e1bd7..0a710c9 100644
+--- a/tools/firmware/hvmloader/Makefile
++++ b/tools/firmware/hvmloader/Makefile
+@@ -73,9 +73,11 @@ ROMS += $(ROMBIOS_ROM) $(STDVGA_ROM) $(CIRRUSVGA_ROM) $(ETHERBOOT_ROMS)
+ endif
+ 
+ ifeq ($(CONFIG_SEABIOS),y)
+-OBJS += seabios.o
++OBJS += seabios.o optionroms.o
+ CFLAGS += -DENABLE_SEABIOS
++ifeq ($(SEABIOS_ROM),)
+ SEABIOS_ROM := $(SEABIOS_DIR)/out/bios.bin
++endif
+ ROMS += $(SEABIOS_ROM)
+ else
+ OBJS += seabios.o
+diff --git a/tools/firmware/hvmloader/mkhex b/tools/firmware/hvmloader/mkhex
+index cb21257..d62d11d 100755
+--- a/tools/firmware/hvmloader/mkhex
++++ b/tools/firmware/hvmloader/mkhex
+@@ -20,7 +20,7 @@
+ # Place - Suite 330, Boston, MA 02111-1307 USA.
+ #
+ 
+-echo "unsigned $1[] = {"
++echo "static unsigned $1[] = {"
+ shift
+ od -v -t x $@ | sed 's/^[0-9]*  */0x/' | sed 's/  */, 0x/g' | sed 's/$/,/' | sed 's/0x,//' | sed 's/^[0-9]*,//'
+ echo "};"
+diff --git a/tools/firmware/hvmloader/seabios.c b/tools/firmware/hvmloader/seabios.c
+index f17e67b..dc298ea 100644
+--- a/tools/firmware/hvmloader/seabios.c
++++ b/tools/firmware/hvmloader/seabios.c
+@@ -27,10 +27,21 @@
+ 
+ #include "smbios_types.h"
+ #include "acpi/acpi2_0.h"
++#include "option_rom.h"
++
++#include <xen/hvm/params.h>
+ 
+ #define ROM_INCLUDE_SEABIOS
++#define ROM_INCLUDE_ROMBIOS
++#define ROM_INCLUDE_VGABIOS
++#define ROM_INCLUDE_ETHERBOOT
++
++/* dont complain about unused rombios variable */
++#pragma GCC diagnostic warning "-Wunused-variable"
+ #include "roms.inc"
+ 
++#define SEABIOS_OPTIONROM_PHYSICAL_END 0x000EA000
++
+ extern unsigned char dsdt_anycpu_qemu_xen[];
+ extern int dsdt_anycpu_qemu_xen_len;
+ 
+@@ -135,6 +146,70 @@ static void seabios_setup_e820(void)
+ 
+ //BUILD_BUG_ON(sizeof(seabios) > (0x00100000U - SEABIOS_PHYSICAL_ADDRESS));
+ 
++static void seabios_load_roms(void)
++{
++    int option_rom_sz = 0, vgabios_sz = 0, etherboot_sz = 0;
++    uint32_t etherboot_phys_addr = 0, option_rom_phys_addr = 0;
++    const char *load;
++    load = xenstore_read("hvmloader/seabios-legacy-load-roms", "0");
++    if (strcmp(load, "1") != 0)
++        return;
++    switch ( virtual_vga )
++    {
++    case VGA_cirrus:
++        printf("Loading Cirrus VGABIOS ...\n");
++        memcpy((void *)VGABIOS_PHYSICAL_ADDRESS,
++               vgabios_cirrusvga, sizeof(vgabios_cirrusvga));
++        vgabios_sz = round_option_rom(sizeof(vgabios_cirrusvga));
++        break;
++    case VGA_std:
++        printf("Loading Standard VGABIOS ...\n");
++        memcpy((void *)VGABIOS_PHYSICAL_ADDRESS,
++               vgabios_stdvga, sizeof(vgabios_stdvga));
++        vgabios_sz = round_option_rom(sizeof(vgabios_stdvga));
++        break;
++    case VGA_pt:
++        printf("Loading VGABIOS of passthroughed gfx ...\n");
++        vgabios_sz =
++            round_option_rom((*(uint8_t *)(VGABIOS_PHYSICAL_ADDRESS+2)) * 512);
++        break;
++#if 0
++    case VGA_xengfx:
++        printf("Loading XenGFX VGABIOS ...\n");
++        memcpy((void *)VGABIOS_PHYSICAL_ADDRESS,
++               vgabios_xengfx, sizeof(vgabios_xengfx));
++        vgabios_sz = round_option_rom(sizeof(vgabios_xengfx));
++        break;
++#endif
++    default:
++        printf("No emulated VGA adaptor ...\n");
++        break;
++    }
++
++    etherboot_phys_addr = VGABIOS_PHYSICAL_ADDRESS + vgabios_sz;
++    /* round address at 2k boundary for BIOS ROM scanning */
++    etherboot_phys_addr = (etherboot_phys_addr + 0x7ff) & ~0x7ff;
++    memcpy((void *)etherboot_phys_addr, etherboot, sizeof (etherboot));
++    etherboot_sz = sizeof (etherboot);
++    
++    option_rom_phys_addr = etherboot_phys_addr + etherboot_sz;
++    option_rom_sz = pci_load_option_roms(SEABIOS_OPTIONROM_PHYSICAL_END, option_rom_phys_addr);
++
++    printf("Option ROMs:\n");
++    if ( vgabios_sz )
++        printf(" %05x-%05x: VGA BIOS\n",
++               VGABIOS_PHYSICAL_ADDRESS,
++               VGABIOS_PHYSICAL_ADDRESS + vgabios_sz - 1);
++    if ( etherboot_sz )
++        printf(" %05x-%05x: Etherboot ROM\n",
++               etherboot_phys_addr,
++               etherboot_phys_addr + etherboot_sz - 1);
++    if ( option_rom_sz )
++        printf(" %05x-%05x: PCI Option ROMs\n",
++               option_rom_phys_addr,
++               option_rom_phys_addr + option_rom_sz - 1);
++}
++
+ struct bios_config seabios_config = {
+     .name = "SeaBIOS",
+ 
+@@ -143,7 +218,7 @@ struct bios_config seabios_config = {
+ 
+     .bios_address = SEABIOS_PHYSICAL_ADDRESS,
+ 
+-    .load_roms = NULL,
++    .load_roms = seabios_load_roms,
+ 
+     .bios_load = NULL,
+ 

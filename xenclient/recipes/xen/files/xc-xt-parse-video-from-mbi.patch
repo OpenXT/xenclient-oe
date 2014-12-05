@@ -1,0 +1,151 @@
+diff --git a/xen/arch/x86/boot/reloc.c b/xen/arch/x86/boot/reloc.c
+index fa0fb6b..fbec086 100644
+--- a/xen/arch/x86/boot/reloc.c
++++ b/xen/arch/x86/boot/reloc.c
+@@ -29,7 +29,10 @@ asm (
+     "    .long 0                       \n"
+     );
+ 
++typedef unsigned long long u64;
+ typedef unsigned int u32;
++typedef unsigned short u16;
++typedef unsigned char u8;
+ #include "../../../include/xen/multiboot.h"
+ 
+ static void *reloc_mbi_struct(void *old, unsigned int bytes)
+@@ -93,7 +96,8 @@ multiboot_info_t *reloc(multiboot_info_t *mbi_old)
+                    MBI_CMDLINE |
+                    MBI_MODULES |
+                    MBI_MEMMAP |
+-                   MBI_LOADERNAME);
++                   MBI_LOADERNAME |
++                   MBI_FRAMEBUFFER_INFO);
+ 
+     return mbi;
+ }
+diff --git a/xen/arch/x86/setup.c b/xen/arch/x86/setup.c
+index 0b92874..d957c25 100644
+--- a/xen/arch/x86/setup.c
++++ b/xen/arch/x86/setup.c
+@@ -87,6 +87,9 @@ unsigned long __initdata highmem_start;
+ size_param("highmem-start", highmem_start);
+ #endif
+ 
++static bool_t __initdata mbi_video;
++boolean_param("mbi-video", mbi_video);
++
+ cpumask_t __read_mostly cpu_present_map;
+ 
+ unsigned long __read_mostly xen_phys_start;
+@@ -437,7 +440,7 @@ struct boot_video_info {
+ };
+ extern struct boot_video_info boot_vid_info;
+ 
+-static void __init parse_video_info(void)
++static void __init parse_video_info(multiboot_info_t *mbi)
+ {
+     struct boot_video_info *bvi = &bootsym(boot_vid_info);
+ 
+@@ -445,6 +448,30 @@ static void __init parse_video_info(void)
+     if ( efi_enabled )
+         return;
+ 
++    if ( mbi_video &&
++        (mbi->flags & MBI_FRAMEBUFFER_INFO) &&
++        (mbi->framebuffer_type==MULTIBOOT_FRAMEBUFFER_TYPE_RGB)) {
++       bvi->orig_video_isVGA = 0x23;
++
++       bvi->lfb_width          = mbi->framebuffer_width;
++       bvi->lfb_height         = mbi->framebuffer_height;
++       bvi->lfb_linelength     = mbi->framebuffer_pitch;
++       bvi->lfb_depth          = mbi->framebuffer_bpp;
++       bvi->lfb_base           = mbi->framebuffer_addr;
++       bvi->lfb_size           = mbi->framebuffer_height*mbi->framebuffer_pitch;
++
++       bvi->red_pos            = mbi->framebuffer_red_field_position;
++       bvi->red_size           = mbi->framebuffer_red_mask_size;
++       bvi->green_pos          = mbi->framebuffer_green_field_position;
++       bvi->green_size         = mbi->framebuffer_green_mask_size;
++       bvi->blue_pos           = mbi->framebuffer_blue_field_position;
++       bvi->blue_size          = mbi->framebuffer_blue_mask_size;
++       bvi->rsvd_pos           = 0;
++       bvi->rsvd_size          = 0;
++       bvi->capabilities       = 0;
++       bvi->vesa_attrib        = 0;
++    }
++
+     if ( (bvi->orig_video_isVGA == 1) && (bvi->orig_video_mode == 3) )
+     {
+         vga_console_info.video_type = XEN_VGATYPE_TEXT_MODE_3;
+@@ -584,7 +611,7 @@ void __init __start_xen(unsigned long mbi_p)
+      * allocing any xenheap structures wanted in lower memory. */
+     kexec_early_calculations();
+ 
+-    parse_video_info();
++    parse_video_info(mbi);
+ 
+     set_current((struct vcpu *)0xfffff000); /* debug sanity */
+     idle_vcpu[0] = current;
+diff --git a/xen/include/xen/multiboot.h b/xen/include/xen/multiboot.h
+index 67483ed..7836d2d 100644
+--- a/xen/include/xen/multiboot.h
++++ b/xen/include/xen/multiboot.h
+@@ -26,7 +26,6 @@
+ #define MULTIBOOT_HEADER_MAGIC         0x1BADB002
+ #define MULTIBOOT_HEADER_MODS_ALIGNED  0x00000001
+ #define MULTIBOOT_HEADER_WANT_MEMORY   0x00000002
+-#define MULTIBOOT_HEADER_HAS_VBE       0x00000004
+ #define MULTIBOOT_HEADER_HAS_ADDR      0x00010000
+ 
+ /* The magic number passed by a Multiboot-compliant boot loader. */
+@@ -43,7 +42,7 @@
+ #define MBI_BIOSCONFIG (_AC(1,u) << 8)
+ #define MBI_LOADERNAME (_AC(1,u) << 9)
+ #define MBI_APM        (_AC(1,u) << 10)
+-
++#define MBI_FRAMEBUFFER_INFO (_AC(1,u) <<12)
+ #ifndef __ASSEMBLY__
+ 
+ /* The symbol table for a.out.  */
+@@ -102,6 +101,41 @@ typedef struct {
+ 
+     /* Valid if flags sets MBI_APM */
+     u32 apm_table;
++
++    /* Video */
++    u32 vbe_control_info;
++    u32 vbe_mode_info;
++    u16 vbe_mode;
++    u16 vbe_interface_seg;
++    u16 vbe_interface_off;
++    u16 vbe_interface_len;
++
++    u64 framebuffer_addr;
++    u32 framebuffer_pitch;
++    u32 framebuffer_width;
++    u32 framebuffer_height;
++    u8 framebuffer_bpp;
++#define MULTIBOOT_FRAMEBUFFER_TYPE_INDEXED 0
++#define MULTIBOOT_FRAMEBUFFER_TYPE_RGB     1
++#define MULTIBOOT_FRAMEBUFFER_TYPE_EGA_TEXT     2
++    u8 framebuffer_type;
++    union
++    {
++      struct
++      {
++        u32 framebuffer_palette_addr;
++        u16 framebuffer_palette_num_colors;
++      };
++      struct
++      {
++        u8 framebuffer_red_field_position;
++        u8 framebuffer_red_mask_size;
++        u8 framebuffer_green_field_position;
++        u8 framebuffer_green_mask_size;
++        u8 framebuffer_blue_field_position;
++        u8 framebuffer_blue_mask_size;
++      };
++    };
+ } multiboot_info_t;
+ 
+ /* The module structure.  */

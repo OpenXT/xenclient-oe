@@ -1,0 +1,2491 @@
+# HG changeset patch
+# Parent fd6e336fc071f6229640f39f561b351e49d95c64
+diff --git a/tools/blktap2/drivers/block-vhd.c b/tools/blktap2/drivers/block-vhd.c
+index 76ea5bd..9d80824 100644
+--- a/tools/blktap2/drivers/block-vhd.c
++++ b/tools/blktap2/drivers/block-vhd.c
+@@ -248,6 +248,8 @@ struct vhd_state {
+ 	uint64_t                  read_size;
+ 	uint64_t                  writes;
+ 	uint64_t                  write_size;
++	uint64_t                  cache_hits;
++	uint64_t                  cache_misses;
+ };
+ 
+ #define test_vhd_flag(word, flag)  ((word) & (flag))
+@@ -315,6 +317,12 @@ _get_vhd_zeros(const char *func, unsigned long size)
+ static inline void
+ set_batmap(struct vhd_state *s, uint32_t blk)
+ {
++#ifdef DYNAMIC_BATMAP
++	if (vhd_has_dyn_batmap(&s->vhd)) {
++		vhd_dyn_batmap_set(&s->vhd.meta_ctx.dyn_batmap, blk);
++		DBG(TLOG_DBG, "block 0x%x completely full\n", blk);
++	} else
++#endif
+ 	if (s->bat.batmap.map) {
+ 		vhd_batmap_set(&s->vhd, &s->bat.batmap, blk);
+ 		DBG(TLOG_DBG, "block 0x%x completely full\n", blk);
+@@ -324,9 +332,17 @@ set_batmap(struct vhd_state *s, uint32_t blk)
+ static inline int
+ test_batmap(struct vhd_state *s, uint32_t blk)
+ {
++#ifdef DYNAMIC_BATMAP
++	if (vhd_has_dyn_batmap(&s->vhd))
++		return vhd_dyn_batmap_test(&s->vhd.meta_ctx.dyn_batmap, blk);
++	if (s->bat.batmap.map)
++		return vhd_batmap_test(&s->vhd, &s->bat.batmap, blk);
++	return 0;
++#else
+ 	if (!s->bat.batmap.map)
+ 		return 0;
+ 	return vhd_batmap_test(&s->vhd, &s->bat.batmap, blk);
++#endif
+ }
+ 
+ static int
+@@ -664,6 +680,20 @@ __vhd_open(td_driver_t *driver, const char *name, vhd_flag_t flags)
+ 		s->writes++;
+ 	}
+ 
++#ifdef DYNAMIC_BATMAP_SAVE
++	if (!vhd_has_batmap(&s->vhd)) {
++		err = vhd_meta_open(&s->vhd, name);
++		if (err) {
++			libvhd_set_log_level(1);
++			err = vhd_meta_open(&s->vhd, name);
++			if (err) {
++				EPRINTF("Unable to open [%s] meta (%d)!\n", name, err);
++				return err;
++			}
++		}
++	}
++#endif
++
+         return 0;
+ 
+  fail:
+@@ -732,8 +762,17 @@ _vhd_close(td_driver_t *driver)
+ 	s = (struct vhd_state *)driver->data;
+ 
+ 	/* don't write footer if tapdisk is read-only */
+-	if (test_vhd_flag(s->flags, VHD_FLAG_OPEN_RDONLY))
++	if (test_vhd_flag(s->flags, VHD_FLAG_OPEN_RDONLY)) {
++#ifdef DYNAMIC_BATMAP_SAVE
++		if (vhd_has_dyn_batmap(&s->vhd)) {
++			EPRINTF("writing %s dyn batmap\n", s->vhd.meta_ctx.file);
++			err = vhd_write_dyn_batmap(&s->vhd.meta_ctx, &s->vhd.meta_ctx.dyn_batmap);
++			if (err)
++				EPRINTF("writing %s dyn batmap: %d\n", s->vhd.meta_ctx.file, err);
++		}
++#endif
+ 		goto free;
++	}
+ 	
+ 	/* 
+ 	 * write footer if:
+@@ -748,18 +787,32 @@ _vhd_close(td_driver_t *driver)
+ 		if (err)
+ 			EPRINTF("writing %s footer: %d\n", s->vhd.file, err);
+ 
++#ifdef DYNAMIC_BATMAP_SAVE
++		if (vhd_has_dyn_batmap(&s->vhd)) {
++			EPRINTF("writing %s dyn batmap\n", s->vhd.meta_ctx.file);
++			err = vhd_write_dyn_batmap(&s->vhd.meta_ctx, &s->vhd.meta_ctx.dyn_batmap);
++			if (err)
++				EPRINTF("writing %s dyn batmap: %d\n", s->vhd.meta_ctx.file, err);
++		} else if (vhd_has_batmap(&s->vhd)) {
++			err = vhd_write_batmap(&s->vhd, &s->bat.batmap);
++			if (err)
++				EPRINTF("writing %s batmap: %d\n", s->vhd.file, err);
++		}
++#else
+ 		if (!vhd_has_batmap(&s->vhd))
+ 			goto free;
+ 
+ 		err = vhd_write_batmap(&s->vhd, &s->bat.batmap);
+ 		if (err)
+ 			EPRINTF("writing %s batmap: %d\n", s->vhd.file, err);
++#endif
+ 	}
+ 
+  free:
+ 	vhd_log_close(s);
+ 	vhd_free_bat(s);
+ 	vhd_free_bitmap_cache(s);
++	vhd_meta_close(&s->vhd.meta_ctx);
+ 	vhd_close(&s->vhd);
+ 	vhd_free(s);
+ 
+@@ -976,10 +1029,14 @@ get_bitmap(struct vhd_state *s, uint32_t block)
+ 
+ 	for (i = 0; i < VHD_CACHE_SIZE; i++) {
+ 		bm = s->bitmap[i];
+-		if (bm && bm->blk == block)
++		if (bm && bm->blk == block) {
++			s->cache_hits++;
+ 			return bm;
++		}
+ 	}
+ 
++	s->cache_misses++;
++
+ 	return NULL;
+ }
+ 
+@@ -1177,6 +1234,16 @@ read_bitmap_cache(struct vhd_state *s, uint64_t sector, uint8_t op)
+ 	if (test_vhd_flag(bm->status, VHD_FLAG_BM_READ_PENDING))
+ 		return VHD_BM_READ_PENDING;
+ 
++#ifdef DYNAMIC_BATMAP
++	if (vhd_has_dyn_batmap(&s->vhd) &&
++		!vhd_dyn_batmap_valid(&s->vhd.meta_ctx.dyn_batmap, blk)) {
++		if (bitmap_full(s, bm))
++			vhd_dyn_batmap_set(&s->vhd.meta_ctx.dyn_batmap, blk);
++		else
++			vhd_dyn_batmap_clear(&s->vhd.meta_ctx.dyn_batmap, blk);
++	}
++#endif
++
+ 	return ((vhd_bitmap_test(&s->vhd, bm->map, sec)) ? 
+ 		VHD_BM_BIT_SET : VHD_BM_BIT_CLEAR);
+ }
+@@ -1207,6 +1274,16 @@ read_bitmap_cache_span(struct vhd_state *s,
+ 		if (vhd_bitmap_test(&s->vhd, bm->map, sec) != value)
+ 			break;
+ 
++#ifdef DYNAMIC_BATMAP
++	if (vhd_has_dyn_batmap(&s->vhd) &&
++		!vhd_dyn_batmap_valid(&s->vhd.meta_ctx.dyn_batmap, blk)) {
++		if (bitmap_full(s, bm))
++			vhd_dyn_batmap_set(&s->vhd.meta_ctx.dyn_batmap, blk);
++		else
++			vhd_dyn_batmap_clear(&s->vhd.meta_ctx.dyn_batmap, blk);
++	}
++#endif
++
+ 	return ret;
+ }
+ 
+@@ -1697,7 +1774,22 @@ vhd_queue_read(td_driver_t *driver, td_request_t treq)
+ 
+ 		case VHD_BM_BIT_CLEAR:
+ 			clone.secs = read_bitmap_cache_span(s, clone.sec, clone.secs, 0);
+-			td_forward_request(clone);
++			/*
++			 * Workaround for Windows vhdmount.exe brain
++			 * damage. In some cases it modifies a base disk
++			 * sector but does not set the sector bitmap. Hence we
++			 * cannot use the optimization of immediately
++			 * returning a sector of zeroes when a sector bit is
++			 * clear and must always read from disk.
++			 */
++			if (vhd_creator_virtualserver(&s->vhd) &&
++			    td_is_last_image(clone)) {
++				err = schedule_data_read(s, clone, 0);
++				if (err)
++					goto fail;
++			} else {
++				td_forward_request(clone);
++			}
+ 			break;
+ 
+ 		case VHD_BM_BIT_SET:
+@@ -2249,6 +2341,8 @@ vhd_debug(td_driver_t *driver)
+ 	    s->writes, (s->writes ? ((float)s->write_size / s->writes) : 0.0));
+ 	DBG(TLOG_WARN, "READS: 0x%08"PRIx64", AVG_READ_SIZE: %f\n",
+ 	    s->reads, (s->reads ? ((float)s->read_size / s->reads) : 0.0));
++	DBG(TLOG_WARN, "CACHE HITS: 0x%08"PRIx64", CACHE MISSES: 0x%08"PRIx64"\n",
++	    s->cache_hits, s->cache_misses);
+ 
+ 	DBG(TLOG_WARN, "ALLOCATED REQUESTS: (%lu total)\n", VHD_REQS_DATA);
+ 	for (i = 0; i < VHD_REQS_DATA; i++) {
+diff --git a/tools/blktap2/drivers/tapdisk-interface.c b/tools/blktap2/drivers/tapdisk-interface.c
+index 2e51883..24e3e57 100644
+--- a/tools/blktap2/drivers/tapdisk-interface.c
++++ b/tools/blktap2/drivers/tapdisk-interface.c
+@@ -213,6 +213,12 @@ fail:
+ 	td_complete_request(treq, err);
+ }
+ 
++int
++td_is_last_image(td_request_t treq)
++{
++	return (tapdisk_vbd_is_last_image(treq));
++}
++
+ void
+ td_forward_request(td_request_t treq)
+ {
+diff --git a/tools/blktap2/drivers/tapdisk-interface.h b/tools/blktap2/drivers/tapdisk-interface.h
+index adc4376..fcd2233 100644
+--- a/tools/blktap2/drivers/tapdisk-interface.h
++++ b/tools/blktap2/drivers/tapdisk-interface.h
+@@ -37,9 +37,9 @@ int td_load(td_image_t *);
+ int td_close(td_image_t *);
+ int td_get_parent_id(td_image_t *, td_disk_id_t *);
+ int td_validate_parent(td_image_t *, td_image_t *);
+-
+ void td_queue_write(td_image_t *, td_request_t);
+ void td_queue_read(td_image_t *, td_request_t);
++int td_is_last_image(td_request_t);
+ void td_forward_request(td_request_t);
+ void td_complete_request(td_request_t, int);
+ 
+diff --git a/tools/blktap2/drivers/tapdisk-vbd.c b/tools/blktap2/drivers/tapdisk-vbd.c
+index bb5dbeb..12475e1 100644
+--- a/tools/blktap2/drivers/tapdisk-vbd.c
++++ b/tools/blktap2/drivers/tapdisk-vbd.c
+@@ -167,7 +167,7 @@ tapdisk_vbd_validate_chain(td_vbd_t *vbd)
+ 	tapdisk_vbd_for_each_image(vbd, image, tmp) {
+ 		DPRINTF("%s: %d\n", image->name, image->type);
+ 
+-		if (tapdisk_vbd_is_last_image(vbd, image))
++		if (i_tapdisk_vbd_is_last_image(vbd, image))
+ 			break;
+ 
+ 		parent = tapdisk_vbd_next_image(image);
+@@ -935,7 +935,7 @@ tapdisk_vbd_open_image(td_vbd_t *vbd, td_image_t *image)
+ 	if (err)
+ 		return err;
+ 
+-	if (!tapdisk_vbd_is_last_image(vbd, image)) {
++	if (!i_tapdisk_vbd_is_last_image(vbd, image)) {
+ 		parent = tapdisk_vbd_next_image(image);
+ 		err    = td_validate_parent(image, parent);
+ 		if (err) {
+@@ -1267,7 +1267,7 @@ __tapdisk_vbd_reissue_td_request(td_vbd_t *vbd,
+ 
+ 	vreq->submitting++;
+ 
+-	if (tapdisk_vbd_is_last_image(vbd, image)) {
++	if (i_tapdisk_vbd_is_last_image(vbd, image)) {
+ 		memset(treq.buf, 0, treq.secs << SECTOR_SHIFT);
+ 		td_complete_request(treq, 0);
+ 		goto done;
+@@ -1333,6 +1333,18 @@ done:
+ 		tapdisk_vbd_complete_vbd_request(vbd, vreq);
+ }
+ 
++int
++tapdisk_vbd_is_last_image(td_request_t treq)
++{
++	td_vbd_t *vbd;
++	td_image_t *image;
++
++	image = treq.image;
++	vbd   = (td_vbd_t *)image->private;
++
++	return (i_tapdisk_vbd_is_last_image(vbd, image));
++}
++
+ void
+ tapdisk_vbd_forward_request(td_request_t treq)
+ {
+diff --git a/tools/blktap2/drivers/tapdisk-vbd.h b/tools/blktap2/drivers/tapdisk-vbd.h
+index 062e89c..4856338 100644
+--- a/tools/blktap2/drivers/tapdisk-vbd.h
++++ b/tools/blktap2/drivers/tapdisk-vbd.h
+@@ -149,7 +149,7 @@ tapdisk_vbd_add_image(td_vbd_t *vbd, td_image_t *image)
+ }
+ 
+ static inline int
+-tapdisk_vbd_is_last_image(td_vbd_t *vbd, td_image_t *image)
++i_tapdisk_vbd_is_last_image(td_vbd_t *vbd, td_image_t *image)
+ {
+ 	return list_is_last(&image->next, &vbd->images);
+ }
+@@ -187,6 +187,7 @@ void tapdisk_vbd_close_vdi(td_vbd_t *);
+ int tapdisk_vbd_attach(td_vbd_t *, const char *, int);
+ void tapdisk_vbd_detach(td_vbd_t *);
+ 
++int tapdisk_vbd_is_last_image(td_request_t);
+ void tapdisk_vbd_forward_request(td_request_t);
+ 
+ int tapdisk_vbd_get_image_info(td_vbd_t *, image_t *);
+diff --git a/tools/blktap2/include/libvhd.h b/tools/blktap2/include/libvhd.h
+index 8e854e4..a57c1a0 100644
+--- a/tools/blktap2/include/libvhd.h
++++ b/tools/blktap2/include/libvhd.h
+@@ -87,6 +87,7 @@
+ #define VHD_OPEN_IGNORE_DISABLED   0x00010
+ 
+ #define VHD_FLAG_CREAT_PARENT_RAW        0x00001
++#define VHD_FLAG_CREAT_MS_COMPAT         0x00002
+ 
+ #define vhd_flag_set(word, flag)         ((word) |= (flag))
+ #define vhd_flag_clear(word, flag)       ((word) &= ~(flag))
+@@ -115,6 +116,8 @@
+ #define TEST_FAIL_EXTERN_VARS
+ #endif // ENABLE_FAILURE_TESTING
+ 
++#define DYNAMIC_BATMAP
++#define DYNAMIC_BATMAP_SAVE
+ 
+ static const char                  VHD_POISON_COOKIE[] = "v_poison";
+ 
+@@ -122,9 +125,15 @@ typedef struct hd_ftr              vhd_footer_t;
+ typedef struct dd_hdr              vhd_header_t;
+ typedef struct vhd_bat             vhd_bat_t;
+ typedef struct vhd_batmap          vhd_batmap_t;
++#ifdef DYNAMIC_BATMAP
++typedef struct vhd_dyn_batmap      vhd_dyn_batmap_t;
++#endif
+ typedef struct dd_batmap_hdr       vhd_batmap_header_t;
+ typedef struct prt_loc             vhd_parent_locator_t;
+ typedef struct vhd_context         vhd_context_t;
++#ifdef DYNAMIC_BATMAP
++typedef struct vhd_meta_context    vhd_meta_context_t;
++#endif
+ typedef uint32_t                   vhd_flag_creat_t;
+ 
+ struct vhd_bat {
+@@ -138,6 +147,25 @@ struct vhd_batmap {
+ 	char                      *map;
+ };
+ 
++#ifdef DYNAMIC_BATMAP
++struct vhd_dyn_batmap {
++	vhd_batmap_header_t        header;
++	char                      *map;
++        char                      *valid;
++};
++#endif
++
++
++#ifdef DYNAMIC_BATMAP
++struct vhd_meta_context {
++#ifdef DYNAMIC_BATMAP_SAVE
++        int                        fd;
++	char                      *file;
++#endif
++        vhd_dyn_batmap_t           dyn_batmap;
++};
++#endif
++
+ struct vhd_context {
+ 	int                        fd;
+ 	char                      *file;
+@@ -151,6 +179,9 @@ struct vhd_context {
+ 	vhd_footer_t               footer;
+ 	vhd_bat_t                  bat;
+ 	vhd_batmap_t               batmap;
++#ifdef DYNAMIC_BATMAP
++        vhd_meta_context_t         meta_ctx;
++#endif
+ };
+ 
+ static inline uint32_t
+@@ -191,6 +222,12 @@ vhd_creator_tapdisk(vhd_context_t *ctx)
+ }
+ 
+ static inline int
++vhd_creator_virtualserver(vhd_context_t *ctx)
++{
++	return !strncmp(ctx->footer.crtr_app, "vs", 2);
++}
++
++static inline int
+ vhd_disabled(vhd_context_t *ctx)
+ {
+ 	return (!memcmp(ctx->footer.cookie,
+@@ -248,11 +285,16 @@ int vhd_validate_platform_code(uint32_t code);
+ 
+ int vhd_open(vhd_context_t *, const char *file, int flags);
+ void vhd_close(vhd_context_t *);
+-int vhd_create(const char *name, uint64_t bytes, int type, vhd_flag_creat_t);
+-/* vhd_snapshot: the bytes parameter is optional and can be 0 if the snapshot 
++#ifdef DYNAMIC_BATMAP_SAVE
++int vhd_meta_open(vhd_context_t *ctx, const char *file);
++void vhd_meta_close(vhd_meta_context_t *ctx);
++#endif
++int vhd_create(const char *name, const char *child, vhd_uuid_t *uuid, uint64_t bytes,
++    int type, vhd_flag_creat_t flags);
++/* vhd_snapshot: the bytes parameter is optional and can be 0 if the snapshot
+  * is to have the same size as the (first non-empty) parent */
+-int vhd_snapshot(const char *snapshot, uint64_t bytes, const char *parent,
+-		vhd_flag_creat_t);
++int vhd_snapshot(const char *name, const char *child, const char *parent,
++    vhd_uuid_t *uuid, uint64_t bytes, vhd_flag_creat_t flags);
+ 
+ int vhd_hidden(vhd_context_t *, int *);
+ int vhd_chain_depth(vhd_context_t *, int *);
+@@ -261,6 +303,11 @@ off_t vhd_position(vhd_context_t *);
+ int vhd_seek(vhd_context_t *, off_t, int);
+ int vhd_read(vhd_context_t *, void *, size_t);
+ int vhd_write(vhd_context_t *, void *, size_t);
++#ifdef DYNAMIC_BATMAP_SAVE
++int vhd_meta_seek(vhd_meta_context_t *ctx, off64_t offset, int whence);
++int vhd_meta_read(vhd_meta_context_t *, void *, size_t);
++int vhd_meta_write(vhd_meta_context_t *, void *, size_t);
++#endif
+ 
+ int vhd_offset(vhd_context_t *, uint32_t, uint32_t *);
+ 
+@@ -278,6 +325,20 @@ void vhd_put_footer(vhd_context_t *);
+ void vhd_put_bat(vhd_context_t *);
+ void vhd_put_batmap(vhd_context_t *);
+ 
++#ifdef DYNAMIC_BATMAP
++static inline int
++vhd_has_dyn_batmap(vhd_context_t *ctx)
++{
++	return (ctx->meta_ctx.dyn_batmap.map != NULL);
++}
++
++int vhd_dyn_batmap_valid(vhd_dyn_batmap_t *batmap, uint32_t block);
++int vhd_dyn_batmap_test(vhd_dyn_batmap_t *batmap, uint32_t block);
++void vhd_dyn_batmap_set(vhd_dyn_batmap_t *batmap, uint32_t block);
++void vhd_dyn_batmap_clear(vhd_dyn_batmap_t *batmap, uint32_t block);
++
++int vhd_create_dynamic_batmap(vhd_context_t *ctx, vhd_dyn_batmap_t *dyn_batmap);
++#endif
+ int vhd_has_batmap(vhd_context_t *);
+ int vhd_batmap_test(vhd_context_t *, vhd_batmap_t *, uint32_t);
+ void vhd_batmap_set(vhd_context_t *, vhd_batmap_t *, uint32_t);
+@@ -308,6 +369,11 @@ int vhd_read_header(vhd_context_t *, vhd_header_t *);
+ int vhd_read_header_at(vhd_context_t *, vhd_header_t *, off_t);
+ int vhd_read_bat(vhd_context_t *, vhd_bat_t *);
+ int vhd_read_batmap(vhd_context_t *, vhd_batmap_t *);
++#ifdef DYNAMIC_BATMAP_SAVE
++uint32_t vhd_checksum_dyn_batmap(vhd_dyn_batmap_t *batmap);
++int vhd_validate_dyn_batmap(vhd_dyn_batmap_t *batmap);
++int vhd_read_dyn_batmap(vhd_meta_context_t *ctx, vhd_dyn_batmap_t *batmap);
++#endif
+ int vhd_read_bitmap(vhd_context_t *, uint32_t block, char **bufp);
+ int vhd_read_block(vhd_context_t *, uint32_t block, char **bufp);
+ 
+@@ -317,6 +383,9 @@ int vhd_write_header(vhd_context_t *, vhd_header_t *);
+ int vhd_write_header_at(vhd_context_t *, vhd_header_t *, off_t);
+ int vhd_write_bat(vhd_context_t *, vhd_bat_t *);
+ int vhd_write_batmap(vhd_context_t *, vhd_batmap_t *);
++#ifdef DYNAMIC_BATMAP_SAVE
++int vhd_write_dyn_batmap(vhd_meta_context_t *ctx, vhd_dyn_batmap_t *batmap);
++#endif
+ int vhd_write_bitmap(vhd_context_t *, uint32_t block, char *bitmap);
+ int vhd_write_block(vhd_context_t *, uint32_t block, char *data);
+ 
+diff --git a/tools/blktap2/include/relative-path.h b/tools/blktap2/include/relative-path.h
+index d78f94d..940f350 100644
+--- a/tools/blktap2/include/relative-path.h
++++ b/tools/blktap2/include/relative-path.h
+@@ -38,6 +38,6 @@
+  * returns a relative path from @src to @dest
+  * result should be freed
+  */
+-char *relative_path_to(char *src, char *dest, int *err);
++char *relative_path_to(const char *src, const char *dest, int real, int *err);
+ 
+ #endif
+diff --git a/tools/blktap2/include/vhd-util.h b/tools/blktap2/include/vhd-util.h
+index 11f077e..bd9f452 100644
+--- a/tools/blktap2/include/vhd-util.h
++++ b/tools/blktap2/include/vhd-util.h
+@@ -27,6 +27,8 @@
+ #ifndef _VHD_UTIL_H_
+ #define _VHD_UTIL_H_
+ 
++#include <inttypes.h>
++
+ int vhd_util_create(int argc, char **argv);
+ int vhd_util_snapshot(int argc, char **argv);
+ int vhd_util_query(int argc, char **argv);
+@@ -41,4 +43,8 @@ int vhd_util_scan(int argc, char **argv);
+ int vhd_util_check(int argc, char **argv);
+ int vhd_util_revert(int argc, char **argv);
+ 
++typedef int (coalesce_callback_t)(uint64_t block);
++
++void vhd_util_coalesce_set_callback(coalesce_callback_t *cb);
++
+ #endif
+diff --git a/tools/blktap2/include/vhd.h b/tools/blktap2/include/vhd.h
+index c064425..147667c 100644
+--- a/tools/blktap2/include/vhd.h
++++ b/tools/blktap2/include/vhd.h
+@@ -135,6 +135,9 @@ struct prt_loc {
+ #define PLAT_CODE_MAC   0x4D616320  /* MacOS alias stored as a blob.      */
+ #define PLAT_CODE_MACX  0x4D616358  /* File URL (UTF-8), see RFC 2396.    */
+ 
++#define PLAT_CODE_LNXU  0X4C6E7875  /* Linux absolute path.		  */
++#define PLAT_CODE_LNXK  0X4C6E786B  /* Linux relative path.    		  */
++
+ /* ---------------------------------------------------------------------- */
+ /* This is the dynamic disk header.                                       */
+ /* ---------------------------------------------------------------------- */
+diff --git a/tools/blktap2/vhd/lib/libvhd.c b/tools/blktap2/vhd/lib/libvhd.c
+index 3511cb4..6ab5acf 100644
+--- a/tools/blktap2/vhd/lib/libvhd.c
++++ b/tools/blktap2/vhd/lib/libvhd.c
+@@ -430,6 +430,8 @@ vhd_validate_platform_code(uint32_t code)
+ 	case PLAT_CODE_W2KU:
+ 	case PLAT_CODE_MAC:
+ 	case PLAT_CODE_MACX:
++	case PLAT_CODE_LNXU:
++	case PLAT_CODE_LNXK:
+ 		return 0;
+ 	default:
+ 		VHDLOG("invalid parent locator code %u\n", code);
+@@ -558,6 +560,61 @@ vhd_batmap_clear(vhd_context_t *ctx, vhd_batmap_t *batmap, uint32_t block)
+ 	clear_bit(batmap->map, block);
+ }
+ 
++#ifdef DYNAMIC_BATMAP
++int
++vhd_dyn_batmap_valid(vhd_dyn_batmap_t *batmap, uint32_t block)
++{
++	if (!batmap->map)
++		return 0;
++
++	if (block >= (batmap->header.batmap_size << (VHD_SECTOR_SHIFT + 3)))
++		return 0;
++
++	return test_bit(batmap->valid, block);
++}
++
++int
++vhd_dyn_batmap_test(vhd_dyn_batmap_t *batmap, uint32_t block)
++{
++	if (!batmap->map)
++		return 0;
++
++	if (block >= (batmap->header.batmap_size << (VHD_SECTOR_SHIFT + 3)))
++		return 0;
++
++	if (!test_bit(batmap->valid, block))
++		return 0;
++
++	return test_bit(batmap->map, block);
++}
++
++void
++vhd_dyn_batmap_set(vhd_dyn_batmap_t *batmap, uint32_t block)
++{
++	if (!batmap->map)
++		return;
++
++	if (block >= (batmap->header.batmap_size << (VHD_SECTOR_SHIFT + 3)))
++		return;
++
++	set_bit(batmap->map, block);
++	set_bit(batmap->valid, block);
++}
++
++void
++vhd_dyn_batmap_clear(vhd_dyn_batmap_t *batmap, uint32_t block)
++{
++	if (!batmap->map)
++		return;
++
++	if (block >= (batmap->header.batmap_size << (VHD_SECTOR_SHIFT + 3)))
++		return;
++
++	clear_bit(batmap->map, block);
++	set_bit(batmap->valid, block);
++}
++#endif
++
+ int
+ vhd_bitmap_test(vhd_context_t *ctx, char *map, uint32_t block)
+ {
+@@ -1203,6 +1260,106 @@ fail:
+ 	return err;
+ }
+ 
++#ifdef DYNAMIC_BATMAP_SAVE
++uint32_t
++vhd_checksum_dyn_batmap(vhd_dyn_batmap_t *batmap)
++{
++	int i, n;
++	char *blob;
++	uint32_t checksum;
++
++	checksum = 0;
++
++	n = vhd_sectors_to_bytes(batmap->header.batmap_size);
++
++	blob     = batmap->map;
++	for (i = 0; i < n; i++) {
++		if (batmap->header.batmap_version == VHD_BATMAP_VERSION(1, 1))
++			checksum += (uint32_t)blob[i];
++		else
++			checksum += (uint32_t)(unsigned char)blob[i];
++	}
++
++	blob     = batmap->valid;
++	for (i = 0; i < n; i++) {
++		if (batmap->header.batmap_version == VHD_BATMAP_VERSION(1, 1))
++			checksum += (uint32_t)blob[i];
++		else
++			checksum += (uint32_t)(unsigned char)blob[i];
++	}
++
++	return ~checksum;
++}
++
++int
++vhd_validate_dyn_batmap(vhd_dyn_batmap_t *batmap)
++{
++	uint32_t checksum;
++
++	if (!batmap->map)
++		return -EINVAL;
++
++	checksum = vhd_checksum_dyn_batmap(batmap);
++	if (checksum != batmap->header.checksum) {
++		VHDLOG("failed validating batmap: %u vs %u\n",
++			checksum, batmap->header.checksum);
++		return -EINVAL;
++	}
++
++	return 0;
++}
++
++int
++vhd_read_dyn_batmap(vhd_meta_context_t *ctx, vhd_dyn_batmap_t *batmap)
++{
++	int err;
++	size_t map_size;
++
++	vhd_meta_seek(ctx, 0, SEEK_SET);
++	
++	err  = vhd_meta_read(ctx, &batmap->header, sizeof(batmap->header));
++	if (err)
++		goto out;
++
++	map_size = vhd_sectors_to_bytes(batmap->header.batmap_size);
++
++	VHDLOG("%s: reading batmap map size %d\n", ctx->file, (int)map_size);
++
++	vhd_meta_seek(ctx, batmap->header.batmap_offset, SEEK_SET);
++
++	err = posix_memalign((void **)&batmap->map, VHD_SECTOR_SIZE, map_size);
++	if (err)
++		goto out;
++
++	err  = vhd_meta_read(ctx, batmap->map, map_size);
++	if (err)
++		goto out;
++
++	err = posix_memalign((void **)&batmap->valid, VHD_SECTOR_SIZE, map_size);
++	if (err)
++		goto out;
++
++	err  = vhd_meta_read(ctx, batmap->valid, map_size);
++	if (err)
++		goto out;
++
++	err = vhd_validate_dyn_batmap(batmap);
++	if (err) {
++		VHDLOG("%s: failed validating batmap: %d\n", ctx->file, err);
++		goto out;
++	}
++
++	VHDLOG("%s: read batmap map size %d\n", ctx->file, (int)map_size);
++
++	return 0;
++
++out:
++	if (err)
++		VHDLOG("%s: failed reading batmap: %d\n", ctx->file, err);
++	return err;
++}
++#endif
++
+ int
+ vhd_has_batmap(vhd_context_t *ctx)
+ {
+@@ -1272,14 +1429,14 @@ vhd_find_parent(vhd_context_t *ctx, const char *parent, char **_location)
+ 			*_location = path;
+ 			return 0;
+ 		}
++
++		return -errno;
+ 	}
+ 
+ 	/* check parent path relative to child's directory */
+-	cpath = realpath(ctx->file, NULL);
+-	if (!cpath) {
+-		err = -errno;
+-		goto out;
+-	}
++	cpath = strdup(ctx->file);
++	if (!cpath)
++		return -ENOMEM;
+ 
+ 	cdir = dirname(cpath);
+ 	if (asprintf(&location, "%s/%s", cdir, parent) == -1) {
+@@ -1289,11 +1446,9 @@ vhd_find_parent(vhd_context_t *ctx, const char *parent, char **_location)
+ 	}
+ 
+ 	if (!access(location, R_OK)) {
+-		path = realpath(location, NULL);
+-		if (path) {
+-			*_location = path;
+-			return 0;
+-		}
++		free(cpath);
++		*_location = location;
++		return 0;
+ 	}
+ 	err = -errno;
+ 
+@@ -1303,6 +1458,30 @@ out:
+ 	return err;
+ }
+ 
++static int
++vhd_lnx_encode_location(char *name, char **out, int *outlen)
++{
++	int len, err;
++	char *ret;
++
++	*out    = NULL;
++	*outlen = 0;
++	len     = strlen(name);
++
++	ret = malloc(len);
++	if (!ret) {
++		err = -ENOMEM;
++		goto out;
++	}
++
++	memcpy(ret, name, len);
++	*outlen = len;
++	*out    = ret;
++
++ out:
++	return err;
++}
++
+ static int 
+ vhd_macx_encode_location(char *name, char **out, int *outlen)
+ {
+@@ -1456,6 +1635,56 @@ vhd_w2u_encode_location(char *name, char **out, int *outlen)
+ 	return err;
+ }
+ 
++static int
++vhd_wi2_encode_location(char *name, char **out, int *outlen)
++{
++	char *uri, *tmp;
++	int err;
++
++	err     = 0;
++	*out    = NULL;
++	*outlen = 0;
++
++	/*
++	 * MICROSOFT_COMPAT
++	 * relative paths must start with ".\"
++	 */
++	if (name[0] != '/') {
++		tmp = strstr(name, "./");
++		if (tmp == name)
++			tmp += strlen("./");
++		else
++			tmp = name;
++
++		err = asprintf(&uri, ".\\%s", tmp);
++	} else
++		err = asprintf(&uri, "%s", name);
++
++	if (err == -1)
++		return -ENOMEM;
++
++	tmp = uri;
++	while (*tmp != '\0') {
++		if (*tmp == '/')
++			*tmp = '\\';
++		tmp++;
++	}
++
++	*outlen = strlen(uri);
++	*out    = uri;
++
++	return 0;
++}
++
++static char *
++vhd_lnx_decode_location(char *in, char *out, int len)
++{
++	strncpy(out, in, len);
++	out[len] = '\0';
++
++	return strdup(out);
++}
++
+ static char *
+ vhd_macx_decode_location(const char *in, char *out, int len)
+ {
+@@ -1525,6 +1754,28 @@ vhd_w2u_decode_location(const char *in, char *out, int len, char *utf_type)
+ 	return strdup(name);
+ }
+ 
++static char *
++vhd_wi2_decode_location(char *in, char *out, int len)
++{
++	char *name, *tmp;
++
++	strncpy(out, in, len);
++	out[len] = '\0';
++
++	tmp = out;
++	while (*tmp != '\0') {
++		if (*tmp == '\\')
++			*tmp = '/';
++		tmp++;
++	}
++
++	name = out;
++	if (strstr(name, "C:") == name || strstr(name, "c:") == name)
++		name += strlen("c:");
++
++	return strdup(name);
++}
++
+ int
+ vhd_header_decode_parent(vhd_context_t *ctx, vhd_header_t *header, char **buf)
+ {
+@@ -1561,6 +1812,10 @@ vhd_parent_locator_read(vhd_context_t *ctx,
+ 	case PLAT_CODE_MACX:
+ 	case PLAT_CODE_W2KU:
+ 	case PLAT_CODE_W2RU:
++	case PLAT_CODE_WI2K:
++	case PLAT_CODE_WI2R:
++	case PLAT_CODE_LNXU:
++	case PLAT_CODE_LNXK:
+ 		break;
+ 	default:
+ 		err = -EINVAL;
+@@ -1603,6 +1858,13 @@ vhd_parent_locator_read(vhd_context_t *ctx,
+ 		name = vhd_w2u_decode_location(raw, out,
+ 					       loc->data_len, UTF_16LE);
+ 		break;
++	case PLAT_CODE_WI2K:
++	case PLAT_CODE_WI2R:
++		name = vhd_wi2_decode_location(raw, out, loc->data_len);
++		break;
++	case PLAT_CODE_LNXK:
++	case PLAT_CODE_LNXU:
++		name = vhd_lnx_decode_location(raw, out, loc->data_len);
+ 	}
+ 
+ 	if (!name) {
+@@ -1688,6 +1950,10 @@ vhd_parent_locator_write_at(vhd_context_t *ctx,
+ 	case PLAT_CODE_MACX:
+ 	case PLAT_CODE_W2KU:
+ 	case PLAT_CODE_W2RU:
++	case PLAT_CODE_WI2K:
++	case PLAT_CODE_WI2R:
++	case PLAT_CODE_LNXU:
++	case PLAT_CODE_LNXK:
+ 		break;
+ 	default:
+ 		return -EINVAL;
+@@ -1710,7 +1976,7 @@ vhd_parent_locator_write_at(vhd_context_t *ctx,
+ 		goto out;
+ 	}
+ 
+-	relative_path = relative_path_to(ctx->file, absolute_path, &err);
++	relative_path = relative_path_to(ctx->file, parent, 0, &err);
+ 	if (!relative_path || err) {
+ 		err = (err ? err : -EINVAL);
+ 		goto out;
+@@ -1724,6 +1990,14 @@ vhd_parent_locator_write_at(vhd_context_t *ctx,
+ 	case PLAT_CODE_W2RU:
+ 		err = vhd_w2u_encode_location(relative_path, &encoded, &len);
+ 		break;
++	case PLAT_CODE_WI2K:
++	case PLAT_CODE_WI2R:
++		err = vhd_wi2_encode_location(relative_path, &encoded, &len);
++		break;
++	case PLAT_CODE_LNXU:
++	case PLAT_CODE_LNXK:
++		err = vhd_lnx_encode_location(relative_path, &encoded, &len);
++		break;
+ 	default:
+ 		err = -EINVAL;
+ 	}
+@@ -1773,7 +2047,7 @@ out:
+ 		 * into loc->data_space to be compatible with MSFT, even though
+ 		 * this goes against the specs
+ 		 */
+-		loc->data_space  = size; 
++		loc->data_space  = size;
+ 		loc->data_offset = off;
+ 	}
+ 
+@@ -1942,10 +2216,14 @@ int
+ vhd_write_footer(vhd_context_t *ctx, vhd_footer_t *footer)
+ {
+ 	int err;
+-	off_t off;
++	off_t off, end;
++
++	err = vhd_footer_offset_at_eof(ctx, &end);
++	if (err)
++		return err;
+ 
+ 	if (ctx->is_block)
+-		err = vhd_footer_offset_at_eof(ctx, &off);
++		off = end;
+ 	else
+ 		err = vhd_end_of_data(ctx, &off);
+ 	if (err)
+@@ -1955,6 +2233,12 @@ vhd_write_footer(vhd_context_t *ctx, vhd_footer_t *footer)
+ 	if (err)
+ 		return err;
+ 
++	if (off != end) {
++		err = ftruncate(ctx->fd, off + sizeof(vhd_footer_t));
++		if (err)
++			return err;
++	}
++
+ 	if (!vhd_type_dynamic(ctx))
+ 		return 0;
+ 
+@@ -2137,6 +2421,46 @@ out:
+ 	return 0;
+ }
+ 
++#ifdef DYNAMIC_BATMAP_SAVE
++int
++vhd_write_dyn_batmap(vhd_meta_context_t *ctx, vhd_dyn_batmap_t *batmap)
++{
++	int err;
++	size_t map_size;
++
++	batmap->header.checksum = vhd_checksum_dyn_batmap(batmap);
++
++	map_size = vhd_sectors_to_bytes(batmap->header.batmap_size);
++
++	vhd_meta_seek(ctx, 0, SEEK_SET);
++
++	err  = vhd_meta_write(ctx, &batmap->header, sizeof(batmap->header));
++	if (err)
++		goto out;
++
++	vhd_meta_seek(ctx, batmap->header.batmap_offset, SEEK_SET);
++
++	VHDLOG("%s: writing batmap map checksum %u size %d at %ld\n",
++		ctx->file, batmap->header.checksum, (int)map_size,
++		batmap->header.batmap_offset);
++
++	err  = vhd_meta_write(ctx, batmap->map, map_size);
++	if (err)
++		goto out;
++
++	err  = vhd_meta_write(ctx, batmap->valid, map_size);
++	if (err)
++		goto out;
++
++	return 0;
++
++out:
++	if (err)
++		VHDLOG("%s: failed writing batmap: %d\n", ctx->file, err);
++	return err;
++}
++#endif
++
+ int
+ vhd_write_bitmap(vhd_context_t *ctx, uint32_t block, char *bitmap)
+ {
+@@ -2437,15 +2761,167 @@ vhd_close(vhd_context_t *ctx)
+ 	memset(ctx, 0, sizeof(vhd_context_t));
+ }
+ 
++#ifdef DYNAMIC_BATMAP
++int
++vhd_create_dynamic_batmap(vhd_context_t *ctx, vhd_dyn_batmap_t *dyn_batmap)
++{
++	int err, map_bytes;
++	vhd_batmap_header_t *header;
++
++	if (!vhd_type_dynamic(ctx))
++		return -EINVAL;
++
++	map_bytes = (ctx->header.max_bat_size + 7) >> 3;
++	header    = &dyn_batmap->header;
++
++	memset(header, 0, sizeof(vhd_batmap_header_t));
++	memcpy(header->cookie, VHD_BATMAP_COOKIE, sizeof(header->cookie));
++
++	header->batmap_offset  = sizeof(vhd_batmap_header_t);
++	header->batmap_size    = secs_round_up_no_zero(map_bytes);
++	header->batmap_version = VHD_BATMAP_CURRENT_VERSION;
++
++	map_bytes = vhd_sectors_to_bytes(header->batmap_size);
++
++	err = posix_memalign((void **)&dyn_batmap->map,
++			     VHD_SECTOR_SIZE, map_bytes);
++	if (err) {
++		dyn_batmap->map = NULL;
++		return -err;
++	}
++
++	memset(dyn_batmap->map, 0, map_bytes);
++
++	err = posix_memalign((void **)&dyn_batmap->valid,
++			     VHD_SECTOR_SIZE, map_bytes);
++	if (err) {
++		dyn_batmap->valid = NULL;
++		return -err;
++	}
++
++	memset(dyn_batmap->valid, 0, map_bytes);
++
++	VHDLOG("%s: done: map %p valid %p size %d\n", ctx->meta_ctx.file, dyn_batmap->map, dyn_batmap->valid, map_bytes);
++
++	return 0;
++}
++#endif
++
++#ifdef DYNAMIC_BATMAP_SAVE
++int
++vhd_meta_seek(vhd_meta_context_t *ctx, off64_t offset, int whence)
++{
++	off64_t off;
++
++	off = lseek64(ctx->fd, offset, whence);
++	if (off == (off64_t)-1) {
++		VHDLOG("%s: seek(0x%08"PRIx64", %d) failed: %d\n",
++		       ctx->file, offset, whence, -errno);
++		return -errno;
++	}
++
++	return 0;
++}
++
++int
++vhd_meta_read(vhd_meta_context_t *ctx, void *buf, size_t size)
++{
++	size_t ret;
++
++	errno = 0;
++
++	ret = read(ctx->fd, buf, size);
++	if (ret == size)
++		return 0;
++
++	VHDLOG("%s: read of %zu returned %zd, errno: %d\n",
++	       ctx->file, size, ret, -errno);
++
++	return (errno ? -errno : -EIO);
++}
++
++int
++vhd_meta_write(vhd_meta_context_t *ctx, void *buf, size_t size)
++{
++	size_t ret = 0;
++
++	errno = 0;
++
++	ret = write(ctx->fd, buf, size);
++	if (ret == size)
++		return 0;
++
++	VHDLOG("%s: write of %zu returned %zd, errno: %d\n",
++	       ctx->file, size, ret, -errno);
++
++	return (errno ? -errno : -EIO);
++}
++
++int
++vhd_meta_open(vhd_context_t *ctx, const char *file)
++{
++	vhd_meta_context_t *meta_ctx = &ctx->meta_ctx;
++	int err, oflags, file_name_len, base_name_len;
++
++	memset(meta_ctx, 0, sizeof(vhd_meta_context_t));
++	meta_ctx->fd     = -1;
++
++	file_name_len = strlen(file);
++	meta_ctx->file = malloc(file_name_len + 2);
++	if (!meta_ctx->file)
++		return -ENOMEM;
++
++	base_name_len = file_name_len - 3;
++
++	strncpy(meta_ctx->file, file, base_name_len);
++	strcpy(&meta_ctx->file[base_name_len], "data");
++
++	oflags = O_CREAT | O_RDWR;
++
++	VHDLOG("%s: open\n", meta_ctx->file);
++
++	meta_ctx->fd = open(meta_ctx->file, oflags, 0644);
++	if (meta_ctx->fd == -1) {
++		err = -errno;
++		VHDLOG("failed to open %s: %d\n", meta_ctx->file, err);
++		goto fail;
++	}
++
++	err = vhd_read_dyn_batmap(meta_ctx, &meta_ctx->dyn_batmap);
++	if (err)
++		vhd_create_dynamic_batmap(ctx, &meta_ctx->dyn_batmap);
++
++	return 0;
++
++fail:
++	if (meta_ctx->fd != -1)
++		close(ctx->fd);
++	free(meta_ctx->file);
++	memset(meta_ctx, 0, sizeof(vhd_meta_context_t));
++	return err;
++}
++
++void
++vhd_meta_close(vhd_meta_context_t *ctx)
++{
++	if (ctx->file)
++		close(ctx->fd);
++	free(ctx->file);
++	free(ctx->dyn_batmap.map);
++	free(ctx->dyn_batmap.valid);
++	memset(ctx, 0, sizeof(vhd_meta_context_t));
++}
++#endif
++
+ static inline void
+-vhd_initialize_footer(vhd_context_t *ctx, int type, uint64_t size)
++vhd_initialize_footer(vhd_context_t *ctx, vhd_uuid_t *uuid, int type, uint64_t size,
++		      vhd_flag_creat_t flags)
+ {
+ 	memset(&ctx->footer, 0, sizeof(vhd_footer_t));
+ 	memcpy(ctx->footer.cookie, HD_COOKIE, sizeof(ctx->footer.cookie));
+ 	ctx->footer.features     = HD_RESERVED;
+ 	ctx->footer.ff_version   = HD_FF_VERSION;
+ 	ctx->footer.timestamp    = vhd_time(time(NULL));
+-	ctx->footer.crtr_ver     = VHD_CURRENT_VERSION;
+ 	ctx->footer.crtr_os      = 0x00000000;
+ 	ctx->footer.orig_size    = size;
+ 	ctx->footer.curr_size    = size;
+@@ -2595,12 +3071,16 @@ vhd_write_parent_locators(vhd_context_t *ctx, const char *parent)
+ 	if (ctx->footer.type != HD_TYPE_DIFF)
+ 		return -EINVAL;
+ 
+-	off = ctx->batmap.header.batmap_offset + 
+-		vhd_sectors_to_bytes(ctx->batmap.header.batmap_size);
++	if (vhd_has_batmap(ctx))
++		off = ctx->batmap.header.batmap_offset +
++			vhd_sectors_to_bytes(ctx->batmap.header.batmap_size);
++	else
++		vhd_batmap_header_offset(ctx, &off);
++
+ 	if (off & (VHD_SECTOR_SIZE - 1))
+ 		off = vhd_bytes_padded(off);
+ 
+-	for (i = 0; i < 3; i++) {
++	for (i = 0; i <= 4; i++) {
+ 		switch (i) {
+ 		case 0:
+ 			code = PLAT_CODE_MACX;
+@@ -2611,6 +3091,12 @@ vhd_write_parent_locators(vhd_context_t *ctx, const char *parent)
+ 		case 2:
+ 			code = PLAT_CODE_W2RU;
+ 			break;
++		case 3:
++			code = PLAT_CODE_WI2K;
++			break;
++		case 4:
++			code = PLAT_CODE_WI2R;
++			break;
+ 		}
+ 
+ 		err = vhd_parent_locator_write_at(ctx, parent, off, code,
+@@ -2663,7 +3149,7 @@ vhd_change_parent(vhd_context_t *child, char *parent_path, int raw)
+ 		vhd_close(&parent);
+ 	}
+ 
+-	vhd_initialize_header_parent_name(child, ppath);
++	vhd_initialize_header_parent_name(child, parent_path);
+ 	child->header.prt_ts = vhd_time(stats.st_mtime);
+ 
+ 	for (i = 0; i < vhd_parent_locator_count(child); i++) {
+@@ -2674,12 +3160,16 @@ vhd_change_parent(vhd_context_t *child, char *parent_path, int raw)
+ 		case PLAT_CODE_MACX:
+ 		case PLAT_CODE_W2KU:
+ 		case PLAT_CODE_W2RU:
++		case PLAT_CODE_WI2K:
++		case PLAT_CODE_WI2R:
++		case PLAT_CODE_LNXU:
++		case PLAT_CODE_LNXK:
+ 			break;
+ 		default:
+ 			continue;
+ 		}
+ 
+-		err = vhd_parent_locator_write_at(child, ppath,
++		err = vhd_parent_locator_write_at(child, parent_path,
+ 						  loc->data_offset,
+ 						  loc->code, max, loc);
+ 		if (err) {
+@@ -2835,8 +3325,8 @@ vhd_set_phys_size(vhd_context_t *ctx, off_t size)
+ }
+ 
+ static int
+-__vhd_create(const char *name, const char *parent, uint64_t bytes, int type,
+-		vhd_flag_creat_t flags)
++__vhd_create(const char *name, const char *child, const char *parent,
++    vhd_uuid_t *uuid, uint64_t bytes, int type, vhd_flag_creat_t flags)
+ {
+ 	int err;
+ 	off_t off;
+@@ -2858,6 +3348,9 @@ __vhd_create(const char *name, const char *parent, uint64_t bytes, int type,
+ 
+ 	if (strnlen(name, VHD_MAX_NAME_LEN - 1) == VHD_MAX_NAME_LEN - 1)
+ 		return -ENAMETOOLONG;
++	if ((child != NULL) &&
++	    (strnlen(child, VHD_MAX_NAME_LEN - 1) == VHD_MAX_NAME_LEN - 1))
++		return -ENAMETOOLONG;
+ 
+ 	memset(&ctx, 0, sizeof(vhd_context_t));
+ 	footer = &ctx.footer;
+@@ -2870,17 +3363,17 @@ __vhd_create(const char *name, const char *parent, uint64_t bytes, int type,
+ 	if (ctx.fd == -1)
+ 		return -errno;
+ 
+-	ctx.file = strdup(name);
++	ctx.file = strdup((child != NULL) ? child : name);
+ 	if (!ctx.file) {
+ 		err = -ENOMEM;
+ 		goto out;
+ 	}
+ 
+-	err = vhd_test_file_fixed(ctx.file, &ctx.is_block);
++	err = vhd_test_file_fixed(name, &ctx.is_block);
+ 	if (err)
+ 		goto out;
+ 
+-	vhd_initialize_footer(&ctx, type, size);
++	vhd_initialize_footer(&ctx, uuid, type, size, flags);
+ 
+ 	if (type == HD_TYPE_FIXED) {
+ 		err = vhd_initialize_fixed_disk(&ctx);
+@@ -2900,9 +3393,11 @@ __vhd_create(const char *name, const char *parent, uint64_t bytes, int type,
+ 		if (err)
+ 			goto out;
+ 
+-		err = vhd_create_batmap(&ctx);
+-		if (err)
+-			goto out;
++		if (!vhd_flag_test(flags, VHD_FLAG_CREAT_MS_COMPAT)) {
++			err = vhd_create_batmap(&ctx);
++			if (err)
++				goto out;
++		}
+ 
+ 		err = vhd_create_bat(&ctx);
+ 		if (err)
+@@ -2947,16 +3442,18 @@ out:
+ }
+ 
+ int
+-vhd_create(const char *name, uint64_t bytes, int type, vhd_flag_creat_t flags)
++vhd_create(const char *name, const char *child, vhd_uuid_t *uuid, uint64_t bytes,
++    int type, vhd_flag_creat_t flags)
+ {
+-	return __vhd_create(name, NULL, bytes, type, flags);
++	return __vhd_create(name, child, NULL, uuid, bytes, type, flags);
+ }
+ 
+ int
+-vhd_snapshot(const char *name, uint64_t bytes, const char *parent,
+-		vhd_flag_creat_t flags)
++vhd_snapshot(const char *name, const char *child, const char *parent,
++    vhd_uuid_t *uuid, uint64_t bytes, vhd_flag_creat_t flags)
+ {
+-	return __vhd_create(name, parent, bytes, HD_TYPE_DIFF, flags);
++	return __vhd_create(name, child, parent, uuid, bytes, HD_TYPE_DIFF,
++	    flags);
+ }
+ 
+ static int
+@@ -3291,10 +3788,17 @@ __vhd_io_dynamic_write(vhd_context_t *ctx,
+ 		if (err)
+ 			return err;
+ 
++#ifdef DYNAMIC_BATMAP
++		if ((vhd_has_dyn_batmap(ctx) &&
++		    vhd_dyn_batmap_test(&ctx->meta_ctx.dyn_batmap, blk)) ||
++		    (vhd_has_batmap(ctx) &&
++		    vhd_batmap_test(ctx, &ctx->batmap, blk)))
++			goto next;
++#else
+ 		if (vhd_has_batmap(ctx) &&
+ 		    vhd_batmap_test(ctx, &ctx->batmap, blk))
+ 			goto next;
+-
++#endif
+ 		err = vhd_read_bitmap(ctx, blk, &map);
+ 		if (err)
+ 			return err;
+@@ -3306,6 +3810,17 @@ __vhd_io_dynamic_write(vhd_context_t *ctx,
+ 		if (err)
+ 			goto fail;
+ 
++#ifdef DYNAMIC_BATMAP
++		if (vhd_has_dyn_batmap(ctx)) {
++			for (i = 0; i < ctx->spb; i++)
++				if (!vhd_bitmap_test(ctx, map, i)) {
++					free(map);
++					goto next;
++				}
++
++			vhd_dyn_batmap_set(&ctx->meta_ctx.dyn_batmap, blk);
++		} else
++#endif
+ 		if (vhd_has_batmap(ctx)) {
+ 			for (i = 0; i < ctx->spb; i++)
+ 				if (!vhd_bitmap_test(ctx, map, i)) {
+diff --git a/tools/blktap2/vhd/lib/relative-path.c b/tools/blktap2/vhd/lib/relative-path.c
+index 8b7cb71..2259f12 100644
+--- a/tools/blktap2/vhd/lib/relative-path.c
++++ b/tools/blktap2/vhd/lib/relative-path.c
+@@ -209,7 +209,7 @@ node_offset(char *from, int offset)
+  * result should be freed
+  */
+ char *
+-relative_path_to(char *from, char *to, int *err)
++relative_path_to(const char *from, const char *to, int real, int *err)
+ {
+ 	int from_nodes, common;
+ 	char *to_absolute, *from_absolute;
+@@ -229,14 +229,20 @@ relative_path_to(char *from, char *to, int *err)
+ 		return NULL;
+ 	}
+ 
+-	to_absolute = realpath(to, NULL);
++	if (real) {
++		to_absolute = realpath(to, NULL);
++		from_absolute = realpath(from, NULL);
++	} else {
++		to_absolute = strdup(to);
++		from_absolute = strdup(from);
++	}
++
+ 	if (!to_absolute) {
+ 		EPRINTF("failed to get absolute path of %s\n", to);
+ 		*err = -errno;
+ 		goto out;
+ 	}
+ 
+-	from_absolute = realpath(from, NULL);
+ 	if (!from_absolute) {
+ 		EPRINTF("failed to get absolute path of %s\n", from);
+ 		*err = -errno;
+diff --git a/tools/blktap2/vhd/lib/vhd-util-check.c b/tools/blktap2/vhd/lib/vhd-util-check.c
+index af07426..9d81652 100644
+--- a/tools/blktap2/vhd/lib/vhd-util-check.c
++++ b/tools/blktap2/vhd/lib/vhd-util-check.c
+@@ -72,7 +72,7 @@ vhd_util_check_footer_opened(vhd_footer_t *footer)
+ }
+ 
+ static char *
+-vhd_util_check_validate_footer(vhd_footer_t *footer)
++vhd_util_check_validate_footer(vhd_footer_t *footer, int ignoretime)
+ {
+ 	int size;
+ 	uint32_t checksum, now;
+@@ -114,9 +114,11 @@ ok:
+ 	    footer->data_offset != ~(0ULL))
+ 		return "invalid data offset";
+ 
+-	now = vhd_time(time(NULL));
+-	if (footer->timestamp > now + TIMESTAMP_MAX_SLACK)
+-		return "creation time in future";
++	if (!ignoretime) {
++		now = vhd_time(time(NULL));
++		if (footer->timestamp > now + TIMESTAMP_MAX_SLACK)
++			return "creation time in future";
++	}
+ 
+ 	if (!strncmp(footer->crtr_app, "tap", 3) &&
+ 	    footer->crtr_ver > VHD_CURRENT_VERSION)
+@@ -192,7 +194,7 @@ vhd_util_check_validate_header(int fd, vhd_header_t *header)
+ }
+ 
+ static char *
+-vhd_util_check_validate_differencing_header(vhd_context_t *vhd)
++vhd_util_check_validate_differencing_header(vhd_context_t *vhd, int ignoretime)
+ {
+ 	vhd_header_t *header;
+ 
+@@ -202,9 +204,11 @@ vhd_util_check_validate_differencing_header(vhd_context_t *vhd)
+ 		char *parent;
+ 		uint32_t now;
+ 
+-		now = vhd_time(time(NULL));
+-		if (header->prt_ts > now + TIMESTAMP_MAX_SLACK)
+-			return "parent creation time in future";
++		if (!ignoretime) {
++			now = vhd_time(time(NULL));
++			if (header->prt_ts > now + TIMESTAMP_MAX_SLACK)
++				return "parent creation time in future";
++		}
+ 
+ 		if (vhd_header_decode_parent(vhd, header, &parent))
+ 			return "invalid parent name";
+@@ -275,8 +279,12 @@ vhd_util_check_validate_parent_locator(vhd_context_t *vhd,
+ 		return "invalid platform code";
+ 
+ 	if (loc->code == PLAT_CODE_NONE) {
+-		if (vhd_util_check_zeros(loc, sizeof(*loc)))
+-			return "non-zero locator";
++//
++// The spec does not require the locator to be all zero when the
++// the platform code is None (0x0).
++//
++//		if (vhd_util_check_zeros(loc, sizeof(*loc)))
++//			return "non-zero locator";
+ 
+ 		return NULL;
+ 	}
+@@ -331,7 +339,7 @@ out:
+ }
+ 
+ static int
+-vhd_util_check_footer(int fd, vhd_footer_t *footer, int ignore)
++vhd_util_check_footer(int fd, vhd_footer_t *footer, int ignore, int ignoretime)
+ {
+ 	size_t size;
+ 	int err, opened;
+@@ -376,7 +384,7 @@ vhd_util_check_footer(int fd, vhd_footer_t *footer, int ignore)
+ 	opened = vhd_util_check_footer_opened(&primary);
+ 	vhd_footer_in(&primary);
+ 
+-	msg = vhd_util_check_validate_footer(&primary);
++	msg = vhd_util_check_validate_footer(&primary, ignoretime);
+ 	if (msg) {
+ 		if (opened && ignore)
+ 			goto check_backup;
+@@ -412,7 +420,7 @@ check_backup:
+ 	memcpy(&backup, buf, sizeof(backup));
+ 	vhd_footer_in(&backup);
+ 
+-	msg = vhd_util_check_validate_footer(&backup);
++	msg = vhd_util_check_validate_footer(&backup, ignoretime);
+ 	if (msg) {
+ 		err = -EINVAL;
+ 		printf("backup footer invalid: %s\n", msg);
+@@ -498,11 +506,11 @@ out:
+ }
+ 
+ static int
+-vhd_util_check_differencing_header(vhd_context_t *vhd)
++vhd_util_check_differencing_header(vhd_context_t *vhd, int ignoretime)
+ {
+ 	char *msg;
+ 
+-	msg = vhd_util_check_validate_differencing_header(vhd);
++	msg = vhd_util_check_validate_differencing_header(vhd, ignoretime);
+ 	if (msg) {
+ 		printf("differencing header is invalid: %s\n", msg);
+ 		return -EINVAL;
+@@ -512,9 +520,24 @@ vhd_util_check_differencing_header(vhd_context_t *vhd)
+ }
+ 
+ static int
++uint32_cmp(const void *ap, const void *bp)
++{
++	const uint32_t *a = ap;
++	const uint32_t *b = bp;
++
++	if (*a < *b)
++		return (-1);
++	else if (*a == *b)
++		return (0);
++	else
++		return (1);
++}
++
++static int
+ vhd_util_check_bat(vhd_context_t *vhd)
+ {
+ 	off_t eof, eoh;
++	uint32_t off;
+ 	int i, j, err, block_size;
+ 
+ 	err = vhd_seek(vhd, 0, SEEK_END);
+@@ -553,52 +576,33 @@ vhd_util_check_bat(vhd_context_t *vhd)
+ 
+ 	eof  -= sizeof(vhd_footer_t);
+ 	eof >>= VHD_SECTOR_SHIFT;
+-	eoh >>= VHD_SECTOR_SHIFT;
+ 	block_size = vhd->spb + vhd->bm_secs;
+ 
+-	for (i = 0; i < vhd->header.max_bat_size; i++) {
+-		uint32_t off = vhd->bat.bat[i];
+-		if (off == DD_BLK_UNUSED)
+-			continue;
++	qsort(vhd->bat.bat, vhd->header.max_bat_size, sizeof (uint32_t),
++	    uint32_cmp);
+ 
+-		if (off < eoh) {
+-			printf("block %d (offset 0x%x) clobbers headers\n",
+-			       i, off);
+-			return -EINVAL;
+-		}
++	for (i = 1; i < vhd->header.max_bat_size; i++) {
++		/* DD_BLK_UNUSED is UINT32_MAX so once it's hit we are done */
++		if (vhd->bat.bat[i] == DD_BLK_UNUSED)
++			break;
+ 
+-		if (off + block_size > eof) {
+-			printf("block %d (offset 0x%x) clobbers footer\n",
+-			       i, off);
++		if (vhd->bat.bat[i] - vhd->bat.bat[i-1] < block_size) {
++			printf("block (offset 0x%x) clobbers block "
++			    "(offset 0x%x)\n", vhd->bat.bat[i-1],
++			    vhd->bat.bat[i]);
+ 			return -EINVAL;
+ 		}
++	}
+ 
+-		for (j = 0; j < vhd->header.max_bat_size; j++) {
+-			uint32_t joff = vhd->bat.bat[j];
+-
+-			if (i == j)
+-				continue;
+-
+-			if (joff == DD_BLK_UNUSED)
+-				continue;
+-
+-			if (off == joff)
+-				err = -EINVAL;
+-
+-			if (off > joff && off < joff + block_size)
+-				err = -EINVAL;
+-
+-			if (off + block_size > joff &&
+-			    off + block_size < joff + block_size)
+-				err = -EINVAL;
+-
+-			if (err) {
+-				printf("block %d (offset 0x%x) clobbers "
+-				       "block %d (offset 0x%x)\n",
+-				       i, off, j, joff);
+-				return err;
+-			}
+-		}
++	/*
++	 * Verify that the block with highest offset does not extend past the
++	 * end of the disk.
++	 */
++	off = vhd->bat.bat[i-1];
++	if ((off != DD_BLK_UNUSED) && ((off > eof) ||
++	    (eof - off < block_size))) {
++		printf("block (offset 0x%x) clobbers footer\n", off);
++		return -EINVAL;
+ 	}
+ 
+ 	return 0;
+@@ -642,13 +646,14 @@ vhd_util_check_batmap(vhd_context_t *vhd)
+ }
+ 
+ static int
+-vhd_util_check_parent_locators(vhd_context_t *vhd)
++vhd_util_check_parent_locators(vhd_context_t *vhd, int pvalidate)
+ {
+ 	int i, n, err;
+ 	vhd_parent_locator_t *loc;
+-	char *file, *ppath, *location, *pname;
+ 	const char *msg;
+-	int mac, macx, w2ku, w2ru, wi2r, wi2k, found;
++	char *file, *ppath, *location, *pname, *pbase;
++	int mac, macx, w2ku, w2ru, wi2r, wi2k, lnxk, lnxu, found;
++
+ 
+ 	mac      = 0;
+ 	macx     = 0;
+@@ -656,6 +661,8 @@ vhd_util_check_parent_locators(vhd_context_t *vhd)
+ 	w2ru     = 0;
+ 	wi2r     = 0;
+ 	wi2k     = 0;
++	lnxk	 = 0;
++	lnxu	 = 0;
+ 	found    = 0;
+ 	pname    = NULL;
+ 	ppath    = NULL;
+@@ -666,6 +673,7 @@ vhd_util_check_parent_locators(vhd_context_t *vhd)
+ 		printf("error decoding parent name: %d\n", err);
+ 		return err;
+ 	}
++	pbase = basename(pname);
+ 
+ 	n = sizeof(vhd->header.loc) / sizeof(vhd->header.loc[0]);
+ 	for (i = 0; i < n; i++) {
+@@ -714,15 +722,27 @@ vhd_util_check_parent_locators(vhd_context_t *vhd)
+ 				goto dup;
+ 			break;
+ 
++		case PLAT_CODE_LNXU:
++			if (lnxu++)
++				goto dup;
++			break;
++
++		case PLAT_CODE_LNXK:
++			if (lnxk++)
++				goto dup;
++			break;
++
+ 		default:
+ 			err = -EINVAL;
+-			printf("invalid  platform code for locator %d\n", i);
++			printf("invalid platform code for locator %d\n", i);
+ 			goto out;
+ 		}
+ 
+ 		if (loc->code != PLAT_CODE_MACX &&
+ 		    loc->code != PLAT_CODE_W2RU &&
+-		    loc->code != PLAT_CODE_W2KU)
++		    loc->code != PLAT_CODE_W2KU &&
++		    loc->code != PLAT_CODE_LNXK &&
++		    loc->code != PLAT_CODE_LNXU)
+ 			continue;
+ 
+ 		err = vhd_parent_locator_read(vhd, loc, &ppath);
+@@ -732,35 +752,40 @@ vhd_util_check_parent_locators(vhd_context_t *vhd)
+ 		}
+ 
+ 		file = basename(ppath);
+-		if (strcmp(pname, file)) {
++		if (strcmp(pbase, file)) {
+ 			err = -EINVAL;
+ 			printf("parent locator %d name (%s) does not match "
+ 			       "header name (%s)\n", i, file, pname);
+ 			goto out;
+ 		}
+ 
+-		err = vhd_find_parent(vhd, ppath, &location);
+-		if (err) {
+-			printf("error resolving %s: %d\n", ppath, err);
+-			goto out;
+-		}
++		if (pvalidate) {
++			err = vhd_find_parent(vhd, ppath, &location);
++			if (err) {
++				printf("error resolving %s: %d\n", ppath, err);
++				goto cont;
++			}
+ 
+-		err = access(location, R_OK);
+-		if (err && loc->code == PLAT_CODE_MACX) {
+-			err = -errno;
+-			printf("parent locator %d points to missing file %s "
+-				"(resolved to %s)\n", i, ppath, location);
+-			goto out;
+-		}
++			err = access(location, R_OK);
++			if (err && loc->code == PLAT_CODE_MACX) {
++				err = -errno;
++				printf("parent locator %d points to missing "
++				       "file %s (resolved to %s)\n",
++				       i, ppath, location);
++				goto cont;
++			}
+ 
+-		msg = vhd_util_check_validate_parent(vhd, location);
+-		if (msg) {
+-			err = -EINVAL;
+-			printf("invalid parent %s: %s\n", location, msg);
+-			goto out;
++			msg = vhd_util_check_validate_parent(vhd, location);
++			if (msg) {
++				err = -EINVAL;
++				printf("invalid parent %s: %s\n",
++				        location, msg);
++				goto out;
++			}
+ 		}
+ 
+ 		found++;
++	cont:
+ 		free(ppath);
+ 		free(location);
+ 		ppath = NULL;
+@@ -801,7 +826,8 @@ vhd_util_dump_headers(const char *name)
+ }
+ 
+ static int
+-vhd_util_check_vhd(const char *name, int ignore)
++vhd_util_check_vhd(const char *name, int ignore, int ignoretime, int pvalidate,
++    int ignorebats)
+ {
+ 	int fd, err;
+ 	vhd_context_t vhd;
+@@ -829,7 +855,7 @@ vhd_util_check_vhd(const char *name, int ignore)
+ 		return -errno;
+ 	}
+ 
+-	err = vhd_util_check_footer(fd, &footer, ignore);
++	err = vhd_util_check_footer(fd, &footer, ignore, ignoretime);
+ 	if (err)
+ 		goto out;
+ 
+@@ -844,22 +870,28 @@ vhd_util_check_vhd(const char *name, int ignore)
+ 	if (err)
+ 		goto out;
+ 
+-	err = vhd_util_check_differencing_header(&vhd);
++	err = vhd_util_check_differencing_header(&vhd, ignoretime);
+ 	if (err)
+ 		goto out;
+ 
+-	err = vhd_util_check_bat(&vhd);
+-	if (err)
+-		goto out;
++	if (!ignorebats) {
++		if (vhd_has_batmap(&vhd)) {
++			err = vhd_util_check_batmap(&vhd);
++			if (err)
++				goto out;
++		}
+ 
+-	if (vhd_has_batmap(&vhd)) {
+-		err = vhd_util_check_batmap(&vhd);
++		/*
++		 * The following check clobbers the in memory BAT so nothing
++		 * that uses the BAT should be called after it.
++		 */
++		err = vhd_util_check_bat(&vhd);
+ 		if (err)
+ 			goto out;
+ 	}
+ 
+ 	if (vhd.footer.type == HD_TYPE_DIFF) {
+-		err = vhd_util_check_parent_locators(&vhd);
++		err = vhd_util_check_parent_locators(&vhd, pvalidate);
+ 		if (err)
+ 			goto out;
+ 	}
+@@ -877,7 +909,8 @@ out:
+ }
+ 
+ static int
+-vhd_util_check_parents(const char *name, int ignore)
++vhd_util_check_parents(const char *name, int ignore, int ignoretime,
++    int ignorebats)
+ {
+ 	int err;
+ 	vhd_context_t vhd;
+@@ -908,7 +941,8 @@ vhd_util_check_parents(const char *name, int ignore)
+ 			free(cur);
+ 		cur = parent;
+ 
+-		err = vhd_util_check_vhd(cur, ignore);
++		err = vhd_util_check_vhd(cur, ignore, ignoretime, 1,
++		    ignorebats);
+ 		if (err)
+ 			goto out;
+ 	}
+@@ -926,19 +960,22 @@ vhd_util_check(int argc, char **argv)
+ {
+ 	char *name;
+ 	vhd_context_t vhd;
+-	int c, err, ignore, parents;
++	int c, err, ignore, ignorebats, ignoretime, parents, pvalidate;
+ 
+ 	if (!argc || !argv) {
+ 		err = -EINVAL;
+ 		goto usage;
+ 	}
+ 
+-	ignore  = 0;
+-	parents = 0;
+-	name    = NULL;
++	ignore     = 0;
++	ignorebats = 0;
++	ignoretime = 0;
++	parents    = 0;
++	pvalidate  = 1;
++	name       = NULL;
+ 
+ 	optind = 0;
+-	while ((c = getopt(argc, argv, "n:iph")) != -1) {
++	while ((c = getopt(argc, argv, "n:ipBPTh")) != -1) {
+ 		switch (c) {
+ 		case 'n':
+ 			name = optarg;
+@@ -949,6 +986,15 @@ vhd_util_check(int argc, char **argv)
+ 		case 'p':
+ 			parents = 1;
+ 			break;
++		case 'P':
++			pvalidate = 0;
++			break;
++		case 'B':
++			ignorebats = 1;
++			break;
++		case 'T':
++			ignoretime = 1;
++			break;
+ 		case 'h':
+ 			err = 0;
+ 			goto usage;
+@@ -963,18 +1009,22 @@ vhd_util_check(int argc, char **argv)
+ 		goto usage;
+ 	}
+ 
+-	err = vhd_util_check_vhd(name, ignore);
++	err = vhd_util_check_vhd(name, ignore, ignoretime, pvalidate,
++	    ignorebats);
+ 	if (err)
+ 		goto out;
+ 
+ 	if (parents)
+-		err = vhd_util_check_parents(name, ignore);
++		err = vhd_util_check_parents(name, ignore, ignoretime,
++		    ignorebats);
+ 
+ out:
+ 	return err;
+ 
+ usage:
+ 	printf("options: -n <file> [-i ignore missing primary footers] "
+-	       "[-p check parents] [-h help]\n");
++	       "[-p check parents] [-P don't validate parent] "
++	       "[-B don't validate bat(map)s] "
++	       "[-T don't validate timestamps] [-h help]\n");
+ 	return err;
+ }
+diff --git a/tools/blktap2/vhd/lib/vhd-util-coalesce.c b/tools/blktap2/vhd/lib/vhd-util-coalesce.c
+index 63dcf60..4c3e131 100644
+--- a/tools/blktap2/vhd/lib/vhd-util-coalesce.c
++++ b/tools/blktap2/vhd/lib/vhd-util-coalesce.c
+@@ -26,11 +26,21 @@
+ */
+ #include <errno.h>
+ #include <fcntl.h>
++#include <limits.h>
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <unistd.h>
+ 
+ #include "libvhd.h"
++#include "vhd-util.h"
++
++/*
++ * Call the callback each time this many sectors worth of in use blocks have
++ * been processed.
++ */
++#define	CALLBACK_SECTORS ((32*1024*1024) / 512) /* 32 MB in sectors */
++
++static coalesce_callback_t *coalesce_cb;
+ 
+ static int
+ __raw_io_write(int fd, char* buf, uint64_t sec, uint32_t secs)
+@@ -70,9 +80,6 @@ vhd_util_coalesce_block(vhd_context_t *vhd, vhd_context_t *parent,
+ 	map = NULL;
+ 	sec = block * vhd->spb;
+ 
+-	if (vhd->bat.bat[block] == DD_BLK_UNUSED)
+-		return 0;
+-
+ 	err = posix_memalign((void **)&buf, 4096, vhd->header.block_size);
+ 	if (err)
+ 		return -err;
+@@ -81,7 +88,14 @@ vhd_util_coalesce_block(vhd_context_t *vhd, vhd_context_t *parent,
+ 	if (err)
+ 		goto done;
+ 
+-	if (vhd_has_batmap(vhd) && vhd_batmap_test(vhd, &vhd->batmap, block)) {
++#ifdef DYNAMIC_BATMAP
++	if ((vhd_has_dyn_batmap(vhd) &&
++		vhd_dyn_batmap_test(&vhd->meta_ctx.dyn_batmap, block)) ||
++		(vhd_has_batmap(vhd) &&
++		vhd_batmap_test(vhd, &vhd->batmap, block))) {
++#else
++	if (vhd_has_batmap(vhd) && vhd_batmap_test(&vhd->batmap, block)) {
++#endif
+ 		if (parent->file)
+ 			err = vhd_io_write(parent, buf, sec, vhd->spb);
+ 		else
+@@ -127,11 +141,14 @@ int
+ vhd_util_coalesce(int argc, char **argv)
+ {
+ 	int err, c;
+-	uint64_t i;
++	uint64_t i, block;
+ 	char *name, *pname;
+ 	vhd_context_t vhd, parent;
+ 	int parent_fd = -1;
++	int merged_blocks;
++	int blocks_per_cb;
+ 
++	block = 0;
+ 	name  = NULL;
+ 	pname = NULL;
+ 	parent.file = NULL;
+@@ -140,11 +157,17 @@ vhd_util_coalesce(int argc, char **argv)
+ 		goto usage;
+ 
+ 	optind = 0;
+-	while ((c = getopt(argc, argv, "n:h")) != -1) {
++	while ((c = getopt(argc, argv, "b:n:p:h")) != -1) {
+ 		switch (c) {
++		case 'b':
++			block = strtoull(optarg, NULL, 0);
++			break;
+ 		case 'n':
+ 			name = optarg;
+ 			break;
++		case 'p':
++			pname = optarg;
++			break;
+ 		case 'h':
+ 		default:
+ 			goto usage;
+@@ -160,29 +183,42 @@ vhd_util_coalesce(int argc, char **argv)
+ 		return err;
+ 	}
+ 
+-	err = vhd_parent_locator_get(&vhd, &pname);
+-	if (err) {
+-		printf("error finding %s parent: %d\n", name, err);
+-		vhd_close(&vhd);
+-		return err;
+-	}
+-
+-	if (vhd_parent_raw(&vhd)) {
+-		parent_fd = open(pname, O_RDWR | O_DIRECT | O_LARGEFILE, 0644);
+-		if (parent_fd == -1) {
+-			err = -errno;
+-			printf("failed to open parent %s: %d\n", pname, err);
++	if (pname != NULL) {
++		err = vhd_open(&parent, pname, VHD_OPEN_RDWR);
++		if (err) {
++			printf("error opening parent %s: %d\n", pname, err);
+ 			vhd_close(&vhd);
+ 			return err;
+ 		}
+ 	} else {
+-		err = vhd_open(&parent, pname, VHD_OPEN_RDWR);
++		err = vhd_parent_locator_get(&vhd, &pname);
+ 		if (err) {
+-			printf("error opening %s: %d\n", pname, err);
+-			free(pname);
++			printf("error finding %s parent: %d\n", name, err);
+ 			vhd_close(&vhd);
+ 			return err;
+ 		}
++
++		if (vhd_parent_raw(&vhd)) {
++			parent_fd = open(pname, O_RDWR | O_DIRECT | O_LARGEFILE,
++					 0644);
++			if (parent_fd == -1) {
++				err = -errno;
++				printf("failed to open parent %s: %d\n", pname,
++				       err);
++				vhd_close(&vhd);
++				return err;
++			}
++		} else {
++			err = vhd_open(&parent, pname, VHD_OPEN_RDWR);
++			if (err) {
++				printf("error opening %s: %d\n", pname, err);
++				free(pname);
++				vhd_close(&vhd);
++				return err;
++			}
++		}
++
++		free(pname);
+ 	}
+ 
+ 	err = vhd_get_bat(&vhd);
+@@ -195,16 +231,35 @@ vhd_util_coalesce(int argc, char **argv)
+ 			goto done;
+ 	}
+ 
+-	for (i = 0; i < vhd.bat.entries; i++) {
++	if ((coalesce_cb != NULL) && !coalesce_cb(ULLONG_MAX)) {
++		err = -EINTR;
++		goto done;
++	}
++
++	blocks_per_cb = CALLBACK_SECTORS / vhd.spb;
++	merged_blocks = 0;
++
++	for (i = block; i < vhd.bat.entries; i++) {
++		if (vhd.bat.bat[i] == DD_BLK_UNUSED)
++			continue;
++
+ 		err = vhd_util_coalesce_block(&vhd, &parent, parent_fd, i);
+ 		if (err)
+ 			goto done;
++
++		if (coalesce_cb != NULL) {
++			merged_blocks++;
++			if (((merged_blocks % blocks_per_cb) == 0) &&
++			    !coalesce_cb(i)) {
++				err = -EINTR;
++				goto done;
++			}
++		}
+ 	}
+ 
+ 	err = 0;
+ 
+  done:
+-	free(pname);
+ 	vhd_close(&vhd);
+ 	if (parent.file)
+ 		vhd_close(&parent);
+@@ -213,6 +268,12 @@ vhd_util_coalesce(int argc, char **argv)
+ 	return err;
+ 
+ usage:
+-	printf("options: <-n name> [-h help]\n");
++	printf("options: <-n name> [-p parent] [-b block] [-h help]\n");
+ 	return -EINVAL;
+ }
++
++void
++vhd_util_coalesce_set_callback(coalesce_callback_t cb)
++{
++	coalesce_cb = cb;
++}
+diff --git a/tools/blktap2/vhd/lib/vhd-util-create.c b/tools/blktap2/vhd/lib/vhd-util-create.c
+index a9bdf05..3517dbd 100644
+--- a/tools/blktap2/vhd/lib/vhd-util-create.c
++++ b/tools/blktap2/vhd/lib/vhd-util-create.c
+@@ -37,8 +37,11 @@ vhd_util_create(int argc, char **argv)
+ 	char *name;
+ 	uint64_t size;
+ 	int c, sparse, err;
++	vhd_uuid_t uuid;
+ 	vhd_flag_creat_t flags;
+ 
++	vhd_uuid_clear(&uuid);
++
+ 	err       = -EINVAL;
+ 	size      = 0;
+ 	sparse    = 1;
+@@ -49,7 +52,7 @@ vhd_util_create(int argc, char **argv)
+ 		goto usage;
+ 
+ 	optind = 0;
+-	while ((c = getopt(argc, argv, "n:s:rh")) != -1) {
++	while ((c = getopt(argc, argv, "n:s:u:rMh")) != -1) {
+ 		switch (c) {
+ 		case 'n':
+ 			name = optarg;
+@@ -58,9 +61,15 @@ vhd_util_create(int argc, char **argv)
+ 			err  = 0;
+ 			size = strtoull(optarg, NULL, 10);
+ 			break;
++		case 'u':
++			vhd_uuid_from_string(&uuid, optarg);
++			break;
+ 		case 'r':
+ 			sparse = 0;
+ 			break;
++		case 'M':
++			vhd_flag_set(flags, VHD_FLAG_CREAT_MS_COMPAT);
++			break;
+ 		case 'h':
+ 		default:
+ 			goto usage;
+@@ -70,11 +79,11 @@ vhd_util_create(int argc, char **argv)
+ 	if (err || !name || optind != argc)
+ 		goto usage;
+ 
+-	return vhd_create(name, size << 20,
+-				  (sparse ? HD_TYPE_DYNAMIC : HD_TYPE_FIXED),
+-				  flags);
++	return vhd_create(name, NULL, &uuid, size << 20,
++		 	  (sparse ? HD_TYPE_DYNAMIC : HD_TYPE_FIXED), flags);
+ 
+ usage:
+-	printf("options: <-n name> <-s size (MB)> [-r reserve] [-h help]\n");
++	printf("options: <-n name> <-s size (MB)> [-u UUID] [-r reserve] "
++	       "[-M MS compat] [-h help]\n");
+ 	return -EINVAL;
+ }
+diff --git a/tools/blktap2/vhd/lib/vhd-util-modify.c b/tools/blktap2/vhd/lib/vhd-util-modify.c
+index b563d6a..b763606 100644
+--- a/tools/blktap2/vhd/lib/vhd-util-modify.c
++++ b/tools/blktap2/vhd/lib/vhd-util-modify.c
+@@ -55,18 +55,26 @@ vhd_util_modify(int argc, char **argv)
+ {
+ 	char *name;
+ 	vhd_context_t vhd;
+-	int err, c, size, parent, parent_raw;
++	int err, c, size, parent, parent_raw, uuid, creator;
+ 	off_t newsize = 0;
+ 	char *newparent = NULL;
++	char *newcreator = NULL;
++	vhd_uuid_t newuuid;
+ 
+ 	name       = NULL;
+ 	size       = 0;
+ 	parent     = 0;
+ 	parent_raw = 0;
++	uuid       = 0;
++	creator    = 0;
+ 
+ 	optind = 0;
+-	while ((c = getopt(argc, argv, "n:s:p:mh")) != -1) {
++	while ((c = getopt(argc, argv, "c:n:s:p:u:mh")) != -1) {
+ 		switch (c) {
++		case 'c':
++			creator = 1;
++			newcreator = optarg;
++			break;
+ 		case 'n':
+ 			name = optarg;
+ 			break;
+@@ -83,6 +91,10 @@ vhd_util_modify(int argc, char **argv)
+ 			parent = 1;
+ 			newparent = optarg;
+ 			break;
++		case 'u':
++			vhd_uuid_from_string(&newuuid, optarg);
++			uuid = 1;
++			break;
+ 		case 'm':
+ 			parent_raw = 1;
+ 			break;
+@@ -102,6 +114,11 @@ vhd_util_modify(int argc, char **argv)
+ 		return err;
+ 	}
+ 
++	if (creator) {
++		strncpy(vhd.footer.crtr_app, newcreator, 4);
++		err = vhd_write_footer(&vhd, &vhd.footer);
++	}
++
+ 	if (size) {
+ 		err = vhd_set_phys_size(&vhd, newsize);
+ 		if (err)
+@@ -120,6 +137,11 @@ vhd_util_modify(int argc, char **argv)
+ 		TEST_FAIL_AT(FAIL_REPARENT_END);
+ 	}
+ 
++	if (uuid) {
++		vhd_uuid_copy(&vhd.footer.uuid, &newuuid);
++		err = vhd_write_footer(&vhd, &vhd.footer);
++	}
++
+ done:
+ 	vhd_close(&vhd);
+ 	return err;
+@@ -127,6 +149,6 @@ done:
+ usage:
+ 	printf("*** Dangerous operations, use with care ***\n");
+ 	printf("options: <-n name> [-p NEW_PARENT set parent [-m raw]] "
+-			"[-s NEW_SIZE set size] [-h help]\n");
++			"[-s NEW_SIZE set size] [-u UUID] [-h help]\n");
+ 	return -EINVAL;
+ }
+diff --git a/tools/blktap2/vhd/lib/vhd-util-read.c b/tools/blktap2/vhd/lib/vhd-util-read.c
+index ac4d833..bdf6068 100644
+--- a/tools/blktap2/vhd/lib/vhd-util-read.c
++++ b/tools/blktap2/vhd/lib/vhd-util-read.c
+@@ -36,6 +36,7 @@
+ 
+ #define nsize     15
+ static char nbuf[nsize];
++static int verbose = 0;
+ 
+ static inline char *
+ __xconv(uint64_t num)
+@@ -179,6 +180,10 @@ code_name(uint32_t code)
+ 		return "PLAT_CODE_MAC";
+ 	case PLAT_CODE_MACX:
+ 		return "PLAT_CODE_MACX";
++	case PLAT_CODE_LNXU:
++		return "PLAT_CODE_LNXU";
++	case PLAT_CODE_LNXK:
++		return "PLAT_CODE_LNXK";
+ 	default:
+ 		return "UNKOWN";
+ 	}
+@@ -427,13 +432,30 @@ out:
+ }
+ 
+ static int
++vhd_util_check_zeros(void *buf, size_t size)
++{
++	int i;
++	char *p;
++
++	p = buf;
++	for (i = 0; i < size; i++)
++		if (p[i])
++			return i;
++
++	return 0;
++}
++
++static int
+ vhd_test_bitmap(vhd_context_t *vhd, uint64_t sector, int count, int hex)
+ {
+-	char *buf;
++	char *buf, *data_buf;
+ 	uint64_t cur;
+ 	int i, err, bit;
+ 	uint32_t blk, bm_blk, sec;
+ 
++	if (count == -1)
++		count = vhd->bat.entries * vhd->spb;
++
+ 	if (vhd_sectors_to_bytes(sector + count) > vhd->footer.curr_size) {
+ 		printf("sector %s past end of file\n", conv(hex, sector));
+ 		return -ERANGE;
+@@ -441,6 +463,7 @@ vhd_test_bitmap(vhd_context_t *vhd, uint64_t sector, int count, int hex)
+ 
+ 	bm_blk = -1;
+ 	buf    = NULL;
++	data_buf = NULL;
+ 
+ 	for (i = 0; i < count; i++) {
+ 		cur = sector + i;
+@@ -450,28 +473,45 @@ vhd_test_bitmap(vhd_context_t *vhd, uint64_t sector, int count, int hex)
+ 		if (blk != bm_blk) {
+ 			bm_blk = blk;
+ 			free(buf);
++			free(data_buf);
+ 			buf = NULL;
++			data_buf = NULL;
+ 
+ 			if (vhd->bat.bat[blk] != DD_BLK_UNUSED) {
+ 				err = vhd_read_bitmap(vhd, blk, &buf);
+ 				if (err)
+ 					goto out;
++
++				err = vhd_read_block(vhd, blk, &data_buf);
++				if (err)
++					goto out;
+ 			}
+ 		}
+ 
+ 		if (vhd->bat.bat[blk] == DD_BLK_UNUSED)
+ 			bit = 0;
+-		else
+-			bit = vhd_bitmap_test(vhd, buf, blk);
++		else {
++			bit = vhd_bitmap_test(vhd, buf, sec);
++
++			if (!bit &&
++			    vhd_util_check_zeros(&data_buf[sec*VHD_SECTOR_SIZE],
++				VHD_SECTOR_SIZE)) {
++				printf("Block %u Sector %u: zero bit with data\n",
++					blk, sec);
++			}
++		}
+ 
+ 	print:
+-		printf("block %s: ", conv(hex, blk));
+-		printf("sec: %s: %d\n", conv(hex, sec), bit);
++		if (verbose) {
++			printf("block %s: ", conv(hex, blk));
++			printf("sec: %s: %d\n", conv(hex, sec), bit);
++		}
+ 	}
+ 
+ 	err = 0;
+  out:
+ 	free(buf);
++	free(data_buf);
+ 	return err;
+ }
+ 
+@@ -606,7 +646,7 @@ vhd_util_read(int argc, char **argv)
+ 		goto usage;
+ 
+ 	optind = 0;
+-	while ((c = getopt(argc, argv, "n:pt:b:m:i:aj:d:c:r:xh")) != -1) {
++	while ((c = getopt(argc, argv, "n:pt:b:m:i:aj:d:c:r:xhv")) != -1) {
+ 		switch(c) {
+ 		case 'n':
+ 			name = optarg;
+@@ -615,35 +655,38 @@ vhd_util_read(int argc, char **argv)
+ 			headers = 1;
+ 			break;
+ 		case 't':
+-			lsec = strtoul(optarg, NULL, 10);
++			lsec = strtoul(optarg, NULL, 0);
+ 			break;
+ 		case 'b':
+-			bat = strtoull(optarg, NULL, 10);
++			bat = strtoull(optarg, NULL, 0);
+ 			break;
+ 		case 'm':
+-			bitmap = strtoull(optarg, NULL, 10);
++			bitmap = strtoull(optarg, NULL, 0);
+ 			break;
+ 		case 'i':
+-			tbitmap = strtoul(optarg, NULL, 10);
++			tbitmap = strtoul(optarg, NULL, 0);
+ 			break;
+ 		case 'a':
+ 			batmap = 1;
+ 			break;
+ 		case 'j':
+-			tbatmap = strtoull(optarg, NULL, 10);
++			tbatmap = strtoull(optarg, NULL, 0);
+ 			break;
+ 		case 'd':
+-			data = strtoull(optarg, NULL, 10);
++			data = strtoull(optarg, NULL, 0);
+ 			break;
+ 		case 'r':
+-			read = strtoull(optarg, NULL, 10);
++			read = strtoull(optarg, NULL, 0);
+ 			break;
+ 		case 'c':
+-			count = strtoul(optarg, NULL, 10);
++			count = strtoll(optarg, NULL, 0);
+ 			break;
+ 		case 'x':
+ 			hex = 1;
+ 			break;
++		case 'v':
++			verbose = 1;
++			break;
+ 		case 'h':
+ 		default:
+ 			goto usage;
+diff --git a/tools/blktap2/vhd/lib/vhd-util-repair.c b/tools/blktap2/vhd/lib/vhd-util-repair.c
+index 14ded81..1bcd09a 100644
+--- a/tools/blktap2/vhd/lib/vhd-util-repair.c
++++ b/tools/blktap2/vhd/lib/vhd-util-repair.c
+@@ -73,8 +73,10 @@ vhd_util_repair(int argc, char **argv)
+ 	}
+ 
+ 	err = vhd_write_footer_at(&vhd, &vhd.footer, eof);
++	if (!err)
++		err = ftruncate(vhd.fd, eof + 512LL);
+ 
+- done:
++  done:
+ 	vhd_close(&vhd);
+ 	return err;
+ 
+diff --git a/tools/blktap2/vhd/lib/vhd-util-snapshot.c b/tools/blktap2/vhd/lib/vhd-util-snapshot.c
+index 75960f9..7204c87 100644
+--- a/tools/blktap2/vhd/lib/vhd-util-snapshot.c
++++ b/tools/blktap2/vhd/lib/vhd-util-snapshot.c
+@@ -33,6 +33,29 @@
+ #include "libvhd.h"
+ 
+ static int
++vhd_compare_paths(char *path_a, char *path_b)
++{
++	char *canon_a, *canon_b;
++	int ret;
++
++	if ((canon_a = realpath(path_a, NULL)) == NULL) {
++		return -1;
++	}
++
++	if ((canon_b = realpath(path_b, NULL)) == NULL) {
++		free(canon_a);
++		return -1;
++	}
++
++	ret = strcmp(canon_a, canon_b) == 0 ? 1 : 0;
++
++	free(canon_a);
++	free(canon_b);
++
++	return ret;
++}
++
++static int
+ vhd_util_find_snapshot_target(const char *name, char **result, int *parent_raw)
+ {
+ 	int i, err;
+@@ -106,10 +129,14 @@ vhd_util_snapshot(int argc, char **argv)
+ {
+ 	vhd_flag_creat_t flags;
+ 	int c, err, prt_raw, limit;
+-	char *name, *pname, *ppath, *backing;
++	char *child, *name, *pname, *ppath, *backing;
++	vhd_uuid_t uuid;
+ 	uint64_t size;
+ 	vhd_context_t vhd;
+ 
++	vhd_uuid_clear(&uuid);
++
++	child   = NULL;
+ 	name    = NULL;
+ 	pname   = NULL;
+ 	ppath   = NULL;
+@@ -124,8 +151,11 @@ vhd_util_snapshot(int argc, char **argv)
+ 	}
+ 
+ 	optind = 0;
+-	while ((c = getopt(argc, argv, "n:p:l:mh")) != -1) {
++	while ((c = getopt(argc, argv, "c:n:p:l:u:mMh")) != -1) {
+ 		switch (c) {
++		case 'c':
++			child = optarg;
++			break;
+ 		case 'n':
+ 			name = optarg;
+ 			break;
+@@ -135,9 +165,15 @@ vhd_util_snapshot(int argc, char **argv)
+ 		case 'l':
+ 			limit = strtol(optarg, NULL, 10);
+ 			break;
++		case 'u':
++			vhd_uuid_from_string(&uuid, optarg);
++			break;
+ 		case 'm':
+ 			vhd_flag_set(flags, VHD_FLAG_CREAT_PARENT_RAW);
+ 			break;
++		case 'M':
++			vhd_flag_set(flags, VHD_FLAG_CREAT_MS_COMPAT);
++			break;
+ 		case 'h':
+ 			err = 0;
+ 			goto usage;
+@@ -163,7 +199,7 @@ vhd_util_snapshot(int argc, char **argv)
+ 			goto out;
+ 		}
+ 	} else {
+-		err = vhd_util_find_snapshot_target(ppath, &backing, &prt_raw);
++		err = vhd_util_find_snapshot_target(pname, &backing, &prt_raw);
+ 		if (err) {
+ 			backing = NULL;
+ 			goto out;
+@@ -173,8 +209,8 @@ vhd_util_snapshot(int argc, char **argv)
+ 		 * if the sizes of the parent chain are non-uniform, we need to 
+ 		 * pick the right size: that of the supplied parent
+ 		 */
+-		if (strcmp(ppath, backing)) {
+-			err = vhd_open(&vhd, ppath, VHD_OPEN_RDONLY);
++		if (!vhd_compare_paths(pname, backing)) {
++			err = vhd_open(&vhd, pname, VHD_OPEN_RDONLY);
+ 			if (err)
+ 				goto out;
+ 			size = vhd.footer.curr_size;
+@@ -201,7 +237,10 @@ vhd_util_snapshot(int argc, char **argv)
+ 			goto out;
+ 	}
+ 
+-	err = vhd_snapshot(name, size, backing, flags);
++	if (vhd_flag_test(flags, VHD_FLAG_CREAT_PARENT_RAW))
++		err = vhd_snapshot(name, NULL, backing, &uuid, size, flags);
++	else
++		err = vhd_snapshot(name, child, pname, &uuid, size, flags);
+ 
+ out:
+ 	free(ppath);
+@@ -210,7 +249,8 @@ out:
+ 	return err;
+ 
+ usage:
+-	printf("options: <-n name> <-p parent name> [-l snapshot depth limit]"
+-	       " [-m parent_is_raw] [-h help]\n");
++	printf("options: <-n name> <-p parent name> [-c child name] "
++	    "[-l snapshot depth limit] [-u UUID] [-m parent_is_raw] "
++	    "[-M MS compat] [-h help]\n");
+ 	return err;
+ }

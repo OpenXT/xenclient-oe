@@ -1,0 +1,76 @@
+diff --git a/tools/firmware/vgabios/vgabios.c b/tools/firmware/vgabios/vgabios.c
+index 0adce16..9ec5726 100644
+--- a/tools/firmware/vgabios/vgabios.c
++++ b/tools/firmware/vgabios/vgabios.c
+@@ -271,6 +271,9 @@ vgabios_init_func:
+ ;; init basic bios vars
+   call init_bios_area
+ 
++;; init table for mode3 resets
++  call init_mode3_reset
++
+ #ifdef VBE  
+ ;; init vbe functions
+   call vbe_init  
+@@ -604,6 +607,46 @@ ASM_END
+ 
+ // --------------------------------------------------------------------------------------------
+ /*
++ *  Boot time mode3 table init 
++ */
++ASM_START
++
++mode3_reset_table:
++  .word _video_param_table /* video params table addr */
++  .word 0xc000             /* video params table seg */
++
++  .word _palette2          /* palette2 addr */
++  .word 0xc000             /* palette2 seg */
++
++  .word _vgafont16         /* font16 addr */
++  .word 0xc000             /* font16 seg */
++
++  .ascii "M3RTBLE"
++  .byte  0x00
++
++init_mode3_reset:
++  push  ds
++  push  ax
++  push  dx
++  mov   ax, #0xc000
++  mov   ds, ax
++
++  mov   dx, # VGA_PORT_VGA_M3RSEG
++  out   dx, ax
++
++  mov   ax, #mode3_reset_table
++  mov   dx, # VGA_PORT_VGA_M3RADDR
++  out   dx, ax
++
++  pop   dx
++  pop   ax
++  pop   ds
++  ret
++
++ASM_END
++
++// --------------------------------------------------------------------------------------------
++/*
+  *  Boot time Splash screen
+  */
+ static void display_splash_screen()
+diff --git a/tools/firmware/vgabios/vgatables.h b/tools/firmware/vgabios/vgatables.h
+index 0f779ce..34daa1d 100644
+--- a/tools/firmware/vgabios/vgatables.h
++++ b/tools/firmware/vgabios/vgatables.h
+@@ -60,7 +60,9 @@
+ #define VGA_PORT_VBE_FLAG      0x3830 /* word */
+ #define VGA_PORT_VBE_MODE      0x3832 /* word */
+ #define VGA_PORT_VBE_POWER     0x3834 /* byte */
+-                                      /* 0x3035 - 0x303F unused */
++#define VGA_PORT_VGA_M3RADDR   0x3836 /* byte */
++#define VGA_PORT_VGA_M3RSEG    0x3838 /* byte */
++                                      /* 0x303A - 0x303F unused */
+ 
+ #define VGA_SHADOW_NONE        0x0000
+ #define VGA_SHADOW_ONLY        0x0001
