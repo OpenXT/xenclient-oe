@@ -1,0 +1,824 @@
+diff --git a/Makefile b/Makefile
+index 759bbbb..0f6583d 100644
+--- a/Makefile
++++ b/Makefile
+@@ -180,7 +180,7 @@ $(OUT)bios.bin.elf $(OUT)bios.bin: $(OUT)rom.o tools/checkrom.py
+ SRCVGA=src/output.c src/util.c src/pci.c \
+     vgasrc/vgabios.c vgasrc/vgafb.c vgasrc/vgafonts.c vgasrc/vbe.c \
+     vgasrc/stdvga.c vgasrc/stdvgamodes.c vgasrc/stdvgaio.c \
+-    vgasrc/clext.c vgasrc/bochsvga.c vgasrc/geodevga.c
++    vgasrc/clext.c vgasrc/bochsvga.c vgasrc/geodevga.c vgasrc/xengfx.c
+ 
+ CFLAGS16VGA = $(CFLAGS16INC) -Isrc
+ 
+diff --git a/vgasrc/Kconfig b/vgasrc/Kconfig
+index 0901c04..fc99283 100644
+--- a/vgasrc/Kconfig
++++ b/vgasrc/Kconfig
+@@ -41,6 +41,11 @@ menu "VGA ROM"
+             bool "GeodeLX"
+             help
+                 Build support for Geode LX vga.
++
++        config VGA_XENGFX
++            bool "XenGFX interface VGA BIOS"
++            help
++                Build support for XenGFX vga.
+     endchoice
+ 
+     choice
+@@ -97,6 +102,7 @@ menu "VGA ROM"
+         default 0x1234 if VGA_BOCHS
+         default 0x100b if VGA_GEODEGX2
+         default 0x1022 if VGA_GEODELX
++        default 0x5853 if VGA_XENGFX
+         default 0x0000
+         help
+             Vendor ID for the PCI ROM
+@@ -109,6 +115,7 @@ menu "VGA ROM"
+         default 0x1111 if VGA_BOCHS
+         default 0x0030 if VGA_GEODEGX2
+         default 0x2081 if VGA_GEODELX
++        default 0xC147 if VGA_XENGFX
+         default 0x0000
+         help
+             Device ID for the PCI ROM
+diff --git a/vgasrc/vgabios.h b/vgasrc/vgabios.h
+index 5adbf4b..eb90e57 100644
+--- a/vgasrc/vgabios.h
++++ b/vgasrc/vgabios.h
+@@ -108,6 +108,7 @@ extern u32 VBE_total_memory;
+ extern u32 VBE_capabilities;
+ extern u32 VBE_framebuffer;
+ extern u16 VBE_win_granularity;
++extern u8 VBE_linesize_align;
+ #define VBE_OEM_STRING "SeaBIOS VBE(C) 2011"
+ #define VBE_VENDOR_STRING "SeaBIOS Developers"
+ #define VBE_PRODUCT_STRING "SeaBIOS VBE Adapter"
+diff --git a/vgasrc/vgahw.h b/vgasrc/vgahw.h
+index af79dee..402afe7 100644
+--- a/vgasrc/vgahw.h
++++ b/vgasrc/vgahw.h
+@@ -8,12 +8,15 @@
+ #include "bochsvga.h" // bochsvga_set_mode
+ #include "stdvga.h" // stdvga_set_mode
+ #include "geodevga.h" // geodevga_setup
++#include "xengfx.h"
+ 
+ static inline struct vgamode_s *vgahw_find_mode(int mode) {
+     if (CONFIG_VGA_CIRRUS)
+         return clext_find_mode(mode);
+     if (CONFIG_VGA_BOCHS)
+         return bochsvga_find_mode(mode);
++    if (CONFIG_VGA_XENGFX)
++        return xengfx_find_mode(mode);
+     return stdvga_find_mode(mode);
+ }
+ 
+@@ -22,6 +25,8 @@ static inline int vgahw_set_mode(struct vgamode_s *vmode_g, int flags) {
+         return clext_set_mode(vmode_g, flags);
+     if (CONFIG_VGA_BOCHS)
+         return bochsvga_set_mode(vmode_g, flags);
++    if (CONFIG_VGA_XENGFX)
++        return xengfx_set_mode(vmode_g, flags);
+     return stdvga_set_mode(vmode_g, flags);
+ }
+ 
+@@ -30,6 +35,8 @@ static inline void vgahw_list_modes(u16 seg, u16 *dest, u16 *last) {
+         clext_list_modes(seg, dest, last);
+     else if (CONFIG_VGA_BOCHS)
+         bochsvga_list_modes(seg, dest, last);
++    else if (CONFIG_VGA_XENGFX)
++        xengfx_list_modes(seg, dest, last);
+     else
+         stdvga_list_modes(seg, dest, last);
+ }
+@@ -41,6 +48,8 @@ static inline int vgahw_setup(void) {
+         return bochsvga_setup();
+     if (CONFIG_VGA_GEODEGX2 || CONFIG_VGA_GEODELX)
+         return geodevga_setup();
++    if (CONFIG_VGA_XENGFX)
++        return xengfx_init();
+     return stdvga_setup();
+ }
+ 
+@@ -49,6 +58,8 @@ static inline int vgahw_get_window(struct vgamode_s *vmode_g, int window) {
+         return clext_get_window(vmode_g, window);
+     if (CONFIG_VGA_BOCHS)
+         return bochsvga_get_window(vmode_g, window);
++    if (CONFIG_VGA_XENGFX)
++        return xengfx_get_window(vmode_g, window);
+     return stdvga_get_window(vmode_g, window);
+ }
+ 
+@@ -58,6 +69,8 @@ static inline int vgahw_set_window(struct vgamode_s *vmode_g, int window
+         return clext_set_window(vmode_g, window, val);
+     if (CONFIG_VGA_BOCHS)
+         return bochsvga_set_window(vmode_g, window, val);
++    if (CONFIG_VGA_XENGFX)
++        return xengfx_set_window(vmode_g, window, val);
+     return stdvga_set_window(vmode_g, window, val);
+ }
+ 
+@@ -66,6 +79,8 @@ static inline int vgahw_get_linelength(struct vgamode_s *vmode_g) {
+         return clext_get_linelength(vmode_g);
+     if (CONFIG_VGA_BOCHS)
+         return bochsvga_get_linelength(vmode_g);
++    if (CONFIG_VGA_XENGFX)
++        return xengfx_get_linelength(vmode_g);
+     return stdvga_get_linelength(vmode_g);
+ }
+ 
+@@ -74,6 +89,8 @@ static inline int vgahw_set_linelength(struct vgamode_s *vmode_g, int val) {
+         return clext_set_linelength(vmode_g, val);
+     if (CONFIG_VGA_BOCHS)
+         return bochsvga_set_linelength(vmode_g, val);
++    if (CONFIG_VGA_XENGFX)
++        return xengfx_set_linelength(vmode_g, val);
+     return stdvga_set_linelength(vmode_g, val);
+ }
+ 
+@@ -82,6 +99,8 @@ static inline int vgahw_get_displaystart(struct vgamode_s *vmode_g) {
+         return clext_get_displaystart(vmode_g);
+     if (CONFIG_VGA_BOCHS)
+         return bochsvga_get_displaystart(vmode_g);
++    if (CONFIG_VGA_XENGFX)
++        return xengfx_get_displaystart(vmode_g);
+     return stdvga_get_displaystart(vmode_g);
+ }
+ 
+@@ -90,6 +109,8 @@ static inline int vgahw_set_displaystart(struct vgamode_s *vmode_g, int val) {
+         return clext_set_displaystart(vmode_g, val);
+     if (CONFIG_VGA_BOCHS)
+         return bochsvga_set_displaystart(vmode_g, val);
++    if (CONFIG_VGA_XENGFX)
++        return xengfx_set_displaystart(vmode_g, val);
+     return stdvga_set_displaystart(vmode_g, val);
+ }
+ 
+@@ -110,6 +131,8 @@ static inline int vgahw_size_state(int states) {
+         return clext_size_state(states);
+     if (CONFIG_VGA_BOCHS)
+         return bochsvga_size_state(states);
++    if (CONFIG_VGA_XENGFX)
++        return xengfx_size_state(states);
+     return stdvga_size_state(states);
+ }
+ 
+@@ -118,6 +141,8 @@ static inline int vgahw_save_state(u16 seg, void *data, int states) {
+         return clext_save_state(seg, data, states);
+     if (CONFIG_VGA_BOCHS)
+         return bochsvga_save_state(seg, data, states);
++    if (CONFIG_VGA_XENGFX)
++        return xengfx_save_state(seg, data, states);
+     return stdvga_save_state(seg, data, states);
+ }
+ 
+@@ -126,14 +151,20 @@ static inline int vgahw_restore_state(u16 seg, void *data, int states) {
+         return clext_restore_state(seg, data, states);
+     if (CONFIG_VGA_BOCHS)
+         return bochsvga_restore_state(seg, data, states);
++    if (CONFIG_VGA_XENGFX)
++        return xengfx_restore_state(seg, data, states);
+     return stdvga_restore_state(seg, data, states);
+ }
+ 
+ static inline int vgahw_get_ddc_capabilities(u16 unit) {
++    if (CONFIG_VGA_XENGFX)
++        return xengfx_get_ddc_capabilities(unit);
+     return stdvga_get_ddc_capabilities(unit);
+ }
+ 
+ static inline int vgahw_read_edid(u16 unit, u16 block, u16 seg, void *data) {
++    if (CONFIG_VGA_XENGFX)
++        return xengfx_read_edid(unit, block, seg, data);
+     return stdvga_read_edid(unit, block, seg, data);
+ }
+ 
+diff --git a/vgasrc/xengfx.c b/vgasrc/xengfx.c
+new file mode 100644
+index 0000000..6228d35
+--- /dev/null
++++ b/vgasrc/xengfx.c
+@@ -0,0 +1,482 @@
++#include "vgabios.h" // struct vbe_modeinfo
++#include "vbe.h" // VBE_CAPABILITY_8BIT_DAC
++#include "util.h" // dprintf
++#include "config.h" // CONFIG_*
++#include "biosvar.h" // GET_GLOBAL
++#include "stdvga.h" // VGAREG_SEQU_ADDRESS
++#include "pci.h" // pci_config_readl
++#include "pci_regs.h" // PCI_BASE_ADDRESS_0
++
++#include "xengfx.h"
++
++u16 XGFX_iobase VAR16 = 0;
++
++static struct xengfx_mode
++{
++    u16 mode;
++    struct vgamode_s info;
++} xengfx_modes[] VAR16 = {
++    { 0x100, { MM_PACKED, 640,  400,   8, 8, 16, SEG_GRAPH } },
++    { 0x101, { MM_PACKED, 640,  480,   8, 8, 16, SEG_GRAPH } },
++    { 0x102, { MM_PLANAR, 800,  600,   4, 8, 16, SEG_GRAPH } },
++    { 0x103, { MM_PACKED, 800,  600,   8, 8, 16, SEG_GRAPH } },
++    { 0x104, { MM_PLANAR, 1024, 768,   4, 8, 16, SEG_GRAPH } },
++    { 0x105, { MM_PACKED, 1024, 768,   8, 8, 16, SEG_GRAPH } },
++    { 0x106, { MM_PLANAR, 1280, 1024,  4, 8, 16, SEG_GRAPH } },
++    { 0x107, { MM_PACKED, 1280, 1024,  8, 8, 16, SEG_GRAPH } },
++    { 0x10D, { MM_DIRECT, 320,  200,  15, 8, 16, SEG_GRAPH } },
++    { 0x10E, { MM_DIRECT, 320,  200,  16, 8, 16, SEG_GRAPH } },
++    { 0x10F, { MM_DIRECT, 320,  200,  24, 8, 16, SEG_GRAPH } },
++    { 0x110, { MM_DIRECT, 640,  480,  15, 8, 16, SEG_GRAPH } },
++    { 0x111, { MM_DIRECT, 640,  480,  16, 8, 16, SEG_GRAPH } },
++    { 0x112, { MM_DIRECT, 640,  480,  24, 8, 16, SEG_GRAPH } },
++    { 0x113, { MM_DIRECT, 800,  600,  15, 8, 16, SEG_GRAPH } },
++    { 0x114, { MM_DIRECT, 800,  600,  16, 8, 16, SEG_GRAPH } },
++    { 0x115, { MM_DIRECT, 800,  600,  24, 8, 16, SEG_GRAPH } },
++    { 0x116, { MM_DIRECT, 1024, 768,  15, 8, 16, SEG_GRAPH } },
++    { 0x117, { MM_DIRECT, 1024, 768,  16, 8, 16, SEG_GRAPH } },
++    { 0x118, { MM_DIRECT, 1024, 768,  24, 8, 16, SEG_GRAPH } },
++    { 0x119, { MM_DIRECT, 1280, 1024, 15, 8, 16, SEG_GRAPH } },
++    { 0x11A, { MM_DIRECT, 1280, 1024, 16, 8, 16, SEG_GRAPH } },
++    { 0x11B, { MM_DIRECT, 1280, 1024, 24, 8, 16, SEG_GRAPH } },
++    { 0x11C, { MM_PACKED, 1600, 1200,  8, 8, 16, SEG_GRAPH } },
++    { 0x11D, { MM_DIRECT, 1600, 1200, 15, 8, 16, SEG_GRAPH } },
++    { 0x11E, { MM_DIRECT, 1600, 1200, 16, 8, 16, SEG_GRAPH } },
++    { 0x11F, { MM_DIRECT, 1600, 1200, 24, 8, 16, SEG_GRAPH } },
++    { 0x140, { MM_DIRECT,  320,  200, 32, 8, 16, SEG_GRAPH } },
++    { 0x141, { MM_DIRECT,  640,  400, 32, 8, 16, SEG_GRAPH } },
++    { 0x142, { MM_DIRECT,  640,  480, 32, 8, 16, SEG_GRAPH } },
++    { 0x143, { MM_DIRECT,  800,  600, 32, 8, 16, SEG_GRAPH } },
++    { 0x144, { MM_DIRECT, 1024,  768, 32, 8, 16, SEG_GRAPH } },
++    { 0x145, { MM_DIRECT, 1280, 1024, 32, 8, 16, SEG_GRAPH } },
++    { 0x146, { MM_PACKED,  320,  200,  8, 8, 16, SEG_GRAPH } },
++    { 0x147, { MM_DIRECT, 1600, 1200, 32, 8, 16, SEG_GRAPH } },
++    { 0x148, { MM_PACKED, 1152,  864,  8, 8, 16, SEG_GRAPH } },
++    { 0x149, { MM_DIRECT, 1152,  864, 15, 8, 16, SEG_GRAPH } },
++    { 0x14a, { MM_DIRECT, 1152,  864, 16, 8, 16, SEG_GRAPH } },
++    { 0x14b, { MM_DIRECT, 1152,  864, 24, 8, 16, SEG_GRAPH } },
++    { 0x14c, { MM_DIRECT, 1152,  864, 32, 8, 16, SEG_GRAPH } },
++    { 0x160, { MM_DIRECT, 1366,  768,  8, 8, 16, SEG_GRAPH } },
++    { 0x161, { MM_DIRECT, 1366,  768, 15, 8, 16, SEG_GRAPH } },
++    { 0x162, { MM_DIRECT, 1366,  768, 16, 8, 16, SEG_GRAPH } },
++    { 0x163, { MM_DIRECT, 1366,  768, 24, 8, 16, SEG_GRAPH } },
++    { 0x164, { MM_DIRECT, 1366,  768, 32, 8, 16, SEG_GRAPH } },
++    { 0x178, { MM_DIRECT, 1280,  800, 16, 8, 16, SEG_GRAPH } },
++    { 0x179, { MM_DIRECT, 1280,  800, 24, 8, 16, SEG_GRAPH } },
++    { 0x17a, { MM_DIRECT, 1280,  800, 32, 8, 16, SEG_GRAPH } },
++    { 0x17b, { MM_DIRECT, 1280,  960, 16, 8, 16, SEG_GRAPH } },
++    { 0x17c, { MM_DIRECT, 1280,  960, 24, 8, 16, SEG_GRAPH } },
++    { 0x17d, { MM_DIRECT, 1280,  960, 32, 8, 16, SEG_GRAPH } },
++    { 0x17e, { MM_DIRECT, 1440,  900, 16, 8, 16, SEG_GRAPH } },
++    { 0x17f, { MM_DIRECT, 1440,  900, 24, 8, 16, SEG_GRAPH } },
++    { 0x180, { MM_DIRECT, 1440,  900, 32, 8, 16, SEG_GRAPH } },
++    { 0x181, { MM_DIRECT, 1400, 1050, 16, 8, 16, SEG_GRAPH } },
++    { 0x182, { MM_DIRECT, 1400, 1050, 24, 8, 16, SEG_GRAPH } },
++    { 0x183, { MM_DIRECT, 1400, 1050, 32, 8, 16, SEG_GRAPH } },
++    { 0x184, { MM_DIRECT, 1680, 1050, 16, 8, 16, SEG_GRAPH } },
++    { 0x185, { MM_DIRECT, 1680, 1050, 24, 8, 16, SEG_GRAPH } },
++    { 0x186, { MM_DIRECT, 1680, 1050, 32, 8, 16, SEG_GRAPH } },
++    { 0x187, { MM_DIRECT, 1920, 1200, 16, 8, 16, SEG_GRAPH } },
++    { 0x188, { MM_DIRECT, 1920, 1200, 24, 8, 16, SEG_GRAPH } },
++    { 0x189, { MM_DIRECT, 1920, 1200, 32, 8, 16, SEG_GRAPH } },
++    { 0x18a, { MM_DIRECT, 2560, 1600, 16, 8, 16, SEG_GRAPH } },
++    { 0x18b, { MM_DIRECT, 2560, 1600, 24, 8, 16, SEG_GRAPH } },
++    { 0x18c, { MM_DIRECT, 2560, 1600, 32, 8, 16, SEG_GRAPH } },
++    { 0x18d, { MM_DIRECT, 1920, 1200, 16, 8, 16, SEG_GRAPH } },
++    { 0x18e, { MM_DIRECT, 1920, 1200, 24, 8, 16, SEG_GRAPH } },
++    { 0x18f, { MM_DIRECT, 1920, 1200, 32, 8, 16, SEG_GRAPH } },
++    { 0x190, { MM_DIRECT, 2560, 1600, 16, 8, 16, SEG_GRAPH } },
++    { 0x191, { MM_DIRECT, 2560, 1600, 24, 8, 16, SEG_GRAPH } },
++    { 0x192, { MM_DIRECT, 2560, 1600, 32, 8, 16, SEG_GRAPH } },
++    { 0x193, { MM_DIRECT,  768, 1024, 16, 8, 16, SEG_GRAPH } },
++    { 0x194, { MM_DIRECT,  768, 1024, 24, 8, 16, SEG_GRAPH } },
++    { 0x195, { MM_DIRECT,  768, 1024, 32, 8, 16, SEG_GRAPH } },
++    { 0x196, { MM_DIRECT, 1280,  720, 32, 8, 16, SEG_GRAPH } },
++    { 0x197, { MM_DIRECT, 1280,  768, 32, 8, 16, SEG_GRAPH } },
++    { 0x198, { MM_DIRECT, 1368,  768, 32, 8, 16, SEG_GRAPH } },
++    { 0x199, { MM_DIRECT, 1920, 1440, 32, 8, 16, SEG_GRAPH } },
++    { 0x19a, { MM_DIRECT, 2048, 1536, 32, 8, 16, SEG_GRAPH } },
++    { 0x19b, { MM_DIRECT, 2560, 1920, 32, 8, 16, SEG_GRAPH } },
++};
++
++static int is_xengfx_mode(struct vgamode_s *vmode_g)
++{
++    return (vmode_g >= &xengfx_modes[0].info
++            && vmode_g <= &xengfx_modes[ARRAY_SIZE(xengfx_modes)-1].info);
++}
++
++struct vgamode_s *xengfx_find_mode(int mode)
++{
++    struct xengfx_mode *m = xengfx_modes;
++    for (; m < &xengfx_modes[ARRAY_SIZE(xengfx_modes)]; m++)
++        if (GET_GLOBAL(m->mode) == mode)
++            return &m->info;
++    return stdvga_find_mode(mode);
++}
++
++static int xengfx_mode_nr(struct vgamode_s *vmode_g)
++{
++    struct xengfx_mode *m = container_of(vmode_g, struct xengfx_mode, info);
++
++    return GET_GLOBAL(m->mode);
++}
++
++void
++xengfx_list_modes(u16 seg, u16 *dest, u16 *last)
++{
++    struct xengfx_mode *m = xengfx_modes;
++    for (; m < &xengfx_modes[ARRAY_SIZE(xengfx_modes)] && dest<last; m++) {
++        u16 mode = GET_GLOBAL(m->mode);
++        if (mode == 0xffff)
++            continue;
++        SET_FARVAR(seg, *dest, mode);
++        dest++;
++    }
++    stdvga_list_modes(seg, dest, last);
++}
++
++int
++xengfx_get_window(struct vgamode_s *vmode_g, int window)
++{
++    return -1;
++}
++
++int
++xengfx_set_window(struct vgamode_s *vmode_g, int window, int val)
++{
++    return -1;
++}
++
++int
++xengfx_get_linelength(struct vgamode_s *vmode_g)
++{
++    return xengfx_mmio_read(XGFX_VCRTC_STRIDE); /* Stride */
++}
++
++int
++xengfx_set_linelength(struct vgamode_s *vmode_g, int val)
++{
++    stdvga_set_linelength(vmode_g, val);
++    u32 linesize = ALIGN(val, GET_GLOBAL(VBE_linesize_align));
++
++    xengfx_mmio_write(XGFX_VCRTC_STRIDE, linesize); /* Stride */
++
++    return 0;
++}
++
++int
++xengfx_get_displaystart(struct vgamode_s *vmode_g)
++{
++    return xengfx_mmio_read(XGFX_VCRTC_LINEOFFSET);
++}
++
++int
++xengfx_set_displaystart(struct vgamode_s *vmode_g, int val)
++{
++    stdvga_set_displaystart(vmode_g, val);
++
++    xengfx_mmio_write(XGFX_VCRTC_LINEOFFSET, val);
++    return 0;
++}
++
++int
++xengfx_get_dacformat(struct vgamode_s *vmode_g)
++{
++    return 6;
++}
++
++int
++xengfx_set_dacformat(struct vgamode_s *vmode_g, int val)
++{
++    return -1;
++}
++
++#if 0
++static void xengfx_gart_init(u32 gart_size, u32 stolen_base, u32 stolen_size)
++{
++    int i;
++
++    dprintf(1, "Initializing XenGFX GART...\n");
++
++    for (i = 0; i < (gart_size * 1024) && i < stolen_size; i++) {
++        /* gart[i] = pfn + i */
++        xengfx_mmio_write(0x200000 + i * 4, (stolen_base + i) | 0x80000000);
++    }
++    for (; i < (gart_size * 1024); i++) {
++        xengfx_mmio_write(0x200000 + i * 4, 0x0);
++    }
++    /* Flush */
++    xengfx_mmio_read(0x204);
++}
++#endif
++
++int
++xengfx_size_state(int states)
++{
++    int size = stdvga_size_state(states);
++    if (size < 0)
++        return size;
++    if (states & 8)
++        size += sizeof (struct xengfx_state);
++    return size;
++}
++
++int
++xengfx_save_state(u16 seg, void *data, int states)
++{
++    int ret = stdvga_save_state(seg, data, states);
++    if (ret < 0)
++        return ret;
++
++    if (!(states & 8))
++        return 0;
++
++    struct xengfx_state *s = (data + stdvga_size_state(states));
++    SET_FARVAR(seg, s->control, xengfx_mmio_read(XGFX_CONTROL));
++    SET_FARVAR(seg, s->isr, xengfx_mmio_read(XGFX_ISR));
++    SET_FARVAR(seg, s->crtc_control, xengfx_mmio_read(XGFX_VCRTC_CONTROL));
++    SET_FARVAR(seg, s->format, xengfx_mmio_read(XGFX_VCRTC_FORMAT));
++    SET_FARVAR(seg, s->hactive, xengfx_mmio_read(XGFX_VCRTC_HORIZONTAL_ACTIVE));
++    SET_FARVAR(seg, s->vactive, xengfx_mmio_read(XGFX_VCRTC_VERTICAL_ACTIVE));
++    SET_FARVAR(seg, s->stride, xengfx_mmio_read(XGFX_VCRTC_STRIDE));
++    SET_FARVAR(seg, s->base, xengfx_mmio_read(XGFX_VCRTC_BASE));
++    SET_FARVAR(seg, s->vbe_mode, xengfx_get_rsrvd(0));
++
++    return 0;
++}
++
++int
++xengfx_restore_state(u16 seg, void *data, int states)
++{
++    int ret = stdvga_restore_state(seg, data, states);
++    if (ret < 0)
++        return ret;
++
++    if (!(states & 8))
++        return 0;
++
++#if 0
++    u32 gart_size = xengfx_mmio_read(0x200);
++    u32 stolen_base = xengfx_mmio_read(0x208);
++    u32 stolen_size = xengfx_mmio_read(0x20C);
++
++    xengfx_gart_init(gart_size, stolen_base, stolen_size);
++#endif
++
++    struct xengfx_state *s = (data + stdvga_size_state(states));
++    xengfx_mmio_write(XGFX_CONTROL, GET_FARVAR(seg, s->control));
++    xengfx_mmio_write(XGFX_ISR, GET_FARVAR(seg, s->isr));
++    xengfx_mmio_write(XGFX_VCRTC_CONTROL, GET_FARVAR(seg, s->crtc_control));
++    xengfx_mmio_write(XGFX_VCRTC_FORMAT, GET_FARVAR(seg, s->format));
++    xengfx_mmio_write(XGFX_VCRTC_HORIZONTAL_ACTIVE, GET_FARVAR(seg, s->hactive));
++    xengfx_mmio_write(XGFX_VCRTC_VERTICAL_ACTIVE, GET_FARVAR(seg, s->vactive));
++    xengfx_mmio_write(XGFX_VCRTC_STRIDE, GET_FARVAR(seg, s->stride));
++    xengfx_mmio_write(XGFX_VCRTC_BASE, GET_FARVAR(seg, s->base));
++    xengfx_set_rsrvd(0, GET_FARVAR(seg, s->vbe_mode));
++
++    return 0;
++}
++
++static void xengfx_hires_enable(int enable)
++{
++    u32 control;
++
++    control = xengfx_mmio_read(XGFX_CONTROL);
++
++    if (enable)
++        control |= 0x1;
++    else
++        control &= ~0x1;
++
++    xengfx_mmio_write(XGFX_CONTROL, control);
++}
++
++int
++xengfx_set_mode(struct vgamode_s *vmode_g, int flags)
++{
++    if (! is_xengfx_mode(vmode_g)) {
++        xengfx_hires_enable(0);
++        return stdvga_set_mode(vmode_g, flags);
++    }
++
++    dprintf(1, "Setting mode %x...\n", xengfx_mode_nr(vmode_g));
++
++    u8 depth = GET_GLOBAL(vmode_g->depth);
++    if (depth == 4)
++        stdvga_set_mode(stdvga_find_mode(0x6a), 0);
++    if (depth == 8)
++        // XXX load_dac_palette(3);
++        ;
++
++    u32 format;
++    u16 width = GET_GLOBAL(vmode_g->width);
++    u16 height = GET_GLOBAL(vmode_g->height);
++    u32 linesize = ALIGN(DIV_ROUND_UP(width * vga_bpp(vmode_g), 8),
++                         GET_GLOBAL(VBE_linesize_align));
++
++    switch (depth) {
++    case 15: format = XGFX_VCRTC_FORMAT_BGR555; break;  /* BGR555 */
++    case 16: format = XGFX_VCRTC_FORMAT_BGR565; break;  /* BGR565 */
++    case 24: format = XGFX_VCRTC_FORMAT_BGR888; break; /* BGR888 */
++    case 32: format = XGFX_VCRTC_FORMAT_BGRX8888; break; /* BGRX8888 */
++    }
++
++    xengfx_hires_enable(1);
++    xengfx_mmio_write(XGFX_VCRTC_CONTROL, 1); /* Enable CRTC */
++    xengfx_mmio_write(XGFX_VCRTC_FORMAT, format); /* Format */
++    xengfx_mmio_write(XGFX_VCRTC_HORIZONTAL_ACTIVE, width - 1); /* Horizontal active */
++    xengfx_mmio_write(XGFX_VCRTC_VERTICAL_ACTIVE, height - 1); /* Vertical active */
++    xengfx_mmio_write(XGFX_VCRTC_STRIDE, linesize); /* Stride */
++
++    xengfx_mmio_write(XGFX_VCRTC_BASE, 0); /* CRTC base */
++
++    xengfx_set_rsrvd(0, xengfx_mode_nr(vmode_g) & flags);
++
++    if (!(flags & MF_NOCLEARMEM)) {
++        /* Start Clearing and don't wait for completion */
++        xengfx_mmio_write(XGFX_STOLEN_CLEAR, 1);
++    }
++
++    return 0;
++}
++
++int
++xengfx_init(void)
++{
++    int ret = stdvga_setup();
++    if (ret)
++        return ret;
++
++    if (GET_GLOBAL(HaveRunInit))
++        return 0;
++
++    int bdf = GET_GLOBAL(VgaBDF);
++    if (bdf < 0) {
++        ret = find_pci_device(0x5853, 0xc147, 0, (u16 *)&bdf);
++        if (ret) {
++            dprintf(1, "XenGFX PCI device not found (rc=%x)\n", ret);
++            return -1;
++        }
++        SET_VGA(VgaBDF, bdf);
++    }
++    SET_VGA(XGFX_iobase, pci_config_readl(bdf, 0x20) & ~0x3);
++
++    u32 magic = xengfx_mmio_read(XGFX_MAGIC);
++    if (magic != 0x58464758) {
++        dprintf(1, "XenGFX wrong magic number (got %x)\n", magic);
++        return -1;
++    }
++    u32 aperture = pci_config_readl(bdf, 0x10) & ~0xf;
++
++    u32 rev = xengfx_mmio_read(XGFX_REV);
++    u32 stolen_size = xengfx_mmio_read(XGFX_STOLEN_SIZE);
++    u32 align = xengfx_mmio_read(XGFX_VCRTC_STRIDE_ALIGN);
++#if 0
++    u32 stolen_base = xengfx_mmio_read(XGFX_STOLEN_BASE);
++    u32 gart_size = xengfx_mmio_read(XGFX_GART_SIZE);
++#endif
++
++    SET_VGA(VBE_framebuffer, aperture);
++    SET_VGA(VBE_total_memory, stolen_size * 4096);
++    SET_VGA(VBE_capabilities, 0);
++    SET_VGA(VBE_linesize_align, align + 1);
++
++    dprintf(1, "XenGFX rev. %d, Total memory: %dM\n", rev,
++            stolen_size / 256);
++
++    dprintf(1, "Initializing XenGFX HW...\n");
++    //xengfx_mmio_read(XGFX_RESET); /* Reset */
++    xengfx_mmio_write(XGFX_CONTROL, 0); /* HIRES disabled INT disabled */
++    xengfx_mmio_write(XGFX_ISR, 0); /* Clear interrupts */
++
++#if 0
++    xengfx_gart_init(gart_size, stolen_base, stolen_size);
++#endif
++
++    u32 maxh = xengfx_mmio_read(XGFX_VCRTC_MAX_HORIZONTAL) + 1;
++    u32 maxv = xengfx_mmio_read(XGFX_VCRTC_MAX_VERTICAL) + 1;
++    u32 valid_fmt = xengfx_mmio_read(XGFX_VCRTC_VALID_FORMAT);
++
++    struct xengfx_mode *m = xengfx_modes;
++    for (; m < &xengfx_modes[ARRAY_SIZE(xengfx_modes)]; m++) {
++        u16 width = GET_GLOBAL(m->info.width);
++        u16 height = GET_GLOBAL(m->info.height);
++        u8 depth = GET_GLOBAL(m->info.depth);
++        u32 mem = (height * DIV_ROUND_UP(width * vga_bpp(&m->info), 8)
++                   * 4 / stdvga_bpp_factor(&m->info));
++
++        if (mem > stolen_size * 4096)
++            goto remove;
++        if (width > maxh)
++            goto remove;
++        if (height > maxv)
++            goto remove;
++
++        switch (depth) {
++        case 4:
++        case 8:
++            goto remove;
++        case 15:
++            if (!(valid_fmt & (XGFX_VCRTC_FORMAT_BGR555 |
++                               XGFX_VCRTC_FORMAT_BGR555)))
++                goto remove;
++            break;
++        case 16:
++            if (!(valid_fmt & (XGFX_VCRTC_FORMAT_RGB565 |
++                               XGFX_VCRTC_FORMAT_BGR565)))
++                goto remove;
++            break;
++        case 24:
++            if (!(valid_fmt & (XGFX_VCRTC_FORMAT_RGB888 |
++                               XGFX_VCRTC_FORMAT_BGR888)))
++                goto remove;
++            break;
++        case 32:
++            if (!(valid_fmt & (XGFX_VCRTC_FORMAT_RGBX8888 |
++                               XGFX_VCRTC_FORMAT_BGRX8888)))
++                goto remove;
++            break;
++        }
++
++        continue;
++remove:
++        dprintf(1, "Removing mode %x\n", GET_GLOBAL(m->mode));
++        SET_VGA(m->mode, 0xffff);
++    }
++
++    return 0;
++}
++
++int xengfx_get_ddc_capabilities(u16 unit)
++{
++    if (unit != 0)
++        return -1;
++
++    return (1 << 8) | VBE_DDC1_PROTOCOL_SUPPORTED;
++}
++
++int xengfx_read_edid(u16 unit, u16 block, u16 seg, void *data)
++{
++    u8 i;
++
++    if (unit != 0)
++        return -1;
++
++    if ((block * 128) >= 4096)
++        return -1;
++
++    xengfx_mmio_write(XGFX_VCRTC_EDID_REQUEST, 0x1);
++
++    /* Wait for EDID to be ready */
++    while (xengfx_mmio_read(XGFX_VCRTC_EDID_REQUEST) != 0)
++        ;
++
++    for (i = 0; i < 128; i += 4) {
++        u32 *dst = (u32 *)((u8 *)data + i);
++
++        SET_FARVAR(seg, *dst, xengfx_mmio_read(XGFX_VCRTC_EDID +
++                                               (block * 128) + i));
++    }
++
++    return 0;
++}
+diff --git a/vgasrc/xengfx.h b/vgasrc/xengfx.h
+new file mode 100644
+index 0000000..3702091
+--- /dev/null
++++ b/vgasrc/xengfx.h
+@@ -0,0 +1,133 @@
++#ifndef __XENGFX_H
++#define __XENGFX_H
++
++#include "types.h" // u8
++#include "ioport.h" // outw
++
++extern u16 XGFX_iobase;
++
++struct xengfx_state
++{
++    u32 control;
++    u32 isr;
++    u32 crtc_control;
++    u32 format;
++    u32 hactive;
++    u32 vactive;
++    u32 stride;
++    u32 base;
++
++    u16 vbe_mode;
++};
++
++#define XGFX_MAGIC                      0x0000
++#define XGFX_REV                        0x0004
++#define XGFX_CONTROL                    0x0100
++#define XGFX_ISR                        0x0104
++#define XGFX_GART_SIZE                  0x0200
++#define XGFX_INVALIDATE_GART            0x0204
++#define XGFX_STOLEN_BASE                0x0208
++#define XGFX_STOLEN_SIZE                0x020C
++#define XGFX_STOLEN_CLEAR               0x0210
++#define XGFX_NVCRTC                     0x0300
++#define XGFX_RESET                      0x0400
++#define XGFX_MADVISE                    0x1000
++#define XGFX_BIOS_RESERVED              0x2000
++#define XGFX_CONTROL_HIRES_EN           0x00000001
++#define XGFX_CONTROL_INT_EN             0x00000002
++#define XGFX_ISR_INT                    0x00000001
++
++#define XGFX_VCRTC_OFFSET               0x100000
++#define XGFX_VCRTC_STATUS               0x100000
++#define XGFX_VCRTC_STATUS_CHANGE        0x100004
++#define XGFX_VCRTC_STATUS_INT           0x100008
++#define XGFX_VCRTC_SCANLINE             0x10000C
++#define XGFX_VCRTC_EDID_REQUEST         0x101000
++#define XGFX_VCRTC_CONTROL              0x102000
++#define XGFX_VCRTC_VALID_FORMAT         0x102004
++#define XGFX_VCRTC_FORMAT               0x102008
++#define XGFX_VCRTC_MAX_HORIZONTAL       0x102010
++#define XGFX_VCRTC_HORIZONTAL_ACTIVE    0x102014
++#define XGFX_VCRTC_MAX_VERTICAL         0x102018
++#define XGFX_VCRTC_VERTICAL_ACTIVE      0x10201c
++#define XGFX_VCRTC_STRIDE_ALIGN         0x102020
++#define XGFX_VCRTC_STRIDE               0x102024
++#define XGFX_VCRTC_BASE                 0x103000
++#define XGFX_VCRTC_LINEOFFSET           0x104000
++#define XGFX_VCRTC_EDID                 0x105000
++#define XGFX_VCRTC_STATUS_HOTPLUG       0x00000001
++#define XGFX_VCRTC_STATUS_ONSCREEN      0x00000002
++#define XGFX_VCRTC_STATUS_RETRACE       0x00000004
++#define XGFX_VCRTC_CONTROL_ENABLE       0x00000001
++#define XGFX_VCRTC_FORMAT_NONE          0x00000000
++#define XGFX_VCRTC_FORMAT_RGB555        0x00000001
++#define XGFX_VCRTC_FORMAT_BGR555        0x00000002
++#define XGFX_VCRTC_FORMAT_RGB565        0x00000004
++#define XGFX_VCRTC_FORMAT_BGR565        0x00000008
++#define XGFX_VCRTC_FORMAT_RGB888        0x00000010
++#define XGFX_VCRTC_FORMAT_BGR888        0x00000020
++#define XGFX_VCRTC_FORMAT_RGBX8888      0x00000040
++#define XGFX_VCRTC_FORMAT_BGRX8888      0x00000080
++#define XGFX_GART_OFFSET                0x200000
++#define XGFX_GART_VALID_PFN             0x80000000
++#define XGFX_GART_CLEAR_PFN             0x00000000
++
++
++static inline int find_pci_device(u16 vendor_id, u16 device_id,
++                                  u16 index, u16 *bdf)
++{
++    int status;
++
++    asm volatile(
++            "int $0x1a\n"
++            "cli\n"
++            "cld"
++            : "=a"(status), "=b"(*bdf)
++            : "a"(0xb102), "c"(device_id), "d"(vendor_id), "S"(index)
++            : "cc", "memory");
++
++    return status >> 16;
++}
++
++static inline u32 xengfx_mmio_read(u32 addr)
++{
++    outl(addr, GET_GLOBAL(XGFX_iobase));
++    return inl(GET_GLOBAL(XGFX_iobase) + 4);
++}
++
++static inline void xengfx_mmio_write(u32 addr, u32 val)
++{
++    outl(addr, GET_GLOBAL(XGFX_iobase));
++    outl(val, GET_GLOBAL(XGFX_iobase) + 4);
++}
++
++static inline void xengfx_set_rsrvd(u32 offset, u32 val)
++{
++    xengfx_mmio_write(XGFX_BIOS_RESERVED + offset, val);
++}
++
++static inline u32 xengfx_get_rsrvd(u32 offset)
++{
++    return xengfx_mmio_read(XGFX_BIOS_RESERVED + offset);
++}
++
++struct vgamode_s *xengfx_find_mode(int mode);
++void xengfx_list_modes(u16 seg, u16 *dest, u16 *last);
++int xengfx_get_window(struct vgamode_s *vmode_g, int window);
++int xengfx_set_window(struct vgamode_s *vmode_g, int window, int val);
++int xengfx_get_linelength(struct vgamode_s *vmode_g);
++int xengfx_set_linelength(struct vgamode_s *vmode_g, int val);
++int xengfx_get_displaystart(struct vgamode_s *vmode_g);
++int xengfx_set_displaystart(struct vgamode_s *vmode_g, int val);
++int xengfx_get_dacformat(struct vgamode_s *vmode_g);
++int xengfx_set_dacformat(struct vgamode_s *vmode_g, int val);
++int xengfx_size_state(int states);
++int xengfx_save_state(u16 seg, void *data, int states);
++int xengfx_restore_state(u16 seg, void *data, int states);
++int xengfx_set_mode(struct vgamode_s *vmode_g, int flags);
++int xengfx_init(void);
++
++int xengfx_get_ddc_capabilities(u16 unit);
++int xengfx_read_edid(u16 unit, u16 block, u16 seg, void *data);
++
++#endif
