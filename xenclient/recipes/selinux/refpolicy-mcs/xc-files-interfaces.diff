@@ -1,0 +1,370 @@
+diff --git a/policy/modules/contrib/dbus.te b/policy/modules/contrib/dbus.te
+index 40a351d..809a3f8 100644
+--- a/policy/modules/contrib/dbus.te
++++ b/policy/modules/contrib/dbus.te
+@@ -164,6 +164,10 @@ optional_policy(`
+ 	udev_read_db(system_dbusd_t)
+ ')
+ 
++optional_policy(`
++	xc_dontaudit_search_config_dir(system_dbusd_t)
++')
++
+ ########################################
+ #
+ # Common session bus local policy
+diff --git a/policy/modules/contrib/dmidecode.te b/policy/modules/contrib/dmidecode.te
+index 0109e10..a0ba2bf 100644
+--- a/policy/modules/contrib/dmidecode.te
++++ b/policy/modules/contrib/dmidecode.te
+@@ -43,3 +43,7 @@ xen_dontaudit_rw_unix_stream_sockets(dmidecode_t)
+ optional_policy(`
+ 	statusreport_write_storage_files(dmidecode_t)
+ ')
++
++optional_policy(`
++	xc_dontaudit_read_etc_files(dmidecode_t)
++')
+diff --git a/policy/modules/contrib/firstboot.te b/policy/modules/contrib/firstboot.te
+index 5010f04..9ada905 100644
+--- a/policy/modules/contrib/firstboot.te
++++ b/policy/modules/contrib/firstboot.te
+@@ -119,6 +119,11 @@ optional_policy(`
+ ')
+ 
+ optional_policy(`
++	xc_manage_config_dirs(firstboot_t)
++	xc_relabelfrom_config_dirs(firstboot_t)
++')
++
++optional_policy(`
+ 	xserver_domtrans(firstboot_t)
+ 	xserver_rw_shm(firstboot_t)
+ 	xserver_unconfined(firstboot_t)
+diff --git a/policy/modules/contrib/loadkeys.te b/policy/modules/contrib/loadkeys.te
+index 9895358..b146899 100644
+--- a/policy/modules/contrib/loadkeys.te
++++ b/policy/modules/contrib/loadkeys.te
+@@ -57,6 +57,11 @@ optional_policy(`
+ 	nscd_dontaudit_search_pid(loadkeys_t)
+ ')
+ 
++optional_policy(`
++	xc_dontaudit_rw_v4v_chr(loadkeys_t)
++	xc_search_config_dirs(loadkeys_t)
++')
++
+ # allow loadkeys to read symlink at /usr/share/keymaps/ppc
+ files_read_usr_symlinks(loadkeys_t)
+ kernel_read_xen_state(loadkeys_t)
+diff --git a/policy/modules/contrib/networkmanager.te b/policy/modules/contrib/networkmanager.te
+index 64495aa..48c4791 100644
+--- a/policy/modules/contrib/networkmanager.te
++++ b/policy/modules/contrib/networkmanager.te
+@@ -363,6 +363,10 @@ optional_policy(`
+ ')
+ 
+ optional_policy(`
++	xc_files_rw_v4v_chr(NetworkManager_t)
++')
++
++optional_policy(`
+ 	xen_dontaudit_rw_unix_stream_sockets(NetworkManager_t)
+ 	xen_dbus_chat(NetworkManager_t)
+ ')
+diff --git a/policy/modules/contrib/qemu.te b/policy/modules/contrib/qemu.te
+index 060ec03..651bcd0 100644
+--- a/policy/modules/contrib/qemu.te
++++ b/policy/modules/contrib/qemu.te
+@@ -85,6 +85,13 @@ optional_policy(`
+ ')
+ 
+ optional_policy(`
++	xc_dontaudit_write_iso_files(qemu_t)
++	xc_files_rw_v4v_chr(qemu_t)
++	xc_read_iso_files(qemu_t)
++	xc_read_video_device(qemu_t)
++')
++
++optional_policy(`
+ 	xserver_user_x_domain_template(qemu, qemu_t, qemu_tmpfs_t)
+ ')
+ 
+diff --git a/policy/modules/contrib/xen.te b/policy/modules/contrib/xen.te
+index f6f511c..2fa1f87 100644
+--- a/policy/modules/contrib/xen.te
++++ b/policy/modules/contrib/xen.te
+@@ -139,6 +139,11 @@ domain_type(xm_t)
+ type xend_config_t;
+ files_type(xend_config_t);
+ 
++# var/lib/ovf/* files
++type xend_ovf_iso_t;
++xc_iso_type(xend_ovf_iso_t)
++xc_ovf_var_lib_filetrans(xend_t, xend_ovf_iso_t, file)
++
+ ########################################
+ #
+ # blktap local policy
+@@ -344,6 +349,24 @@ files_read_isid_type_files(xend_t)
+ files_read_isid_type_symlinks(xend_t)
+ files_search_isid_type_dirs(xend_t)
+ 
++xc_read_etc_files(xend_t)
++xc_getattr_config_files(xend_t)
++xc_read_config_files(xend_t)
++# never reads device.key file, just searches through /config/sec?
++xc_config_sec_dir_list(xend_t)
++xc_search_vhd_key_dirs(xend_t)
++xc_list_iso_files(xend_t)
++xc_read_iso_files(xend_t)
++xc_dontaudit_write_iso_files(xend_t)
++xc_search_service_disk_dir(xend_t)
++xc_getattr_service_disk_files(xend_t)
++xc_create_disks_dir(xend_t)
++xc_create_client_disk_files(xend_t)
++xc_delete_client_disk_files(xend_t)
++xc_write_client_disk_files(xend_t)
++xc_files_rw_v4v_chr(xend_t)
++xc_config_filetrans(xend_t, xend_config_t, { file dir })
++
+ fs_getattr_all_fs(xend_t)
+ fs_list_auto_mountpoints(xend_t)
+ fs_read_dos_files(xend_t)
+@@ -479,6 +502,10 @@ optional_policy(`
+ 	vhdutil_domtrans(xend_t)
+ ')
+ 
++optional_policy(`
++        xc_read_nilf_files(xend_t)
++')
++
+ ########################################
+ #
+ # Xen console local policy
+diff --git a/policy/modules/kernel/files.if b/policy/modules/kernel/files.if
+index 605acb8..5b18920 100644
+--- a/policy/modules/kernel/files.if
++++ b/policy/modules/kernel/files.if
+@@ -2719,6 +2719,8 @@ interface(`files_read_etc_files',`
+ 	allow $1 etc_t:dir list_dir_perms;
+ 	read_files_pattern($1, etc_t, etc_t)
+ 	read_lnk_files_pattern($1, etc_t, etc_t)
++
++	xc_search_config_dirs($1)
+ ')
+ 
+ ########################################
+diff --git a/policy/modules/services/ssh.te b/policy/modules/services/ssh.te
+index 0d1917b..92aa6a1 100644
+--- a/policy/modules/services/ssh.te
++++ b/policy/modules/services/ssh.te
+@@ -127,6 +127,10 @@ allow ssh_server ssh_home_t:dir list_dir_perms;
+ read_files_pattern(ssh_server, ssh_home_t, ssh_home_t)
+ read_lnk_files_pattern(ssh_server, ssh_home_t, ssh_home_t)
+ 
++optional_policy(`
++	xc_config_dir_search(ssh_server)
++')
++
+ kernel_read_kernel_sysctls(ssh_t)
+ kernel_read_system_state(ssh_t)
+ 
+@@ -199,6 +203,11 @@ tunable_policy(`user_tcp_server',`
+ ')
+ 
+ optional_policy(`
++	xc_files_rw_v4v_chr(ssh_t)
++	xc_search_config_dirs(ssh_t)
++')
++
++optional_policy(`
+ 	xserver_user_x_domain_template(ssh, ssh_t, ssh_tmpfs_t)
+ 	xserver_domtrans_xauth(ssh_t)
+ ')
+@@ -296,6 +305,10 @@ optional_policy(`
+ ')
+ 
+ optional_policy(`
++	xc_files_rw_v4v_chr(sshd_t)
++')
++
++optional_policy(`
+ 	xserver_domtrans_xauth(sshd_t)
+ ')
+ 
+@@ -345,5 +358,10 @@ optional_policy(`
+ 	udev_read_db(ssh_keygen_t)
+ ')
+ 
++# XC: ssh_keygen_t makes and stores keys in /config/ssh
++optional_policy(`
++	xc_config_dir_search(ssh_keygen_t)
++')
++
+ # load v4v module
+ kernel_request_load_module(sshd_t)
+diff --git a/policy/modules/system/authlogin.te b/policy/modules/system/authlogin.te
+index e022771..7e1d86f 100644
+--- a/policy/modules/system/authlogin.te
++++ b/policy/modules/system/authlogin.te
+@@ -148,6 +148,12 @@ optional_policy(`
+ 	nis_authenticate(chkpwd_t)
+ ')
+ 
++# these have got to be leaked file descriptors
++optional_policy(`
++	dev_search_sysfs(chkpwd_t)
++	xc_search_config_dirs(chkpwd_t)
++')
++
+ ########################################
+ #
+ # PAM local policy
+diff --git a/policy/modules/system/fstools.te b/policy/modules/system/fstools.te
+index bf8f609..5094411 100644
+--- a/policy/modules/system/fstools.te
++++ b/policy/modules/system/fstools.te
+@@ -213,3 +213,7 @@ optional_policy(`
+ 	kernel_dontaudit_read_xen_state(fsadm_t)
+ 	kernel_dontaudit_write_xen_state(fsadm_t)
+ ')
++
++optional_policy(`
++	xc_dontaudit_rw_v4v_chr(fsadm_t)
++')
+diff --git a/policy/modules/system/init.te b/policy/modules/system/init.te
+index b2bf44d..f3b1ba6 100644
+--- a/policy/modules/system/init.te
++++ b/policy/modules/system/init.te
+@@ -225,6 +225,10 @@ optional_policy(`
+ ')
+ 
+ optional_policy(`
++	xc_config_filetrans(init_t, init_flag_t, file)
++')
++
++optional_policy(`
+ 	unconfined_domain(init_t)
+ ')
+ 
+diff --git a/policy/modules/system/logging.te b/policy/modules/system/logging.te
+index 57088f7..5e5794f 100644
+--- a/policy/modules/system/logging.te
++++ b/policy/modules/system/logging.te
+@@ -530,6 +530,11 @@ optional_policy(`
+ ')
+ 
+ optional_policy(`
++	xc_dontaudit_search_storage(syslogd_t)
++	xc_dontaudit_search_config_dir(syslogd_t)
++')
++
++optional_policy(`
+ 	# log to the xconsole
+ 	xserver_rw_console(syslogd_t)
+ ')
+diff --git a/policy/modules/system/lvm.te b/policy/modules/system/lvm.te
+index 0f6788a..8eff776 100644
+--- a/policy/modules/system/lvm.te
++++ b/policy/modules/system/lvm.te
+@@ -395,9 +395,12 @@ optional_policy(`
+ ')
+ 
+ optional_policy(`
++	xc_dontaudit_config_sec_files_read(lvm_t)
++	xc_dontaudit_rw_v4v_chr(lvm_t)
+ 	xc_read_config_key_files(lvm_t)
+ 	xc_read_vhd_key_files(lvm_t)
+ 	xc_search_vhd_key_dirs(lvm_t)
++	xc_secure_files_read(lvm_t)
+ ')
+ 
+ optional_policy(`
+diff --git a/policy/modules/system/mount.te b/policy/modules/system/mount.te
+index 45cd105..2cc487f 100644
+--- a/policy/modules/system/mount.te
++++ b/policy/modules/system/mount.te
+@@ -258,3 +258,7 @@ optional_policy(`
+ 	statusreport_write_storage_files(mount_t)
+ 	statusreport_getattr_storage_files(mount_t)
+ ')
++
++optional_policy(`
++	xc_dontaudit_rw_v4v_chr(mount_t)
++')
+diff --git a/policy/modules/system/selinuxutil.te b/policy/modules/system/selinuxutil.te
+index c6576d4..f655947 100644
+--- a/policy/modules/system/selinuxutil.te
++++ b/policy/modules/system/selinuxutil.te
+@@ -330,6 +330,12 @@ if(secure_mode) {
+ 	userdom_spec_domtrans_all_users(newrole_t)
+ }
+ 
++# these have got to be leaked file descriptors
++optional_policy(`
++	dev_dontaudit_search_sysfs(newrole_t)
++	xc_dontaudit_search_config_dir(newrole_t)
++')
++
+ tunable_policy(`allow_polyinstantiation',`
+ 	files_polyinstantiate_all(newrole_t)
+ ')
+@@ -545,6 +551,10 @@ optional_policy(`
+ 	updatemgr_dontaudit_rw_stream_sockets(semanage_t)
+ ')
+ 
++optional_policy(`
++	xc_search_config_dirs(semanage_t)
++')
++
+ ########################################
+ #
+ # Setfiles local policy
+@@ -683,3 +693,7 @@ optional_policy(`
+ 	kernel_dontaudit_read_xen_state(setfiles_t)
+ 	kernel_dontaudit_write_xen_state(setfiles_t)
+ ')
++
++optional_policy(`
++	xc_dontaudit_rw_v4v_chr(setfiles_t)
++')
+diff --git a/policy/modules/system/sysnetwork.te b/policy/modules/system/sysnetwork.te
+index 62d82c3..78dec58 100644
+--- a/policy/modules/system/sysnetwork.te
++++ b/policy/modules/system/sysnetwork.te
+@@ -355,6 +355,10 @@ optional_policy(`
+ ')
+ 
+ optional_policy(`
++	xc_config_dir_search(dhcpc_t)
++')
++
++optional_policy(`
+ 	network_slave_rw_stream_sockets(ifconfig_t)
+ ')
+ 
+diff --git a/policy/modules/system/udev.te b/policy/modules/system/udev.te
+index 7aa0bea..d86c34e 100644
+--- a/policy/modules/system/udev.te
++++ b/policy/modules/system/udev.te
+@@ -305,6 +305,10 @@ optional_policy(`
+ ')
+ 
+ optional_policy(`
++	xc_dontaudit_search_config_dir(udev_t)
++')
++
++optional_policy(`
+ 	xserver_read_xdm_pid(udev_t)
+ ')
+ 
+@@ -333,4 +337,8 @@ dev_dontaudit_rw_generic_chr_files(udevrc_t)
+ fs_search_tmpfs(udevrc_t)
+ seutil_domtrans_setfiles(udevrc_t)
+ 
++optional_policy(`
++	xc_config_dir_search(udevrc_t)
++')
++
+ allow udevrc_t self:fifo_file manage_fifo_file_perms;
