@@ -1,0 +1,118 @@
+vgasrc: Add skeleton for VBE function 15h (VBE/DDC Standard)
+
+
+Signed-off-by: Julian Pidancet <julian.pidancet@gmail.com>
+diff --git a/src/vbe.h b/src/vbe.h
+index 386613c..b5aedc6 100644
+--- a/src/vbe.h
++++ b/src/vbe.h
+@@ -154,4 +154,9 @@ struct vbe_crtc_info {
+ #define VBE_DIRECTCOLOR_COLOR_RAMP_PROGRAMMABLE          0x01
+ #define VBE_DIRECTCOLOR_RESERVED_BITS_AVAILABLE          0x02
+ 
++/* Display Data Channel (DDC) */
++#define VBE_DDC1_PROTOCOL_SUPPORTED                      0x01
++#define VBE_DDC2_PROTOCOL_SUPPORTED                      0x02
++#define VBE_DDC_BLANK_DURING_TRANSFER                    0x04
++
+ #endif
+diff --git a/vgasrc/stdvga.c b/vgasrc/stdvga.c
+index 1dd947e..34e8917 100644
+--- a/vgasrc/stdvga.c
++++ b/vgasrc/stdvga.c
+@@ -500,3 +500,14 @@ stdvga_setup(void)
+ 
+     return 0;
+ }
++
++int stdvga_get_ddc_capabilities(u16 unit)
++{
++    return -1;
++}
++
++int stdvga_read_edid(u16 unit, u16 block, u16 seg, void *data)
++{
++    return -1;
++}
++
+diff --git a/vgasrc/stdvga.h b/vgasrc/stdvga.h
+index d712a32..238743d 100644
+--- a/vgasrc/stdvga.h
++++ b/vgasrc/stdvga.h
+@@ -108,5 +108,7 @@ int stdvga_save_state(u16 seg, void *data, int states);
+ int stdvga_restore_state(u16 seg, void *data, int states);
+ void stdvga_enable_video_addressing(u8 disable);
+ int stdvga_setup(void);
++int stdvga_get_ddc_capabilities(u16 unit);
++int stdvga_read_edid(u16 unit, u16 block, u16 seg, void *data);
+ 
+ #endif // stdvga.h
+diff --git a/vgasrc/vbe.c b/vgasrc/vbe.c
+index 0ce598c..8da522f 100644
+--- a/vgasrc/vbe.c
++++ b/vgasrc/vbe.c
+@@ -407,6 +407,39 @@ vbe_104f10(struct bregs *regs)
+ }
+ 
+ static void
++vbe_104f15(struct bregs *regs)
++{
++    int ret;
++    u16 seg = regs->es;
++    void *data = (void *)(regs->di+0);
++    u16 unit = regs->cx;
++    u16 block = regs->dx;
++
++    switch (regs->bl) {
++    case 0x00: /* Report VBE/DDC Capabilities */
++        ret = vgahw_get_ddc_capabilities(unit);
++        if (ret < 0)
++            goto fail;
++        regs->bh = ret >> 8; /* Approx. time in seconds, rounded up, to transfer
++                                one EDID block (128 bytes) */
++        regs->bl = ret & 0xff; /* DDC level supported */
++        break;
++    case 0x01: /* Read EDID */
++        ret = vgahw_read_edid(unit, block, seg, data);
++        if (ret < 0)
++            goto fail;
++        break;
++    default:
++        goto fail;
++    }
++    regs->ax = 0x004f;
++    return;
++
++fail:
++    regs->ax = 0x014f;
++}
++
++static void
+ vbe_104fXX(struct bregs *regs)
+ {
+     debug_stub(regs);
+@@ -433,6 +466,7 @@ handle_104f(struct bregs *regs)
+     case 0x08: vbe_104f08(regs); break;
+     case 0x0a: vbe_104f0a(regs); break;
+     case 0x10: vbe_104f10(regs); break;
++    case 0x15: vbe_104f15(regs); break;
+     default:   vbe_104fXX(regs); break;
+     }
+ }
+diff --git a/vgasrc/vgahw.h b/vgasrc/vgahw.h
+index f69a5ac..af79dee 100644
+--- a/vgasrc/vgahw.h
++++ b/vgasrc/vgahw.h
+@@ -129,4 +129,12 @@ static inline int vgahw_restore_state(u16 seg, void *data, int states) {
+     return stdvga_restore_state(seg, data, states);
+ }
+ 
++static inline int vgahw_get_ddc_capabilities(u16 unit) {
++    return stdvga_get_ddc_capabilities(unit);
++}
++
++static inline int vgahw_read_edid(u16 unit, u16 block, u16 seg, void *data) {
++    return stdvga_read_edid(unit, block, seg, data);
++}
++
+ #endif // vgahw.h
