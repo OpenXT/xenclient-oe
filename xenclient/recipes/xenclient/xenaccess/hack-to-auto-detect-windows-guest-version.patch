@@ -1,0 +1,265 @@
+diff --git a/xenaccess/windows_core.c b/xenaccess/windows_core.c
+index 15fbdc8..5b68fb4 100755
+--- a/xenaccess/windows_core.c
++++ b/xenaccess/windows_core.c
+@@ -127,6 +127,11 @@ int windows_init (xa_instance_t *instance)
+     xa_dbprint("**set instance->kpgd (0x%.8x).\n", instance->kpgd);
+ //    printf("kpgd search --> 0x%.8x\n", xa_find_kernel_pd(instance));
+ 
++    if (autofill_windows_instance(&(instance->os.windows_instance)) == XA_FAILURE){
++        xa_dbprint("--autofill_windows_instance() failed,\n");
++	goto error_exit;
++    }
++
+     /* get address start of process list */
+     xa_read_long_phys(
+         instance,
+diff --git a/xenaccess/windows_memory.c b/xenaccess/windows_memory.c
+index 8f6890e..6a70583 100755
+--- a/xenaccess/windows_memory.c
++++ b/xenaccess/windows_memory.c
+@@ -40,18 +40,11 @@ int windows_symbol_to_address (
+     /*TODO check symbol server */
+ }
+ 
+-/* find the ntoskrnl base address */
++/* Various base addresses that are known to exist across different
++   versions of windows.  If you add to this list, be sure to change
++   the value of NUM_BASE_ADDRESSES as well! */
+ #define NUM_BASE_ADDRESSES 11
+-uint32_t get_ntoskrnl_base (xa_instance_t *instance)
+-{
+-    uint32_t paddr;
+-    uint32_t sysproc_rva;
+-    int i = 0;
+-
+-    /* Various base addresses that are known to exist across different
+-       versions of windows.  If you add to this list, be sure to change
+-       the value of NUM_BASE_ADDRESSES as well! */
+-    uint32_t base_address[NUM_BASE_ADDRESSES] = {
++static uint32_t base_address[NUM_BASE_ADDRESSES] = {
+         0x00100000, /* NT 4 */
+         0x00400000, /* Windows 2000 */
+         0x004d4000, /* Windows XP */
+@@ -63,7 +56,80 @@ uint32_t get_ntoskrnl_base (xa_instance_t *instance)
+         0x004de000, /* Windows Server 2003 */
+         0x00800000, /* Windows Server 2003 SP1 */
+         0x01800000  /* Windows Vista */
+-    };
++};
++
++static
++void xp_instance(struct windows_instance *win)
++{
++	/* leave ntoskrnl untouched; it should already be set */
++	win->tasks_offset = 0x88;
++	win->pdbase_offset = 0x18;
++	win->pid_offset = 0x84;
++	win->name_offset = 0x174;
++	win->peb_offset = 0x1b0;
++	win->iba_offset = 0x8;
++	win->ph_offset = 0x18;
++	win->vm_ws_offset = 0x20c;
++}
++
++static
++void vista_instance(struct windows_instance *win)
++{
++	/* leave ntoskrnl untouched; it should already be set */
++	win->tasks_offset = 0xa0;
++	win->pdbase_offset = 0x18;
++	win->pid_offset = 0x9c;
++	win->name_offset = 0x14c;
++	win->peb_offset = 0x188;
++	win->iba_offset = 0x8;
++	win->ph_offset = 0x18;
++	win->vm_ws_offset = 0x208;
++}
++
++int autofill_windows_instance(struct windows_instance *instance)
++{
++	int ret = XA_SUCCESS;
++	uint32_t paddr = instance->ntoskrnl;
++	int found = 0;
++	int i = 0;
++	
++	//TODO-DRF: Parse the PE file to determine the OS version proper; 
++	//          look for the VERSION_INFO in the resource data as 
++        //          discussed in the link below:
++        // http://windowsir.blogspot.com/2006/09/os-detection-explained.html
++
++	/* HACK: determine the OS version by looking at its base address */
++	for (i = 0; i < NUM_BASE_ADDRESSES; ++i){
++		if (paddr == base_address[i]){
++			if (i >= 2 && i <= 7){ /*entries 2-7 are for XP*/
++				xp_instance(instance);
++				found = 1;
++			} else if (i == 10) {
++				vista_instance(instance);
++				found = 1;
++			}
++			break;
++		}
++	}
++
++	if (!found){
++		fprintf(stderr, "Could not autofill instance with base addr 0x%x\n", paddr);
++		ret = XA_FAILURE;
++		goto error_exit;
++	}
++
++error_exit:
++	
++	return ret;
++}
++
++
++/* find the ntoskrnl base address */
++uint32_t get_ntoskrnl_base (xa_instance_t *instance)
++{
++    uint32_t paddr;
++    uint32_t sysproc_rva;
++    int i = 0;
+ 
+     /* start by looking at known base addresses */
+     for (i = 0; i < NUM_BASE_ADDRESSES; ++i){
+diff --git a/xenaccess/xa_core.c b/xenaccess/xa_core.c
+index 1d5bca5..3acbdc8 100644
+--- a/xenaccess/xa_core.c
++++ b/xenaccess/xa_core.c
+@@ -471,12 +471,6 @@ int helper_init (xa_instance_t *instance)
+ #endif /* ENABLE_XEN */
+     }
+ 
+-    /* read in configure file information */
+-    if (read_config_file(instance) == XA_FAILURE){
+-        ret = xa_report_error(instance, 0, XA_EMINOR);
+-        if (XA_FAILURE == ret) goto error_exit;
+-    }
+-    
+     /* determine the page sizes and layout for target OS */
+     if (XA_MODE_XEN == instance->mode){
+ #ifdef ENABLE_XEN
+@@ -520,12 +514,14 @@ int helper_init (xa_instance_t *instance)
+     }
+ 
+     /* setup OS specific stuff */
+-    if (instance->os_type == XA_OS_LINUX){
+-        ret = linux_init(instance);
+-    }
+-    else if (instance->os_type == XA_OS_WINDOWS){
++    if (xa_is_windows(instance->m.xen.domain_id)){
++	instance->os_type = XA_OS_WINDOWS;
+         ret = windows_init(instance);
+     }
++    else{
++        fprintf(stderr, "ERROR: Domain %d is of unsupported type", instance->m.xen.domain_id);
++	ret = XA_FAILURE;
++    }
+ 
+ error_exit:
+     return ret;
+diff --git a/xenaccess/xa_domain_info.c b/xenaccess/xa_domain_info.c
+index 9f33e40..90f6218 100644
+--- a/xenaccess/xa_domain_info.c
++++ b/xenaccess/xa_domain_info.c
+@@ -99,6 +99,55 @@ error_exit:
+     return kernel;
+ }
+ 
++int xa_is_windows(int id)
++{
++    struct xs_handle *xsh = NULL;
++    xs_transaction_t xth = XBT_NULL;
++    char *tmp = NULL;
++    char *dompath = NULL;
++    char *osdistro = NULL;
++    int ret = 0;
++
++    tmp = malloc(100);
++    if (NULL == tmp){
++        fprintf(stderr, "ERROR: failed to allocate memory for tmp variable\n");
++	goto error_exit;
++    }
++
++    xsh = xs_domain_open();
++    if (NULL == xsh){
++        fprintf(stderr, "ERROR: failed to open connection to xenstore\n");
++	goto error_exit;
++    }
++
++    dompath = xs_get_domain_path(xsh, id);
++    if (NULL == dompath){
++        fprintf(stderr, "ERROR: domain id %d is not running\n", id);
++	goto error_exit;
++    }
++    
++    memset(tmp, 0, 100);
++    sprintf(tmp, "%s/data/os_distro", dompath);
++    osdistro = xs_read(xsh, xth, tmp, NULL);
++    if (NULL == osdistro){
++        fprintf(stderr, "ERROR: could not read %s\n", tmp);
++	goto error_exit;
++    }
++
++    if (strcmp("windows", osdistro) == 0){
++        ret = 1;
++    }
++
++error_exit:
++    /* cleanup memory here */
++    if (tmp) free(tmp);
++    if (dompath) free(dompath);
++    if (osdistro) free(osdistro);
++    if (xsh) xs_daemon_close(xsh);
++
++    return ret;
++}
++
+ /*TODO use Xen version info to to correct test the first time */
+ int xa_ishvm (int id)
+ {
+@@ -193,6 +242,7 @@ error_exit:
+ #else
+ char *xa_get_vmpath (int id){return NULL;}
+ char *xa_get_kernel_name (int id){return NULL;}
++int xa_is_windows(int id){return 0;}
+ int xa_ishvm (int id){return 0;}
+ uint32_t xa_get_domain_id (char *name){return 0;}
+ #endif /* ENABLE_XEN */
+diff --git a/xenaccess/xa_private.h b/xenaccess/xa_private.h
+index c923169..d308f2f 100644
+--- a/xenaccess/xa_private.h
++++ b/xenaccess/xa_private.h
+@@ -276,6 +276,15 @@ void *linux_access_kernel_symbol (
+ char *xa_get_kernel_name (int id);
+ 
+ /**
++ * Finds out whether the domU is running a Windows image.
++ *
++ * @param[in] id Domain id.
++ *
++ * @return 1 if domain is running windows. 0 otherwise.
++ */
++int xa_is_windows (int id);
++
++/**
+  * Finds out whether the domU is HVM (Hardware virtual machine).
+  *
+  * @param[in] id Domain id.
+diff --git a/xenaccess/xenaccess.h.in b/xenaccess/xenaccess.h.in
+index 2c01e4c..42ffabd 100644
+--- a/xenaccess/xenaccess.h.in
++++ b/xenaccess/xenaccess.h.in
+@@ -245,9 +245,11 @@ typedef struct xa_instance{
+             int tasks_offset;    /**< EPROCESS->ActiveProcessLinks */
+             int pdbase_offset;   /**< EPROCESS->Pcb.DirectoryTableBase */
+             int pid_offset;      /**< EPROCESS->UniqueProcessId */
++            int name_offset;     /**< EPROCESS->ImageFilename */
+             int peb_offset;      /**< EPROCESS->Peb */
+             int iba_offset;      /**< EPROCESS->Peb.ImageBaseAddress */
+             int ph_offset;       /**< EPROCESS->Peb.ProcessHeap */
++            int vm_ws_offset;    /**< EPROCESS->Vm.WorkingSetSize */
+         } windows_instance;
+     } os;
+     union{
