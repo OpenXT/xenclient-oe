@@ -1,0 +1,41 @@
+diff --git a/drivers/pci/pci.c b/drivers/pci/pci.c
+index d1b4e00..e7d416b 100644
+--- a/drivers/pci/pci.c
++++ b/drivers/pci/pci.c
+@@ -3705,6 +3705,27 @@ int pci_set_vga_state(struct pci_dev *dev, bool decode,
+ static char resource_alignment_param[RESOURCE_ALIGNMENT_PARAM_SIZE] = {0};
+ static DEFINE_SPINLOCK(resource_alignment_lock);
+ 
++static
++resource_size_t pci_auto_resource_alignment(struct pci_dev *dev)
++{
++	int i;
++	struct resource *r;
++	if (dev->hdr_type == PCI_HEADER_TYPE_BRIDGE ||
++	    (dev->hdr_type == PCI_HEADER_TYPE_NORMAL &&
++	     (dev->class >> 8) == PCI_CLASS_BRIDGE_HOST))
++		return 0;
++
++	/* move resources only if they are not page aligned */
++	for (i = 0; i < PCI_BRIDGE_RESOURCES; ++i) {
++		r = &dev->resource[i];
++		if (!(r->flags & IORESOURCE_MEM))
++			continue;
++		if (r->start & (PAGE_SIZE-1))
++			return PAGE_SIZE;
++	}
++	return 0;
++}
++
+ /**
+  * pci_specified_resource_alignment - get resource alignment specified by user.
+  * @dev: the PCI device to get
+@@ -3758,6 +3779,8 @@ resource_size_t pci_specified_resource_alignment(struct pci_dev *dev)
+ 		}
+ 		p++;
+ 	}
++	if (align < PAGE_SIZE)
++		align = pci_auto_resource_alignment(dev);
+ 	spin_unlock(&resource_alignment_lock);
+ 	return align;
+ }

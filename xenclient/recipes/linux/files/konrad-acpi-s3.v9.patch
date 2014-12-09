@@ -1,0 +1,116 @@
+diff --git a/arch/x86/include/asm/acpi.h b/arch/x86/include/asm/acpi.h
+index 0c44630..7b9c263 100644
+--- a/arch/x86/include/asm/acpi.h
++++ b/arch/x86/include/asm/acpi.h
+@@ -115,7 +115,7 @@ static inline void acpi_disable_pci(void)
+ }
+ 
+ /* Low-level suspend routine. */
+-extern int acpi_suspend_lowlevel(void);
++extern int (*acpi_suspend_lowlevel)(void);
+ 
+ /* Physical address to resume after wakeup */
+ #define acpi_wakeup_address ((unsigned long)(real_mode_header->wakeup_start))
+diff --git a/arch/x86/kernel/acpi/boot.c b/arch/x86/kernel/acpi/boot.c
+index bacf4b0..0bcf8c7 100644
+--- a/arch/x86/kernel/acpi/boot.c
++++ b/arch/x86/kernel/acpi/boot.c
+@@ -44,6 +44,7 @@
+ #include <asm/mpspec.h>
+ #include <asm/smp.h>
+ 
++#include "sleep.h" /* To include x86_acpi_suspend_lowlevel */
+ static int __initdata acpi_force = 0;
+ u32 acpi_rsdt_forced;
+ int acpi_disabled;
+@@ -560,6 +561,12 @@ static int acpi_register_gsi_ioapic(struct device *dev, u32 gsi,
+ int (*__acpi_register_gsi)(struct device *dev, u32 gsi,
+ 			   int trigger, int polarity) = acpi_register_gsi_pic;
+ 
++#ifdef CONFIG_ACPI_SLEEP
++int (*acpi_suspend_lowlevel)(void) = x86_acpi_suspend_lowlevel;
++#else
++int (*acpi_suspend_lowlevel)(void);
++#endif
++
+ /*
+  * success: return IRQ number (>=0)
+  * failure: return < 0
+diff --git a/arch/x86/kernel/acpi/sleep.c b/arch/x86/kernel/acpi/sleep.c
+index d5e0d71..a1c81d3 100644
+--- a/arch/x86/kernel/acpi/sleep.c
++++ b/arch/x86/kernel/acpi/sleep.c
+@@ -26,12 +26,12 @@ static char temp_stack[4096];
+ #endif
+ 
+ /**
+- * acpi_suspend_lowlevel - save kernel state
++ * x86_acpi_suspend_lowlevel - save kernel state
+  *
+  * Create an identity mapped page table and copy the wakeup routine to
+  * low memory.
+  */
+-int acpi_suspend_lowlevel(void)
++int x86_acpi_suspend_lowlevel(void)
+ {
+ 	struct wakeup_header *header =
+ 		(struct wakeup_header *) __va(real_mode_header->wakeup_header);
+diff --git a/arch/x86/kernel/acpi/sleep.h b/arch/x86/kernel/acpi/sleep.h
+index 67f59f8..c9c2c98 100644
+--- a/arch/x86/kernel/acpi/sleep.h
++++ b/arch/x86/kernel/acpi/sleep.h
+@@ -15,3 +15,5 @@ extern unsigned long acpi_copy_wakeup_routine(unsigned long);
+ extern void wakeup_long64(void);
+ 
+ extern void do_suspend_lowlevel(void);
++
++extern int x86_acpi_suspend_lowlevel(void);
+diff --git a/drivers/acpi/sleep.c b/drivers/acpi/sleep.c
+index df85051..500a7e8 100644
+--- a/drivers/acpi/sleep.c
++++ b/drivers/acpi/sleep.c
+@@ -484,6 +484,8 @@ static int acpi_suspend_enter(suspend_state_t pm_state)
+ 		break;
+ 
+ 	case ACPI_STATE_S3:
++		if (!acpi_suspend_lowlevel)
++			return -ENOSYS;
+ 		error = acpi_suspend_lowlevel();
+ 		if (error)
+ 			return error;
+diff --git a/include/xen/acpi.h b/include/xen/acpi.h
+index 48a9c01..960cb6f 100644
+--- a/include/xen/acpi.h
++++ b/include/xen/acpi.h
+@@ -40,14 +40,30 @@
+ #include <xen/xen.h>
+ #include <linux/acpi.h>
+ 
++extern u8 wake_sleep_flags;
++
+ int xen_acpi_notify_hypervisor_state(u8 sleep_state,
+ 				     u32 pm1a_cnt, u32 pm1b_cnd);
+ 
++static inline int xen_acpi_suspend_lowlevel(void)
++{
++	/*
++	* Xen will save and restore CPU context, so
++	* we can skip that and just go straight to
++	* the suspend.
++	*/
++	acpi_enter_sleep_state(ACPI_STATE_S3);
++	return 0;
++}
++
+ static inline void xen_acpi_sleep_register(void)
+ {
+-	if (xen_initial_domain())
++	if (xen_initial_domain()) {
+ 		acpi_os_set_prepare_sleep(
+ 			&xen_acpi_notify_hypervisor_state);
++
++		acpi_suspend_lowlevel = xen_acpi_suspend_lowlevel;
++	}
+ }
+ #else
+ static inline void xen_acpi_sleep_register(void)

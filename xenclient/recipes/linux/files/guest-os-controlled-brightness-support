@@ -1,0 +1,244 @@
+diff --git a/drivers/acpi/video.c b/drivers/acpi/video.c
+index ac9a69c..b05bde4 100644
+--- a/drivers/acpi/video.c
++++ b/drivers/acpi/video.c
+@@ -39,6 +39,7 @@
+ #include <linux/slab.h>
+ #include <asm/uaccess.h>
+ #include <linux/dmi.h>
++#include <xen/xenbus.h>
+ #include <acpi/acpi_bus.h>
+ #include <acpi/acpi_drivers.h>
+ #include <linux/suspend.h>
+@@ -86,6 +87,9 @@ module_param(allow_duplicates, bool, 0644);
+ static bool use_bios_initial_backlight = 1;
+ module_param(use_bios_initial_backlight, bool, 0644);
+ 
++static char brightness_levels[256]; /* up to 64 levels, more than enough */
++module_param_string(brightness_levels, brightness_levels, sizeof(brightness_levels), 0444);
++
+ static int register_count = 0;
+ static int acpi_video_bus_add(struct acpi_device *device);
+ static int acpi_video_bus_remove(struct acpi_device *device, int type);
+@@ -213,6 +217,8 @@ static const char device_decode[][30] = {
+ 	"UNKNOWN",
+ };
+ 
++static struct acpi_video_device_brightness lcd_device_brightness;
++
+ static void acpi_video_device_notify(acpi_handle handle, u32 event, void *data);
+ static void acpi_video_device_rebind(struct acpi_video_bus *video);
+ static void acpi_video_device_bind(struct acpi_video_bus *video,
+@@ -599,6 +605,40 @@ acpi_video_cmp_level(const void *a, const void *b)
+ 
+ /*
+  *  Arg:	
++ *  	br	: video child device reporting brightness
++ *
++ *  Initialize brightness levels and module param reporting string.
++ */
++
++static void
++acpi_video_init_brightness_level_params(struct acpi_video_device_brightness *br,
++										int count)
++{
++	int i, j;
++	char *p = brightness_levels, *e;
++
++	lcd_device_brightness.levels = kmalloc(count*sizeof(int), GFP_KERNEL);
++	if (lcd_device_brightness.levels) {
++		memcpy(lcd_device_brightness.levels, br->levels, count*sizeof(int));
++		lcd_device_brightness.count = count;
++	}
++	else {
++		printk(KERN_ERR "can't allocate _BCL listmemory\n");
++		return;
++    }
++
++	memset(&brightness_levels[0], 0, sizeof(brightness_levels));
++	e = brightness_levels + sizeof(brightness_levels) - 1;
++	for (i = 0; i < lcd_device_brightness.count; i++) {
++		j = sprintf(p, "%d ", lcd_device_brightness.levels[i]);
++		if ((j < 0)||((p + j) >= e))
++			break;
++		p += j;
++	}
++}
++
++/*
++ *  Arg:	
+  *  	device	: video output device (LCD, CRT, ..)
+  *
+  *  Return Value:
+@@ -675,6 +715,9 @@ acpi_video_init_brightness(struct acpi_video_device *device)
+ 	} else if (level_ac_battery > 2)
+ 		ACPI_ERROR((AE_INFO, "Too many duplicates in _BCL package\n"));
+ 
++	if (count >= 2 && lcd_device_brightness.levels == NULL)
++		acpi_video_init_brightness_level_params(br, count);
++
+ 	/* Check if the _BCL package is in a reversed order */
+ 	if (max_level == br->levels[2]) {
+ 		br->flags._BCL_reversed = 1;
+@@ -1257,7 +1300,7 @@ acpi_video_get_next_level(struct acpi_video_device *device,
+ static int
+ acpi_video_switch_brightness(struct acpi_video_device *device, int event)
+ {
+-	unsigned long long level_current, level_next;
++	unsigned long long level_current, level_next, level_new;
+ 	int result = -EINVAL;
+ 
+ 	/* no warning message if acpi_backlight=vendor is used */
+@@ -1277,13 +1320,14 @@ acpi_video_switch_brightness(struct acpi_video_device *device, int event)
+ 	result = acpi_video_device_lcd_set_level(device, level_next);
+ 
+ 	if (!result)
+-		backlight_force_update(device->backlight,
+-				       BACKLIGHT_UPDATE_HOTKEY);
++		backlight_force_update(device->backlight, BACKLIGHT_UPDATE_HOTKEY);
++	else
++		goto out;
+ 
++	result = acpi_video_device_lcd_get_level_current(device, &level_new, 0);
++	if ( !result && level_new != level_next )
++		result = -EINVAL; /* If we succeed without settting the next requested level! */
+ out:
+-	if (result)
+-		printk(KERN_ERR PREFIX "Failed to switch the brightness\n");
+-
+ 	return result;
+ }
+ 
+@@ -1516,6 +1560,7 @@ static void acpi_video_device_notify(acpi_handle handle, u32 event, void *data)
+ 	struct acpi_video_bus *bus;
+ 	struct input_dev *input;
+ 	int keycode = 0;
++	int send_key=1;
+ 
+ 	if (!video_device)
+ 		return;
+@@ -1527,19 +1572,19 @@ static void acpi_video_device_notify(acpi_handle handle, u32 event, void *data)
+ 	switch (event) {
+ 	case ACPI_VIDEO_NOTIFY_CYCLE_BRIGHTNESS:	/* Cycle brightness */
+ 		if (brightness_switch_enabled)
+-			acpi_video_switch_brightness(video_device, event);
++			send_key=acpi_video_switch_brightness(video_device, event);
+ 		acpi_bus_generate_proc_event(device, event, 0);
+ 		keycode = KEY_BRIGHTNESS_CYCLE;
+ 		break;
+ 	case ACPI_VIDEO_NOTIFY_INC_BRIGHTNESS:	/* Increase brightness */
+ 		if (brightness_switch_enabled)
+-			acpi_video_switch_brightness(video_device, event);
++			send_key=acpi_video_switch_brightness(video_device, event);
+ 		acpi_bus_generate_proc_event(device, event, 0);
+ 		keycode = KEY_BRIGHTNESSUP;
+ 		break;
+ 	case ACPI_VIDEO_NOTIFY_DEC_BRIGHTNESS:	/* Decrease brightness */
+ 		if (brightness_switch_enabled)
+-			acpi_video_switch_brightness(video_device, event);
++			send_key=acpi_video_switch_brightness(video_device, event);
+ 		acpi_bus_generate_proc_event(device, event, 0);
+ 		keycode = KEY_BRIGHTNESSDOWN;
+ 		break;
+@@ -1563,6 +1608,8 @@ static void acpi_video_device_notify(acpi_handle handle, u32 event, void *data)
+ 
+ 	acpi_notifier_call_chain(device, event, 0);
+ 
++	if (!send_key) return;
++
+ 	if (keycode) {
+ 		input_report_key(input, keycode, 1);
+ 		input_sync(input);
+@@ -1771,6 +1818,31 @@ static int __init is_i740(struct pci_dev *dev)
+ 	return 0;
+ }
+ 
++unsigned int acpi_video_get_num_brightness_levels(void)
++{
++	return lcd_device_brightness.count;
++}
++EXPORT_SYMBOL(acpi_video_get_num_brightness_levels);
++
++acpi_status acpi_video_get_brightness_levels(unsigned int *levels, unsigned int size)
++{
++	if ( lcd_device_brightness.levels == NULL)
++		return AE_ERROR;
++
++    if ( (levels == NULL) || (size < lcd_device_brightness.count * sizeof(int)) )
++		return AE_NO_MEMORY;
++
++	memcpy(levels, lcd_device_brightness.levels, lcd_device_brightness.count * sizeof(int));
++	return AE_OK;
++}
++EXPORT_SYMBOL(acpi_video_get_brightness_levels);
++
++void acpi_video_brightness_switch_control(int enable)
++{
++        brightness_switch_enabled = (enable != 0) ? 1 : 0;
++}
++EXPORT_SYMBOL(acpi_video_brightness_switch_control);
++
+ static int __init intel_opregion_present(void)
+ {
+ 	int opregion = 0;
+@@ -1845,6 +1917,8 @@ EXPORT_SYMBOL(acpi_video_unregister);
+ static int __init acpi_video_init(void)
+ {
+ 	dmi_check_system(video_dmi_table);
++	memset(&lcd_device_brightness, 0, sizeof(lcd_device_brightness));
++	memset(&brightness_levels[0], 0, sizeof(brightness_levels));
+ 
+ 	if (intel_opregion_present())
+ 		return 0;
+@@ -1856,6 +1930,12 @@ static void __exit acpi_video_exit(void)
+ {
+ 	acpi_video_unregister();
+ 
++	if (lcd_device_brightness.levels) {
++		kfree(lcd_device_brightness.levels);
++		memset(&lcd_device_brightness, 0, sizeof(lcd_device_brightness));
++		memset(&brightness_levels[0], 0, sizeof(brightness_levels));
++	}
++
+ 	return;
+ }
+ 
+diff --git a/drivers/xen/Kconfig b/drivers/xen/Kconfig
+index 740dd48..47dedc2 100644
+--- a/drivers/xen/Kconfig
++++ b/drivers/xen/Kconfig
+@@ -216,4 +216,15 @@ config XEN_ACPI_WMI_WRAPPER
+           Facilitates OEM specific hotkey implementation within
+           guest space.
+ 
++config XEN_ACPI_VIDEO
++        tristate "Xen Video"
++        depends on X86 && BACKLIGHT_CLASS_DEVICE && VIDEO_OUTPUT_CONTROL && XEN
++        depends on INPUT
++        depends on ACPI_VIDEO
++        help
++          Minimal Xen ACPI video driver implementation to query for a list of
++          brightness control levels from the firmware and communicate it to the
++          virtual firmware and to set and get current brightness level from the
++          firmware based on request from the virtual firmware.
++
+ endmenu
+diff --git a/include/linux/acpi.h b/include/linux/acpi.h
+index 46455bc..454c926 100644
+--- a/include/linux/acpi.h
++++ b/include/linux/acpi.h
+@@ -229,6 +229,14 @@ extern bool wmi_has_guid(const char *guid);
+ 
+ #endif	/* CONFIG_ACPI_WMI */
+ 
++#if defined(CONFIG_ACPI_VIDEO)
++
++extern unsigned int acpi_video_get_num_brightness_levels(void);
++extern acpi_status acpi_video_get_brightness_levels(unsigned int *levels, unsigned int size);
++extern void acpi_video_brightness_switch_control(int enable);
++
++#endif /* CONFIG_ACPI_VIDEO */
++
+ #define ACPI_VIDEO_OUTPUT_SWITCHING			0x0001
+ #define ACPI_VIDEO_DEVICE_POSTING			0x0002
+ #define ACPI_VIDEO_ROM_AVAILABLE			0x0004

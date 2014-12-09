@@ -1,0 +1,57 @@
+diff --git a/drivers/acpi/video.c b/drivers/acpi/video.c
+index 694e145..0014fe3 100644
+--- a/drivers/acpi/video.c
++++ b/drivers/acpi/video.c
+@@ -92,6 +92,9 @@ module_param(use_bios_initial_backlight, bool, 0644);
+ static char brightness_levels[256]; /* up to 64 levels, more than enough */
+ module_param_string(brightness_levels, brightness_levels, sizeof(brightness_levels), 0444);
+ 
++static bool delay_init = 0;
++module_param(delay_init, bool, 0644);
++
+ static int register_count = 0;
+ static int acpi_video_bus_add(struct acpi_device *device);
+ static int acpi_video_bus_remove(struct acpi_device *device);
+@@ -2015,6 +2018,22 @@ void acpi_video_unregister(void)
+ }
+ EXPORT_SYMBOL(acpi_video_unregister);
+ 
++static ssize_t store_init_acpi_video(struct bus_type *bus,
++                                    const char *buf, size_t count)
++{
++	unsigned int val;
++	if (kstrtouint(buf, 10, &val) || val != 1)
++		return -EINVAL;
++	acpi_video_register();
++	return count;
++}
++
++static struct bus_attribute init_acpi_video_attr = {
++	.attr = {.name = "init_acpi_video", .mode = 0644},
++	.show = NULL,
++	.store = store_init_acpi_video,
++};
++
+ /*
+  * This is kind of nasty. Hardware using Intel chipsets may require
+  * the video opregion code to be run first in order to initialise
+@@ -2028,6 +2047,9 @@ static int __init acpi_video_init(void)
+ 	memset(&lcd_device_brightness, 0, sizeof(lcd_device_brightness));
+ 	memset(&brightness_levels[0], 0, sizeof(brightness_levels));
+ 
++	if (delay_init)
++		return bus_create_file(&acpi_bus_type, &init_acpi_video_attr);
++
+ 	if (intel_opregion_present())
+ 		return 0;
+ 
+@@ -2036,6 +2058,9 @@ static int __init acpi_video_init(void)
+ 
+ static void __exit acpi_video_exit(void)
+ {
++	if (delay_init)
++		bus_remove_file(&acpi_bus_type, &init_acpi_video_attr);
++
+ 	acpi_video_unregister();
+ 
+ 	if (lcd_device_brightness.levels) {

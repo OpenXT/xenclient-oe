@@ -1,0 +1,121 @@
+diff --git a/net/bridge/br_if.c b/net/bridge/br_if.c
+index 6f17728..6252eba 100644
+--- a/net/bridge/br_if.c
++++ b/net/bridge/br_if.c
+@@ -82,6 +82,7 @@ void br_port_carrier_check(struct net_bridge_port *p)
+ 		if (p->state != BR_STATE_DISABLED)
+ 			br_stp_disable_port(p);
+ 	}
++	br_maybe_copy_iface_carrier(p);
+ 	spin_unlock_bh(&br->lock);
+ }
+ 
+@@ -465,3 +466,28 @@ void __net_exit br_net_exit(struct net *net)
+ 	rtnl_unlock();
+ 
+ }
++
++/* if p->priority == 0 either copy carier if p is forwarding
++ * or set carrier to off if p is is not forwarding
++ * */
++int br_maybe_copy_iface_carrier(struct net_bridge_port *p)
++{
++	int carrier;
++	if (p->priority == 0) {
++		if (p->state == BR_STATE_FORWARDING)
++			carrier = netif_carrier_ok(p->dev);
++		else
++			carrier = 0;
++		if (carrier != netif_carrier_ok(p->br->dev)) {
++			printk("prio 0 port %s carrier %s, update bridge %s state\n",
++			       p->dev->name, carrier ? "on" : "off",
++			       p->br->dev->name);
++			if (carrier)
++				netif_carrier_on(p->br->dev);
++			else
++				netif_carrier_off(p->br->dev);
++		}
++		return 1;
++	}
++	return 0;
++}
+diff --git a/net/bridge/br_private.h b/net/bridge/br_private.h
+index a70bb90..23ded28 100644
+--- a/net/bridge/br_private.h
++++ b/net/bridge/br_private.h
+@@ -447,6 +447,7 @@ extern int br_del_if(struct net_bridge *br,
+ extern int br_min_mtu(const struct net_bridge *br);
+ extern netdev_features_t br_features_recompute(struct net_bridge *br,
+ 	netdev_features_t features);
++extern int br_maybe_copy_iface_carrier(struct net_bridge_port *p);
+ 
+ /* br_input.c */
+ extern int br_handle_frame_finish(struct sk_buff *skb);
+diff --git a/net/bridge/br_stp.c b/net/bridge/br_stp.c
+index 3c86f05..ee5750c 100644
+--- a/net/bridge/br_stp.c
++++ b/net/bridge/br_stp.c
+@@ -452,8 +452,13 @@ void br_port_state_selection(struct net_bridge *br)
+ 
+ 	if (liveports == 0)
+ 		netif_carrier_off(br->dev);
+-	else
+-		netif_carrier_on(br->dev);
++        else {
++                int carrier_copied = 0;
++                list_for_each_entry(p, &br->port_list, list)
++                        carrier_copied |= br_maybe_copy_iface_carrier(p);
++                if (!carrier_copied)
++                        netif_carrier_on(br->dev);
++        }
+ }
+ 
+ /* called under bridge lock */
+diff --git a/net/bridge/br_stp_if.c b/net/bridge/br_stp_if.c
+index 656a6f3..b8a363c 100644
+--- a/net/bridge/br_stp_if.c
++++ b/net/bridge/br_stp_if.c
+@@ -286,6 +286,7 @@ int br_stp_set_port_priority(struct net_bridge_port *p, unsigned long newprio)
+ 		br_port_state_selection(p->br);
+ 	}
+ 
++	br_maybe_copy_iface_carrier(p);
+ 	return 0;
+ }
+ 
+diff --git a/net/bridge/br_sysfs_br.c b/net/bridge/br_sysfs_br.c
+index 3b9637f..8f09ccb 100644
+--- a/net/bridge/br_sysfs_br.c
++++ b/net/bridge/br_sysfs_br.c
+@@ -341,6 +341,23 @@ static ssize_t store_flush(struct device *d,
+ }
+ static DEVICE_ATTR(flush, S_IWUSR, NULL, store_flush);
+ 
++static int set_link_state(struct net_bridge *br, unsigned long val)
++{
++	if (val)
++		netif_carrier_on(br->dev);
++	else
++		netif_carrier_off(br->dev);
++	return 0;
++}
++
++static ssize_t store_link_state(struct device *d,
++				struct device_attribute *attr,
++				const char *buf, size_t len)
++{
++	return store_bridge_parm(d, buf, len, set_link_state);
++}
++static DEVICE_ATTR(link_state, S_IWUSR, NULL, store_link_state);
++
+ #ifdef CONFIG_BRIDGE_IGMP_SNOOPING
+ static ssize_t show_multicast_router(struct device *d,
+ 				     struct device_attribute *attr, char *buf)
+@@ -755,6 +772,7 @@ static struct attribute *bridge_attrs[] = {
+ 	&dev_attr_gc_timer.attr,
+ 	&dev_attr_group_addr.attr,
+ 	&dev_attr_flush.attr,
++	&dev_attr_link_state.attr,
+ #ifdef CONFIG_BRIDGE_IGMP_SNOOPING
+ 	&dev_attr_multicast_router.attr,
+ 	&dev_attr_multicast_snooping.attr,
