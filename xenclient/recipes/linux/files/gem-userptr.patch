@@ -1,0 +1,609 @@
+diff --git a/drivers/gpu/drm/i915/Makefile b/drivers/gpu/drm/i915/Makefile
+index 40034ec..bdcf1e4 100644
+--- a/drivers/gpu/drm/i915/Makefile
++++ b/drivers/gpu/drm/i915/Makefile
+@@ -14,6 +14,7 @@ i915-y := i915_drv.o i915_dma.o i915_irq.o \
+ 	  i915_gem_gtt.o \
+ 	  i915_gem_stolen.o \
+ 	  i915_gem_tiling.o \
++	  i915_gem_userptr.o \
+ 	  i915_sysfs.o \
+ 	  i915_trace_points.o \
+ 	  i915_ums.o \
+diff --git a/drivers/gpu/drm/i915/i915_dma.c b/drivers/gpu/drm/i915/i915_dma.c
+index f466980..3453254 100644
+--- a/drivers/gpu/drm/i915/i915_dma.c
++++ b/drivers/gpu/drm/i915/i915_dma.c
+@@ -1891,6 +1891,7 @@ struct drm_ioctl_desc i915_ioctls[] = {
+ 	DRM_IOCTL_DEF_DRV(I915_GEM_CONTEXT_CREATE, i915_gem_context_create_ioctl, DRM_UNLOCKED),
+ 	DRM_IOCTL_DEF_DRV(I915_GEM_CONTEXT_DESTROY, i915_gem_context_destroy_ioctl, DRM_UNLOCKED),
+ 	DRM_IOCTL_DEF_DRV(I915_REG_READ, i915_reg_read_ioctl, DRM_UNLOCKED),
++	DRM_IOCTL_DEF_DRV(I915_GEM_USERPTR, i915_gem_userptr_ioctl, DRM_UNLOCKED),
+ };
+ 
+ int i915_max_ioctl = DRM_ARRAY_SIZE(i915_ioctls);
+diff --git a/drivers/gpu/drm/i915/i915_drv.h b/drivers/gpu/drm/i915/i915_drv.h
+index 2f09e80..8c24b0d 100644
+--- a/drivers/gpu/drm/i915/i915_drv.h
++++ b/drivers/gpu/drm/i915/i915_drv.h
+@@ -43,6 +43,7 @@
+ #include <linux/intel-iommu.h>
+ #include <linux/kref.h>
+ #include <linux/pm_qos.h>
++#include <linux/mmu_notifier.h>
+ 
+ /* General customization:
+  */
+@@ -1212,6 +1213,7 @@ struct drm_i915_gem_object_ops {
+ 	 */
+ 	int (*get_pages)(struct drm_i915_gem_object *);
+ 	void (*put_pages)(struct drm_i915_gem_object *);
++	void (*release)(struct drm_i915_gem_object *);
+ };
+ 
+ struct drm_i915_gem_object {
+@@ -1351,6 +1353,25 @@ struct drm_i915_gem_object {
+ };
+ #define to_gem_object(obj) (&((struct drm_i915_gem_object *)(obj))->base)
+ 
++struct i915_gem_userptr_object {
++	struct drm_i915_gem_object gem;
++	uintptr_t user_ptr;
++	size_t user_size;
++	int read_only;
++
++	struct mm_struct *mm;
++#if defined(CONFIG_MMU_NOTIFIER)
++	struct mmu_notifier mn;
++#endif
++};
++
++union drm_i915_gem_objects {
++	struct drm_i915_gem_object base;
++	union {
++		struct i915_gem_userptr_object userptr;
++	};
++};
++
+ #define to_intel_bo(x) container_of(x, struct drm_i915_gem_object, base)
+ 
+ /**
+@@ -1648,6 +1669,8 @@ int i915_gem_entervt_ioctl(struct drm_device *dev, void *data,
+ 			   struct drm_file *file_priv);
+ int i915_gem_leavevt_ioctl(struct drm_device *dev, void *data,
+ 			   struct drm_file *file_priv);
++int i915_gem_userptr_ioctl(struct drm_device *dev, void *data,
++			   struct drm_file *file);
+ int i915_gem_set_tiling(struct drm_device *dev, void *data,
+ 			struct drm_file *file_priv);
+ int i915_gem_get_tiling(struct drm_device *dev, void *data,
+@@ -1696,6 +1719,7 @@ static inline void i915_gem_object_unpin_pages(struct drm_i915_gem_object *obj)
+ 	BUG_ON(obj->pages_pin_count == 0);
+ 	obj->pages_pin_count--;
+ }
++int i915_gem_object_put_pages(struct drm_i915_gem_object *obj);
+ 
+ int __must_check i915_mutex_lock_interruptible(struct drm_device *dev);
+ int i915_gem_object_sync(struct drm_i915_gem_object *obj,
+diff --git a/drivers/gpu/drm/i915/i915_gem.c b/drivers/gpu/drm/i915/i915_gem.c
+index d9e2208..06b6900 100644
+--- a/drivers/gpu/drm/i915/i915_gem.c
++++ b/drivers/gpu/drm/i915/i915_gem.c
+@@ -1324,20 +1324,18 @@ int i915_gem_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
+ 	struct drm_i915_gem_object *obj = to_intel_bo(vma->vm_private_data);
+ 	struct drm_device *dev = obj->base.dev;
+ 	drm_i915_private_t *dev_priv = dev->dev_private;
+-	pgoff_t page_offset;
++	pgoff_t offset;
+ 	unsigned long pfn;
+ 	int ret = 0;
+ 	bool write = !!(vmf->flags & FAULT_FLAG_WRITE);
+ 
+-	/* We don't use vmf->pgoff since that has the fake offset */
+-	page_offset = ((unsigned long)vmf->virtual_address - vma->vm_start) >>
+-		PAGE_SHIFT;
+-
+ 	ret = i915_mutex_lock_interruptible(dev);
+ 	if (ret)
+ 		goto out;
+ 
+-	trace_i915_gem_object_fault(obj, page_offset, true, write);
++	trace_i915_gem_object_fault(obj,
++				    (unsigned long)(vmf->virtual_address - vma->vm_start) >> PAGE_SHIFT,
++				    true, write);
+ 
+ 	/* Access to snoopable pages through the GTT is incoherent. */
+ 	if (obj->cache_level != I915_CACHE_NONE && !HAS_LLC(dev)) {
+@@ -1360,8 +1358,9 @@ int i915_gem_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
+ 
+ 	obj->fault_mappable = true;
+ 
+-	pfn = ((dev_priv->gtt.mappable_base + obj->gtt_offset) >> PAGE_SHIFT) +
+-		page_offset;
++	offset = (unsigned long)vmf->virtual_address - vma->vm_start;
++	offset += obj->gtt_offset;
++	pfn = (dev_priv->gtt.mappable_base + offset) >> PAGE_SHIFT;
+ 
+ 	/* Finally, remap it using the new GTT offset */
+ 	ret = vm_insert_pfn(vma, (unsigned long)vmf->virtual_address, pfn);
+@@ -1553,6 +1552,12 @@ i915_gem_mmap_gtt(struct drm_file *file,
+ 		goto out;
+ 	}
+ 
++	if (offset_in_page(obj->gtt_offset)) {
++		DRM_ERROR("Attempting to mmap an unaligned buffer\n");
++		ret = -EINVAL;
++		goto out;
++	}
++
+ 	ret = i915_gem_object_create_mmap_offset(obj);
+ 	if (ret)
+ 		goto out;
+@@ -2634,9 +2639,9 @@ i915_gem_object_unbind(struct drm_i915_gem_object *obj)
+ 	/* Avoid an unnecessary call to unbind on rebind. */
+ 	obj->map_and_fenceable = true;
+ 
++	obj->gtt_offset -= obj->gtt_space->start;
+ 	drm_mm_put_block(obj->gtt_space);
+ 	obj->gtt_space = NULL;
+-	obj->gtt_offset = 0;
+ 
+ 	return 0;
+ }
+@@ -3149,7 +3154,7 @@ search_free:
+ 	list_add_tail(&obj->mm_list, &dev_priv->mm.inactive_list);
+ 
+ 	obj->gtt_space = node;
+-	obj->gtt_offset = node->start;
++	obj->gtt_offset += node->start;
+ 
+ 	fenceable =
+ 		node->size == fence_size &&
+@@ -3975,6 +3980,9 @@ void i915_gem_free_object(struct drm_gem_object *gem_obj)
+ 	if (obj->base.import_attach)
+ 		drm_prime_gem_destroy(&obj->base, NULL);
+ 
++	if (obj->ops->release)
++		obj->ops->release(obj);
++
+ 	drm_gem_object_release(&obj->base);
+ 	i915_gem_info_remove_obj(dev_priv, obj->base.size);
+ 
+diff --git a/drivers/gpu/drm/i915/i915_gem_execbuffer.c b/drivers/gpu/drm/i915/i915_gem_execbuffer.c
+index 87a3227..88d5b46 100644
+--- a/drivers/gpu/drm/i915/i915_gem_execbuffer.c
++++ b/drivers/gpu/drm/i915/i915_gem_execbuffer.c
+@@ -254,14 +254,16 @@ i915_gem_execbuffer_relocate_entry(struct drm_i915_gem_object *obj,
+ 		return -EFAULT;
+ 
+ 	reloc->delta += target_offset;
++	reloc->offset += obj->gtt_offset;
+ 	if (use_cpu_reloc(obj)) {
+-		uint32_t page_offset = reloc->offset & ~PAGE_MASK;
++		uint32_t page_offset = offset_in_page(reloc->offset);
+ 		char *vaddr;
+ 
+ 		ret = i915_gem_object_set_to_cpu_domain(obj, 1);
+ 		if (ret)
+ 			return ret;
+ 
++		reloc->offset -= obj->gtt_space->start;
+ 		vaddr = kmap_atomic(i915_gem_object_get_page(obj,
+ 							     reloc->offset >> PAGE_SHIFT));
+ 		*(uint32_t *)(vaddr + page_offset) = reloc->delta;
+@@ -280,11 +282,10 @@ i915_gem_execbuffer_relocate_entry(struct drm_i915_gem_object *obj,
+ 			return ret;
+ 
+ 		/* Map the page containing the relocation we're going to perform.  */
+-		reloc->offset += obj->gtt_offset;
+ 		reloc_page = io_mapping_map_atomic_wc(dev_priv->gtt.mappable,
+ 						      reloc->offset & PAGE_MASK);
+ 		reloc_entry = (uint32_t __iomem *)
+-			(reloc_page + (reloc->offset & ~PAGE_MASK));
++			(reloc_page + offset_in_page(reloc->offset));
+ 		iowrite32(reloc->delta, reloc_entry);
+ 		io_mapping_unmap_atomic(reloc_page);
+ 	}
+diff --git a/drivers/gpu/drm/i915/i915_gem_userptr.c b/drivers/gpu/drm/i915/i915_gem_userptr.c
+new file mode 100644
+index 0000000..93ae752
+--- /dev/null
++++ b/drivers/gpu/drm/i915/i915_gem_userptr.c
+@@ -0,0 +1,358 @@
++/*
++ * Copyright © 2012 Intel Corporation
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining a
++ * copy of this software and associated documentation files (the "Software"),
++ * to deal in the Software without restriction, including without limitation
++ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
++ * and/or sell copies of the Software, and to permit persons to whom the
++ * Software is furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice (including the next
++ * paragraph) shall be included in all copies or substantial portions of the
++ * Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
++ * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
++ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
++ * IN THE SOFTWARE.
++ *
++ */
++
++#include "drmP.h"
++#include "i915_drm.h"
++#include "i915_drv.h"
++#include "i915_trace.h"
++#include "intel_drv.h"
++#include <linux/mmu_notifier.h>
++#include <linux/swap.h>
++
++static inline int vma_is_io(struct vm_area_struct *vma)
++{
++	return !!(vma->vm_flags & (VM_IO | VM_PFNMAP));
++}
++
++static struct i915_gem_userptr_object *to_userptr_object(struct drm_i915_gem_object *obj)
++{
++	return container_of(obj, struct i915_gem_userptr_object, gem);
++}
++
++#if defined(CONFIG_MMU_NOTIFIER)
++static void i915_gem_userptr_mn_invalidate_range_start(struct mmu_notifier *mn,
++						       struct mm_struct *mm,
++						       unsigned long start,
++						       unsigned long end)
++{
++	struct i915_gem_userptr_object *vmap;
++	struct drm_device *dev;
++
++	/* XXX race between obj unref and mmu notifier? */
++	vmap = container_of(mn, struct i915_gem_userptr_object, mn);
++	BUG_ON(vmap->mm != mm);
++
++	if (vmap->user_ptr >= end || vmap->user_ptr + vmap->user_size <= start)
++		return;
++
++	if (vmap->gem.pages == NULL) /* opportunistic check */
++		return;
++
++	dev = vmap->gem.base.dev;
++	mutex_lock(&dev->struct_mutex);
++	if (vmap->gem.gtt_space) {
++		struct drm_i915_private *dev_priv = dev->dev_private;
++		bool was_interruptible;
++		int ret;
++
++		was_interruptible = dev_priv->mm.interruptible;
++		dev_priv->mm.interruptible = false;
++
++		ret = i915_gem_object_unbind(&vmap->gem);
++		BUG_ON(ret && ret != -EIO);
++
++		dev_priv->mm.interruptible = was_interruptible;
++	}
++
++	BUG_ON(i915_gem_object_put_pages(&vmap->gem));
++	mutex_unlock(&dev->struct_mutex);
++}
++
++static void i915_gem_userptr_mn_release(struct mmu_notifier *mn,
++					struct mm_struct *mm)
++{
++	struct i915_gem_userptr_object *vmap;
++
++	vmap = container_of(mn, struct i915_gem_userptr_object, mn);
++	BUG_ON(vmap->mm != mm);
++	vmap->mm = NULL;
++
++	/* XXX Schedule an eventual unbind? E.g. hook into require request?
++	 * However, locking will be complicated.
++	 */
++}
++
++static const struct mmu_notifier_ops i915_gem_userptr_notifier = {
++	.invalidate_range_start = i915_gem_userptr_mn_invalidate_range_start,
++	.release = i915_gem_userptr_mn_release,
++};
++
++static void
++i915_gem_userptr_release__mmu_notifier(struct i915_gem_userptr_object *vmap)
++{
++	if (vmap->mn.ops && vmap->mm) {
++		mmu_notifier_unregister(&vmap->mn, vmap->mm);
++		BUG_ON(vmap->mm);
++	}
++}
++
++static int
++i915_gem_userptr_init__mmu_notifier(struct i915_gem_userptr_object *vmap,
++				    unsigned flags)
++{
++	if (flags & I915_USERPTR_UNSYNCHRONIZED)
++		return capable(CAP_SYS_ADMIN) ? 0 : -EPERM;
++
++	vmap->mn.ops = &i915_gem_userptr_notifier;
++	return mmu_notifier_register(&vmap->mn, vmap->mm);
++}
++
++#else
++
++static void
++i915_gem_userptr_release__mmu_notifier(struct i915_gem_userptr_object *vmap)
++{
++}
++
++static int
++i915_gem_userptr_init__mmu_notifier(struct i915_gem_userptr_object *vmap,
++				    unsigned flags)
++{
++	if ((flags & I915_USERPTR_UNSYNCHRONIZED) == 0)
++		return -ENODEV;
++
++	if (!capable(CAP_SYS_ADMIN))
++		return -EPERM;
++
++	return 0;
++}
++#endif
++
++static int
++i915_gem_userptr_get_pages(struct drm_i915_gem_object *obj)
++{
++	struct i915_gem_userptr_object *vmap = to_userptr_object(obj);
++	int num_pages = obj->base.size >> PAGE_SHIFT;
++	struct sg_table *st;
++	struct scatterlist *sg;
++	struct page **pvec;
++	int n, pinned, ret;
++	struct vm_area_struct *vma = NULL;
++
++	if (vmap->mm == NULL)
++		return -EFAULT;
++
++	if (!access_ok(vmap->read_only ? VERIFY_READ : VERIFY_WRITE,
++		       (char __user *)vmap->user_ptr, vmap->user_size))
++		return -EFAULT;
++
++	/* If userspace should engineer that these pages are replaced in
++	 * the vma between us binding this page into the GTT and completion
++	 * of rendering... Their loss. If they change the mapping of their
++	 * pages they need to create a new bo to point to the new vma.
++	 *
++	 * However, that still leaves open the possibility of the vma
++	 * being copied upon fork. Which falls under the same userspace
++	 * synchronisation issue as a regular bo, except that this time
++	 * the process may not be expecting that a particular piece of
++	 * memory is tied to the GPU.
++	 *
++	 * Fortunately, we can hook into the mmu_notifier in order to
++	 * discard the page references prior to anything nasty happening
++	 * to the vma (discard or cloning) which should prevent the more
++	 * egregious cases from causing harm.
++	 */
++
++	pvec = kmalloc(num_pages*sizeof(struct page *),
++		       GFP_KERNEL | __GFP_NOWARN | __GFP_NORETRY);
++	if (pvec == NULL) {
++		pvec = drm_malloc_ab(num_pages, sizeof(struct page *));
++		if (pvec == NULL)
++			return -ENOMEM;
++	}
++
++	vma = find_vma(current->mm, vmap->user_ptr);
++	pinned = 0;
++
++	/* the memory region mmaped with VM_PFNMAP. */
++	if (vma_is_io(vma)) {
++		unsigned int i;
++		unsigned long start = vmap->user_ptr;
++
++		for (i = 0; i < num_pages; i++, start += PAGE_SIZE) {
++			unsigned long pfn;
++			int ret = follow_pfn(vma, start, &pfn);
++			if (ret)
++				return ret;
++
++			pvec[i] = pfn_to_page(pfn);
++			pinned++;
++		}
++
++		if (pinned != num_pages) {
++			DRM_ERROR("failed to get user_pages.\n");
++			return -EINVAL;
++		}
++	}
++
++	if (!pinned && vmap->mm == current->mm)
++		pinned = __get_user_pages_fast(vmap->user_ptr, num_pages,
++					       !vmap->read_only, pvec);
++	if (pinned < num_pages) {
++		struct mm_struct *mm = vmap->mm;
++		ret = 0;
++		mutex_unlock(&obj->base.dev->struct_mutex);
++		down_read(&mm->mmap_sem);
++		if (vmap->mm != NULL)
++			ret = get_user_pages(current, mm,
++					     vmap->user_ptr + (pinned << PAGE_SHIFT),
++					     num_pages - pinned,
++					     !vmap->read_only, 0,
++					     pvec + pinned,
++					     NULL);
++		up_read(&mm->mmap_sem);
++		mutex_lock(&obj->base.dev->struct_mutex);
++		if (ret > 0)
++			pinned += ret;
++
++		if (obj->pages || pinned < num_pages) {
++			ret = obj->pages ? 0 : -EFAULT;
++			goto cleanup_pinned;
++		}
++	}
++
++	st = kmalloc(sizeof(*st), GFP_KERNEL);
++	if (st == NULL) {
++		ret = -ENOMEM;
++		goto cleanup_pinned;
++	}
++
++	if (sg_alloc_table(st, num_pages, GFP_KERNEL)) {
++		ret = -ENOMEM;
++		goto cleanup_st;
++	}
++
++	for_each_sg(st->sgl, sg, num_pages, n)
++		sg_set_page(sg, pvec[n], PAGE_SIZE, 0);
++	drm_free_large(pvec);
++
++	obj->pages = st;
++	return 0;
++
++cleanup_st:
++	kfree(st);
++cleanup_pinned:
++	release_pages(pvec, pinned, 0);
++	drm_free_large(pvec);
++	return ret;
++}
++
++static void
++i915_gem_userptr_put_pages(struct drm_i915_gem_object *obj)
++{
++	struct scatterlist *sg;
++	int i;
++
++	if (obj->madv != I915_MADV_WILLNEED)
++		obj->dirty = 0;
++
++	for_each_sg(obj->pages->sgl, sg, obj->pages->nents, i) {
++		struct page *page = sg_page(sg);
++
++		if (obj->dirty)
++			set_page_dirty(page);
++
++		mark_page_accessed(page);
++		page_cache_release(page);
++	}
++	obj->dirty = 0;
++
++	sg_free_table(obj->pages);
++	kfree(obj->pages);
++}
++
++static void
++i915_gem_userptr_release(struct drm_i915_gem_object *obj)
++{
++	struct i915_gem_userptr_object *vmap = to_userptr_object(obj);
++
++	i915_gem_userptr_release__mmu_notifier(vmap);
++}
++
++static const struct drm_i915_gem_object_ops i915_gem_userptr_ops = {
++	.get_pages = i915_gem_userptr_get_pages,
++	.put_pages = i915_gem_userptr_put_pages,
++	.release = i915_gem_userptr_release,
++};
++
++/**
++ * Creates a new mm object that wraps some user memory.
++ */
++int
++i915_gem_userptr_ioctl(struct drm_device *dev, void *data, struct drm_file *file)
++{
++	struct drm_i915_private *dev_priv = dev->dev_private;
++	struct drm_i915_gem_userptr *args = data;
++	struct i915_gem_userptr_object *obj;
++	loff_t first_data_page, last_data_page;
++	int num_pages;
++	int ret;
++	u32 handle;
++
++	if (args->flags & ~(I915_USERPTR_READ_ONLY | I915_USERPTR_UNSYNCHRONIZED))
++		return -EINVAL;
++
++	first_data_page = args->user_ptr / PAGE_SIZE;
++	last_data_page = (args->user_ptr + args->user_size - 1) / PAGE_SIZE;
++	num_pages = last_data_page - first_data_page + 1;
++	if (num_pages * PAGE_SIZE > dev_priv->gtt.total)
++		return -E2BIG;
++
++	/* Allocate the new object */
++	obj = kzalloc(sizeof(*obj), GFP_KERNEL);
++	if (obj == NULL)
++		return -ENOMEM;
++
++	if (drm_gem_private_object_init(dev, &obj->gem.base,
++					num_pages * PAGE_SIZE)) {
++		kfree(obj);
++		return -ENOMEM;
++	}
++
++	i915_gem_object_init(&obj->gem, &i915_gem_userptr_ops);
++	obj->gem.cache_level = I915_CACHE_LLC_MLC;
++
++	obj->gem.gtt_offset = offset_in_page(args->user_ptr);
++	obj->user_ptr = args->user_ptr;
++	obj->user_size = args->user_size;
++	obj->read_only = args->flags & I915_USERPTR_READ_ONLY;
++
++	/* And keep a pointer to the current->mm for resolving the user pages
++	 * at binding. This means that we need to hook into the mmu_notifier
++	 * in order to detect if the mmu is destroyed.
++	 */
++	obj->mm = current->mm;
++	ret = i915_gem_userptr_init__mmu_notifier(obj, args->flags);
++	if (ret)
++		return ret;
++
++	ret = drm_gem_handle_create(file, &obj->gem.base, &handle);
++	/* drop reference from allocate - handle holds it now */
++	drm_gem_object_unreference(&obj->gem.base);
++	if (ret)
++		return ret;
++
++	args->handle = handle;
++	return 0;
++}
+diff --git a/include/uapi/drm/i915_drm.h b/include/uapi/drm/i915_drm.h
+index 923ed7f..489e892 100644
+--- a/include/uapi/drm/i915_drm.h
++++ b/include/uapi/drm/i915_drm.h
+@@ -198,6 +198,7 @@ typedef struct _drm_i915_sarea {
+ #define DRM_I915_GEM_SET_CACHING	0x2f
+ #define DRM_I915_GEM_GET_CACHING	0x30
+ #define DRM_I915_REG_READ		0x31
++#define DRM_I915_GEM_USERPTR		0x32
+ 
+ #define DRM_IOCTL_I915_INIT		DRM_IOW( DRM_COMMAND_BASE + DRM_I915_INIT, drm_i915_init_t)
+ #define DRM_IOCTL_I915_FLUSH		DRM_IO ( DRM_COMMAND_BASE + DRM_I915_FLUSH)
+@@ -247,6 +248,7 @@ typedef struct _drm_i915_sarea {
+ #define DRM_IOCTL_I915_GEM_CONTEXT_CREATE	DRM_IOWR (DRM_COMMAND_BASE + DRM_I915_GEM_CONTEXT_CREATE, struct drm_i915_gem_context_create)
+ #define DRM_IOCTL_I915_GEM_CONTEXT_DESTROY	DRM_IOW (DRM_COMMAND_BASE + DRM_I915_GEM_CONTEXT_DESTROY, struct drm_i915_gem_context_destroy)
+ #define DRM_IOCTL_I915_REG_READ			DRM_IOWR (DRM_COMMAND_BASE + DRM_I915_REG_READ, struct drm_i915_reg_read)
++#define DRM_IOCTL_I915_GEM_USERPTR			DRM_IOWR (DRM_COMMAND_BASE + DRM_I915_GEM_USERPTR, struct drm_i915_gem_userptr)
+ 
+ /* Allow drivers to submit batchbuffers directly to hardware, relying
+  * on the security mechanisms provided by hardware.
+@@ -981,4 +983,18 @@ struct drm_i915_reg_read {
+ 	__u64 offset;
+ 	__u64 val; /* Return value */
+ };
++
++struct drm_i915_gem_userptr {
++	__u64 user_ptr;
++	__u32 user_size;
++	__u32 flags;
++#define I915_USERPTR_READ_ONLY 0x1
++#define I915_USERPTR_UNSYNCHRONIZED 0x80000000
++	/**
++	 * Returned handle for the object.
++	 *
++	 * Object handles are nonzero.
++	 */
++	__u32 handle;
++};
+ #endif /* _UAPI_I915_DRM_H_ */

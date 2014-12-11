@@ -1,0 +1,65 @@
+diff --git a/drivers/pci/pci.c b/drivers/pci/pci.c
+index e7d416b..63f0362 100644
+--- a/drivers/pci/pci.c
++++ b/drivers/pci/pci.c
+@@ -3274,6 +3274,10 @@ static int __pci_dev_reset(struct pci_dev *dev, int probe)
+ 
+ 	rc = pci_parent_bus_reset(dev, probe);
+ done:
++	/* larger delay for gpus */
++	if (!probe && (dev->class == 0x30000 || dev->class == 0x38000))
++	  msleep(500);
++
+ 	return rc;
+ }
+ 
+diff --git a/drivers/pci/quirks.c b/drivers/pci/quirks.c
+index 0369fb6..1a722e7 100644
+--- a/drivers/pci/quirks.c
++++ b/drivers/pci/quirks.c
+@@ -3168,10 +3168,15 @@ static int reset_ivb_igd(struct pci_dev *dev, int probe)
+ 	void __iomem *mmio_base;
+ 	unsigned long timeout;
+ 	u32 val;
++	u16 cmd;
+ 
+ 	if (probe)
+ 		return 0;
+ 
++        /* enable response in memory space */
++        pci_read_config_word(dev, PCI_COMMAND, &cmd);
++        pci_write_config_word(dev, PCI_COMMAND, cmd | PCI_COMMAND_MEMORY);
++
+ 	mmio_base = pci_iomap(dev, 0, 0);
+ 	if (!mmio_base)
+ 		return -ENOMEM;
+@@ -3202,7 +3207,10 @@ reset_complete:
+ 	iowrite32(0x00000002, mmio_base + NSDE_PWR_STATE);
+ 
+ 	pci_iounmap(dev, mmio_base);
+-	return 0;
++        pci_write_config_word(dev, PCI_COMMAND, cmd);
++        /* follow with regular flr, returning ENOTTY causes rest of the FLR non-device specific code
++           to execute. Alternatively we could execute it here explicitly and mby that would be cleaner */
++        return -ENOTTY;
+ }
+ 
+ #define PCI_DEVICE_ID_INTEL_82599_SFP_VF   0x10ed
+diff --git a/drivers/xen/xen-pciback/pci_stub.c b/drivers/xen/xen-pciback/pci_stub.c
+index a2278ba..483644a 100644
+--- a/drivers/xen/xen-pciback/pci_stub.c
++++ b/drivers/xen/xen-pciback/pci_stub.c
+@@ -391,10 +391,13 @@ static int pcistub_init_device(struct pci_dev *dev)
+ 	if (!dev_data->pci_saved_state)
+ 		dev_err(&dev->dev, "Could not store PCI conf saved state!\n");
+ 	else {
++#if 0
+ 		dev_dbg(&dev->dev, "resetting (FLR, D3, etc) the device\n");
+ 		__pci_reset_function_locked(dev);
+ 		pci_restore_state(dev);
++#endif
+ 	}
++
+ 	/* Now disable the device (this also ensures some private device
+ 	 * data is setup before we export)
+ 	 */

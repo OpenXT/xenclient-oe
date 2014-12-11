@@ -1,0 +1,75 @@
+diff --git a/sound/pci/hda/patch_analog.c b/sound/pci/hda/patch_analog.c
+index 89fc503..84f18a7 100644
+--- a/sound/pci/hda/patch_analog.c
++++ b/sound/pci/hda/patch_analog.c
+@@ -4548,6 +4548,7 @@ enum {
+ 	AD1884A_THINKPAD,
+ 	AD1984A_TOUCHSMART,
+ 	AD1984A_PRECISION,
++        AD1984A_HP_MV,
+ 	AD1884A_MODELS
+ };
+ 
+@@ -4558,6 +4559,7 @@ static const char * const ad1884a_models[AD1884A_MODELS] = {
+ 	[AD1884A_THINKPAD]	= "thinkpad",
+ 	[AD1984A_TOUCHSMART]	= "touchsmart",
+ 	[AD1984A_PRECISION]	= "precision",
++	[AD1984A_HP_MV]	        = "hp_mv",
+ };
+ 
+ static const struct snd_pci_quirk ad1884a_cfg_tbl[] = {
+@@ -4566,6 +4568,7 @@ static const struct snd_pci_quirk ad1884a_cfg_tbl[] = {
+ 	SND_PCI_QUIRK(0x103c, 0x3037, "HP 2230s", AD1884A_LAPTOP),
+ 	SND_PCI_QUIRK(0x103c, 0x3056, "HP", AD1884A_MOBILE),
+ 	SND_PCI_QUIRK_MASK(0x103c, 0xfff0, 0x3070, "HP", AD1884A_MOBILE),
++        SND_PCI_QUIRK_MASK(0x103c, 0xffff, 0x30db, "HP MV", AD1984A_HP_MV),
+ 	SND_PCI_QUIRK_MASK(0x103c, 0xfff0, 0x30d0, "HP laptop", AD1884A_LAPTOP),
+ 	SND_PCI_QUIRK_MASK(0x103c, 0xfff0, 0x30e0, "HP laptop", AD1884A_LAPTOP),
+ 	SND_PCI_QUIRK_MASK(0x103c, 0xff00, 0x3600, "HP laptop", AD1884A_LAPTOP),
+@@ -4630,6 +4633,21 @@ static int patch_ad1884a(struct hda_codec *codec)
+ 					  (0x05 << AC_AMPCAP_STEP_SIZE_SHIFT) |
+ 					  (1 << AC_AMPCAP_MUTE_SHIFT));
+ 		break;
++        case AD1984A_HP_MV:
++		spec->mixers[0] = ad1884a_mobile_mixers;
++		spec->init_verbs[spec->num_init_verbs++] = ad1884a_laptop_verbs;
++		spec->multiout.dig_out_nid = 0;
++                codec->patch_ops.unsol_event = ad1884a_hp_unsol_event;
++                codec->patch_ops.init = ad1884a_laptop_init;
++                /* set the upper-limit for mixer amp to 0dB for avoiding the
++                 * possible damage by overloading
++                 */
++                snd_hda_override_amp_caps(codec, 0x20, HDA_INPUT,
++                                          (0x17 << AC_AMPCAP_OFFSET_SHIFT) |
++                                          (0x17 << AC_AMPCAP_NUM_STEPS_SHIFT) |
++                                          (0x05 << AC_AMPCAP_STEP_SIZE_SHIFT) |
++                                          (1 << AC_AMPCAP_MUTE_SHIFT));
++                break;
+ 	case AD1884A_MOBILE:
+ 		spec->mixers[0] = ad1884a_mobile_mixers;
+ 		spec->init_verbs[0] = ad1884a_mobile_verbs;
+diff --git a/sound/pci/hda/patch_conexant.c b/sound/pci/hda/patch_conexant.c
+index 09fae16..93faa58 100644
+--- a/sound/pci/hda/patch_conexant.c
++++ b/sound/pci/hda/patch_conexant.c
+@@ -2961,6 +2961,7 @@ static const char * const cxt5066_models[CXT5066_MODELS] = {
+ 
+ static const struct snd_pci_quirk cxt5066_cfg_tbl[] = {
+ 	SND_PCI_QUIRK_MASK(0x1025, 0xff00, 0x0400, "Acer", CXT5066_IDEAPAD),
++        SND_PCI_QUIRK(0x10f7, 0x8338, "Panasonic CF-C1", CXT5066_DELL_VOSTRO),
+ 	SND_PCI_QUIRK(0x1028, 0x02d8, "Dell Vostro", CXT5066_DELL_VOSTRO),
+ 	SND_PCI_QUIRK(0x1028, 0x02f5, "Dell Vostro 320", CXT5066_IDEAPAD),
+ 	SND_PCI_QUIRK(0x1028, 0x0401, "Dell Vostro 1014", CXT5066_DELL_VOSTRO),
+diff --git a/sound/pci/hda/patch_sigmatel.c b/sound/pci/hda/patch_sigmatel.c
+index a86547c..b9ae7cb 100644
+--- a/sound/pci/hda/patch_sigmatel.c
++++ b/sound/pci/hda/patch_sigmatel.c
+@@ -1718,6 +1718,8 @@ static const struct snd_pci_quirk stac92hd83xxx_cfg_tbl[] = {
+ 		      "Dell Latitude E6430U", STAC_92HD83XXX_HEADSET_JACK),
+ 	SND_PCI_QUIRK(PCI_VENDOR_ID_DELL, 0x1028,
+ 		      "Dell Vostro 3500", STAC_DELL_VOSTRO_3500),
++        SND_PCI_QUIRK(PCI_VENDOR_ID_DELL, 0x0410,
++                      "Dell E4310", STAC_DELL_S14),
+ 	SND_PCI_QUIRK(PCI_VENDOR_ID_HP, 0x1656,
+ 			  "HP", STAC_92HD83XXX_HP_cNB11_INTQUAD),
+ 	SND_PCI_QUIRK(PCI_VENDOR_ID_HP, 0x1657,

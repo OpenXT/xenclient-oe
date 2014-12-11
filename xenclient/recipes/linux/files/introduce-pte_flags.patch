@@ -1,0 +1,106 @@
+diff --git a/arch/x86/include/asm/paravirt.h b/arch/x86/include/asm/paravirt.h
+index 7361e47..97aee70 100644
+--- a/arch/x86/include/asm/paravirt.h
++++ b/arch/x86/include/asm/paravirt.h
+@@ -427,6 +427,11 @@ static inline void pmd_update_defer(struct mm_struct *mm, unsigned long addr,
+ 	PVOP_VCALL3(pv_mmu_ops.pmd_update_defer, mm, addr, pmdp);
+ }
+ 
++static inline pteval_t pte_flags(pte_t pte)
++{
++	return pv_mmu_ops.pte_flags(pte) & PTE_FLAGS_MASK;
++}
++
+ static inline pte_t __pte(pteval_t val)
+ {
+ 	pteval_t ret;
+diff --git a/arch/x86/include/asm/paravirt_types.h b/arch/x86/include/asm/paravirt_types.h
+index b3b0ec1..ef4df2f 100644
+--- a/arch/x86/include/asm/paravirt_types.h
++++ b/arch/x86/include/asm/paravirt_types.h
+@@ -288,6 +288,7 @@ struct pv_mmu_ops {
+ 	void (*ptep_modify_prot_commit)(struct mm_struct *mm, unsigned long addr,
+ 					pte_t *ptep, pte_t pte);
+ 
++	pteval_t (*pte_flags)(pte_t pte);
+ 	struct paravirt_callee_save pte_val;
+ 	struct paravirt_callee_save make_pte;
+ 
+diff --git a/arch/x86/include/asm/pgtable.h b/arch/x86/include/asm/pgtable.h
+index 1c1a955..a88d888 100644
+--- a/arch/x86/include/asm/pgtable.h
++++ b/arch/x86/include/asm/pgtable.h
+@@ -76,6 +76,7 @@ extern struct mm_struct *pgd_page_get_mm(struct page *page);
+ #define __pmd(x)	native_make_pmd(x)
+ #endif
+ 
++#define pte_flags(x)	(native_pte_val(x) & PTE_FLAGS_MASK)
+ #define pte_val(x)	native_pte_val(x)
+ #define __pte(x)	native_make_pte(x)
+ 
+diff --git a/arch/x86/include/asm/pgtable_types.h b/arch/x86/include/asm/pgtable_types.h
+index 3c32db8..be74704 100644
+--- a/arch/x86/include/asm/pgtable_types.h
++++ b/arch/x86/include/asm/pgtable_types.h
+@@ -290,9 +290,9 @@ static inline pteval_t native_pte_val(pte_t pte)
+ 	return pte.pte;
+ }
+ 
+-static inline pteval_t pte_flags(pte_t pte)
++static inline pteval_t native_pte_flags(pte_t pte)
+ {
+-	return native_pte_val(pte) & PTE_FLAGS_MASK;
++	return pte.pte;
+ }
+ 
+ #define pgprot_val(x)	((x).pgprot)
+diff --git a/arch/x86/kernel/paravirt.c b/arch/x86/kernel/paravirt.c
+index 8bfb335..9f57f0c 100644
+--- a/arch/x86/kernel/paravirt.c
++++ b/arch/x86/kernel/paravirt.c
+@@ -462,6 +462,7 @@ struct pv_mmu_ops pv_mmu_ops = {
+ #endif
+ #endif /* PAGETABLE_LEVELS >= 3 */
+ 
++	.pte_flags = native_pte_flags,
+ 	.pte_val = PTE_IDENT,
+ 	.pgd_val = PTE_IDENT,
+ 
+diff --git a/arch/x86/xen/mmu.c b/arch/x86/xen/mmu.c
+index cab96b6..47fcf11 100644
+--- a/arch/x86/xen/mmu.c
++++ b/arch/x86/xen/mmu.c
+@@ -431,6 +431,16 @@ static pteval_t iomap_pte(pteval_t val)
+ 	return val;
+ }
+ 
++static pteval_t xen_pte_flags(pte_t pte)
++{
++	pteval_t pteval = pte.pte;
++
++	/* If this is a WC pte, convert back from Xen WC to Linux WC */
++	if ((pteval & (_PAGE_PAT | _PAGE_PCD | _PAGE_PWT)) == _PAGE_PAT)
++		pteval = (pteval & ~_PAGE_PAT) | _PAGE_PWT;
++	return pteval;
++}
++
+ static pteval_t xen_pte_val(pte_t pte)
+ {
+ 	pteval_t pteval = pte.pte;
+@@ -2110,6 +2120,8 @@ static void __init xen_post_allocator_init(void)
+ 	pv_mmu_ops.release_pud = xen_release_pud;
+ #endif
+ 
++	if (!pat_enabled)
++		pv_mmu_ops.pte_flags = native_pte_flags;
+ #ifdef CONFIG_X86_64
+ 	SetPagePinned(virt_to_page(level3_user_vsyscall));
+ #endif
+@@ -2158,6 +2170,7 @@ static const struct pv_mmu_ops xen_mmu_ops __initconst = {
+ 	.ptep_modify_prot_start = __ptep_modify_prot_start,
+ 	.ptep_modify_prot_commit = __ptep_modify_prot_commit,
+ 
++	.pte_flags = xen_pte_flags,
+ 	.pte_val = PV_CALLEE_SAVE(xen_pte_val),
+ 	.pgd_val = PV_CALLEE_SAVE(xen_pgd_val),
+ 

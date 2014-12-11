@@ -1,0 +1,223 @@
+diff --git a/arch/x86/include/asm/pci.h b/arch/x86/include/asm/pci.h
+index d9e9e6c..d8a7042 100644
+--- a/arch/x86/include/asm/pci.h
++++ b/arch/x86/include/asm/pci.h
+@@ -142,6 +142,9 @@ void default_restore_msi_irqs(struct pci_dev *dev, int irq);
+ #define default_restore_msi_irqs	NULL
+ #endif
+ 
++u32 default_msi_mask_irq(struct msi_desc *desc, u32 mask, u32 flag);
++u32 default_msix_mask_irq(struct msi_desc *desc, u32 flag);
++
+ #define PCI_DMA_BUS_IS_PHYS (dma_ops->is_phys)
+ 
+ #endif  /* __KERNEL__ */
+diff --git a/arch/x86/include/asm/x86_init.h b/arch/x86/include/asm/x86_init.h
+index 828a156..0f1be11 100644
+--- a/arch/x86/include/asm/x86_init.h
++++ b/arch/x86/include/asm/x86_init.h
+@@ -172,6 +172,7 @@ struct x86_platform_ops {
+ 
+ struct pci_dev;
+ struct msi_msg;
++struct msi_desc;
+ 
+ struct x86_msi_ops {
+ 	int (*setup_msi_irqs)(struct pci_dev *dev, int nvec, int type);
+@@ -182,6 +183,8 @@ struct x86_msi_ops {
+ 	void (*teardown_msi_irqs)(struct pci_dev *dev);
+ 	void (*restore_msi_irqs)(struct pci_dev *dev, int irq);
+ 	int  (*setup_hpet_msi)(unsigned int irq, unsigned int id);
++	u32 (*msi_mask_irq)(struct msi_desc *desc, u32 mask, u32 flag);
++	u32 (*msix_mask_irq)(struct msi_desc *desc, u32 flag);
+ };
+ 
+ struct IO_APIC_route_entry;
+diff --git a/arch/x86/kernel/x86_init.c b/arch/x86/kernel/x86_init.c
+index 5f24c71..e913a15 100644
+--- a/arch/x86/kernel/x86_init.c
++++ b/arch/x86/kernel/x86_init.c
+@@ -114,6 +114,8 @@ struct x86_msi_ops x86_msi = {
+ 	.teardown_msi_irqs	= default_teardown_msi_irqs,
+ 	.restore_msi_irqs	= default_restore_msi_irqs,
+ 	.setup_hpet_msi		= default_setup_hpet_msi,
++	.msi_mask_irq		= default_msi_mask_irq,
++	.msix_mask_irq		= default_msix_mask_irq,
+ };
+ 
+ struct x86_io_apic_ops x86_io_apic_ops = {
+@@ -127,3 +129,53 @@ struct x86_io_apic_ops x86_io_apic_ops = {
+ 	.setup_entry		= native_setup_ioapic_entry,
+ 	.eoi_ioapic_pin		= native_eoi_ioapic_pin,
+ };
++
++u32 arch_msi_mask_irq(struct msi_desc *desc, u32 mask, u32 flag)
++{
++	return x86_msi.msi_mask_irq(desc, mask, flag);
++}
++u32 arch_msix_mask_irq(struct msi_desc *desc, u32 flag)
++{
++	return x86_msi.msix_mask_irq(desc, flag);
++}
++
++/*
++ * PCI 2.3 does not specify mask bits for each MSI interrupt.  Attempting to
++ * mask all MSI interrupts by clearing the MSI enable bit does not work
++ * reliably as devices without an INTx disable bit will then generate a
++ * level IRQ which will never be cleared.
++ */
++u32 default_msi_mask_irq(struct msi_desc *desc, u32 mask, u32 flag)
++{
++	u32 mask_bits = desc->masked;
++
++	if (!desc->msi_attrib.maskbit)
++		return 0;
++
++	mask_bits &= ~mask;
++	mask_bits |= flag;
++	pci_write_config_dword(desc->dev, desc->mask_pos, mask_bits);
++
++	return mask_bits;
++}
++
++/*
++ * This internal function does not flush PCI writes to the device.
++ * All users must ensure that they read from the device before either
++ * assuming that the device state is up to date, or returning out of this
++ * file.  This saves a few milliseconds when initialising devices with lots
++ * of MSI-X interrupts.
++ */
++u32 default_msix_mask_irq(struct msi_desc *desc, u32 flag)
++{
++	u32 mask_bits = desc->masked;
++	unsigned offset = desc->msi_attrib.entry_nr * PCI_MSIX_ENTRY_SIZE +
++						PCI_MSIX_ENTRY_VECTOR_CTRL;
++	mask_bits &= ~PCI_MSIX_ENTRY_CTRL_MASKBIT;
++	if (flag)
++		mask_bits |= PCI_MSIX_ENTRY_CTRL_MASKBIT;
++	writel(mask_bits, desc->mask_base + offset);
++
++	return mask_bits;
++}
++
+diff --git a/arch/x86/pci/xen.c b/arch/x86/pci/xen.c
+index 48e8461..5eee495 100644
+--- a/arch/x86/pci/xen.c
++++ b/arch/x86/pci/xen.c
+@@ -382,7 +382,14 @@ static void xen_teardown_msi_irq(unsigned int irq)
+ {
+ 	xen_destroy_irq(irq);
+ }
+-
++static u32 xen_nop_msi_mask_irq(struct msi_desc *desc, u32 mask, u32 flag)
++{
++	return 0;
++}
++static u32 xen_nop_msix_mask_irq(struct msi_desc *desc, u32 flag)
++{
++	return 0;
++}
+ #endif
+ 
+ int __init pci_xen_init(void)
+@@ -406,6 +413,8 @@ int __init pci_xen_init(void)
+ 	x86_msi.setup_msi_irqs = xen_setup_msi_irqs;
+ 	x86_msi.teardown_msi_irq = xen_teardown_msi_irq;
+ 	x86_msi.teardown_msi_irqs = xen_teardown_msi_irqs;
++	x86_msi.msi_mask_irq = xen_nop_msi_mask_irq;
++	x86_msi.msix_mask_irq = xen_nop_msix_mask_irq;
+ #endif
+ 	return 0;
+ }
+@@ -485,6 +494,8 @@ int __init pci_xen_initial_domain(void)
+ 	x86_msi.setup_msi_irqs = xen_initdom_setup_msi_irqs;
+ 	x86_msi.teardown_msi_irq = xen_teardown_msi_irq;
+ 	x86_msi.restore_msi_irqs = xen_initdom_restore_msi_irqs;
++	x86_msi.msi_mask_irq = xen_nop_msi_mask_irq;
++	x86_msi.msix_mask_irq = xen_nop_msix_mask_irq;
+ #endif
+ 	xen_setup_acpi_sci();
+ 	__acpi_register_gsi = acpi_register_gsi_xen;
+diff --git a/drivers/pci/msi.c b/drivers/pci/msi.c
+index aca7578..79e0863 100644
+--- a/drivers/pci/msi.c
++++ b/drivers/pci/msi.c
+@@ -156,54 +156,24 @@ static inline __attribute_const__ u32 msi_enabled_mask(u16 control)
+ 	return msi_mask((control >> 4) & 7);
+ }
+ 
+-/*
+- * PCI 2.3 does not specify mask bits for each MSI interrupt.  Attempting to
+- * mask all MSI interrupts by clearing the MSI enable bit does not work
+- * reliably as devices without an INTx disable bit will then generate a
+- * level IRQ which will never be cleared.
+- */
+-static u32 __msi_mask_irq(struct msi_desc *desc, u32 mask, u32 flag)
++__weak u32 arch_msi_mask_irq(struct msi_desc *desc, u32 mask, u32 flag)
+ {
+-	u32 mask_bits = desc->masked;
+-
+-	if (!desc->msi_attrib.maskbit)
+-		return 0;
+-
+-	mask_bits &= ~mask;
+-	mask_bits |= flag;
+-	pci_write_config_dword(desc->dev, desc->mask_pos, mask_bits);
+-
+-	return mask_bits;
++	return default_msi_mask_irq(desc, mask, flag);
+ }
+ 
+ static void msi_mask_irq(struct msi_desc *desc, u32 mask, u32 flag)
+ {
+-	desc->masked = __msi_mask_irq(desc, mask, flag);
++	desc->masked = arch_msi_mask_irq(desc, mask, flag);
+ }
+ 
+-/*
+- * This internal function does not flush PCI writes to the device.
+- * All users must ensure that they read from the device before either
+- * assuming that the device state is up to date, or returning out of this
+- * file.  This saves a few milliseconds when initialising devices with lots
+- * of MSI-X interrupts.
+- */
+-static u32 __msix_mask_irq(struct msi_desc *desc, u32 flag)
++__weak u32 arch_msix_mask_irq(struct msi_desc *desc, u32 flag)
+ {
+-	u32 mask_bits = desc->masked;
+-	unsigned offset = desc->msi_attrib.entry_nr * PCI_MSIX_ENTRY_SIZE +
+-						PCI_MSIX_ENTRY_VECTOR_CTRL;
+-	mask_bits &= ~PCI_MSIX_ENTRY_CTRL_MASKBIT;
+-	if (flag)
+-		mask_bits |= PCI_MSIX_ENTRY_CTRL_MASKBIT;
+-	writel(mask_bits, desc->mask_base + offset);
+-
+-	return mask_bits;
++	return default_msix_mask_irq(desc, flag);
+ }
+ 
+ static void msix_mask_irq(struct msi_desc *desc, u32 flag)
+ {
+-	desc->masked = __msix_mask_irq(desc, flag);
++	desc->masked = arch_msix_mask_irq(desc, flag);
+ }
+ 
+ #ifdef CONFIG_GENERIC_HARDIRQS
+@@ -885,7 +855,7 @@ void pci_msi_shutdown(struct pci_dev *dev)
+ 	pci_read_config_word(dev, dev->msi_cap + PCI_MSI_FLAGS, &ctrl);
+ 	mask = msi_capable_mask(ctrl);
+ 	/* Keep cached state to be restored */
+-	__msi_mask_irq(desc, mask, ~mask);
++	arch_msi_mask_irq(desc, mask, ~mask);
+ 
+ 	/* Restore dev->irq to its default pin-assertion irq */
+ 	dev->irq = desc->msi_attrib.default_irq;
+@@ -981,7 +951,7 @@ void pci_msix_shutdown(struct pci_dev *dev)
+ 	/* Return the device with MSI-X masked as initial states */
+ 	list_for_each_entry(entry, &dev->msi_list, list) {
+ 		/* Keep cached states to be restored */
+-		__msix_mask_irq(entry, 1);
++		arch_msix_mask_irq(entry, 1);
+ 	}
+ 
+ 	msix_set_enable(dev, 0);

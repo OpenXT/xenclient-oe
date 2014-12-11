@@ -1,0 +1,32 @@
+diff --git a/drivers/xen/xenbus/xenbus_probe_backend.c b/drivers/xen/xenbus/xenbus_probe_backend.c
+index 998bbba..a64f787 100644
+--- a/drivers/xen/xenbus/xenbus_probe_backend.c
++++ b/drivers/xen/xenbus/xenbus_probe_backend.c
+@@ -187,6 +187,18 @@ static void frontend_changed(struct xenbus_watch *watch,
+ 	xenbus_otherend_changed(watch, vec, len, 0);
+ }
+ 
++void xenbus_dev_shutdown_backend(struct device *_dev)
++{
++	struct xenbus_device *dev = to_xenbus_device(_dev);
++	get_device(&dev->dev);
++	if (system_state > SYSTEM_RUNNING && !strcmp(dev->devicetype, "vif"))
++		pr_info("%s: %s: skipping wait for frontend to close\n",
++			__func__, dev->nodename);
++	else
++		xenbus_dev_shutdown(_dev);
++	put_device(&dev->dev);
++}
++
+ static struct xen_bus_type xenbus_backend = {
+ 	.root = "backend",
+ 	.levels = 3,		/* backend/type/<frontend>/<id> */
+@@ -199,7 +211,7 @@ static struct xen_bus_type xenbus_backend = {
+ 		.uevent		= xenbus_uevent_backend,
+ 		.probe		= xenbus_dev_probe,
+ 		.remove		= xenbus_dev_remove,
+-		.shutdown	= xenbus_dev_shutdown,
++		.shutdown	= xenbus_dev_shutdown_backend,
+ 		.dev_attrs	= xenbus_dev_attrs,
+ 	},
+ };
