@@ -10,7 +10,7 @@ XENCLIENT_TOOLS ?= "unknown"
 # Add /etc/xenclient.conf
 ROOTFS_POSTPROCESS_COMMAND += " \
     { \
-        echo 'product = XenClient XT'; \
+        echo 'product = OpenXT'; \
         echo 'build = ${XENCLIENT_BUILD}'; \
         echo 'build_date = ${XENCLIENT_BUILD_DATE}'; \
         echo 'build_branch = ${XENCLIENT_BUILD_BRANCH}'; \
@@ -23,7 +23,7 @@ ROOTFS_POSTPROCESS_COMMAND += " \
 # Update /etc/issue and /etc/issue.net
 ROOTFS_POSTPROCESS_COMMAND += " \
     { \
-        echo 'XenClient XT'; \
+        echo 'OpenXT'; \
         echo; \
         cat ${IMAGE_ROOTFS}/etc/xenclient.conf; \
         echo; \
