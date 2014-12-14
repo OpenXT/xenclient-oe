@@ -4,7 +4,7 @@ SRC_URI[md5sum] = "2832e23d4778bbacbfa4b49bf642d667"
 SRC_URI[sha256sum] = "ed2cfa15018a4fd2557e875f66fcb3f0b9dabe12fa0700aa2f11cca69c2cb256"
 # prevent uim from dumb check for libedit that causes cross compilation sanity check fail
 EXTRA_OECONF += "ac_cv_lib_edit_el_init=false"
-require recipes/uim/uim.inc
+require recipes-connectivity/uim/uim.inc
 DEPENDS = "gtk+ uim-native anthy fontconfig libxft xt glib-2.0 ncurses"
 SECTION_uim-gtk2.0 = "x11/inputmethods"
 PR = "r4"
