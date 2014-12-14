@@ -1,6 +1,6 @@
 SRC_URI[dbus.md5sum] = "8c12fc6af7538c5c8ff12ba683f9d80b"
 SRC_URI[dbus.sha256sum] = "4666ec0633dca25887b349f82b51665fa99c56ebf54ad6e560556a08943bc460"
-include recipes/dbus/dbus_1.2.28.inc
+include dbus_1.2.28.inc
 
 PR = "r0xc2"
 LICENSE = "GPL-2.0 & AFL-2.1"
