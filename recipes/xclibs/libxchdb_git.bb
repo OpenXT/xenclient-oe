@@ -1,4 +1,4 @@
-require recipes/ghc/ghc-xclib.inc
+require recipes-devtools/ghc/ghc-xclib.inc
 
 DESCRIPTION = "helps accessing db daemon"
 LICENSE = "LGPLv2.1"

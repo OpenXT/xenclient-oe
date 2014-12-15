@@ -1,4 +1,4 @@
-require recipes/ghc/ghc-pkg.inc
+require recipes-devtools/ghc/ghc-pkg.inc
 
 BBCLASSEXTEND = "native"
 

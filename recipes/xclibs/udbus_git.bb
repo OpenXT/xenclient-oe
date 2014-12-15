@@ -1,4 +1,4 @@
-require recipes/ghc/ghc-xclib.inc
+require recipes-devtools/ghc/ghc-xclib.inc
 
 DESCRIPTION = "haskell dbus library"
 LICENSE = "LGPLv2.1"

@@ -1,4 +1,4 @@
-require recipes/ghc/ghc-xcprog.inc
+require recipes-devtools/ghc/ghc-xcprog.inc
 
 DESCRIPTION = "bash completion for human beings"
 LICENSE = "MIT"

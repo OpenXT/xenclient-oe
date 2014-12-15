@@ -1,4 +1,4 @@
-require recipes/ghc/ghc-xcprog.inc
+require recipes-devtools/ghc/ghc-xcprog.inc
 
 DESCRIPTION = "XenClient RPC proxy"
 LICENSE = "GPLv2"

@@ -1,5 +1,5 @@
 inherit findlib
-require recipes/ghc/ghc-pkg.inc
+require recipes-devtools/ghc/ghc-pkg.inc
 
 DESCRIPTION = "XenClient database daemon"
 LICENSE = "GPLv2"
