@@ -1,7 +1,7 @@
 inherit xenclient
 inherit xenclient-deb
 
-require recipes/xen/xen.inc
+require recipes-extended/xen/xen.inc
 
 LICENSE = "GPLv2"
 DEPENDS = "${@deb_bootstrap_deps(d)} deb-libxenstore"
