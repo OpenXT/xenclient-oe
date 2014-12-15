@@ -1,6 +1,6 @@
 inherit xenclient
 
-require recipes/linux/linux.inc
+require recipes-kernel/linux/linux.inc
 
 DEPENDS += "bc-native"
 
