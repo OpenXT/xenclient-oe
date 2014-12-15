@@ -1,4 +1,4 @@
-require recipes/intel/intel-microcode.inc
+require recipes-kernel/intel/intel-microcode.inc
 
 SRC_URI = "${OPENXT_MIRROR}/microcode-${PV}.tgz " 
 SRC_URI[md5sum] = "40008cd2a18a96bf04d3290e8faad812"
