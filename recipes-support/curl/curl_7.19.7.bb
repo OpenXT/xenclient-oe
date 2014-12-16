@@ -1,8 +1,8 @@
 
 CURL_FEATURES = "zlib,openssl,cookies,crypto-auth,dict,file,ftp,http,telnet,tftp"
 
-require recipes/curl/curl-common.inc
-require recipes/curl/curl-target.inc
+require recipes-support/curl/curl-common.inc
+require recipes-support/curl/curl-target.inc
 
 SRC_URI += "file://off_t_abi_fix.patch;patch=1;pnum=0"
 SRC_URI += "file://libcurl-7.19.7-certdata_url.patch;patch=1"
