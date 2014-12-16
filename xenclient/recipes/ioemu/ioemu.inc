@@ -51,6 +51,7 @@ SRC_URI = "git://${OPENXT_GIT_MIRROR}/ioemu.git;protocol=${OPENXT_GIT_PROTOCOL};
     file://disable-blktap.patch;patch=1 \
     file://atapi-pt-exclusive-access.patch;patch=1 \
     file://intel-hda.patch;patch=1 \
+    file://intel-hda-disable-audio-recording;patch=1 \
     file://cdrom-fix-cdrom-media-change-detection.patch;patch=1 \
     file://lpc.patch;patch=1 \
     file://applesmc.patch;patch=1 \
