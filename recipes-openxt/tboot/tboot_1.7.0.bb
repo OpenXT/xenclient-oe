@@ -1,5 +1,5 @@
 
-require recipes/tboot/tboot.inc
+require recipes-openxt/tboot/tboot.inc
 
 # This is not a very good way to do this. Some update to this file like a
 # change to the copyright date broke the checksum.
