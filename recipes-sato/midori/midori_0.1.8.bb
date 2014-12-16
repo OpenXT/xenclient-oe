@@ -1,4 +1,4 @@
-require recipes/gtk-webcore/midori.inc
+require recipes-sato/midori/midori.inc
 
 PR="r3"
 
