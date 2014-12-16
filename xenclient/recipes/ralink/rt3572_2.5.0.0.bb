@@ -19,7 +19,7 @@ S = "${WORKDIR}/2011_0427_RT3572_Linux_STA_v2.5.0.0.DPO"
 DEPENDS = "virtual/kernel"
 inherit module-base
 
-addtask move_lic before do_populate_lic after do_unpack
+addtask move_lic before do_populate_lic before do_configure after do_unpack
 
 do_move_lic () {
     cp ${S}/LICENSE\ ralink-GPL.txt ${S}/LICENSE-ralink-GPL.txt
