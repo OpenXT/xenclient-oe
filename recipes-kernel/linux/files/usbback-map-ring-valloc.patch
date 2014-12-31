@@ -1,0 +1,203 @@
+Subject: [PATCH 001/001] Use xenbus shared ring mapper functions.
+
+From: Ross Philipson <ross.philipson@gmail.com>
+
+The comment in the code sums up what the problem is but I will recap here.
+The existing code was calling alloc_vm_area which update the page tables
+for the init process (init_mm). If the process context is not init, the
+current process will not have updated page tables. These tables would be
+updated through normal #PF faults later. But, since the next call here is
+a hypercall, there is not chance to update those table and the hypercall
+fails when it cannot find the page through a PT lookup. Thus the error:
+
+(XEN) mm.c:3889:d0 Could not find L1 PTE for address f8684000
+
+Using the xenbus mapping with valloc and vfree handles this by passing
+the PTEs to the hypercall.
+
+OXT-69
+
+Signed-off-by: Ross Philipson <ross.philipson@gmail.com>
+---
+diff --git a/drivers/usb/xen-usbback/common.h b/drivers/usb/xen-usbback/common.h
+index 76dbdb3..2dbb5a8 100644
+--- a/drivers/usb/xen-usbback/common.h
++++ b/drivers/usb/xen-usbback/common.h
+@@ -181,7 +181,7 @@ typedef struct usbif_st {
+ 	/* Comms information. */
+ 	enum usbif_protocol usb_protocol;
+ 	usbif_back_rings_t usb_rings;
+-	struct vm_struct *usb_ring_area;
++	void *usb_ring_addr;
+ 	/* The VUSB attached to this interface. */
+ 	struct vusb        vusb;
+ 	/* Back pointer to the backend_info. */
+@@ -200,8 +200,6 @@ typedef struct usbif_st {
+ 
+ 	wait_queue_head_t waiting_to_free;
+ 	
+-	grant_handle_t shmem_handle;
+-	grant_ref_t    shmem_ref;
+ } usbif_t;
+ 
+ static inline struct usbif_st *usbif_from_vusb(struct vusb *vusb)
+@@ -287,7 +285,7 @@ static inline int data_pages(pending_req_t *req)
+ 
+ usbif_t *usbif_alloc(domid_t domid);
+ void usbif_kill_xenusbd(usbif_t *usbif);
+-void usbif_disconnect(usbif_t *usbif);
++void usbif_disconnect(usbif_t *usbif, struct xenbus_device *dev);
+ void usbif_free(usbif_t *usbif);
+ int usbif_map(usbif_t *usbif, unsigned long shared_page, unsigned int evtchn);
+ 
+diff --git a/drivers/usb/xen-usbback/interface.c b/drivers/usb/xen-usbback/interface.c
+index d747844..644c938 100644
+--- a/drivers/usb/xen-usbback/interface.c
++++ b/drivers/usb/xen-usbback/interface.c
+@@ -58,38 +58,6 @@ usbif_t *usbif_alloc(domid_t domid)
+ 	return usbif;
+ }
+ 
+-static int map_frontend_page(usbif_t *usbif, unsigned long shared_page)
+-{
+-	struct gnttab_map_grant_ref op;
+-
+-	gnttab_set_map_op(&op, (unsigned long)usbif->usb_ring_area->addr,
+-			  GNTMAP_host_map, shared_page, usbif->domid);
+-
+-	if (HYPERVISOR_grant_table_op(GNTTABOP_map_grant_ref, &op, 1))
+-		BUG();
+-
+-	if (op.status) {
+-		DPRINTK(" Grant table operation failure !\n");
+-		return op.status;
+-	}
+-
+-	usbif->shmem_ref = shared_page;
+-	usbif->shmem_handle = op.handle;
+-
+-	return 0;
+-}
+-
+-static void unmap_frontend_page(usbif_t *usbif)
+-{
+-	struct gnttab_unmap_grant_ref op;
+-
+-	gnttab_set_unmap_op(&op, (unsigned long)usbif->usb_ring_area->addr,
+-			    GNTMAP_host_map, usbif->shmem_handle);
+-
+-	if (HYPERVISOR_grant_table_op(GNTTABOP_unmap_grant_ref, &op, 1))
+-		BUG();
+-}
+-
+ int usbif_map(usbif_t *usbif, unsigned long shared_page, unsigned int evtchn)
+ {
+ 	int err;
+@@ -99,34 +67,40 @@ int usbif_map(usbif_t *usbif, unsigned long shared_page, unsigned int evtchn)
+ 	if (usbif->irq)
+ 		return 0;
+ 
+-	if ( (usbif->usb_ring_area = alloc_vm_area(PAGE_SIZE, &pte)) == NULL )
+-		return -ENOMEM;
+-
+-	err = map_frontend_page(usbif, shared_page);
+-	if (err) {
+-		free_vm_area(usbif->usb_ring_area);
++	debug_print(LOG_LVL_INFO, "Map shared ring, connect event channel\n");
++
++	/* Call the xenbus function to map the shared page. It handles the case
++	 * where alloc_vm_area is done in a process context that is not init
++	 * but only the init_mm tables are updated. Normally a fault would
++	 * correct this in other processes but the supsequent hypercall blocks
++	 * that fault handling. Therefore in the hypercall it sees the PTE's
++	 * not populated. The xenbus routine also tracks the vm area allocation
++	 * and the op.handle for cleanup.
++	 */
++	err = xenbus_map_ring_valloc(usbif->be->dev,
++			shared_page, &(usbif->usb_ring_addr));
++	if (err)
+ 		return err;
+-	}
+ 
+ 	switch (usbif->usb_protocol) {
+ 	case USBIF_PROTOCOL_NATIVE:
+ 	{
+ 		struct usbif_sring *sring;
+-		sring = (struct usbif_sring *)usbif->usb_ring_area->addr;
++		sring = (struct usbif_sring *)usbif->usb_ring_addr;
+ 		BACK_RING_INIT(&usbif->usb_rings.native, sring, PAGE_SIZE);
+ 		break;
+ 	}
+ 	case USBIF_PROTOCOL_X86_32:
+ 	{
+ 		struct usbif_x86_32_sring *sring_x86_32;
+-		sring_x86_32 = (struct usbif_x86_32_sring *)usbif->usb_ring_area->addr;
++		sring_x86_32 = (struct usbif_x86_32_sring *)usbif->usb_ring_addr;
+ 		BACK_RING_INIT(&usbif->usb_rings.x86_32, sring_x86_32, PAGE_SIZE);
+ 		break;
+ 	}
+ 	case USBIF_PROTOCOL_X86_64:
+ 	{
+ 		struct usbif_x86_64_sring *sring_x86_64;
+-		sring_x86_64 = (struct usbif_x86_64_sring *)usbif->usb_ring_area->addr;
++		sring_x86_64 = (struct usbif_x86_64_sring *)usbif->usb_ring_addr;
+ 		BACK_RING_INIT(&usbif->usb_rings.x86_64, sring_x86_64, PAGE_SIZE);
+ 		break;
+ 	}
+@@ -138,9 +112,9 @@ int usbif_map(usbif_t *usbif, unsigned long shared_page, unsigned int evtchn)
+ 		usbif->domid, evtchn, usbif_be_int, 0, "usbif-backend", usbif);
+ 	if (err < 0)
+ 	{
+-		unmap_frontend_page(usbif);
+-		free_vm_area(usbif->usb_ring_area);
++		xenbus_unmap_ring_vfree(usbif->be->dev, usbif->usb_ring_addr);
+ 		usbif->usb_rings.common.sring = NULL;
++		usbif->usb_ring_addr = NULL;
+ 		return err;
+ 	}
+ 	usbif->irq = err;
+@@ -156,8 +130,9 @@ void usbif_kill_xenusbd(usbif_t *usbif)
+ 		kthread_stop(xenusbd);
+ }
+ 
+-void usbif_disconnect(usbif_t *usbif)
++void usbif_disconnect(usbif_t *usbif, struct xenbus_device *dev)
+ {
++	debug_print(LOG_LVL_INFO, "Disconnect shared ring and event channel\n");
+ 	usbif_kill_xenusbd(usbif);
+ 
+ 	atomic_dec(&usbif->refcnt);
+@@ -170,9 +145,9 @@ void usbif_disconnect(usbif_t *usbif)
+ 	}
+ 
+ 	if (usbif->usb_rings.common.sring) {
+-		unmap_frontend_page(usbif);
+-		free_vm_area(usbif->usb_ring_area);
++		xenbus_unmap_ring_vfree(dev, usbif->usb_ring_addr);
+ 		usbif->usb_rings.common.sring = NULL;
++		usbif->usb_ring_addr = NULL;
+ 	}
+ }
+ 
+diff --git a/drivers/usb/xen-usbback/xenbus.c b/drivers/usb/xen-usbback/xenbus.c
+index 67389c9..cb1c8b5 100644
+--- a/drivers/usb/xen-usbback/xenbus.c
++++ b/drivers/usb/xen-usbback/xenbus.c
+@@ -183,7 +183,7 @@ static int usbback_remove(struct xenbus_device *dev)
+ 		 * frontend requests.
+ 		 */
+ 		debug_print(LOG_LVL_ERROR, "Disconnecting vusb %p\n", &usbif->vusb);
+-		usbif_disconnect(usbif);
++		usbif_disconnect(usbif, be->dev);
+ 		/* Shutdown the Linux USB class driver */
+ 		debug_print(LOG_LVL_ERROR, "Freeing vusb %p\n", &usbif->vusb);
+ 		vusb_free(&usbif->vusb);
+@@ -428,7 +428,7 @@ static void frontend_changed(struct xenbus_device *dev,
+ 		break;
+ 
+ 	case XenbusStateClosing:
+-		usbif_disconnect(be->usbif);
++		usbif_disconnect(be->usbif, be->dev);
+ 		xenbus_switch_state(dev, XenbusStateClosing);
+ 		break;
+ 
