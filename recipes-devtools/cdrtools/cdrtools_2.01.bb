@@ -3,13 +3,13 @@
 # Released under the MIT license (see packages/COPYING)
 SUMMARY = "A set of tools for CD recording, including cdrecord"
 DESCRIPTION = "A set of tools for CD recording, including cdrecord"
-HOMEPAGE = "http://cdrecord.berlios.de/private/cdrecord.html"
+HOMEPAGE = "http://cdrtools.sourceforge.net"
 SECTION = "console/utils"
 LICENSE = "GPLv2"
 LIC_FILES_CHKSUM = "file://COPYING;md5=94d55d512a9ba36caa9b7df079bae19f"
 PR = "r2"
 
-SRC_URI = "ftp://ftp.berlios.de/pub/cdrecord/cdrtools-${PV}.tar.bz2 \
+SRC_URI = "http://downloads.sourceforge.net/${PN}/${PN}-${PV}.tar.bz2 \
            file://no_usr_src.patch \
            file://glibc-conflict-rename.patch"
 
