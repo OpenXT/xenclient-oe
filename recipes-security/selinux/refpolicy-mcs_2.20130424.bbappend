@@ -1,13 +1,9 @@
 FILESEXTRA := "${THISDIR}/${PN}"
 FILESEXTRAPATHS_prepend := "${FILESEXTRA}:"
 
-SRCREV_modules = "${AUTOREV}"
+PRINC := "${@int(PRINC) + 1}"
 
-# FIXME: We really should be setting this, but doing so breaks the base include which expects PV=2.20130424
-# PV = "2.20130424+git${SRCPV}"
-
-SRC_URI += "git://${OPENXT_GIT_MIRROR}/selinux-policy.git;protocol=${OPENXT_GIT_PROTOCOL};branch=${OPENXT_BRANCH};destsuffix=modules;name=modules \
-    file://gitignore.diff;patch=1 \
+SRC_URI += " \
     file://remove-xml-doc-gen.patch;patch=1 \
     file://Makefile.diff;patch=1 \
     file://build.conf.diff;patch=1 \
@@ -85,6 +81,96 @@ SRC_URI += "git://${OPENXT_GIT_MIRROR}/selinux-policy.git;protocol=${OPENXT_GIT_
     file://ctxusb-interfaces.diff;patch=1 \
     file://dbusbouncer-interfaces.diff;patch=1 \
     file://config \
+    file://openxt_policy_modules_admin_apptool.fc.patch;patch=1 \
+    file://openxt_policy_modules_admin_apptool.if.patch;patch=1 \
+    file://openxt_policy_modules_admin_apptool.te.patch;patch=1 \
+    file://openxt_policy_modules_admin_getedid.fc.patch;patch=1 \
+    file://openxt_policy_modules_admin_getedid.if.patch;patch=1 \
+    file://openxt_policy_modules_admin_getedid.te.patch;patch=1 \
+    file://openxt_policy_modules_admin_statusreport.fc.patch;patch=1 \
+    file://openxt_policy_modules_admin_statusreport.if.patch;patch=1 \
+    file://openxt_policy_modules_admin_statusreport.te.patch;patch=1 \
+    file://openxt_policy_modules_admin_sysutils.fc.patch;patch=1 \
+    file://openxt_policy_modules_admin_sysutils.if.patch;patch=1 \
+    file://openxt_policy_modules_admin_sysutils.te.patch;patch=1 \
+    file://openxt_policy_modules_admin_tpmsetup.fc.patch;patch=1 \
+    file://openxt_policy_modules_admin_tpmsetup.if.patch;patch=1 \
+    file://openxt_policy_modules_admin_tpmsetup.te.patch;patch=1 \
+    file://openxt_policy_modules_admin_txtstat.fc.patch;patch=1 \
+    file://openxt_policy_modules_admin_txtstat.if.patch;patch=1 \
+    file://openxt_policy_modules_admin_txtstat.te.patch;patch=1 \
+    file://openxt_policy_modules_admin_vhdutils.fc.patch;patch=1 \
+    file://openxt_policy_modules_admin_vhdutils.if.patch;patch=1 \
+    file://openxt_policy_modules_admin_vhdutils.te.patch;patch=1 \
+    file://openxt_policy_modules_admin_xsmutils.fc.patch;patch=1 \
+    file://openxt_policy_modules_admin_xsmutils.if.patch;patch=1 \
+    file://openxt_policy_modules_admin_xsmutils.te.patch;patch=1 \
+    file://openxt_policy_modules_apps_db-cmd.fc.patch;patch=1 \
+    file://openxt_policy_modules_apps_db-cmd.if.patch;patch=1 \
+    file://openxt_policy_modules_apps_db-cmd.te.patch;patch=1 \
+    file://openxt_policy_modules_apps_xec.fc.patch;patch=1 \
+    file://openxt_policy_modules_apps_xec.if.patch;patch=1 \
+    file://openxt_policy_modules_apps_xec.te.patch;patch=1 \
+    file://openxt_policy_modules_contrib_tpmutil.fc.patch;patch=1 \
+    file://openxt_policy_modules_contrib_tpmutil.if.patch;patch=1 \
+    file://openxt_policy_modules_contrib_tpmutil.te.patch;patch=1 \
+    file://openxt_policy_modules_services_blktap.fc.patch;patch=1 \
+    file://openxt_policy_modules_services_blktap.if.patch;patch=1 \
+    file://openxt_policy_modules_services_blktap.te.patch;patch=1 \
+    file://openxt_policy_modules_services_ctxusb.fc.patch;patch=1 \
+    file://openxt_policy_modules_services_ctxusb.if.patch;patch=1 \
+    file://openxt_policy_modules_services_ctxusb.te.patch;patch=1 \
+    file://openxt_policy_modules_services_dbd.fc.patch;patch=1 \
+    file://openxt_policy_modules_services_dbd.if.patch;patch=1 \
+    file://openxt_policy_modules_services_dbd.te.patch;patch=1 \
+    file://openxt_policy_modules_services_dbusbouncer.fc.patch;patch=1 \
+    file://openxt_policy_modules_services_dbusbouncer.if.patch;patch=1 \
+    file://openxt_policy_modules_services_dbusbouncer.te.patch;patch=1 \
+    file://openxt_policy_modules_services_dm-agent.fc.patch;patch=1 \
+    file://openxt_policy_modules_services_dm-agent.if.patch;patch=1 \
+    file://openxt_policy_modules_services_dm-agent.te.patch;patch=1 \
+    file://openxt_policy_modules_services_icbinn.fc.patch;patch=1 \
+    file://openxt_policy_modules_services_icbinn.if.patch;patch=1 \
+    file://openxt_policy_modules_services_icbinn.te.patch;patch=1 \
+    file://openxt_policy_modules_services_input-server.fc.patch;patch=1 \
+    file://openxt_policy_modules_services_input-server.if.patch;patch=1 \
+    file://openxt_policy_modules_services_input-server.te.patch;patch=1 \
+    file://openxt_policy_modules_services_language-sync.fc.patch;patch=1 \
+    file://openxt_policy_modules_services_language-sync.if.patch;patch=1 \
+    file://openxt_policy_modules_services_language-sync.te.patch;patch=1 \
+    file://openxt_policy_modules_services_network-daemon.fc.patch;patch=1 \
+    file://openxt_policy_modules_services_network-daemon.if.patch;patch=1 \
+    file://openxt_policy_modules_services_network-daemon.te.patch;patch=1 \
+    file://openxt_policy_modules_services_surfman.fc.patch;patch=1 \
+    file://openxt_policy_modules_services_surfman.if.patch;patch=1 \
+    file://openxt_policy_modules_services_surfman.te.patch;patch=1 \
+    file://openxt_policy_modules_services_uid.fc.patch;patch=1 \
+    file://openxt_policy_modules_services_uid.if.patch;patch=1 \
+    file://openxt_policy_modules_services_uid.te.patch;patch=1 \
+    file://openxt_policy_modules_services_updatemgr.fc.patch;patch=1 \
+    file://openxt_policy_modules_services_updatemgr.if.patch;patch=1 \
+    file://openxt_policy_modules_services_updatemgr.te.patch;patch=1 \
+    file://openxt_policy_modules_services_xenpmd.fc.patch;patch=1 \
+    file://openxt_policy_modules_services_xenpmd.if.patch;patch=1 \
+    file://openxt_policy_modules_services_xenpmd.te.patch;patch=1 \
+    file://openxt_policy_modules_services_xmlstore.fc.patch;patch=1 \
+    file://openxt_policy_modules_services_xmlstore.if.patch;patch=1 \
+    file://openxt_policy_modules_services_xmlstore.te.patch;patch=1 \
+    file://openxt_policy_modules_system_pcm-config.fc.patch;patch=1 \
+    file://openxt_policy_modules_system_pcm-config.if.patch;patch=1 \
+    file://openxt_policy_modules_system_pcm-config.te.patch;patch=1 \
+    file://openxt_policy_modules_system_stubdom-helpers.fc.patch;patch=1 \
+    file://openxt_policy_modules_system_stubdom-helpers.if.patch;patch=1 \
+    file://openxt_policy_modules_system_stubdom-helpers.te.patch;patch=1 \
+    file://openxt_policy_modules_system_vgmch.fc.patch;patch=1 \
+    file://openxt_policy_modules_system_vgmch.if.patch;patch=1 \
+    file://openxt_policy_modules_system_vgmch.te.patch;patch=1 \
+    file://openxt_policy_modules_system_xc-files.fc.patch;patch=1 \
+    file://openxt_policy_modules_system_xc-files.if.patch;patch=1 \
+    file://openxt_policy_modules_system_xc-files.te.patch;patch=1 \
+    file://openxt_policy_modules_system_xc-installer.fc.patch;patch=1 \
+    file://openxt_policy_modules_system_xc-installer.if.patch;patch=1 \
+    file://openxt_policy_modules_system_xc-installer.te.patch;patch=1 \
 "
 
 RDEPENDS_${PN} = ""
@@ -99,7 +185,6 @@ POLICY_QUIET = "n"
 POLICY_MLS_CATS = "256"
 
 S = "${WORKDIR}/refpolicy"
-MODS_DIR = "${WORKDIR}/modules"
 
 FILES_${PN} += "/selinux ${sysconfdir}/selinux ${datadir}/selinux/*/*.bz2"
 
@@ -107,13 +192,6 @@ EXTRA_OEMAKE += ' -j 1 BINDIR="${STAGING_BINDIR_NATIVE}" SETFILES=true '
 
 conf_file = "${FILESEXTRA}/config"
 POL_TYPE = "${@get_poltype(conf_file)}"
-
-do_configure_prepend() {
-        find ${MODS_DIR} -name '*.fc' -o -name '*.if' -o -name '*.te' | while read MOD_FILE; do
-                DIR_PART=$(echo ${MOD_FILE} | grep -o 'policy/modules/[0-9a-zA-Z_\-]\+/')
-                cp ${MOD_FILE} ${S}/${DIR_PART}
-        done
-}
 
 do_install_append() {
         install -d ${D}/selinux
