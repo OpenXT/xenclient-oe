@@ -18,3 +18,6 @@ SRC_URI = "http://uim.googlecode.com/files/uim-${PV}.tar.bz2"
 
 FILES_${PN}-dbg += "${libdir}/*/*/*/.debug ${libdir}/*/*/.debug"
 FILES_${PN}-dev += "${libdir}/uim/plugin/*.la"
+
+# https://github.com/uim/uim/issues/44
+PARALLEL_MAKE = ""
