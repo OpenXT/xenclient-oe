@@ -1,0 +1,154 @@
+--- a/drivers/gpu/drm/i915/i915_gem.c
++++ b/drivers/gpu/drm/i915/i915_gem.c
+@@ -1836,6 +1836,7 @@ i915_gem_object_get_pages_gtt(struct drm
+ 	return 0;
+ 
+ err_pages:
++	DRM_DEBUG_DRIVER("shmem_read_mapping_page_gfp failed\n");
+ 	sg_mark_end(sg);
+ 	for_each_sg_page(st->sgl, &sg_iter, st->nents, 0)
+ 		page_cache_release(sg_page_iter_page(&sg_iter));
+@@ -3110,8 +3111,10 @@ i915_gem_object_bind_to_gtt(struct drm_i
+ 	}
+ 
+ 	ret = i915_gem_object_get_pages(obj);
+-	if (ret)
++	if (ret) {
++		DRM_DEBUG_DRIVER("i915_gem_object_get_pages failed\n");
+ 		return ret;
++	}
+ 
+ 	i915_gem_object_pin_pages(obj);
+ 
+@@ -3130,8 +3133,10 @@ search_free:
+ 					       obj->cache_level,
+ 					       map_and_fenceable,
+ 					       nonblocking);
+-		if (ret == 0)
++		if (ret == 0) {
++			DRM_DEBUG_DRIVER("drm_mm_insert_* failed... retrying\n");
+ 			goto search_free;
++		}
+ 
+ 		i915_gem_object_unpin_pages(obj);
+ 		kfree(node);
+@@ -3145,6 +3150,7 @@ search_free:
+ 
+ 	ret = i915_gem_gtt_prepare_object(obj);
+ 	if (ret) {
++		DRM_DEBUG_DRIVER("i915_gem_gtt_prepare_object failed\n");
+ 		i915_gem_object_unpin_pages(obj);
+ 		drm_mm_put_block(node);
+ 		return ret;
+@@ -3459,8 +3465,10 @@ i915_gem_object_pin_to_display_plane(str
+ 
+ 	if (pipelined != obj->ring) {
+ 		ret = i915_gem_object_sync(obj, pipelined);
+-		if (ret)
++		if (ret) {
++			DRM_DEBUG_DRIVER("i915_gem_object_sync failed\n");
+ 			return ret;
++		}
+ 	}
+ 
+ 	/* The display engine is not coherent with the LLC cache on gen6.  As
+@@ -3473,16 +3481,20 @@ i915_gem_object_pin_to_display_plane(str
+ 	 * with that bit in the PTE to main memory with just one PIPE_CONTROL.
+ 	 */
+ 	ret = i915_gem_object_set_cache_level(obj, I915_CACHE_NONE);
+-	if (ret)
++	if (ret) {
++		DRM_DEBUG_DRIVER("i915_gem_object_set_cache_level failed\n");
+ 		return ret;
++	}
+ 
+ 	/* As the user may map the buffer once pinned in the display plane
+ 	 * (e.g. libkms for the bootup splash), we have to ensure that we
+ 	 * always use map_and_fenceable for all scanout buffers.
+ 	 */
+ 	ret = i915_gem_object_pin(obj, alignment, true, false);
+-	if (ret)
++	if (ret) {
++		DRM_DEBUG_DRIVER("i915_gem_object_pin failed\n");
+ 		return ret;
++	}
+ 
+ 	i915_gem_object_flush_cpu_write_domain(obj);
+ 
+@@ -3654,8 +3666,10 @@ i915_gem_object_pin(struct drm_i915_gem_
+ 		ret = i915_gem_object_bind_to_gtt(obj, alignment,
+ 						  map_and_fenceable,
+ 						  nonblocking);
+-		if (ret)
++		if (ret) {
++			DRM_DEBUG_DRIVER("i915_gem_object_bind_to_gtt failed\n");
+ 			return ret;
++		}
+ 
+ 		if (!dev_priv->mm.aliasing_ppgtt)
+ 			i915_gem_gtt_bind_object(obj, obj->cache_level);
+--- a/drivers/gpu/drm/i915/i915_gem_foreign.c
++++ b/drivers/gpu/drm/i915/i915_gem_foreign.c
+@@ -65,6 +65,14 @@ i915_gem_foreign_remove_override(struct
+ 	for (i = 0; i < num_pages; i++) {
+ 		if (m2p_remove_override(vmap->pvec[i], NULL))
+ 			BUG();
++#if DRM_DEBUG_CODE
++		if (!(i % 100)) {
++			DRM_DEBUG_DRIVER("Foreign unmap(%d) pfn = %lx, kaddr = %p\n",
++					 i, page_to_pfn(vmap->pvec[i]),
++					 pfn_to_kaddr(page_to_pfn(vmap->pvec[i])));
++
++		}
++#endif
+ 	}
+ }
+ 
+@@ -76,6 +84,7 @@ i915_gem_foreign_get_pages(struct drm_i9
+ 	struct scatterlist *sg = NULL;
+ 	int i, ret;
+ 
++        DRM_DEBUG_DRIVER("Foreign get pages.\n");
+ 	vmap->pvec = kmalloc(vmap->num_pages*sizeof(struct page *),
+ 			 GFP_KERNEL | __GFP_NOWARN | __GFP_NORETRY);
+ 	if (vmap->pvec == NULL) {
+@@ -121,9 +130,22 @@ i915_gem_foreign_get_pages(struct drm_i9
+ 			i915_gem_foreign_remove_override(vmap, i - 1);
+ 			goto err1;
+ 		}
++#if DRM_DEBUG_CODE
++		if (!(i % 100)) {
++			DRM_DEBUG_DRIVER("Foreign map(%d) mfn = %llx, pfn = %lx, kaddr = %p, valid = %d\n",
++					 i, vmap->mfns[i], page_to_pfn(vmap->pvec[i]),
++					 pfn_to_kaddr(page_to_pfn(vmap->pvec[i])),
++					 virt_addr_valid(pfn_to_kaddr(page_to_pfn(vmap->pvec[i]))));
++		}
++#endif
+ 	}
+ 
+ 	for_each_sg(st->sgl, sg, vmap->num_pages, i) {
++#if DRM_DEBUG_CODE
++		if (!(i % 100)) {
++			DRM_DEBUG_DRIVER("Foreign page[%d] = %p\n", i, vmap->pvec[i]);
++		}
++#endif
+ 		sg_set_page(sg, vmap->pvec[i], PAGE_SIZE, 0);
+ 	}
+ 
+@@ -149,6 +171,7 @@ i915_gem_foreign_put_pages(struct drm_i9
+ 	struct i915_gem_foreign_object *vmap = to_foreign_object(obj);
+ 	int num_pages = obj->base.size >> PAGE_SHIFT;
+ 
++        DRM_DEBUG_DRIVER("Foreign put pages.\n");
+ 	i915_gem_foreign_remove_override(vmap, num_pages);
+ 
+ 	i915_gem_foreign_free_pages(vmap, num_pages);
+@@ -185,6 +208,8 @@ i915_gem_foreign_ioctl(struct drm_device
+ 	int ret = -ENOMEM;
+ 	u32 handle;
+ 
++	DRM_DEBUG_DRIVER("Foreign init - mfns:%p num_pages:0x%x flags: 0x%x\n",
++			 args->mfns, args->num_pages, args->flags);
+ 	if ((args->num_pages * PAGE_SIZE) > dev_priv->gtt.total)
+ 		return -E2BIG;
+ 
