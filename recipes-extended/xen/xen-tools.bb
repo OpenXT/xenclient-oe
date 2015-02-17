@@ -63,7 +63,7 @@ INITSCRIPT_PARAMS_${PN}-xenstored = "defaults 05"
 
 EXTRA_OEMAKE += "CROSS_SYS_ROOT=${STAGING_DIR_HOST} CROSS_COMPILE=${HOST_PREFIX}"
 EXTRA_OEMAKE += "CONFIG_IOEMU=n"
-# Why is that last one necessary?
+EXTRA_OEMAKE += "DESTDIR=${D}"
 
 TARGET_CC_ARCH += "${LDFLAGS}"
 
@@ -72,33 +72,33 @@ do_configure() {
 }
 
 do_compile() {
-        DESTDIR=${D} oe_runmake -C tools subdir-all-include
-        DESTDIR=${D} oe_runmake -C tools subdir-all-libxc
-        DESTDIR=${D} oe_runmake -C tools subdir-all-flask
-        DESTDIR=${D} oe_runmake -C tools subdir-all-xenstore
-        DESTDIR=${D} oe_runmake -C tools subdir-all-misc
-        DESTDIR=${D} oe_runmake -C tools subdir-all-hotplug
-        DESTDIR=${D} oe_runmake -C tools subdir-all-xentrace
-        DESTDIR=${D} oe_runmake -C tools subdir-all-xenmon
-        DESTDIR=${D} oe_runmake -C tools subdir-all-console
-        DESTDIR=${D} oe_runmake -C tools subdir-all-xenstat
-        DESTDIR=${D} oe_runmake -C tools subdir-all-hvm-info
-        DESTDIR=${D} oe_runmake -C tools subdir-all-xen-libhvm
+        oe_runmake -C tools subdir-all-include
+        oe_runmake -C tools subdir-all-libxc
+        oe_runmake -C tools subdir-all-flask
+        oe_runmake -C tools subdir-all-xenstore
+        oe_runmake -C tools subdir-all-misc
+        oe_runmake -C tools subdir-all-hotplug
+        oe_runmake -C tools subdir-all-xentrace
+        oe_runmake -C tools subdir-all-xenmon
+        oe_runmake -C tools subdir-all-console
+        oe_runmake -C tools subdir-all-xenstat
+        oe_runmake -C tools subdir-all-hvm-info
+        oe_runmake -C tools subdir-all-xen-libhvm
 }
 
 do_install() {
-        DESTDIR=${D} oe_runmake -C tools subdir-install-include
-        DESTDIR=${D} oe_runmake -C tools subdir-install-libxc
-        DESTDIR=${D} oe_runmake -C tools subdir-install-flask
-        DESTDIR=${D} oe_runmake -C tools subdir-install-xenstore
-        DESTDIR=${D} oe_runmake -C tools subdir-install-misc
-        DESTDIR=${D} oe_runmake -C tools subdir-install-hotplug
-        DESTDIR=${D} oe_runmake -C tools subdir-install-xentrace
-        DESTDIR=${D} oe_runmake -C tools subdir-install-xenmon
-        DESTDIR=${D} oe_runmake -C tools subdir-install-console
-        DESTDIR=${D} oe_runmake -C tools subdir-install-xenstat
-        DESTDIR=${D} oe_runmake -C tools subdir-install-hvm-info
-        DESTDIR=${D} oe_runmake -C tools subdir-install-xen-libhvm
+        oe_runmake -C tools subdir-install-include
+        oe_runmake -C tools subdir-install-libxc
+        oe_runmake -C tools subdir-install-flask
+        oe_runmake -C tools subdir-install-xenstore
+        oe_runmake -C tools subdir-install-misc
+        oe_runmake -C tools subdir-install-hotplug
+        oe_runmake -C tools subdir-install-xentrace
+        oe_runmake -C tools subdir-install-xenmon
+        oe_runmake -C tools subdir-install-console
+        oe_runmake -C tools subdir-install-xenstat
+        oe_runmake -C tools subdir-install-hvm-info
+        oe_runmake -C tools subdir-install-xen-libhvm
 
 # Should not be necessary anymore
         rm -rf ${D}/etc/udev
