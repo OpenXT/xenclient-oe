@@ -41,6 +41,7 @@ SRC_URI = "http://mirror.openxt.org/linux-3.11.10.4.tar.gz;name=kernel \
     file://stubdom-allow-foreign-lowmem-map.patch;patch=1 \
     file://gem-userptr.patch;patch=1 \
     file://gem-foreign.patch;patch=1 \
+    file://gem-foreign-debug.patch;patch=1 \
     file://atmel-tpm-timeouts.patch;patch=1 \
     file://fbcon-do-not-drag-detect-primary-option.patch;patch=1 \
     file://usbback-base.patch;patch=1 \
