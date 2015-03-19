@@ -67,17 +67,21 @@ echo $*
 echo 1 > /proc/sys/net/ipv4/ip_forward
 echo 0 > /proc/sys/net/ipv4/conf/all/rp_filter
 
-# bridges are now created in qemu-ifup
+# Probably not the most elegant way to do that.
+/etc/qemu/qemu-ifup setup "brbridged" "eth0"
+/etc/qemu/qemu-ifup setup "brwireless" "eth1"
 
 mkdir -p /var/run
 export USE_INTEL_SB=1
 export INTEL_DBUS=1
 
+rsyslogd -f /etc/rsyslog.conf -c4
+
 is_dmagent=`echo $QEMU_CMDLINE | cut -d' ' -f1`
 
 if [ "$is_dmagent" == "dmagent" ]; then
     echo "start dm-agent"
-    exec /usr/bin/dm-agent -n -t $DOMID
+    exec /usr/bin/dm-agent -q -n -t $DOMID
 else
     echo "-stubdom -name qemu-$DOMID $QEMU_CMDLINE"
     exec /usr/bin/qemu-dm-wrapper $DOMID -stubdom -name qemu-$DOMID $QEMU_CMDLINE
