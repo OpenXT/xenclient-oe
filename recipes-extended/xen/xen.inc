@@ -102,7 +102,6 @@ SRC_URI = "${XEN_SRC_URI};name=source \
     file://xc-xt-v4v-viptables.patch;patch=1 \
     file://xc-xt-unmap-shared-info.patch;patch=1 \
     file://xc-xt-foreign-batch-cacheattr.patch;patch=1 \
-    file://xc-xt-ioreq-multiple.patch;patch=1 \
     file://xc-xt-allow-pat-cacheattrs-for-all-domains.patch;patch=1 \
     file://xc-xt-opt-disable-vmcs-shadowing.patch;patch=1 \
     file://xc-xt-xenstore-use-pthread-always.patch;patch=1 \
@@ -129,6 +128,7 @@ SRC_URI = "${XEN_SRC_URI};name=source \
     file://blktap-instrumentation.patch;patch=1 \
     file://blktap-timeout.patch;patch=1 \
     file://disable-24bit-vbe-modes.patch;patch=1 \
+    file://stubdomain-msi-irq-access.patch;striplevel=1 \
 "
 
 SRC_URI[source.md5sum] := "${XEN_SRC_MD5SUM}"
