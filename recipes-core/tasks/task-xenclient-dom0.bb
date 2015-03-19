@@ -27,7 +27,7 @@ RDEPENDS_${PN} = " \
     bridge-utils \
     iptables \
     iproute2 \
-    ioemu \
+    qemu-dm \
     xcpmd \
     pmutil \
     vbetool-xc \
