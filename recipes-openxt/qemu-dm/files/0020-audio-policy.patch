@@ -1,0 +1,95 @@
+From: Jed <lejosnej@ainfosec.com>
+Date: Fri, 23 Jan 2015 16:54:42 -0500
+Subject: [PATCH] qemu: add a patch for OpenXT audio policy bits, with just the audio recording flag for now
+
+--- a/hw/ac97.c
++++ b/hw/ac97.c
+@@ -23,6 +23,8 @@
+ #include "pci/pci.h"
+ #include "sysemu/dma.h"
+ 
++extern int disable_audio_recording;
++
+ enum {
+     AC97_Reset                     = 0x00,
+     AC97_Master_Volume_Mute        = 0x02,
+@@ -1056,6 +1058,13 @@ static int read_audio (AC97LinkState *s,
+     int to_copy = 0;
+     SWVoiceIn *voice = (r - s->bm_regs) == MC_INDEX ? s->voice_mc : s->voice_pi;
+ 
++    /* Disable audio recording. */
++    if (disable_audio_recording)
++    {
++        *stop = 1;
++        return 0;
++    }
++
+     temp = audio_MIN (temp, max);
+ 
+     if (!temp) {
+--- a/hw/hda-audio.c
++++ b/hw/hda-audio.c
+@@ -25,6 +25,8 @@
+ 
+ /* -------------------------------------------------------------------------- */
+ 
++extern int disable_audio_recording;
++
+ typedef struct desc_param {
+     uint32_t id;
+     uint32_t val;
+@@ -604,10 +606,13 @@ static void hda_audio_input_cb(void *opa
+                 break;
+             }
+         }
+-        rc = hda_codec_xfer(&st->state->hda, st->stream, false,
+-                            st->buf, sizeof(st->buf));
+-        if (!rc) {
+-            break;
++        /* Only transfer input if allowed by the policy */
++        if (!disable_audio_recording) {
++            rc = hda_codec_xfer(&st->state->hda, st->stream, false,
++                                st->buf, sizeof(st->buf));
++            if (!rc) {
++                break;
++            }
+         }
+         st->bpos = 0;
+     }
+--- a/qemu-options.hx
++++ b/qemu-options.hx
+@@ -520,6 +520,14 @@ modprobe i810_audio clocking=48000
+ @end example
+ ETEXI
+ 
++DEF("disable-audio-rec", 0, QEMU_OPTION_disable_audio_rec,
++    "-disable-audio-rec Disable audio recording\n", QEMU_ARCH_ALL)
++STEXI
++@item -disable-audio-rec
++@findex -disable-audio-rec
++Disable audio recording in the guest.
++ETEXI
++
+ DEF("balloon", HAS_ARG, QEMU_OPTION_balloon,
+     "-balloon none   disable balloon device\n"
+     "-balloon virtio[,addr=str]\n"
+--- a/vl.c
++++ b/vl.c
+@@ -240,6 +240,7 @@ int boot_menu;
+ uint8_t *boot_splash_filedata;
+ size_t boot_splash_filedata_size;
+ uint8_t qemu_extra_params_fw[2];
++int disable_audio_recording = 0;
+ 
+ typedef struct FWBootEntry FWBootEntry;
+ 
+@@ -3223,6 +3224,9 @@ int main(int argc, char **argv, char **e
+                 }
+                 select_soundhw (optarg);
+                 break;
++            case QEMU_OPTION_disable_audio_rec:
++                disable_audio_recording = 1;
++                break;
+             case QEMU_OPTION_h:
+                 help(0);
+                 break;

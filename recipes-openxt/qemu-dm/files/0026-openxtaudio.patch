@@ -1,0 +1,1427 @@
+################################################################################
+SHORT DESCRIPTION: 
+################################################################################
+Subdomain Audio Support
+
+################################################################################
+LONG DESCRIPTION: 
+################################################################################
+QEMU only has support for dom0 audio. Specifically, it uses ALSA to provide
+audio, which talks to the ALSA kernel driver in dom0. This patch provides 
+support for ALSA audio in a stubdomain using V4V. Basically, all of the QEMU 
+API commands for packaged up, and sent / received to a helper application 
+running in dom0. The helper application converts the QEMU commands into ALSA 
+commands in dom0. Note that the ALSA commands are similar to the QEMU code, 
+there are some changes. Specifically, there are some changes that help provide
+better performance for a "remoted" protocol, something that the existing 
+QEMU doesn't have to worry about. If you need some background inforamtion
+on ALSA, the following provides some great information:
+
+http://jan.newmarch.name/LinuxSound/Sampled/Alsa/
+
+Note: During testing, we determined that with QEMU 1.4, AC97 is still the 
+best emulated hardware to use with Windows. Intel's HDA has buffering problems
+that causes a lot of underruns (audio glitches). Since Windows 7 64bit 
+doesn't have an AC97 driver, a custom driver will be needed to provide 
+support. 
+
+Future Work: Once V4V is removed, this patch will need to be updated to whatever
+mechanism takes it's place. 
+
+################################################################################
+CHANGELOG 
+################################################################################
+Intial Commit: Rian Quinn, quinnr@ainfosec.com, 3/18/2015
+
+################################################################################
+REMOVAL 
+################################################################################
+It is unlikely that this patch will be able to be removed. QEMU currently 
+doesn't provide support for audio ina stubdomain, and to get support, we 
+would likely need to upstream this patch. 
+
+################################################################################
+UPSTREAM PLAN 
+################################################################################
+It is unlikely that this patch will be upstreamed. To do so, the code would 
+need to be ported to a traditional front/back driver (i.e. remove V4V). The
+helper would also need to be upstreamed somehow. 
+
+################################################################################
+INTERNAL DEPENDENCIES 
+################################################################################
+None
+
+################################################################################
+PATCHES 
+################################################################################
+
+diff -Naur qemu-1.4.0/audio/alsadef.c qemu-1.4.0-alsa/audio/alsadef.c
+--- qemu-1.4.0/audio/alsadef.c  1969-12-31 19:00:00.000000000 -0500
++++ qemu-1.4.0-alsa/audio/alsadef.c 2015-03-12 09:38:53.795225901 -0400
+@@ -0,0 +1,107 @@
++#include "alsadef.h"
++
++snd_pcm_format_t aud_to_alsafmt(audfmt_e fmt, int endianness)
++{
++    switch (fmt) {
++        case AUD_FMT_S8:
++            return SND_PCM_FORMAT_S8;
++
++        case AUD_FMT_U8:
++            return SND_PCM_FORMAT_U8;
++
++        case AUD_FMT_S16:
++            if (endianness) {
++                return SND_PCM_FORMAT_S16_BE;
++            }
++            else {
++                return SND_PCM_FORMAT_S16_LE;
++            }
++
++        case AUD_FMT_U16:
++            if (endianness) {
++                return SND_PCM_FORMAT_U16_BE;
++            }
++            else {
++                return SND_PCM_FORMAT_U16_LE;
++            }
++
++        case AUD_FMT_S32:
++            if (endianness) {
++                return SND_PCM_FORMAT_S32_BE;
++            }
++            else {
++                return SND_PCM_FORMAT_S32_LE;
++            }
++
++        case AUD_FMT_U32:
++            if (endianness) {
++                return SND_PCM_FORMAT_U32_BE;
++            }
++            else {
++                return SND_PCM_FORMAT_U32_LE;
++            }
++
++        default:
++            return SND_PCM_FORMAT_U8;
++    }
++}
++
++int alsa_to_audfmt(snd_pcm_format_t alsafmt, audfmt_e *fmt, int *endianness)
++{
++    switch (alsafmt) {
++        case SND_PCM_FORMAT_S8:
++            *endianness = 0;
++            *fmt = AUD_FMT_S8;
++            break;
++
++        case SND_PCM_FORMAT_U8:
++            *endianness = 0;
++            *fmt = AUD_FMT_U8;
++            break;
++
++        case SND_PCM_FORMAT_S16_LE:
++            *endianness = 0;
++            *fmt = AUD_FMT_S16;
++            break;
++
++        case SND_PCM_FORMAT_U16_LE:
++            *endianness = 0;
++            *fmt = AUD_FMT_U16;
++            break;
++
++        case SND_PCM_FORMAT_S16_BE:
++            *endianness = 1;
++            *fmt = AUD_FMT_S16;
++            break;
++
++        case SND_PCM_FORMAT_U16_BE:
++            *endianness = 1;
++            *fmt = AUD_FMT_U16;
++            break;
++
++        case SND_PCM_FORMAT_S32_LE:
++            *endianness = 0;
++            *fmt = AUD_FMT_S32;
++            break;
++
++        case SND_PCM_FORMAT_U32_LE:
++            *endianness = 0;
++            *fmt = AUD_FMT_U32;
++            break;
++
++        case SND_PCM_FORMAT_S32_BE:
++            *endianness = 1;
++            *fmt = AUD_FMT_S32;
++            break;
++
++        case SND_PCM_FORMAT_U32_BE:
++            *endianness = 1;
++            *fmt = AUD_FMT_U32;
++            break;
++
++        default:
++            return -1;
++    }
++
++    return 0;
++}
+diff -Naur qemu-1.4.0/audio/alsadef.h qemu-1.4.0-alsa/audio/alsadef.h
+--- qemu-1.4.0/audio/alsadef.h  1969-12-31 19:00:00.000000000 -0500
++++ qemu-1.4.0-alsa/audio/alsadef.h 2015-03-12 09:38:51.155225835 -0400
+@@ -0,0 +1,16 @@
++#ifndef ALSADEF_H
++#define ALSADEF_H
++
++// QEMU Libraries
++#include "qemu-common.h"
++#include "audio.h"
++#include "qemu/timer.h"
++
++// ALSA Libraries
++#include <alsa/asoundlib.h>
++
++// Conversion Functions
++snd_pcm_format_t aud_to_alsafmt(audfmt_e fmt, int endianness);
++int alsa_to_audfmt(snd_pcm_format_t alsafmt, audfmt_e *fmt, int *endianness);
++
++#endif // ALSADEF_H
+diff -Naur qemu-1.4.0/audio/audio_int.h qemu-1.4.0-alsa/audio/audio_int.h
+--- qemu-1.4.0/audio/audio_int.h    2013-02-15 18:05:35.000000000 -0500
++++ qemu-1.4.0-alsa/audio/audio_int.h   2015-02-23 02:54:08.875203054 -0500
+@@ -214,6 +214,7 @@
+ extern struct audio_driver pa_audio_driver;
+ extern struct audio_driver spice_audio_driver;
+ extern struct audio_driver winwave_audio_driver;
++extern struct audio_driver openxt_audio_driver;
+ extern const struct mixeng_volume nominal_volume;
+ 
+ void audio_pcm_init_info (struct audio_pcm_info *info, struct audsettings *as);
+diff -Naur qemu-1.4.0/audio/Makefile.objs qemu-1.4.0-alsa/audio/Makefile.objs
+--- qemu-1.4.0/audio/Makefile.objs  2013-02-15 18:05:35.000000000 -0500
++++ qemu-1.4.0-alsa/audio/Makefile.objs 2015-03-12 09:44:23.083233886 -0400
+@@ -11,6 +11,10 @@
+ common-obj-$(CONFIG_WINWAVE) += winwaveaudio.o
+ common-obj-$(CONFIG_AUDIO_PT_INT) += audio_pt_int.o
+ common-obj-$(CONFIG_AUDIO_WIN_INT) += audio_win_int.o
++common-obj-$(CONFIG_OPENXT) += alsadef.o
++common-obj-$(CONFIG_OPENXT) += openxtv4v.o
++common-obj-$(CONFIG_OPENXT) += openxtdebug.o
++common-obj-$(CONFIG_OPENXT) += openxtaudio.o
+ common-obj-y += wavcapture.o
+ 
+ $(obj)/audio.o $(obj)/fmodaudio.o: QEMU_CFLAGS += $(FMOD_CFLAGS)
+diff -Naur qemu-1.4.0/audio/openxtaudio.c qemu-1.4.0-alsa/audio/openxtaudio.c
+--- qemu-1.4.0/audio/openxtaudio.c  1969-12-31 19:00:00.000000000 -0500
++++ qemu-1.4.0-alsa/audio/openxtaudio.c 2015-03-12 08:21:52.747108315 -0400
+@@ -0,0 +1,424 @@
++#include "qemu-common.h"
++#include "audio.h"
++#include "qemu/timer.h"
++
++#define AUDIO_CAP "openxtaudio"
++#include "audio_int.h"
++
++#include "alsadef.h"
++#include "openxtv4v.h"
++#include "openxtdebug.h"
++#include "openxtpackets.h"
++
++////////////////////////////////////////////////////////////////////////////////
++// Macros                                                                     //
++////////////////////////////////////////////////////////////////////////////////
++
++// The following defines the sample buffer that QEMU will use. If there is 
++// problems with buffering, increasing this value might help, but it might 
++// also increase latency. 
++#define MAX_SAMPLES 1024
++
++////////////////////////////////////////////////////////////////////////////////
++// Opaque Structures                                                          //
++////////////////////////////////////////////////////////////////////////////////
++
++// Opaque out pointer
++typedef struct OpenXTOut {
++    HWVoiceOut hw;
++
++} OpenXTOut;
++
++// Opaque in pointer
++typedef struct OpenXTIn {
++    HWVoiceIn hw;
++
++    int32_t old_ticks;
++
++} OpenXTIn;
++
++bool playback_initialized = false;
++bool capture_initialized = false;
++
++// Global V4V Packets
++V4VPacket snd_packet;
++V4VPacket rcv_packet;
++
++// GLobal V4V Connection
++V4VConnection *conn = NULL;
++
++// Global V4V Packet Bodies
++OpenXTPlaybackPacket *playback_packet = NULL;
++OpenXTSetVolumePacket *set_volume_packet = NULL;
++OpenXTPlaybackAckPacket *playback_ack_packet = NULL;
++OpenXTInitPlaybackPacket *init_playback_packet = NULL;
++OpenXTInitPlaybackAckPacket *init_playback_ack_packet = NULL;
++OpenXTGetAvailableAckPacket *get_available_ack_packet = NULL;
++
++////////////////////////////////////////////////////////////////////////////////
++// Helpers                                                                    //
++////////////////////////////////////////////////////////////////////////////////
++
++static int openxt_send_blank_packet(int32_t opcode)
++{
++    int ret;
++
++    // Sanity checks
++    openxt_assert_quiet(openxt_v4v_isconnected(conn) == true, -ENODEV);
++
++    // Send the blank packet
++    openxt_assert((ret = openxt_v4v_set_opcode(&snd_packet, opcode)) == 0, ret);
++    openxt_assert((ret = openxt_v4v_set_length(&snd_packet, sizeof(OpenBlankPacket))) == 0, ret);
++    openxt_assert((ret = openxt_v4v_send(conn, &snd_packet)) == sizeof(OpenBlankPacket), ret);
++
++    // Success
++    return 0;
++}
++
++////////////////////////////////////////////////////////////////////////////////
++// Playback                                                                   //
++////////////////////////////////////////////////////////////////////////////////
++
++static int openxt_init_playback(HWVoiceOut *hw, struct audsettings *as)
++{
++    int ret;
++    struct audsettings settings;
++
++    // Sanity checks
++    openxt_checkp(hw, -EINVAL);
++    openxt_checkp(as, -EINVAL);
++    openxt_assert_quiet(playback_initialized == false, -ENODEV);
++    openxt_assert_quiet(openxt_v4v_isconnected(conn) == true, -ENODEV);
++
++    // For whatever reason, QEMU will run this function once, or it can run it
++    // 1000 times if an error occurs. The result if the VM gets bogged down 
++    // like mad. This code with the assert above just makes sure that this code
++    // can only execute once.... like it should be in the first place. 
++    playback_initialized = true;
++
++    // Setup the packet
++    openxt_assert((ret = openxt_v4v_set_opcode(&snd_packet, OPENXT_INIT_PLAYBACK)) == 0, ret);
++    openxt_assert((ret = openxt_v4v_set_length(&snd_packet, sizeof(OpenXTInitPlaybackPacket))) == 0, ret);
++
++    // We need to provide the following information to the helper so that it
++    // knows how to setup ALSA. 
++    init_playback_packet->fmt = aud_to_alsafmt(as->fmt, as->endianness);
++    init_playback_packet->freq = as->freq;
++    init_playback_packet->nchannels = as->nchannels;
++    init_playback_packet->sample_size = sizeof(struct st_sample);
++
++    // Provide the helper with the init information, and then wait for it to 
++    // respond back with and ack, that has information we need to setup QEMU
++    // This process basically allows ALSA and QEMU to get sync'd up.
++    openxt_assert((ret = openxt_v4v_send(conn, &snd_packet)) == sizeof(OpenXTInitPlaybackPacket), ret);
++    openxt_assert((ret = openxt_v4v_recv(conn, &rcv_packet)) == sizeof(OpenXTInitPlaybackAckPacket), ret);
++
++    // Make sure that ALSA configured correctly
++    openxt_assert(init_playback_ack_packet->valid != 0, -ENODEV);
++
++    // Create the settings that will be provided to QEMU
++    settings.fmt = as->fmt;
++    settings.freq = init_playback_ack_packet->freq;
++    settings.nchannels = as->nchannels;
++    settings.endianness = as->endianness;
++
++    // Setup QEMU
++    audio_pcm_init_info(&hw->info, &settings);
++    hw->samples = 1024;
++
++    // Success
++    return 0;
++}
++
++static void openxt_fini_playback(HWVoiceOut *hw)
++{
++    openxt_send_blank_packet(OPENXT_FINI_PLAYBACK);
++}
++
++static int openxt_playback(HWVoiceOut *hw, int live)
++{
++    int decr;
++    int samples;
++    OpenXTOut *out = (OpenXTOut *)hw;
++
++    // Sanity checks
++    openxt_checkp(hw, 0);
++    openxt_checkp(out, 0);
++    openxt_assert_quiet(openxt_v4v_isconnected(conn) == true, 0);
++
++    // We need to find out how much space is available in ALSA so that we 
++    // know how many samples to read. 
++    openxt_assert(openxt_v4v_set_opcode(&snd_packet, OPENXT_GET_AVAILABLE) == 0, 0);
++    openxt_assert(openxt_v4v_set_length(&snd_packet, sizeof(OpenBlankPacket)) == 0, 0);
++
++    // Get the available space
++    openxt_assert(openxt_v4v_send(conn, &snd_packet) == sizeof(OpenBlankPacket), 0);
++    openxt_assert(openxt_v4v_recv(conn, &rcv_packet) == sizeof(OpenXTGetAvailableAckPacket), 0);
++
++    // The following figures out how many samples we "can" process in this 
++    // iteration (as this function is called by a timer in QEMU). Basically, 
++    // that total number of samples we can process is the lower value of either
++    // the total number of samples provided to the hardware (live), and the 
++    // total number of samples that ALSA can currently take. 
++    decr = audio_MIN(live, get_available_ack_packet->available);
++
++    // Now that we know how many samples we can send to ALSA to process, we 
++    // need to package these samples up into packets and send them to the 
++    // helper. This loop has to do a couple of things, including making sure 
++    // that we do not overrun the circular buffer that QEMU maintains, as well 
++    // as the making sure that we do not overrun the packet itself, as it 
++    // can only hold a limited number of samples. 
++    for (samples = decr; samples > 0; )
++    {
++        int len = samples; 
++
++        // Make sure that we are not overrunning the circular buffer that QEMU
++        // has, as well as make sure that we are not overrunning the packet
++        // buffer. 
++        len = audio_MIN(len, hw->samples - hw->rpos);
++        len = audio_MIN(len, MAX_PCM_BUFFER_SIZE / sizeof(struct st_sample));
++
++        // Setup the packet. 
++        openxt_assert(openxt_v4v_set_opcode(&snd_packet, OPENXT_PLAYBACK) == 0, 0);
++        openxt_assert(openxt_v4v_set_length(&snd_packet, PLAYBACK_PACKET_LENGTH(len, sizeof(struct st_sample))) == 0, 0);
++
++        // Fill in the packet's body. Note that the hw->clip function is 
++        // basically a memcpy, the only difference is that len is in samples
++        // instead of bytes. The source is the current position in the circular
++        // buffer that QEMU provides, and the destination is our packet. 
++        playback_packet->num_samples = len;
++        hw->clip(playback_packet->samples, hw->mix_buf + hw->rpos, len);
++
++        // Send the packet to the helper. 
++        openxt_assert(openxt_v4v_send(conn, &snd_packet) == PLAYBACK_PACKET_LENGTH(len, sizeof(struct st_sample)), 0);
++    
++        // We need to advance the internal pointers. 
++        samples -= len;
++        hw->rpos = (hw->rpos + len) % hw->samples;
++    }
++
++    // Success
++    return decr;
++}
++
++static int openxt_write(SWVoiceOut *sw, void *buf, int len)
++{
++    return audio_pcm_sw_write(sw, buf, len);
++}
++
++static int openxt_ctl_playback(HWVoiceOut *hw, int cmd, ...)
++{
++    // Sanity checks
++    openxt_assert_quiet(openxt_v4v_isconnected(conn) == true, -ENODEV);
++
++    // Process the command
++    switch(cmd) {
++
++        case VOICE_ENABLE:
++            openxt_send_blank_packet(OPENXT_ENABLE_VOICE);
++            return 0;
++
++        case VOICE_DISABLE:
++            openxt_send_blank_packet(OPENXT_DISABLE_VOICE);
++            return 0;
++
++        case VOICE_VOLUME:
++        {
++            va_list va;
++            SWVoiceOut *sw = NULL;
++
++            // Get the SWVoiceOut from the args
++            va_start(va, cmd);
++            sw = va_arg(va, SWVoiceOut*);
++            va_end(va);
++
++            // Make sure that we actually got an argument back. 
++            if (sw != NULL) {
++
++                // Setup the packet
++                openxt_assert(openxt_v4v_set_opcode(&snd_packet, OPENXT_SET_VOLUME) == 0, 0);
++                openxt_assert(openxt_v4v_set_length(&snd_packet, sizeof(OpenXTSetVolumePacket)) == 0, 0);
++
++                // Setup the packet. 
++                if (sw->vol.mute) {
++
++                    set_volume_packet->left = 0;
++                    set_volume_packet->right = 0;
++                
++                } else {
++
++                    // Set the volume. Note that we need to normalize the 
++                    // volume. During testing, we found that the volume that
++                    // QEMU is providing is a 64 bit number, but only 32 bits
++                    // are actually being used. The following was taken from 
++                    // the spice code, and it basically makes sure that the 
++                    // value for the volume is between 0-255. If QEMU's code 
++                    // changes, this might need to be adjusted, as well as the 
++                    // helper side of things. 
++                    set_volume_packet->left = sw->vol.l / ((1ULL << 24) + 1);
++                    set_volume_packet->right = sw->vol.r / ((1ULL << 24) + 1);
++                }
++
++                // Send the packet
++                openxt_assert(openxt_v4v_send(conn, &snd_packet) == sizeof(OpenXTSetVolumePacket), 0);
++
++                // Done
++                return 0;
++            }
++
++            // Failure
++            return -1;
++        }
++
++        default:
++            return -1;
++    }
++}
++
++static int openxt_init_capture(HWVoiceIn *hw, struct audsettings *as)
++{
++    audio_pcm_init_info(&hw->info, as);
++    hw->samples = 1024;
++
++    // TODO: Add capture init code
++
++    return 0;
++}
++
++static void openxt_fini_capture(HWVoiceIn *hw)
++{
++    (void) hw;
++
++    // TODO: Add capture fini code
++}
++
++static int openxt_capture(HWVoiceIn *hw)
++{
++    // *** TEMPORARY (cut / paste from noaudio.c)
++    OpenXTIn *no = (OpenXTIn *) hw;
++    int live = audio_pcm_hw_get_live_in(hw);
++    int dead = hw->samples - live;
++    int samples = 0;
++
++    if(dead) {
++        int64_t now = qemu_get_clock_ns(vm_clock);
++        int64_t ticks = now - no->old_ticks;
++        int64_t bytes =
++            muldiv64(ticks, hw->info.bytes_per_second, get_ticks_per_sec());
++
++        no->old_ticks = now;
++        bytes = audio_MIN(bytes, INT_MAX);
++        samples = bytes >> hw->info.shift;
++        samples = audio_MIN(samples, dead);
++    }
++    return samples;
++    // *** TEMPORARY (cut / paste from noaudio.c)
++}
++
++static int openxt_read(SWVoiceIn *sw, void *buf, int size)
++{
++    // *** TEMPORARY (cut / paste from noaudio.c)
++    int samples = size >> sw->info.shift;
++    int total = sw->hw->total_samples_captured - sw->total_hw_samples_acquired;
++    int to_clear = audio_MIN(samples, total);
++    sw->total_hw_samples_acquired += total;
++    audio_pcm_info_clear_buf(&sw->info, buf, to_clear);
++    return to_clear << sw->info.shift;
++    // *** TEMPORARY (cut / paste from noaudio.c)
++}
++
++static int openxt_ctl_capture(HWVoiceIn *hw, int cmd, ...)
++{
++    (void) hw;
++    (void) cmd;
++
++    // TODO: Add capture ctl code
++
++    return 0;
++}
++
++////////////////////////////////////////////////////////////////////////////////
++// Init / Fini                                                                //
++////////////////////////////////////////////////////////////////////////////////
++
++static void *openxt_audio_init(void)
++{
++    // Setup
++    openxt_debug_init();
++    openxt_assert((conn = openxt_v4v_open(V4V_PORT_NONE, V4V_DOMID_ANY, OPENXT_AUDIO_PORT, 0)) != NULL, NULL);
++
++    // Cleanup memory(safety)
++    memset(&snd_packet, 0, sizeof(V4VPacket));
++    memset(&rcv_packet, 0, sizeof(V4VPacket));
++
++    // Pointer checks
++    openxt_checkp(playback_packet = openxt_v4v_get_body(&snd_packet), NULL);
++    openxt_checkp(set_volume_packet = openxt_v4v_get_body(&snd_packet), NULL);
++    openxt_checkp(playback_ack_packet = openxt_v4v_get_body(&rcv_packet), NULL);
++    openxt_checkp(init_playback_packet = openxt_v4v_get_body(&snd_packet), NULL);
++    openxt_checkp(init_playback_ack_packet = openxt_v4v_get_body(&rcv_packet), NULL);
++    openxt_checkp(get_available_ack_packet = openxt_v4v_get_body(&rcv_packet), NULL);
++
++    // Size checks
++    openxt_assert(openxt_v4v_validate(sizeof(OpenXTPlaybackPacket)) == true, NULL);
++    openxt_assert(openxt_v4v_validate(sizeof(OpenXTSetVolumePacket)) == true, NULL);
++    openxt_assert(openxt_v4v_validate(sizeof(OpenXTPlaybackAckPacket)) == true, NULL);
++    openxt_assert(openxt_v4v_validate(sizeof(OpenXTInitPlaybackPacket)) == true, NULL);
++    openxt_assert(openxt_v4v_validate(sizeof(OpenXTInitPlaybackAckPacket)) == true, NULL);
++    openxt_assert(openxt_v4v_validate(sizeof(OpenXTGetAvailableAckPacket)) == true, NULL);
++
++    // Success. We don't have an init/fini pointer to return as we use 
++    // global memory like the other drivers, so like the other drivers we 
++    // just pass the address of this function, as returning NULL indicates 
++    // and error to QEMU.
++    return &openxt_audio_init;
++}
++
++static void openxt_audio_fini(void *opaque)
++{
++    // Unused / Sanity checks
++    openxt_unused(opaque);
++    openxt_assert_quiet(openxt_v4v_isconnected(conn) == true);
++
++    // Setup the packet
++    openxt_assert(openxt_v4v_set_opcode(&snd_packet, OPENXT_FINI) == 0);
++    openxt_assert(openxt_v4v_set_length(&snd_packet, sizeof(OpenBlankPacket)) == 0);
++
++    // Tell the helper that we are shutting down
++    openxt_assert(openxt_v4v_send(conn, &snd_packet) == sizeof(OpenBlankPacket));
++
++    // Debugging
++    openxt_info("safely shutdown\n");
++
++    // Cleanup
++    openxt_v4v_close(conn);
++    openxt_debug_fini();
++}
++
++static struct audio_pcm_ops openxt_pcm_ops = {
++    .init_out = openxt_init_playback,
++    .fini_out = openxt_fini_playback,
++    .run_out  = openxt_playback,
++    .write    = openxt_write,
++    .ctl_out  = openxt_ctl_playback,
++
++    .init_in  = openxt_init_capture,
++    .fini_in  = openxt_fini_capture,
++    .run_in   = openxt_capture,
++    .read     = openxt_read,
++    .ctl_in   = openxt_ctl_capture
++};
++
++struct audio_driver openxt_audio_driver = {
++    .name           = "openxt audio",
++    .descr          = "OpenXT Audio Driver",
++    .options        = NULL,
++    .init           = openxt_audio_init,
++    .fini           = openxt_audio_fini,
++    .pcm_ops        = &openxt_pcm_ops,
++    .can_be_default = 1,
++    .max_voices_out = INT_MAX,
++    .max_voices_in  = INT_MAX,
++    .voice_size_out = sizeof(OpenXTOut),
++    .voice_size_in  = sizeof(OpenXTIn)
++};
+diff -Naur qemu-1.4.0/audio/openxtdebug.c qemu-1.4.0-alsa/audio/openxtdebug.c
+--- qemu-1.4.0/audio/openxtdebug.c  1969-12-31 19:00:00.000000000 -0500
++++ qemu-1.4.0-alsa/audio/openxtdebug.c 2015-02-28 23:41:00.800892713 -0500
+@@ -0,0 +1,39 @@
++#include "openxtdebug.h"
++
++////////////////////////////////////////////////////////////////////////////////
++// Global Variables                                                           //
++////////////////////////////////////////////////////////////////////////////////
++
++bool debugging_enabled = false;
++
++////////////////////////////////////////////////////////////////////////////////
++// Functions                                                                  //
++////////////////////////////////////////////////////////////////////////////////
++
++inline void openxt_debug_init(void) 
++{
++#ifdef SYSLOG
++    openlog ("", LOG_CONS | LOG_PID | LOG_NDELAY, LOG_LOCAL1);
++#endif
++
++    openxt_debug_set_enabled(true);
++}
++
++inline void openxt_debug_fini(void) 
++{
++#ifdef SYSLOG
++    closelog ();
++#endif
++
++    openxt_debug_set_enabled(false);
++}
++
++bool openxt_debug_is_enabled(void)
++{
++    return debugging_enabled;
++}
++
++void openxt_debug_set_enabled(bool enabled)
++{
++    debugging_enabled = enabled;
++}
+diff -Naur qemu-1.4.0/audio/openxtdebug.h qemu-1.4.0-alsa/audio/openxtdebug.h
+--- qemu-1.4.0/audio/openxtdebug.h  1969-12-31 19:00:00.000000000 -0500
++++ qemu-1.4.0-alsa/audio/openxtdebug.h 2015-03-08 00:57:51.158156735 -0500
+@@ -0,0 +1,193 @@
++#ifndef OPENXT_DEBUG_H
++#define OPENXT_DEBUG_H
++
++#include <errno.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <stdbool.h>
++#include <sys/types.h>
++
++#include "openxtsettings.h"
++
++#ifdef SYSLOG
++#include <syslog.h>
++#include <stdlib.h>
++#else
++#include <stdio.h>
++#include <stdlib.h>
++#endif
++
++///
++/// Define TAG in your settings if you want a custom TAG provided in the debug
++/// statements
++///
++#ifndef TAG
++#define TAG ""
++#endif
++
++///
++/// This function can be used to tell the compiler that a variable is not used. 
++/// 
++/// @param a unused variable
++///
++#define openxt_unused(a) (void)a
++
++///
++/// The goal of this macro to provide a a simple debug statement that also 
++/// encapsulates syslog, so that things are reported to syslog if desired. 
++/// You should not use this directly, but instead use one of the openxt_
++/// macros. 
++///
++#ifdef SYSLOG
++    #define OPENXT_ERROR(...) \
++        fprintf(stderr, __VA_ARGS__); \
++        syslog(LOG_ERR, __VA_ARGS__)
++    #define OPENXT_DEBUG(...) \
++        fprintf(stdout, __VA_ARGS__); \
++        syslog(LOG_DEBUG, __VA_ARGS__)
++#else
++    #define OPENXT_ERROR(...) \
++        fprintf(stderr, __VA_ARGS__)
++    #define OPENXT_DEBUG(...) \
++        fprintf(stdout, __VA_ARGS__)
++#endif
++
++///
++/// This function can be used to validate that a pointer is not equal to NULL. 
++/// It takes a second, variable set of arguments that allows you to provide a 
++/// return value when the error occurs. If the function is a void, you can 
++/// remove the second argument, and the compiler will equate that to "return;"
++/// 
++/// @param a pointer to validate
++/// @param ... return value (for none void functions)
++///
++#define openxt_checkp(a,...) \
++    if ((a) == 0) { \
++        if (openxt_debug_is_enabled() == true) { \
++            OPENXT_ERROR("%s: ERROR: {%s} == NULL, line: %d, func: %s\n", TAG, #a, __LINE__, __PRETTY_FUNCTION__); \
++        } \
++        return __VA_ARGS__; \
++    }
++
++///
++/// This is an assert, with a return. Most asserts are removed in "production"
++/// but this version is not. This macro (or it's alternatives) will likely be 
++/// used a lot as it makes sure that what you are calling executed correctly. 
++/// Use this to validate that a function executed correctly, or use it to 
++/// validate that a variable has an expected value. The goal is to use this 
++/// macro enough such that, if an error occurs, the function gracefully exits
++/// before something really bad happens. 
++/// 
++/// @param a the expression to validate
++/// @param ... return value (for none void functions)
++///
++#define openxt_assert(a,...) \
++    if (!(a)) { \
++        if (openxt_debug_is_enabled() == true) { \
++            OPENXT_ERROR("%s: ERROR: {%s} == false, line: %d, func: %s\n", TAG, #a, __LINE__, __PRETTY_FUNCTION__); \
++        } \
++        return __VA_ARGS__; \
++    }
++
++///
++/// This is an assert, with a return. Most asserts are removed in "production"
++/// but this version is not. This macro (or it's alternatives) will likely be 
++/// used a lot as it makes sure that what you are calling executed correctly. 
++/// Use this to validate that a function executed correctly, or use it to 
++/// validate that a variable has an expected value. The goal is to use this 
++/// macro enough such that, if an error occurs, the function gracefully exits
++/// before something really bad happens. 
++/// 
++/// @param a the expression to validate
++/// @param b linux error code (can either be ret, or errno)
++/// @param ... return value (for none void functions)
++///
++#define openxt_assert_ret(a,b,...) \
++    if (!(a)) { \
++        if (openxt_debug_is_enabled() == true) { \
++            OPENXT_ERROR("%s: ERROR: {%s} == false, error: %d, srterror: %s, line: %d, func: %s\n", TAG, #a, b, strerror(b), __LINE__, __PRETTY_FUNCTION__); \
++        } \
++        return __VA_ARGS__; \
++    }
++
++///
++/// This is an assert, with a return. Most asserts are removed in "production"
++/// but this version is not. This macro (or it's alternatives) will likely be 
++/// used a lot as it makes sure that what you are calling executed correctly. 
++/// Use this to validate that a function executed correctly, or use it to 
++/// validate that a variable has an expected value. The goal is to use this 
++/// macro enough such that, if an error occurs, the function gracefully exits
++/// before something really bad happens. 
++/// 
++/// @param a the expression to validate
++/// @param ... return value (for none void functions)
++///
++#define openxt_assert_quiet(a,...) \
++    if (!(a)) { \
++        return __VA_ARGS__; \
++    }
++
++///
++/// This function provide a wrapped printf (info). You can also define SYSLOG 
++/// in your settings file, and the functionality will convert to using 
++/// syslog instead of using printf. Use these functions just like 
++/// printf. 
++///
++#ifdef DEBUGGING_ENABLED
++#define openxt_info(...) OPENXT_DEBUG(TAG ": INFO: " __VA_ARGS__);
++#else
++#define openxt_info(...)
++#endif
++
++///
++/// This function provide a wrapped printf (warn). You can also define SYSLOG 
++/// in your settings file, and the functionality will convert to using 
++/// syslog instead of using printf. Use these functions just like 
++/// printf. 
++///
++#define openxt_warn(...) OPENXT_ERROR(TAG ": WARNING: " __VA_ARGS__);
++
++///
++/// This function provide a wrapped printf (error). You can also define SYSLOG 
++/// in your settings file, and the functionality will convert to using 
++/// syslog instead of using printf. Use these functions just like 
++/// printf. 
++///
++#define openxt_error(...) \
++    if (openxt_debug_is_enabled() == true) { \
++        OPENXT_ERROR(TAG ": ERROR: " __VA_ARGS__); \
++    }
++
++///
++/// Helpful for debugging issues
++///
++#define openxt_line openxt_info("file: %s, line: %d\n", __FILE__, __LINE__);
++
++///
++/// This should be the first thing your run in your program. This initializes 
++/// debugging
++///
++void openxt_debug_init(void);
++
++///
++/// This should be the last thing your program does. This cleans up debugging. 
++///
++void openxt_debug_fini(void);
++
++///
++/// The following tells the debug statements where or not debugging is 
++/// turned on
++///
++/// @return true = debugging is enabled
++///
++bool openxt_debug_is_enabled(void);
++
++/// 
++/// The following enables / disables debugging
++/// 
++/// @param enabled true = turn on debug messages
++/// 
++void openxt_debug_set_enabled(bool enabled);
++
++#endif // OPENXT_DEBUG_H
+diff -Naur qemu-1.4.0/audio/openxtpackets.h qemu-1.4.0-alsa/audio/openxtpackets.h
+--- qemu-1.4.0/audio/openxtpackets.h    1969-12-31 19:00:00.000000000 -0500
++++ qemu-1.4.0-alsa/audio/openxtpackets.h   2015-03-11 22:12:48.402176453 -0400
+@@ -0,0 +1,86 @@
++#ifndef OPENXT_PACKETS_H
++#define OPENXT_PACKETS_H
++
++#include "openxtsettings.h"
++
++typedef enum PacketOpCode {
++
++    // Global
++    OPENXT_FINI                 = 01, 
++
++    // Init Commands
++    OPENXT_INIT_PLAYBACK        = 10,
++    OPENXT_INIT_PLAYBACK_ACK    = 11,
++    OPENXT_INIT_CAPTURE         = 12,
++    OPENXT_INIT_CAPTURE_ACK     = 13,
++
++    // Fini Commands
++    OPENXT_FINI_PLAYBACK        = 20,
++    OPENXT_FINI_CAPTURE         = 21,
++
++    // Available
++    OPENXT_GET_AVAILABLE        = 30,
++    OPENXT_GET_AVAILABLE_ACK    = 31,
++
++    // Control 
++    OPENXT_ENABLE_VOICE         = 40,  
++    OPENXT_DISABLE_VOICE        = 41,  
++    OPENXT_SET_VOLUME           = 42,
++
++    // Process
++    OPENXT_PLAYBACK             = 50,
++    OPENXT_CAPTURE              = 51,
++    OPENXT_PLAYBACK_ACK         = 52,
++    OPENXT_CAPTURE_ACK          = 53,
++
++} PacketOpCode;
++
++typedef struct OpenBlankPacket {
++
++} OpenBlankPacket;
++
++typedef struct OpenXTInitPlaybackPacket {
++
++    int32_t fmt;
++    int32_t freq;
++    int32_t nchannels;
++    int32_t sample_size;
++
++} OpenXTInitPlaybackPacket;
++
++typedef struct OpenXTInitPlaybackAckPacket {
++
++    int32_t freq;
++    int32_t valid;
++
++} OpenXTInitPlaybackAckPacket;
++
++typedef struct OpenXTGetAvailableAckPacket {
++
++    int32_t available;
++
++} OpenXTGetAvailableAckPacket;
++
++typedef struct OpenXTPlaybackPacket {
++
++    int32_t num_samples;
++    char samples[MAX_PCM_BUFFER_SIZE];
++
++} OpenXTPlaybackPacket;
++
++typedef struct OpenXTPlaybackAckPacket {
++
++    int32_t written;
++
++} OpenXTPlaybackAckPacket;
++
++typedef struct OpenXTSetVolumePacket {
++
++    int64_t left;
++    int64_t right;
++
++} OpenXTSetVolumePacket;
++
++#define PLAYBACK_PACKET_LENGTH(a,b) (sizeof(int32_t) + (a * b))
++
++#endif // OPENXT_PACKETS_H
+diff -Naur qemu-1.4.0/audio/openxtsettings.h qemu-1.4.0-alsa/audio/openxtsettings.h
+--- qemu-1.4.0/audio/openxtsettings.h   1969-12-31 19:00:00.000000000 -0500
++++ qemu-1.4.0-alsa/audio/openxtsettings.h  2015-03-08 00:35:45.410183909 -0500
+@@ -0,0 +1,16 @@
++#ifndef OPENXT_SETTINGS
++#define OPENXT_SETTINGS
++
++#define DEBUGGING_ENABLED
++#define TAG "openxt_audio_front"
++
++// The following means that we should have room for roughly 1280 samples 
++#define MAX_PCM_BUFFER_SIZE (4096)
++
++// Define the maximum size of a V4V packet
++#define V4V_MAX_PACKET_BODY_SIZE (4096 * 2)
++
++// The following is the V4V port that we will use for communications. 
++#define OPENXT_AUDIO_PORT 5001
++
++#endif // OPENXT_SETTINGS
+\ No newline at end of file
+diff -Naur qemu-1.4.0/audio/openxtv4v.c qemu-1.4.0-alsa/audio/openxtv4v.c
+--- qemu-1.4.0/audio/openxtv4v.c    1969-12-31 19:00:00.000000000 -0500
++++ qemu-1.4.0-alsa/audio/openxtv4v.c   2015-03-08 00:21:58.158197952 -0500
+@@ -0,0 +1,358 @@
++#include "openxtv4v.h"
++#include "openxtdebug.h"
++
++///
++/// This is the main function to setup your V4V connection to another domain. 
++/// The following provides suggested arguments for this function:
++/// 
++/// Clients
++/// - local port = V4V_PORT_NONE
++/// - local domid = V4V_DOMID_ANY
++/// - remote port = <port #>
++/// - remote domid = <server domid, likely == 0>
++/// 
++/// Servers
++/// - local port = <port #>
++/// - local domid = V4V_DOMID_ANY
++/// - remote port = V4V_PORT_NONE
++/// - remote domid = <client domid>
++/// 
++/// @param localport local port
++/// @param localdomid local domid
++/// @param remoteport remote port
++/// @param remotedomid remote domid
++/// 
++/// @return NULL on failure, valid pointer on success
++///
++V4VConnection *openxt_v4v_open(int32_t localport, int32_t localdomid, int32_t remoteport, int32_t remotedomid)
++{
++    // Create a new connection structure
++    V4VConnection *conn = malloc(sizeof(V4VConnection));
++
++    // Initialize the connection for safety.
++    conn->fd = 0;
++    conn->connected = false;
++    conn->local_addr.port = localport;
++    conn->local_addr.domain = localdomid;
++    conn->remote_addr.port = remoteport;
++    conn->remote_addr.domain = remotedomid;
++
++    // Attempt to open a V4V socket
++    if((conn->fd = v4v_socket(SOCK_DGRAM)) <= 0)
++        goto done;
++
++    // Bind to V4V
++    if(v4v_bind(conn->fd, &conn->local_addr, conn->remote_addr.domain) != 0)
++        goto done;
++
++    // We are now connected
++    conn->connected = true;
++
++done:
++
++    // Success
++    return conn;
++}
++
++
++///
++/// The following is for internal use only.
++///
++int openxt_v4v_close_internal(V4VConnection *conn)
++{
++    int ret = 0;
++
++    // Sanity checks
++    openxt_checkp(conn, -EINVAL);
++
++    // Close V4V
++    if (conn->fd)
++        ret = v4v_close(conn->fd);
++
++    // We are no longer connected
++    conn->fd = 0;
++    conn->connected = false;
++
++    // Success
++    return ret;
++}
++
++
++///
++/// Once you are done with V4V, run this function. Note that this function 
++/// could be called by this API if something bad happens. 
++/// 
++/// Note that this free's conn, so don't call it twice :)
++/// 
++/// @return -EINVAL if conn == NULL,
++///          negative error code on failure of v4v_close, 
++///          0 on success
++///
++int openxt_v4v_close(V4VConnection *conn)
++{
++    int ret = openxt_v4v_close_internal(conn);
++
++    // Sanity checks
++    openxt_checkp(conn, -EINVAL);
++
++    // Cleanup
++    free(conn);
++
++    // Success
++    return ret;
++}
++
++///
++/// The following function will tell you if the V4V socket is open and 
++/// connected
++///
++/// @return true = connected, false = disconnected or conn == NULL
++///
++bool openxt_v4v_isconnected(V4VConnection *conn)
++{
++    // Sanity checks
++    openxt_checkp(conn, false);
++
++    // Return connection status
++    return conn->connected;
++}
++
++///
++/// The following can be used as a safety to make sure that your packets are 
++/// not bigger than a V4V packet. This way you can use the packet structures
++/// all you want later without fear of buffer overflows. 
++///
++/// @param size the size of your packet
++/// @return true = safe, false = unsafe (likely will overflow)
++///
++bool openxt_v4v_validate(int32_t size)
++{
++    return size <= V4V_MAX_PACKET_BODY_SIZE;
++}
++
++///
++/// The following will set the opcode of a packet. 
++///
++/// @param packet the packet that you want to set the opcode for
++/// @param opcode the opcode that you want to set
++/// 
++/// @return -EINVAL if packet == NULL, 0 on success
++///
++int openxt_v4v_set_opcode(V4VPacket *packet, int32_t opcode)
++{
++    // Sanity checks
++    openxt_checkp(packet, -EINVAL);
++
++    // Set the opcode of the packet
++    packet->header.opcode = opcode;
++
++    // Success
++    return 0;
++}
++
++///
++/// The following will set the length of a packet. 
++///
++/// @param packet the packet that you want to set the length for
++/// @param length the length that you want to set
++/// 
++/// @return -EINVAL if packet == NULL, -EOVERFLOW if the length is too large, 0 on success
++///
++int openxt_v4v_set_length(V4VPacket *packet, int32_t length)
++{
++    // Sanity checks
++    openxt_checkp(packet, -EINVAL);
++    openxt_assert(length <= V4V_MAX_PACKET_BODY_SIZE, -EOVERFLOW);
++
++    // Set the opcode of the packet
++    packet->header.length = length + sizeof(V4VPacketHeader);
++
++    // Success
++    return 0;
++}
++
++///
++/// The following will get the opcode of a packet. 
++///
++/// @param packet the packet that you want to get the opcode for
++/// 
++/// @return -EINVAL if packet == NULL, opcode on success
++///
++int openxt_v4v_get_opcode(V4VPacket *packet)
++{
++    // Sanity checks
++    openxt_checkp(packet, -EINVAL);
++
++    // Success
++    return packet->header.opcode;
++}
++
++///
++/// The following will get the length of a packet. 
++///
++/// @param packet the packet that you want to get the length for
++/// 
++/// @return -EINVAL if packet == NULL, length on success
++///
++int openxt_v4v_get_length(V4VPacket *packet)
++{
++    // Sanity checks
++    openxt_checkp(packet, -EINVAL);
++
++    // Success
++    return packet->header.length - sizeof(V4VPacketHeader);
++}
++
++///
++/// The following gets the body of a packet. This is basically where you would
++/// put the contents of your packet. 
++/// 
++/// @code
++/// 
++/// V4VPacket snd_packet;
++/// MyPacket *packet = openxt_v4v_get_body(&snd_packet);
++/// 
++/// packet->data1 = data1;
++/// packet->data2 = data2;
++/// 
++/// openxt_v4v_set_opcode(&snd_packet, opcode);
++/// openxt_v4v_set_length(&snd_packet, sizeof(MyPacket));
++/// 
++/// openxt_v4v_send(conn, &snd_packet);
++/// 
++/// @endcode
++/// 
++/// @param packet the packet that you want body access to
++/// @return NULL = packet == NULL, valid pointer on success
++///
++void *openxt_v4v_get_body(V4VPacket *packet)
++{
++    // Sanity checks
++    openxt_checkp(packet, NULL);
++
++    // Success
++    return packet->body.buffer;
++}
++
++///
++/// The following function will send a V4V packet. 
++///
++/// @param conn the V4V connection created using openxt_v4v_open. 
++/// @param packet the packet to send
++/// 
++/// @return -EINVAL if conn or packet == NULL, 
++///         -EOVERFLOW if the packet length is too large, 
++///         -ENODEV if conn is closed, 
++///          negative errno if v4v_sendto fails, 
++///          ret >= 0 on success representing number of bytes sent
++///
++int openxt_v4v_send(V4VConnection *conn, V4VPacket *packet)
++{
++    // Local variables
++    int ret;
++
++    // Sanity checks
++    openxt_checkp(conn, -EINVAL);
++    openxt_checkp(packet, -EINVAL);
++    openxt_assert(openxt_v4v_get_length(packet) <= V4V_MAX_PACKET_BODY_SIZE, -EOVERFLOW);
++
++    // Make sure that we are actually connected. Note that we make this a 
++    // quite failure because if a problem happens, we will close the connection
++    // and it's possible that the code might continue attempting to send, and 
++    // we do not want to kill performance by logging a ton of error messages
++    openxt_assert_quiet(openxt_v4v_isconnected(conn) == true, -ENODEV);
++
++    // Send the packet. Note that we handle printing useful error messages
++    // here. All the user should have to do, is validate that the send was 
++    // successful
++    if ((ret = v4v_sendto(conn->fd, (char *)packet, packet->header.length, 0, &conn->remote_addr)) <= 0) {
++
++        switch (ret) {
++        
++            // Failed to send anything
++            case 0:
++            {
++                openxt_warn("failed openxt_v4v_send, wrote 0 bytes: %d - %s\n", errno, strerror(errno));
++                openxt_v4v_close_internal(conn);
++                return -errno;
++            }
++
++            // Error
++            default:
++            {
++                openxt_warn("failed openxt_v4v_send: %d - %s\n", errno, strerror(errno));
++                openxt_v4v_close_internal(conn);
++                return -errno;
++            }
++        }
++    }
++
++    // Success
++    return ret - sizeof(V4VPacketHeader);
++}
++
++///
++/// The following function will send a V4V packet. 
++///
++/// @param conn the V4V connection created using openxt_v4v_open. 
++/// @param packet the packet to send
++/// 
++/// @return -EINVAL if conn or packet == NULL, 
++///         -EIO if the received packet length != length in header, 
++///         -ENODEV if conn is closed, 
++///          negative errno if v4v_recvfrom fails, 
++///          ret >= 0 on success representing number of bytes received
++///
++int openxt_v4v_recv(V4VConnection *conn, V4VPacket *packet)
++{
++    // Local variables
++    int ret;
++
++    // Sanity checks
++    openxt_checkp(conn, -EINVAL);
++    openxt_checkp(packet, -EINVAL);
++
++    // Make sure that we are actually connected. Note that we make this a 
++    // quite failure because if a problem happens, we will close the connection
++    // and it's possible that the code might continue attempting to send, and 
++    // we do not want to kill performance by logging a ton of error messages
++    openxt_assert_quiet(openxt_v4v_isconnected(conn) == true, -ENODEV);
++
++    // Send the packet. Note that we handle printing useful error messages
++    // here. All the user should have to do, is validate that the send was 
++    // successful
++    if ((ret = v4v_recvfrom(conn->fd, (char *)packet, sizeof(V4VPacket), 0, &conn->remote_addr)) <= 0) {
++
++        switch (ret) {
++        
++            // Failed to receive anything
++            case 0:
++            {
++                openxt_warn("failed openxt_v4v_recv, read 0 bytes: %d - %s\n", errno, strerror(errno));
++                openxt_v4v_close_internal(conn);
++                return -errno;
++            }
++
++            // Error
++            default:
++            {
++                openxt_warn("failed openxt_v4v_recv: %d - %s\n", errno, strerror(errno));
++                openxt_v4v_close_internal(conn);
++                return -errno;
++            }
++        }
++    }
++
++    // Before we return the packet, we need to check to make sure that the 
++    // amount of data that we read, is equal to the amount of data that the 
++    // packet should have returned. If it is not, we have an error
++    if (packet->header.length != ret) {
++
++        openxt_warn("failed openxt_v4v_recv: length mismatch %d - %d\n", packet->header.length, ret);
++        openxt_v4v_close_internal(conn);
++        return -EIO;
++    }
++    
++    // Success
++    return ret - sizeof(V4VPacketHeader);
++}
+diff -Naur qemu-1.4.0/audio/openxtv4v.h qemu-1.4.0-alsa/audio/openxtv4v.h
+--- qemu-1.4.0/audio/openxtv4v.h    1969-12-31 19:00:00.000000000 -0500
++++ qemu-1.4.0-alsa/audio/openxtv4v.h   2015-03-08 00:21:52.406198060 -0500
+@@ -0,0 +1,56 @@
++#ifndef OPENXT_V4V_H
++#define OPENXT_V4V_H
++
++#include <libv4v.h>
++#include <stdbool.h>
++#include <sys/types.h>
++#include <sys/ioctl.h>
++
++#include "openxtsettings.h"
++
++typedef struct V4VConnection {
++
++    int fd;
++    bool connected;
++    v4v_addr_t local_addr;
++    v4v_addr_t remote_addr;
++
++} V4VConnection;
++
++V4VConnection *openxt_v4v_open(int32_t localport, int32_t localdomid, int32_t remoteport, int32_t remotedomid);
++int openxt_v4v_close_internal(V4VConnection *conn);
++int openxt_v4v_close(V4VConnection *conn);
++bool openxt_v4v_isconnected(V4VConnection *conn);
++
++typedef struct V4VPacketHeader {
++
++    int32_t opcode;
++    int32_t length;
++
++} V4VPacketHeader;
++
++typedef struct V4VPacketBody {
++
++    char buffer[V4V_MAX_PACKET_BODY_SIZE];
++
++} V4VPacketBody;
++
++typedef struct V4VPacket {
++
++    V4VPacketHeader header;
++    V4VPacketBody body;
++
++} V4VPacket;
++
++bool openxt_v4v_validate(int32_t size);
++
++int openxt_v4v_set_opcode(V4VPacket *packet, int32_t opcode);
++int openxt_v4v_set_length(V4VPacket *packet, int32_t length);
++int32_t openxt_v4v_get_opcode(V4VPacket *packet);
++int32_t openxt_v4v_get_length(V4VPacket *packet);
++void *openxt_v4v_get_body(V4VPacket *packet);
++
++int openxt_v4v_send(V4VConnection *conn, V4VPacket *packet);
++int openxt_v4v_recv(V4VConnection *conn, V4VPacket *packet);
++
++#endif // OPENXT_V4V_H
+diff -Naur qemu-1.4.0/configure qemu-1.4.0-alsa/configure
+--- qemu-1.4.0/configure    2013-02-15 18:05:35.000000000 -0500
++++ qemu-1.4.0-alsa/configure   2015-02-23 02:38:53.619242246 -0500
+@@ -523,7 +523,7 @@
+ ;;
+ *)
+   audio_drv_list="oss"
+-  audio_possible_drivers="oss alsa sdl esd pa"
++  audio_possible_drivers="oss alsa sdl esd pa openxt"
+   linux="yes"
+   linux_user="yes"
+   usb="linux"

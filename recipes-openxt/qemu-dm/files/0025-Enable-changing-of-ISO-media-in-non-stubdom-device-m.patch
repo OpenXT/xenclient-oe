@@ -1,0 +1,394 @@
+From 288fb427282ecf575d4c60189225c35cf810a627 Mon Sep 17 00:00:00 2001
+From: Brendan Kerrigan <kerriganb@ainfosec.com>
+Date: Tue, 17 Mar 2015 12:03:58 -0400
+Subject: [PATCH] Enable changing of ISO media in non-stubdom device model
+ after boot
+
+--------------------------------------------------------------------------------
+SHORT DESCRIPTION:
+--------------------------------------------------------------------------------
+Enable changing of ISO media in non-stubdom device model after boot
+
+--------------------------------------------------------------------------------
+LONG DESCRIPTION:
+--------------------------------------------------------------------------------
+In the previous device model (ioemu), media changes for ISO backed CDROMs were
+communicated by the toolstack to the ioemu instance via xenstore. This
+functionality was lost in the port, as qemu now expects qmp based notification
+of ISO media changes. This code reintroduces the xenstore based mechanism for
+listening to the toolstack for the non-stubdomain, and calls the appropriate qmp
+code for the change.
+
+The non-stubdom case is far simpler than the stubdom one, as only the 'params'
+key for the particular blk device is needed. Once it changes, as long as the
+file exists, it's fine to tell qemu to do the change.
+
+--------------------------------------------------------------------------------
+CHANGELOG
+--------------------------------------------------------------------------------
+Intial Commit: Brendan Kerrigan, kerriganb@ainfosec.com, 3/17/2015
+
+--------------------------------------------------------------------------------
+REMOVAL
+--------------------------------------------------------------------------------
+This patch should be removed when the patch providing the same functionality to
+the stubdom is removed. This would be a change from using xenstore for a lot of
+functionality to using qmp instead.
+
+--------------------------------------------------------------------------------
+UPSTREAM PLAN
+--------------------------------------------------------------------------------
+Until the use of Xenstore for communication is moved to qmp, it doesn't make
+sense to upstream this. The move to qmp would be more palatable for upstream,
+and provide finer grain control over anything the qmp interface exposes.
+
+--------------------------------------------------------------------------------
+INTERNAL DEPENDENCIES
+--------------------------------------------------------------------------------
+0001-generic-xenstore-watch-callback-support.patch
+0015-atapi-pass-through.patch
+
+--------------------------------------------------------------------------------
+PATCHES
+--------------------------------------------------------------------------------
+---
+ blockdev.c       |   8 +-
+ hw/xen_backend.c | 232 +++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ hw/xen_backend.h |   3 +
+ xen-all.c        |   4 +
+ 4 files changed, 246 insertions(+), 1 deletion(-)
+
+diff --git a/blockdev.c b/blockdev.c
+index f25d242..3e69183 100644
+--- a/blockdev.c
++++ b/blockdev.c
+@@ -20,7 +20,7 @@
+ #include "qmp-commands.h"
+ #include "trace.h"
+ #include "sysemu/arch_init.h"
+-
++#include "hw/xen_backend.h"
+ static QTAILQ_HEAD(drivelist, DriveInfo) drives = QTAILQ_HEAD_INITIALIZER(drives);
+ 
+ static const char *const if_name[IF_COUNT] = {
+@@ -648,6 +648,12 @@ DriveInfo *drive_init(QemuOpts *opts, BlockInterfaceType block_default_type)
+         goto err;
+     }
+ 
++    if(xen_enabled() && media == MEDIA_CDROM && atapi_pt != 1) {
++        if(0 > xenstore_register_iso_dev(file, dinfo)) {
++            error_report("Failed to register device with xenstore for media changes");
++        }
++    }
++
+     if (bdrv_key_required(dinfo->bdrv))
+         autostart = 0;
+     return dinfo;
+diff --git a/hw/xen_backend.c b/hw/xen_backend.c
+index a8af20f..79f3073 100644
+--- a/hw/xen_backend.c
++++ b/hw/xen_backend.c
+@@ -33,16 +33,20 @@
+ #include <sys/stat.h>
+ #include <sys/mman.h>
+ #include <sys/signal.h>
++#include <syslog.h>
+ 
+ #include "hw.h"
+ #include "char/char.h"
+ #include "qemu/log.h"
++#include "block/block.h"
++#include "sysemu/blockdev.h"
+ #include "xen_backend.h"
+ 
+ #include <xen/grant_table.h>
+ 
+ #include "ui/xen-input.h"
+ #include "xen-dmbus.h"
++#include "qemu/timer.h"
+ 
+ /* ------------------------------------------------------------- */
+ 
+@@ -54,6 +58,7 @@ const char *xen_protocol;
+ 
+ /* private */
+ static QTAILQ_HEAD(XenDeviceHead, XenDevice) xendevs = QTAILQ_HEAD_INITIALIZER(xendevs);
++
+ static int debug = 0;
+ 
+ /* ------------------------------------------------------------- */
+@@ -643,6 +648,81 @@ static void xenstore_update_fe(char *watch, struct XenDevice *xendev)
+     xen_be_check_state(xendev);
+ }
+ 
++/* OpenXT: Handle media changes through XenStore */
++struct IsoNode {
++    DriveInfo *drive;
++    char *iso_file;
++    char *xen_vbd_id;
++    char *frontend_state;
++    QEMUTimer *timer;
++    bool first_watch;
++    QTAILQ_ENTRY(IsoNode) next;
++};
++
++static QTAILQ_HEAD(IsoNodeHead, IsoNode) iso_list = QTAILQ_HEAD_INITIALIZER(iso_list);
++
++static void update_iso_cb(void *opaque)
++{
++    struct IsoNode *node = opaque;
++    Error *err = NULL;
++
++    if (!node) {
++        return;
++    }
++
++    // Don't try to do the change if node->iso_file doesn't exist
++    if (access(node->iso_file, F_OK) != -1) {
++        qmp_change_blockdev(bdrv_get_device_name(node->drive->bdrv), node->iso_file, false, NULL, &err);
++    }
++
++    if (err) {
++        fprintf(stderr, "[OXT-ISO] Error: %s", error_get_pretty(err));
++    }
++}
++
++static void xenstore_update_iso(char *watch)
++{
++    // Ignore the first watch fired, it causes unnecessary havoc within
++    // the ide code
++    char *newFile = NULL;
++    struct IsoNode *node;
++    size_t fileLen;
++    char path[XEN_BUFSIZE];
++
++    memset(path, 0x00, XEN_BUFSIZE);
++
++    QTAILQ_FOREACH(node, &iso_list, next)
++    {
++        // Important thing here is the strstr, where the currently
++        // fired watch is matched with the drive of interest.
++        if (node && node->drive && node->iso_file &&
++            node->xen_vbd_id && node->frontend_state &&
++            strstr(watch, node->xen_vbd_id) && !node->first_watch) {
++
++            newFile = xs_read(xenstore, XBT_NULL, watch, &fileLen);
++            
++            // Switch out the file path to the iso, so change gets made
++            // when the node->timer fires.
++            if (newFile) {
++                g_free(node->iso_file);
++                node->iso_file = NULL;
++                node->iso_file = g_strdup(newFile);
++                free(newFile);
++
++                if (!node->iso_file) {
++                    return;
++                }
++            }
++
++            // Wait for blkfront<->blkback to get ready before chaanging
++            // the disk
++            qemu_mod_timer(node->timer, qemu_get_clock_ms(rt_clock) + 1000);
++        }
++
++        node->first_watch = false;
++    }
++}
++
+ static void xenstore_update(void *unused)
+ {
+     char **vec = NULL;
+@@ -665,6 +745,11 @@ static void xenstore_update(void *unused)
+                &ptr, &ops) == 2) {
+         ((xenstore_watch_cb_t)ptr)((void *)ops);
+     }
++    /* OpenXT:
++     * Notify the emulator of a change in media */
++    if (!strcmp(vec[XS_WATCH_TOKEN], "iso")) {
++      xenstore_update_iso(vec[XS_WATCH_PATH]);
++    }
+ 
+ cleanup:
+     free(vec);
+@@ -874,3 +959,150 @@ bool xenstore_is_legacy_res_only(void)
+     return !!val;
+ }
+ 
++/****************************************************
++ * OpenXT: Media change handling 
++   Kind of a hack to get ISO updates when the UI changes it
++   from dom0.
++*/
++int xenstore_register_iso_dev(const char *file, DriveInfo* dinfo)
++{
++    struct IsoNode *node = NULL;
++
++    if (!file || !dinfo) {
++	fprintf(stderr, "Failed to register iso device due to incorrect parameters");
++	return -EINVAL;  
++    }
++
++    node = g_malloc0(sizeof(*node));
++
++    if (!node) {
++	return -ENOMEM;
++    }
++
++    /* 
++       We can't do our Xen business just yet, because hvm init domain hasn't
++       been called yet. So we have to save any information needed for registering
++       until later.
++    */
++
++    node->iso_file = g_strdup(file);
++    node->drive = dinfo;
++    node->xen_vbd_id = NULL;
++    node->frontend_state = NULL;
++    node->timer = qemu_new_timer_ms(rt_clock, update_iso_cb, node);
++    node->first_watch = true;
++
++    if (!node->iso_file || !node->timer) {
++	g_free(node);
++	return -ENOMEM;
++    }
++
++    QTAILQ_INSERT_TAIL(&iso_list, node, next);
++    
++    return 0;
++}
++
++int xenstore_init_iso_dev(void)
++{
++    unsigned int dirNum = 0, i = 0;
++    char *dompath = NULL;
++    char **vbd_devs = NULL;
++    char path[XEN_BUFSIZE];
++    char token[XEN_BUFSIZE];
++    
++    memset(path, 0x00, XEN_BUFSIZE);
++    memset(token, 0x00, XEN_BUFSIZE);
++    
++    if (!xenstore) {
++	syslog(LOG_ERR, "%s: No handle to xenstore", __FUNCTION__);
++	return -1;
++    }
++    
++    // Gives us the /local/domain/<domid>
++    dompath = xs_get_domain_path(xenstore, xen_domid);
++    
++    if (!dompath) {
++	syslog(LOG_ERR, "%s: Failed to retrieve dompath", __FUNCTION__);
++	return -1;
++    }
++    
++    snprintf(path, XEN_BUFSIZE, "%s/device/vbd", dompath);
++    
++    // Find the virtual-device id that blkfront is using for this device
++    vbd_devs = xs_directory(xenstore, XBT_NULL, path, &dirNum);
++    
++    if (!vbd_devs) {
++	return -1;
++    }
++
++    for (i = 0; i < dirNum; i++) {
++
++	if (!vbd_devs[i]) {
++	    continue;
++	}
++	
++	// Build paths to get necessary information from Xenstore
++	// Check the device type as CDROM, and get the backend path
++	memset(path, 0x00, XEN_BUFSIZE);
++	snprintf(path, XEN_BUFSIZE, "%s/device/vbd/%s", dompath, vbd_devs[i]);
++	char *dev_type = xenstore_read_str(path, "device-type");
++	char *be = xenstore_read_str(path, "backend");
++	
++	if (dev_type && be && !strcmp(dev_type, "cdrom")) {
++	    // We need to watch the backend for this device now.
++	    char *params = xenstore_read_str(be, "params");
++	    struct IsoNode *node;
++	    
++	    QTAILQ_FOREACH(node, &iso_list, next) {
++		if (node && params && 
++		    node->xen_vbd_id == NULL &&
++		    node->frontend_state == NULL) {
++		    // For mapping a fired watch to a specific device later
++		    node->xen_vbd_id = strdup(be);
++		    
++		    // Before the guest disk change can occur, make sure the state
++		    // of the specified blkfront device is ready
++		    memset(path, 0x00, XEN_BUFSIZE);
++		    snprintf(path, XEN_BUFSIZE, "%s/device/vbd/%s/state", dompath, vbd_devs[i]);
++		    node->frontend_state = strdup(path);
++		    break;
++		}
++	    } 
++
++	    // Set up the watch on the backend vbd path params key
++	    memset(path, 0x00, XEN_BUFSIZE);
++	    snprintf(path, XEN_BUFSIZE, "%s/params", be);   
++
++	    if (!xs_watch(xenstore, path, "iso")) {
++		fprintf(stderr, "[OXT-ISO] Failed to install xenstore watch on path: %s", path);
++	    }
++	    
++	    if (be) {
++		free(be);
++		be = NULL;
++	    }
++
++	    if (dev_type) {
++		free(dev_type);
++		dev_type = NULL;
++	    }
++	    
++	    if (params) {
++		free(params);
++		params = NULL;
++	    }
++	}
++    }
++
++    if (dompath) {
++	free(dompath);
++	dompath = NULL;
++    }
++    
++    if (vbd_devs) {
++	free(vbd_devs);
++	vbd_devs = NULL;
++    }
++        
++    return 0;
++}
+diff --git a/hw/xen_backend.h b/hw/xen_backend.h
+index f1e12e0..d5f086b 100644
+--- a/hw/xen_backend.h
++++ b/hw/xen_backend.h
+@@ -108,4 +108,7 @@ int xen_config_dev_console(int vdev);
+ typedef void (*xenstore_watch_cb_t)(void*);
+ bool xenstore_add_watch(const char *path, xenstore_watch_cb_t cb,
+                            void *opaque);
++
++int xenstore_register_iso_dev(const char *file, DriveInfo *disk);
++int xenstore_init_iso_dev(void);
+ #endif /* QEMU_HW_XEN_BACKEND_H */
+diff --git a/xen-all.c b/xen-all.c
+index 2a1a711..2264e40 100644
+--- a/xen-all.c
++++ b/xen-all.c
+@@ -1180,6 +1180,10 @@ int xen_hvm_init(void)
+     xen_be_register("qdisk", &xen_blkdev_ops);
+ #endif
+ 
++    if (0 > xenstore_init_iso_dev()) {
++        fprintf(stderr,    "%s: failed to initialize iso media changes, not fatal\n", __FUNCTION__);
++    }
++
+     xen_read_physmap(state);
+ 
+     return 0;
+-- 
+2.1.0
+

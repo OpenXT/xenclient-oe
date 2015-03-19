@@ -1,0 +1,91 @@
+--- a/configure
++++ b/configure
+@@ -230,6 +230,7 @@ surfman="no"
+ virtio_blk_data_plane=""
+ atapipt="no"
+ atapiptv4v="no"
++xenpt_hide_msix="yes"
+ 
+ # parse CC options first
+ for opt do
+@@ -917,6 +918,10 @@ for opt do
+   ;;
+   --disable-surfman) surfman="no"
+   ;;
++  --enable-xenpt-msix) xenpt_hide_msix="no"
++  ;;
++  --disable-xenpt-msix) xenpt_hide_msix="yes"
++  ;;
+   *) echo "ERROR: unknown option $opt"; show_help="yes"
+   ;;
+   esac
+@@ -3417,6 +3422,7 @@ echo "coroutine backend $coroutine_backe
+ echo "GlusterFS support $glusterfs"
+ echo "virtio-blk-data-plane $virtio_blk_data_plane"
+ echo "Surfman support   $surfman"
++echo "Hide MSI-X cap with Xen PCI pass through   $xenpt_hide_msix"
+ echo "gcov              $gcov_tool"
+ echo "gcov enabled      $gcov"
+ echo "ATAPI PT support  $atapipt"
+@@ -3838,6 +3844,10 @@ if test "$surfman" = "yes"; then
+   echo "CONFIG_SURFMAN=y" >> $config_host_mak
+ fi
+ 
++if test "$xenpt_hide_msix" = "yes"; then
++  echo "CONFIG_XENPT_HIDE_MSIX=y" >> $config_host_mak
++fi
++
+ echo "TOOLS=$tools" >> $config_host_mak
+ echo "ROMS=$roms" >> $config_host_mak
+ echo "MAKE=$make" >> $config_host_mak
+--- a/hw/xen_pt_config_init.c
++++ b/hw/xen_pt_config_init.c
+@@ -1354,6 +1354,7 @@ static XenPTRegInfo xen_pt_emu_reg_msi[]
+  * MSI-X Capability
+  */
+ 
++#ifndef CONFIG_XENPT_HIDE_MSIX
+ /* Message Control register for MSI-X */
+ static int xen_pt_msixctrl_reg_init(XenPCIPassthroughState *s,
+                                     XenPTRegInfo *reg, uint32_t real_offset,
+@@ -1437,6 +1438,7 @@ static XenPTRegInfo xen_pt_emu_reg_msix[
+         .size = 0,
+     },
+ };
++#endif  /* CONFIG_XENPT_HIDE_MSIX */
+ 
+ 
+ /****************************
+@@ -1557,6 +1559,8 @@ static int xen_pt_msi_size_init(XenPCIPa
+     *size = msi_size;
+     return 0;
+ }
++
++#ifndef CONFIG_XENPT_HIDE_MSIX
+ /* get MSI-X Capability Structure register group size */
+ static int xen_pt_msix_size_init(XenPCIPassthroughState *s,
+                                  const XenPTRegGroupInfo *grp_reg,
+@@ -1574,6 +1578,7 @@ static int xen_pt_msix_size_init(XenPCIP
+     *size = grp_reg->grp_size;
+     return 0;
+ }
++#endif  /* CONFIG_XENPT_HIDE_MSIX */
+ 
+ 
+ static const XenPTRegGroupInfo xen_pt_emu_reg_grps[] = {
+@@ -1667,6 +1672,7 @@ static const XenPTRegGroupInfo xen_pt_em
+         .size_init   = xen_pt_pcie_size_init,
+         .emu_regs = xen_pt_emu_reg_pcie,
+     },
++#ifndef CONFIG_XENPT_HIDE_MSIX
+     /* MSI-X Capability Structure reg group */
+     {
+         .grp_id      = PCI_CAP_ID_MSIX,
+@@ -1675,6 +1681,7 @@ static const XenPTRegGroupInfo xen_pt_em
+         .size_init   = xen_pt_msix_size_init,
+         .emu_regs = xen_pt_emu_reg_msix,
+     },
++#endif /* CONFIG_XENPT_HIDE_MSIX */
+     {
+         .grp_size = 0,
+     },
