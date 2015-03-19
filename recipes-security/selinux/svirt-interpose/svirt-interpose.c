@@ -30,7 +30,8 @@
 
 #define BUF_SIZE      256
 #define LOCAL_DOMAINS "/local/domain"
-#define QEMU          "/opt/xensource/libexec/qemu-dm-wrapper-old"
+/* #define QEMU          "/opt/xensource/libexec/qemu-dm-wrapper-old" */
+#define QEMU          "/usr/bin/qemu-dm-wrapper"
 #define RAND_DEV      "/dev/random"
 
 typedef struct data data_t;
