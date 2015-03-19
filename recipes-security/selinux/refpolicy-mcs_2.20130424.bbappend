@@ -171,6 +171,7 @@ SRC_URI += " \
     file://openxt_policy_modules_system_xc-installer.fc.patch;patch=1 \
     file://openxt_policy_modules_system_xc-installer.if.patch;patch=1 \
     file://openxt_policy_modules_system_xc-installer.te.patch;patch=1 \
+    file://qemu1.4_wrapper_file_context.patch;striplevel=1 \
 "
 
 RDEPENDS_${PN} = ""
