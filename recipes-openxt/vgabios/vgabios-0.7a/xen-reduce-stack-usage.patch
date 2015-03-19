@@ -1,0 +1,61 @@
+commit 4da31be1202e9d82f4a0c5b7cb79ec36a941598c
+Author: Frediano Ziglio <frediano.ziglio@citrix.com>
+Date:   Mon May 7 13:38:23 2012 +0100
+
+    vgabios: Reduce stack usage getting mode informations
+    
+    Informations are stored in a structure that is smaller than final one.
+    Previous code copy this structure to stack extending with zeroes then
+    update it and copy to caller while now the not-extended version is
+    copied into stack and then is extended during copy reducing stack
+    usage.
+    
+    Signed-off-by: Frediano Ziglio <frediano.ziglio@citrix.com>
+    Committed-by: Keir Fraser <keir@xen.org>
+
+--- a/vbe.c
++++ b/vbe.c
+@@ -924,10 +924,10 @@ Bit16u *AX;Bit16u CX; Bit16u ES;Bit16u D
+         // error by default is 0x014f which means supported but error
+         Bit16u                 result=0x014f;
+         Bit16u            ss=get_SS();
+-        ModeInfoBlock     info;
+         ModeInfoListItem  *cur_info;
+         Boolean           using_lfb;
+         Bit16u            lfb_addr;
++        ModeInfoBlockCompact   info;
+ 
+ #ifdef DEBUG
+         printf("VBE vbe_biosfn_return_mode_information ES%x DI%x CX%x\n",ES,DI,CX);
+@@ -944,7 +944,6 @@ Bit16u *AX;Bit16u CX; Bit16u ES;Bit16u D
+ #ifdef DEBUG
+                 printf("VBE found mode %x\n",CX);
+ #endif
+-                memsetb(ss, &info, 0, sizeof(ModeInfoBlock));
+                 memcpyb(ss, &info, 0xc000, &(cur_info->info), sizeof(ModeInfoBlockCompact));
+                 if (using_lfb) {
+                   info.NumberOfBanks = 1;
+@@ -963,6 +962,10 @@ Bit16u *AX;Bit16u CX; Bit16u ES;Bit16u D
+                 }
+ 
+                 result = 0x4f;
++
++                // copy updates in mode_info_block back
++                memsetb(ES, DI, 0, sizeof(ModeInfoBlock));
++                memcpyb(ES, DI, ss, &info, sizeof(info));
+         }
+         else
+         {
+@@ -971,12 +974,6 @@ Bit16u *AX;Bit16u CX; Bit16u ES;Bit16u D
+ #endif
+         }
+ 
+-        if (result == 0x4f)
+-        {
+-                // copy updates in mode_info_block back
+-                memcpyb(ES, DI, ss, &info, sizeof(info));
+-        }
+-
+         write_word(ss, AX, result);
+ }
+ 

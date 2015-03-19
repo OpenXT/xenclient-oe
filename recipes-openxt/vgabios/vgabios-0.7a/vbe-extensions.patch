@@ -1,0 +1,133 @@
+--- a/vbe.c
++++ b/vbe.c
+@@ -289,6 +289,25 @@ static void dispi_set_bpp(bpp)
+   outw(VBE_DISPI_IOPORT_DATA,bpp);
+ }
+ 
++static void dispi_set_stride(stride)
++  Bit16u stride;
++{
++  outw(VBE_DISPI_IOPORT_INDEX,VBE_DISPI_EXT_INDEX_STRIDE);
++  outw(VBE_DISPI_IOPORT_DATA,stride);
++}
++
++static Bit16u dispi_get_stride_align()
++{
++  outw(VBE_DISPI_IOPORT_INDEX, VBE_DISPI_EXT_INDEX_STRIDE_ALIGN);
++  return inw(VBE_DISPI_IOPORT_DATA);
++}
++
++static Bit16u dispi_is_32bpp_only()
++{
++  outw(VBE_DISPI_IOPORT_INDEX, VBE_DISPI_EXT_INDEX_32BPP_ONLY);
++  return inw(VBE_DISPI_IOPORT_DATA);
++}
++
+ ASM_START
+ ; AL = bits per pixel / AH = bytes per pixel
+ dispi_get_bpp:
+@@ -838,12 +857,17 @@ Bit16u *AX;Bit16u ES;Bit16u DI;
+         ModeInfoListItem  *cur_info=&mode_info_list;
+         Bit16u            xres;
+         Bit16u            yres;
++        Bit16u            max_bpp;
++        Bit16u            bpp32only;
+ 
+         status = read_word(ss, AX);
+ 
+         xres = dispi_edid_get_xres();
+         yres = dispi_edid_get_yres();
++        max_bpp = dispi_get_max_bpp();
++        bpp32only = dispi_is_32bpp_only();
+ #ifdef DEBUG
++        printf("BE Mode restriction %s\n", bpp32only ? "enabled" : "disabled");
+         printf("VBE vbe_biosfn_return_vbe_info ES%x DI%x AX%x\n",ES,DI,status);
+ #endif
+ 
+@@ -924,7 +948,8 @@ Bit16u *AX;Bit16u ES;Bit16u DI;
+ 
+                 if ((cur_info->info.XResolution <= xres) &&
+                     (cur_info->info.YResolution <= yres) &&
+-                    (cur_info->info.BitsPerPixel <= dispi_get_max_bpp()) &&
++                    (bpp32only ? cur_info->info.BitsPerPixel == 32
++                               : (cur_info->info.BitsPerPixel <= max_bpp)) &&
+                     (size_64k <= vbe_info_block.TotalMemory)) {
+ #ifdef DEBUG
+                   printf("VBE found mode %x => %x\n", cur_info->mode,cur_mode);
+@@ -970,10 +995,13 @@ Bit16u *AX;Bit16u CX; Bit16u ES;Bit16u D
+         Bit16u            lfb_addr;
+         ModeInfoBlockCompact   info;
+         Bit16u            xres = dispi_edid_get_xres();
++        Bit16u            stride_align = 0;
++        Bit16u            bpp32only;
+ 
+ #ifdef DEBUG
+         printf("VBE vbe_biosfn_return_mode_information ES%x DI%x CX%x\n",ES,DI,CX);
+ #endif
++        bpp32only = dispi_is_32bpp_only();
+ 
+         using_lfb=((CX & VBE_MODE_LINEAR_FRAME_BUFFER) == VBE_MODE_LINEAR_FRAME_BUFFER);
+ 
+@@ -993,9 +1021,15 @@ Bit16u *AX;Bit16u CX; Bit16u ES;Bit16u D
+                 printf("VBE found mode %x\n",CX);
+ #endif
+                 memcpyb(ss, &info, 0xc000, &(cur_info->info), sizeof(ModeInfoBlockCompact));
++
++                // Align BytersPerScanLine
++                stride_align = dispi_get_stride_align();
++                info.BytesPerScanLine = info.LinBytesPerScanLine =
++                    (cur_info->info.BytesPerScanLine + (stride_align - 1)) & ~(stride_align - 1);
++
+                 size_64k = size64(info.XResolution, info.YResolution, info.BitsPerPixel);
+                 if ((info.XResolution > xres) ||
+-                    (info.BitsPerPixel > max_bpp) ||
++                    (bpp32only ? info.BitsPerPixel != 32 : info.BitsPerPixel > max_bpp) ||
+                     (size_64k > totalMemory))
+                   info.ModeAttributes &= ~VBE_MODE_ATTRIBUTE_SUPPORTED;
+ 
+@@ -1050,6 +1084,9 @@ Bit16u *AX;Bit16u BX; Bit16u ES;Bit16u D
+         Boolean           using_lfb;
+         Bit8u             no_clear;
+         Bit8u             lfb_flag;
++        Bit16u            stride;
++        Bit16u            stride_align;
++
+ 
+         using_lfb=((BX & VBE_MODE_LINEAR_FRAME_BUFFER) == VBE_MODE_LINEAR_FRAME_BUFFER);
+         lfb_flag=using_lfb?VBE_DISPI_LFB_ENABLED:0;
+@@ -1101,6 +1138,10 @@ Bit16u *AX;Bit16u BX; Bit16u ES;Bit16u D
+                 dispi_set_bpp(cur_info->info.BitsPerPixel);
+                 dispi_set_xres(cur_info->info.XResolution);
+                 dispi_set_yres(cur_info->info.YResolution);
++                stride_align = dispi_get_stride_align();
++                stride =
++                    cur_info->info.BytesPerScanLine + (stride_align - 1) & ~(stride_align - 1);
++                dispi_set_stride(stride);
+                 dispi_set_bank(0);
+                 dispi_set_enable(VBE_DISPI_ENABLED | no_clear | lfb_flag);
+                 vga_compat_setup();
+--- a/vbe.h
++++ b/vbe.h
+@@ -310,8 +310,11 @@ typedef struct ModeInfoListItem
+   #define VBE_DISPI_LFB_ENABLED            0x40
+   #define VBE_DISPI_NOCLEARMEM             0x80
+ 
++  #define VBE_DISPI_EXT_INDEX_STRIDE       0xd
+   #define VBE_DISPI_EXT_INDEX_EDID_XRES    0xe
+   #define VBE_DISPI_EXT_INDEX_EDID_YRES    0xf
++  #define VBE_DISPI_EXT_INDEX_STRIDE_ALIGN 0x10
++  #define VBE_DISPI_EXT_INDEX_32BPP_ONLY   0X11
+ 
+   #define VBE_DISPI_LFB_PHYSICAL_ADDRESS   0xF0000000
+ 
+--- a/vbetables-gen.c
++++ b/vbetables-gen.c
+@@ -101,6 +101,8 @@ int main(int argc, char **argv)
+   printf("static ModeInfoListItem mode_info_list[]=\n");
+   printf("{\n");
+   for (pm = modes; pm->mode != 0; pm++) {
++    if (pm->mode >= 0x140 && pm->depth != 16 && pm->depth != 32)
++        continue;
+     if (pm->depth == 4)
+       pitch = (pm->width + 7) / 8;
+     else

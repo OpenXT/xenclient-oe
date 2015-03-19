@@ -1,0 +1,96 @@
+--- a/vgabios.c
++++ b/vgabios.c
+@@ -297,6 +297,7 @@ vgabios_int10_handler:
+   pop ds
+   pop es
+ #endif
++  call  int10_spin_lock
+   cmp   ah, #0x0f
+   jne   int10_test_1A
+   call  biosfn_get_video_mode
+@@ -413,6 +414,7 @@ int10_normal:
+   pop ds
+   pop es
+ int10_end:
++  call  int10_spin_unlock
+   popf
+   iret
+ ASM_END
+@@ -420,6 +422,40 @@ ASM_END
+ #include "vgatables.h"
+ #include "vgafonts.h"
+ 
++ASM_START
++int10_spin_lock:
++  pushf
++  push  ax
++  push  dx
++
++  mov   dx, # VGA_PORT_SPIN_LOCK
++int10_spin_lock_loop:
++  in    ax, dx
++  test  ax, ax
++  jz    int10_spin_lock_loop
++
++  pop   dx
++  pop   ax
++  popf
++  ret
++ASM_END
++
++ASM_START
++int10_spin_unlock:
++  pushf
++  push  ax
++  push  dx
++
++  mov   dx, # VGA_PORT_SPIN_LOCK
++  mov   ax, #0x0001
++  out   dx, ax
++
++  pop   dx
++  pop   ax
++  popf
++  ret
++ASM_END
++
+ /*
+  * Boot time harware inits 
+  */
+@@ -1039,14 +1075,13 @@ static void biosfn_set_video_mode(mode)
+  // Write the fonts in memory
+  if(vga_modes[line].class==TEXT)
+   {
++  biosfn_load_text_8_16_pat(0x04,0x00);
+ ASM_START
+-  ;; copy and activate 8x16 font
+-  mov ax, #0x1104
+-  mov bl, #0x00
+-  int #0x10
++  pusha
+   mov ax, #0x1103
+   mov bl, #0x00
+-  int #0x10
++  call  biosfn_set_text_block_specifier
++  popa
+ ASM_END
+   }
+ 
+--- a/vgatables.h
++++ b/vgatables.h
+@@ -26,7 +26,15 @@
+ #define BIOSMEM_VBE_FLAG      0xB9
+ #define BIOSMEM_VBE_MODE      0xBA
+ 
++/*
++ *
++ * VGA port facility
++ *
++ */
++#define VGA_PORT_RANGE_BASE    0x3800
++#define VGA_PORT_RANGE_SIZE    0x2
+ 
++#define VGA_PORT_SPIN_LOCK     0x3800 /* word */
+ /*
+  *
+  * VGA registers
