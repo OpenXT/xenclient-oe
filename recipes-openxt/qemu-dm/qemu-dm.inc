@@ -16,7 +16,6 @@ DEPENDS = "xen-tools alsa-lib pciutils libpng blktap libxenacpi libv4v openssl z
 
 SRC_URI = "http://wiki.qemu-project.org/download/qemu-${PV}.tar.bz2 \
             file://0001-generic-xenstore-watch-callback-support.patch \
-            file://0002-static-fix.patch;striplevel=1 \
             file://0003-hvm-param-dm-domain.patch;striplevel=1 \
             file://0005-logging-syslog.patch;striplevel=1 \
             file://0006-dmbus.patch;striplevel=1 \
