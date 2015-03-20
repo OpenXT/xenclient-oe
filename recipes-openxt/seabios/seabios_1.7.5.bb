@@ -5,7 +5,7 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=d32239bcb673463ab874e80d47fae504         
                     "
 DEPENDS = ""
 
-SRC_URI += "file://xenclient-version.patch;patch=1                      \
+SRC_URI += "file://openxt-version.patch;patch=1                         \
             file://halt-if-no-bootable.patch;patch=1                    \
             file://init-vgahooks-if-optionroms-deployed.patch;patch=1   \
             file://xci-cpuid-signature.patch;patch=1                    \
