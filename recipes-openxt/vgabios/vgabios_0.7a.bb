@@ -10,7 +10,6 @@ SRC_URI += "file://xen-fix-vbe-size-computation-overflow.patch;patch=1  \
             file://xen-vbe-check-supported-vesa-mode.patch;patch=1      \
             file://xen-fix-vbe-win8.patch;patch=1                       \
             file://xen-fix-print-format.patch;patch=1                   \
-            file://vbe-hvmloader-lfb-addr.patch;patch=1                 \
             file://vbe-edid-interface.patch;patch=1                     \
             file://vbe-extensions.patch;patch=1                         \
             file://vga-spinlock.patch;patch=1                           \
