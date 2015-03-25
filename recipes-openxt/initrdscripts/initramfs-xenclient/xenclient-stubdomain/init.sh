@@ -67,10 +67,6 @@ echo $*
 echo 1 > /proc/sys/net/ipv4/ip_forward
 echo 0 > /proc/sys/net/ipv4/conf/all/rp_filter
 
-# Probably not the most elegant way to do that.
-/etc/qemu/qemu-ifup setup "brbridged" "eth0"
-/etc/qemu/qemu-ifup setup "brwireless" "eth1"
-
 mkdir -p /var/run
 export USE_INTEL_SB=1
 export INTEL_DBUS=1
