@@ -22,7 +22,7 @@ EXTRA_OEMAKE += "CONFIG_IOEMU=n"
 TARGET_CC_ARCH += "${LDFLAGS}"
 
 do_configure() {
-	DESTDIR=${D} ./configure --enable-seabios --prefix=${prefix}
+	DESTDIR=${D} ./configure --enable-seabios --disable-rombios --prefix=${prefix}
 }
 
 do_compile() {
