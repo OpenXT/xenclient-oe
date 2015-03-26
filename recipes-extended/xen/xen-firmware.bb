@@ -10,6 +10,7 @@ DEPENDS += "util-linux"
 
 FILES_${PN} += "/usr/lib/xen/boot/hvmloader"
 
+EXTRA_OEMAKE += "DESTDIR=${D}"
 EXTRA_OEMAKE += "CROSS_SYS_ROOT=${STAGING_DIR_HOST} CROSS_COMPILE=${HOST_PREFIX}"
 EXTRA_OEMAKE += "SEABIOS_ROM=${STAGING_DIR_HOST}/usr/share/firmware/bios.bin"
 EXTRA_OEMAKE += "PXE_ROM=${STAGING_DIR_HOST}/usr/share/firmware/rtl8139.rom"
@@ -25,12 +26,12 @@ do_configure() {
 }
 
 do_compile() {
-        DESTDIR=${D} oe_runmake -C tools subdir-all-include
-        DESTDIR=${D} oe_runmake -C tools subdir-all-firmware
+        oe_runmake -C tools subdir-all-include
+        oe_runmake -C tools subdir-all-firmware
 }
 
 do_install() {
-        DESTDIR=${D} oe_runmake -C tools subdir-install-include
-        DESTDIR=${D} oe_runmake -C tools subdir-install-firmware
+        oe_runmake -C tools subdir-install-include
+        oe_runmake -C tools subdir-install-firmware
 }
 
