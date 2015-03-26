@@ -49,13 +49,8 @@ SRC_URI = "${XEN_SRC_URI};name=source \
     file://acpi-applesmc.patch;patch=1 \
     file://acpi-hvmloader-tm.patch;patch=1 \
     file://acpi-hvmloader-pm-xt.patch;patch=1 \
-    file://vgabios-6b-orc.patch;patch=1 \
-    file://vgabios-size-align.patch;patch=1 \
     file://hvmloader-vga-command-io.patch;patch=1 \
     file://vbe-lfb-addr-matches-hvmloader.patch;patch=1 \
-    file://vgabios-extended-edid-modes.patch;patch=1 \
-    file://variable-lfb-addr.patch;patch=1 \
-    file://vgabios-ddc.patch;patch=1 \
     file://blktap2-vci.patch;patch=1 \
     file://blktap2-multi-coalesce.patch;patch=1 \
     file://libvhd-disable-static-batmaps.patch;patch=1 \
@@ -77,7 +72,6 @@ SRC_URI = "${XEN_SRC_URI};name=source \
     file://XSA-108_properly_bound_x2APIC_MSR_range.patch;patch=1 \
     file://xsa109.patch;patch=1 \
     file://xsa110-4.3-and-4.2.patch;patch=1 \
-    file://orcvbe-option-rom-for-seabios.patch;patch=1 \
     file://xc-xt-hvm-get-time.patch;patch=1 \
     file://hvm-rtc-refresh-time.patch;patch=1 \
     file://fix-race-between-udev-and-tapctl.patch;patch=1 \
@@ -108,13 +102,6 @@ SRC_URI = "${XEN_SRC_URI};name=source \
     file://xc-xt-hvmloader-legacy-seabios-optionroms.patch;patch=1 \
     file://xc-xt-hvmloader-move-reservation-area.patch;patch=1 \
     file://xc-xt-tools-v3-mapspace-workaround.patch;patch=1 \
-    file://vgabios-spinlock-and-shadow.patch;patch=1 \
-    file://vgabios-edid-support.patch;patch=1 \
-    file://vgabios-vbe-extension.patch;patch=1 \
-    file://vgabios-mod3-table.patch;patch=1 \
-    file://vgabios-vbe-xenvesa.patch;patch=1 \
-    file://vgabios-restrict-32b-modes.patch;patch=1 \
-    file://vgabios-restrict-resolution.patch;patch=1 \
     file://gpt-iommu-mapping.patch;patch=1 \
     file://gpt-superblanker.patch;patch=1 \
     file://gpt-nvidia.patch;patch=1 \
@@ -127,7 +114,6 @@ SRC_URI = "${XEN_SRC_URI};name=source \
     file://fix-memcpy-in-x86-emulate.patch;patch=1 \
     file://blktap-instrumentation.patch;patch=1 \
     file://blktap-timeout.patch;patch=1 \
-    file://disable-24bit-vbe-modes.patch;patch=1 \
     file://stubdomain-msi-irq-access.patch;striplevel=1 \
 "
 
