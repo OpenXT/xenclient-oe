@@ -1,0 +1,887 @@
+From c1a9789a0b9886108c5865e546bbf9077a4c3378 Mon Sep 17 00:00:00 2001
+From: "Kyle J. Temkin" <temkink@ainfosec.com>
+Date: Mon, 16 Mar 2015 16:55:44 -0400
+Subject: [PATCH 2/2] Enable support for Surfman multiplexed display as a QEMU
+ display target.
+
+--------------------------------------------------------------------------------
+SHORT DESCRIPTION:
+--------------------------------------------------------------------------------
+Enables support for the Surfman multiplexed display handler as a QEMU display.
+
+--------------------------------------------------------------------------------
+LONG DESCRIPTION:
+--------------------------------------------------------------------------------
+This patch adds a custom Surfman UI frontend to QEMU, which allows QEMU HVM
+to use the Surfman display multiplexing architecture, and which provides support
+for the current zero-copy implementation of the i915 graphics front-end for
+integrated graphics.
+
+This patch modifies the QEMU Xen internals (xen-all.c) in order to allow other
+QEMU components to reference the guest's VRAM. This in turns allows the guest's
+linear framebuffer (LFB) to be passed to Surfman, which can render the LFB's
+contents onscreen.
+
+A Surfman UI is created (ui/surfman.c) which handles communication of guest
+framebuffer data to the Surfman display multiplexer. The guest address is
+communicated via the Device Management (DM) bus.
+
+Future contributors should take particular care when modifying this code, as
+the VRAM is used directly by the "i915" integrated graphics hardware. To
+maintain cache coherency with the displayed hardware, be sure to use the proper
+pointers to access the VRAM, as noted in "xen-all.c"and "surfman-ui.c".
+
+The majority of this patch was ported directly from the older IOEMU code, and
+modified to work with the new QEMU. "Gotchas" and areas that could use
+improvement are noted in the inline documentation.
+
+--------------------------------------------------------------------------------
+DEPENDENCIES
+--------------------------------------------------------------------------------
+External Dependencies:
+  -Surfman, the OpenXT multiplexed display handler.
+  -DMBus, the Device Management Bus
+
+Internal/Patch Dependencies:
+  -Input Server (openxt-input-server.patch) -- must be applied first
+  -DMBus Support (dmbus.patch) -- may be applied after
+
+--------------------------------------------------------------------------------
+CHANGELOG
+--------------------------------------------------------------------------------
+Documentation:           Kyle J. Temkin <temkink@ainfosec.com>   3/16/2015
+Coherency & Color Fixes: Kyle J. Temkin <temkink@ainfosec.com>   1/26/2015
+QEMU 1.4 Port:           Eric Chanudet  <chanudete@ainfosec.com> 1/16/2015
+
+--------------------------------------------------------------------------------
+REMOVAL
+--------------------------------------------------------------------------------
+This patch enables Surfman-multiplexed display for HVM domains. This should be
+removed and/or reworked if:
+  -Surfman is ever replaced with a different display handler; or
+  -The ioemugfx Surfman plugin is rewritten or replaced.
+
+--------------------------------------------------------------------------------
+UPSTREAM PLAN
+--------------------------------------------------------------------------------
+This code is OpenXT specific, and contains details specific to our modified
+i915 driver, which is patched to allow zero-copy display. As it is so specific
+to our stack, is is unlikely to be upstreamed.
+
+--------------------------------------------------------------------------------
+PATCHES
+--------------------------------------------------------------------------------
+---
+ configure               |  12 ++
+ hw/xen.h                |   2 +
+ include/sysemu/sysemu.h |   3 +-
+ include/ui/console.h    |   5 +
+ ui/Makefile.objs        |   1 +
+ ui/console.c            |  10 +-
+ ui/surfman.c            | 363 ++++++++++++++++++++++++++++++++++++++++++++++++
+ ui/surfman.h            | 118 ++++++++++++++++
+ vl.c                    |  14 +-
+ xen-all.c               |  97 ++++++++++++-
+ 10 files changed, 617 insertions(+), 8 deletions(-)
+ create mode 100644 ui/surfman.c
+ create mode 100644 ui/surfman.h
+
+diff --git a/configure b/configure
+index 8789324..82923da 100755
+--- a/configure
++++ b/configure
+@@ -225,6 +225,7 @@ libiscsi=""
+ coroutine=""
+ seccomp=""
+ glusterfs=""
++surfman="no"
+ virtio_blk_data_plane=""
+ 
+ # parse CC options first
+@@ -897,6 +898,10 @@ for opt do
+   ;;
+   --enable-virtio-blk-data-plane) virtio_blk_data_plane="yes"
+   ;;
++  --enable-surfman) surfman="yes"
++  ;;
++  --disable-surfman) surfman="no"
++  ;;
+   *) echo "ERROR: unknown option $opt"; show_help="yes"
+   ;;
+   esac
+@@ -3342,6 +3347,7 @@ echo "seccomp support   $seccomp"
+ echo "coroutine backend $coroutine_backend"
+ echo "GlusterFS support $glusterfs"
+ echo "virtio-blk-data-plane $virtio_blk_data_plane"
++echo "Surfman support   $surfman"
+ echo "gcov              $gcov_tool"
+ echo "gcov enabled      $gcov"
+ 
+@@ -3743,6 +3749,12 @@ if test "$trace_default" = "yes"; then
+   echo "CONFIG_TRACE_DEFAULT=y" >> $config_host_mak
+ fi
+ 
++##########################################
++# Surfman support.
++if test "$surfman" = "yes"; then
++  echo "CONFIG_SURFMAN=y" >> $config_host_mak
++fi
++
+ echo "TOOLS=$tools" >> $config_host_mak
+ echo "ROMS=$roms" >> $config_host_mak
+ echo "MAKE=$make" >> $config_host_mak
+diff --git a/hw/xen.h b/hw/xen.h
+index 6235f91..04c85b4 100644
+--- a/hw/xen.h
++++ b/hw/xen.h
+@@ -54,6 +54,8 @@ void xen_modified_memory(ram_addr_t start, ram_addr_t length);
+ 
+ struct MemoryRegion;
+ void xen_register_framebuffer(struct MemoryRegion *mr);
++struct MemoryRegion *xen_get_framebuffer(void);
++void * xen_get_framebuffer_ptr(void);
+ 
+ #if defined(CONFIG_XEN) && CONFIG_XEN_CTRL_INTERFACE_VERSION < 400
+ #  define HVM_MAX_VCPUS 32
+diff --git a/include/sysemu/sysemu.h b/include/sysemu/sysemu.h
+index 7118218..9f8caf6 100644
+--- a/include/sysemu/sysemu.h
++++ b/include/sysemu/sysemu.h
+@@ -90,8 +90,8 @@ typedef enum DisplayType
+     DT_CURSES,
+     DT_SDL,
+     DT_NOGRAPHIC,
++    DT_SURFMAN,
+     DT_NONE,
+-    DT_XEN /* XenClient: Xen Display */
+ } DisplayType;
+ 
+ extern int autostart;
+@@ -104,6 +104,7 @@ typedef enum {
+ extern int vga_interface_type;
+ #define xenfb_enabled (vga_interface_type == VGA_XENFB)
+ #define qxl_enabled (vga_interface_type == VGA_QXL)
++#define xt_enabled (vga_interface_type == VGA_XT)
+ 
+ extern int graphic_width;
+ extern int graphic_height;
+diff --git a/include/ui/console.h b/include/ui/console.h
+index 6da4b64..4596de0 100644
+--- a/include/ui/console.h
++++ b/include/ui/console.h
+@@ -476,6 +476,11 @@ static inline int vnc_display_pw_expire(DisplayState *ds, time_t expires)
+ };
+ #endif
+ 
++#ifdef CONFIG_SURFMAN
++/* surfman.c */
++void surfman_display_init(DisplayState *ds);
++#endif
++
+ /* curses.c */
+ void curses_display_init(DisplayState *ds, int full_screen);
+ 
+diff --git a/ui/Makefile.objs b/ui/Makefile.objs
+index e0793eb..9947c54 100644
+--- a/ui/Makefile.objs
++++ b/ui/Makefile.objs
+@@ -14,6 +14,7 @@ common-obj-$(CONFIG_COCOA) += cocoa.o
+ common-obj-$(CONFIG_CURSES) += curses.o
+ common-obj-$(CONFIG_VNC) += $(vnc-obj-y)
+ common-obj-$(CONFIG_XEN) += xen-input.o
++common-obj-$(CONFIG_SURFMAN) += surfman.o
+ 
+ $(obj)/sdl.o $(obj)/sdl_zoom.o: QEMU_CFLAGS += $(SDL_CFLAGS) 
+ 
+diff --git a/ui/console.c b/ui/console.c
+index 0a68836..6bd80f5 100644
+--- a/ui/console.c
++++ b/ui/console.c
+@@ -1676,15 +1676,17 @@ PixelFormat qemu_default_pixelformat(int bpp)
+             pf.bbits = 5;
+             break;
+         case 16:
+-            pf.rmask = 0x0000F800;
++            //Modification for OpenXT: select BGR565 as the default, instead of
++            //RGB565, as Surfman supports BGR565, but doesn't support RGB565.
++            pf.rmask = 0x0000001F;
+             pf.gmask = 0x000007E0;
+-            pf.bmask = 0x0000001F;
++            pf.bmask = 0x0000F800;
+             pf.rmax = 31;
+             pf.gmax = 63;
+             pf.bmax = 31;
+-            pf.rshift = 11;
++            pf.rshift = 0;
+             pf.gshift = 5;
+-            pf.bshift = 0;
++            pf.bshift = 11;
+             pf.rbits = 5;
+             pf.gbits = 6;
+             pf.bbits = 5;
+diff --git a/ui/surfman.c b/ui/surfman.c
+new file mode 100644
+index 0000000..460d1c0
+--- /dev/null
++++ b/ui/surfman.c
+@@ -0,0 +1,363 @@
++/*
++ * QEMU graphical console
++ *
++ * Copyright (c) 2015, Assured Information Security, Inc.
++ * Copyright (c) 2012, Citrix Systems
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining a copy
++ * of this software and associated documentation files (the "Software"), to deal
++ * in the Software without restriction, including without limitation the rights
++ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
++ * copies of the Software, and to permit persons to whom the Software is
++ * furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included in
++ * all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
++ * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
++ * THE SOFTWARE.
++ */
++
++#include "surfman.h"
++
++/**
++ * HACK: 
++ * When the video RAM isn't shared between the host and the guest, the LFB (linear framebuffer) will start
++ * at a memory address appropriate for a VGA graphics card. This is the offset into VRAM at which the LFB
++ * will be located.
++ * */
++#define HIDDEN_LFB_OFFSET   0xa00000
++
++/**
++ * The state of the Surfman DCL ("display plugin").
++ * This is initialized when the graphic console hardware is initialized.
++ */
++static struct SurfmanState *ss = NULL;
++
++/**
++ * Maintain the Surfman display state.
++ * Called every DisplayChangeListener::gui_timer_interval.
++ *
++ * @param ds The state of the Surfman display to be applied. (Not currently used.)
++ */
++static void surfman_dpy_refresh(struct DisplayState *ds)
++{
++    (void) ds;
++
++    //Maintain the state of the framebuffer per our emulated hardware.
++    vga_hw_update();
++}
++
++/**
++ * Update the Surfman-managed display. 
++ * This should be called whenever a portion of the framebuffer (Surface) of DisplayState /s/ has changed. 
++ *
++ * @param ds The state of the Surfman-managed display.
++ * @param x, y, w, h The rectangular bounds of the section of the display that requires an update.
++ */
++static void surfman_dpy_gfx_update(struct DisplayState *ds, int x, int y, int w, int h)
++{
++    //In many cases, the framebuffer is directly shared with Surfman (and the integrated graphics
++    //hardware), so the update is handled "in hardware", and we don't need to copy anything.
++    
++    //In rarer cases (e.g. text mode), QEMU manages the contents of the screen directly, rather
++    //than allowing the HVM guest to manage the framebuffer contents. In these cases, we'll need
++    //to copy QEMU's buffer into the guest's VRAM framebuffer-- in other words, to the location
++    //where Surfman is looking. (This is similar to what the hardware does in modern text mode
++    //impelementations-- the equivalent of rendering the glyph data into a scanout buffer.)
++    if (!is_buffer_shared(ds->surface)) {
++        
++        //Get the "stride" for each line of the target image.
++        unsigned int linesize = ds_get_linesize(ds);     // Somehow, the pixman_image_t is 64b aligned ... always?
++
++        //And get the byte depth, which tells us how many bytes we'll need to copy 
++        //per pixel in the rectangle's width.
++        unsigned int Bpp = ds_get_bytes_per_pixel(ds);
++
++        //Compute the location of the VRAM segment we want to update. This factors in:
++        // -The location of the LFB (linear framebuffer) in the emulated VRAM; and
++        // -The location of the target rectangle in the emulated LFB.
++        uint8_t *dest = ss->vram_ptr + HIDDEN_LFB_OFFSET + y * linesize + x * Bpp;
++
++        //Compute the location of the QEMU buffer we want to copy /from/. This location
++        //is only computed in terms of the rectangle's "offset" in the source image.
++        uint8_t *src = ds_get_data(ds) + y * linesize + x * Bpp;
++        unsigned int i;
++
++        surfman_debug("update vram:%#"HWADDR_PRIx" src:%p dest:%p %d,%d (%dx%d).",
++                      ss->vram->addr, src, dest, x, y, w, h);
++
++        //Finally, manually copy each line of the rectangle from the QEMU buffer
++        //to the surfman-watched VRAM.
++        for (i = 0; i < h; ++i) {
++            memcpy(dest, src, w * Bpp);
++            dest += linesize;
++            src += linesize;
++        }
++    }
++}
++
++/**
++ * Update the Surfman UI's knowledge of the LFB (linear framebuffer) bounds. 
++ * This effectively lets the plugin know where the video data will be in the
++ * emualted VRAM, and how it will be formatted.
++ */
++static void surfman_lfb_state_save(struct SurfmanState *ss)
++{
++    struct DisplayState *ds = ss->ds;
++
++    ss->current.width = ds_get_width(ds);
++    ss->current.height = ds_get_height(ds);
++    ss->current.linesize = ds_get_linesize(ds);
++    ss->current.format = surfman_get_format(ds_get_format(ds));
++    ss->current.addr = ss->vram->addr;
++}
++
++/**
++ * Returns a non-zero value iff the given DisplayState contains a different LFB configuration
++ * (i.e. size, format and/or address) than the LFB state provided.
++ */
++static int surfman_lfb_state_compare(const struct lfb_state *s, struct DisplayState *ds)
++{
++    hwaddr lfb_addr;
++
++    //Determine the address of the LFB in VRAM. This is either the start of VRAM 
++    //(when the LFB is shared), or at an offset into VRAM when QEMU is performing its own rendering.
++    lfb_addr = is_buffer_shared(ds->surface) ? ss->vram->addr : ss->vram->addr + HIDDEN_LFB_OFFSET;
++
++    //Determine if any of the DisplayState parameters differ from those of the known LFB.
++    return !((s->width == ds_get_width(ds)) &&
++             (s->height == ds_get_height(ds)) &&
++             (s->linesize == ds_get_linesize(ds)) &&
++             (s->format == surfman_get_format(ds_get_format(ds))) &&
++             (s->addr == lfb_addr));
++}
++
++/**
++ * Inform Surfman of a change in the framebuffer to be displayed. This handles cases in which the 
++ * framebuffer is moved, reformatted, or resized.
++ */ 
++static void surfman_dpy_gfx_resize(struct DisplayState *ds)
++{
++    struct msg_display_resize msg;
++    struct msg_empty_reply reply;
++
++    //If Surfman is already correctly set up to display the relevant framebuffer,
++    //skip sending it the RPC call; we're done!
++    if (!surfman_lfb_state_compare(&ss->current, ds)) {
++        return;
++    }
++
++    //Build the RPC message that informs Surfman of the change in display state.
++    
++    //The DisplayID originally provided a mechanism for QEMU to specify the target monitor for the
++    //given display. Unfortunately, Surfman does not currently support multi-monitor. Since we're
++    //currently always targeting a single monitor/surface, we'll leave this at zero-- the first 
++    //(and only) monitor.
++    msg.DisplayID = 0;  /* Not supported anyway. */
++
++    //Include the LFB size...
++    msg.width = ds_get_width(ds);
++    msg.height = ds_get_height(ds);
++    msg.linesize = ds_get_linesize(ds);
++
++    //... and pixel format. Note that we attempt to convert from a pixman pixelformat to a 
++    //surfman pixel format. This is a potentially lossy step, as Surfman does not support
++    //certain color formats.
++    msg.format = surfman_get_format(ds_get_format(ds));
++
++    //If we weren't able to map the LFB's pixel format to a Surfman-supported format,
++    //throw an error and abort. Ideally, we'd always convert the output to a surfman-supported
++    //format; but this isn't always possible. Instead, we use VBE (the VGA bios extensions) to
++    //only advertise hardware support for Surfman-supported formats-- this should help to make
++    //this an an exception, rather than a common case.Could not recover VRAM MemoryRegion
++    if (!msg.format) {
++        surfman_error("Unsupported pixel format `%#x'.", ds_get_format(ds));
++        return;
++    }
++
++    //Specify the offset at which the LFB exists inside the provided VRAM.
++    //Since we're providing the address of the LFB directly below (even when the LFB
++    //is embedded inside of our emulated VRAM), this offset will always be zero.
++    //
++    //It might be cleaner to conditionally provide the HIDDEN_LFB_OFFSET here, but having
++    //a discrete RPC argument for the offset seems needless, and may go away.
++    msg.fb_offset = 0;  
++
++    //If the guest is performing the rendering, rather than having QEMU perform rendering...
++    if (is_buffer_shared(ds->surface)) {
++        //... then the LFB is accessible at the start of VRAM..
++        msg.lfb_addr = ss->vram->addr;
++
++        //... and Surfman should be able to see the VRAM at all times.
++        //(This allow it to determine which parts of the surface have changed, 
++        // and thus need to be updated.)
++        msg.lfb_traceable = 1;
++
++    } 
++    //Otherwise, QEMU has a hand in rendering (e.g. in text mode), and...
++    else {
++        //... the LFB is accessible at an offset into the VRAM...
++        msg.lfb_addr = ss->vram->addr + HIDDEN_LFB_OFFSET;
++
++        //... and Surfman shouldn't try to make determinations as to what's 
++        //been changed.
++        msg.lfb_traceable = 0;
++    }
++
++    //Log the change...
++    surfman_info("resize %dx%d:%d -> %dx%d:%d%s %s %s.",
++                 ss->current.width, ss->current.height, ss->current.linesize,
++                 msg.width, msg.height, msg.linesize,
++                 msg.lfb_addr == ss->vram->addr ? " (shared)": "",
++                 ds->have_text ? "have text" : "",
++                 ds->have_gfx ? "have gfx" : "");
++
++    //... send our message to surfman via the device-management bus...
++    dmbus_send(ss->dmbus_service, DMBUS_MSG_DISPLAY_RESIZE, &msg, sizeof (msg));
++    dmbus_sync_recv(ss->dmbus_service, DMBUS_MSG_EMPTY_REPLY, &reply, sizeof (reply));
++
++    //... and keep track of the change internally. 
++    surfman_lfb_state_save(ss);
++}
++
++/**
++ * Notify Surfman of a change in the LFB address.
++ * From Surfman's perspective, this is the same event as a resize; so we recycle that RPC.
++ */
++static void surfman_dpy_gfx_setdata(struct DisplayState *ds)
++{
++    surfman_dpy_gfx_resize(ds);
++}
++
++/**
++ * Request the display size limitations (e.g. the maximum size that can be displayed on a monitor)
++ * from Surfman via the DMBUS. (Be careful: this call is synchonous, and thus should be called
++ * infrequently, lest we slow down the guest.)
++ *
++ * Note: If the VBE resolution patches are applied, this method is used to determine the
++ * "EDID-reported" resolution reported by the VGA Bios Extensions.
++ *
++ * @param ds The current state of the display provider. (Not currently used)
++ * @param width_max, height_max If information about the maximum width/height is  
++ *      available, these out-args will be updated.
++ * @param stride_alignment If information about the monitor's "stride" is avilable,
++ *      this out argument will be updated with the relevant alignment.
++ */ 
++static void surfman_dpy_get_display_limits(DisplayState *ds,
++                                           unsigned int *width_max, unsigned int *height_max,
++                                           unsigned int *stride_alignment)
++{
++    struct msg_display_get_info msg;
++    struct msg_display_info reply;
++
++    (void) ds;
++
++    //Retreive the resolution of the first monitor.
++    //FIXME: This should not use only the first monitor! Ideally, this should be replaced
++    //with a different RPC which allows Surfman to /select/ which resolution should be used.
++    msg.DisplayID = 0;
++    dmbus_send(ss->dmbus_service, DMBUS_MSG_DISPLAY_GET_INFO, &msg, sizeof (msg));
++    dmbus_sync_recv(ss->dmbus_service, DMBUS_MSG_DISPLAY_INFO, &reply, sizeof (reply));
++
++    //If we obtained any information about the target monitor, update the relevant out arguments.
++    if (width_max)
++        *width_max = reply.max_xres;
++    if (height_max)
++        *height_max = reply.max_yres;
++    if (stride_alignment)
++        *stride_alignment = reply.align;
++
++    surfman_debug("display_limits: %ux%u stride aligned on %u.", *width_max, *height_max, *stride_alignment);
++}
++
++/**
++ * An event handler which should be called each time surfman reconnects.
++ */ 
++static void surfman_on_reconnect(void *opaque)
++{
++    (void) opaque;
++    surfman_dpy_gfx_resize(ss->ds);
++}
++
++//NOTE: The following functions are not implemened; instead, default display functions are used.
++// -static void surfman_dpy_gfx_copy(struct DisplayState *s, int src_x, int src_y, int dst_x, int dst_y, int w, int h);
++// -static void surfman_dpy_text_cursor(struct DisplayState *s, int x, int y);
++// -static void surfman_dpy_text_resize(struct DisplayState *s, int w, int h);
++// -static void surfman_dpy_text_update(struct DisplayState *s, int x, int y, int w, int h);Could not recover VRAM MemoryRegion
++// -static void surfman_dpy_mouse_set(struct DisplayState *s, int x, int y, int on);
++// -static void surfman_dpy_cursor_define(struct DisplayState *s, QEMUCursor *cursor);
++
++/**
++ * Set up the RPC connection so we're notified on a surfman reconnect.
++ * TODO: Additional RPC events should likely be handled, long term-- including resolution updates.
++ */ 
++static struct dmbus_ops surfman_dmbus_ops = {
++    .dom0_input_event = NULL,
++    .dom0_input_pvm = NULL,
++    .input_config = NULL,
++    .input_config_reset = NULL,
++    .display_info = NULL,
++    .display_edid = NULL,
++    .reconnect = surfman_on_reconnect
++};
++
++/**
++ * Initializes a Surfman multiplexed display, creating the DisplayChangeListener object
++ * that tracks display events.
++ */ 
++void surfman_display_init(DisplayState *ds)
++{
++    DisplayChangeListener *dcl;
++
++    surfman_info("Initialize Surfman display.");
++
++    //Create the SurfmanState "ss" object, which compartmentalizes the state of the Surfman
++    //display plugin...
++    ss = g_malloc0(sizeof (*ss));
++    ss->ds = ds;
++
++    //... populate its internal reference to the guest's VRAM...
++    //(Note again that this should not be used to get references to 
++    // the VRAM for modification by QEMU.)
++    ss->vram = xen_get_framebuffer();
++    if (!ss->vram) {
++        surfman_error("Could not recover VRAM MemoryRegion.");
++        goto err_vram;
++    }
++
++    //... and get a QEMU-accesible pointer to the guest's VRAM. This is used by QEMU to update the video ram,
++    //    whenever the emulated hardware would be touching the framebuffer-- e.g. in text mode.
++    ss->vram_ptr = xen_get_framebuffer_ptr();
++
++    //Connect to Surfman itself via the device management bus. This will open the connection used to
++    //invoke remote procedures.
++    ss->dmbus_service = dmbus_service_connect(DMBUS_SERVICE_SURFMAN, DEVICE_TYPE_VESA, &surfman_dmbus_ops, ss);
++    if (!ss->dmbus_service) {
++        surfman_error("Could not initialize dmbus.");
++        goto err_dmbus;
++    }
++
++    //Finally, bind each of the actual display "change handlers"
++    //that actually form the core display API.
++    dcl = g_malloc0(sizeof (*dcl));
++    dcl->idle = 0;
++    dcl->dpy_refresh = surfman_dpy_refresh;
++    dcl->dpy_gfx_update = surfman_dpy_gfx_update;
++    dcl->dpy_gfx_resize = surfman_dpy_gfx_resize;
++    dcl->dpy_gfx_setdata = surfman_dpy_gfx_setdata;
++    dcl->dpy_get_display_limits = surfman_dpy_get_display_limits;
++    register_displaychangelistener(ds, dcl);
++
++    return;
++
++err_dmbus:
++err_vram:
++    g_free(ss);
++}
++
+diff --git a/ui/surfman.h b/ui/surfman.h
+new file mode 100644
+index 0000000..1a6ceb5
+--- /dev/null
++++ b/ui/surfman.h
+@@ -0,0 +1,118 @@
++#ifndef _SURFMAN_H_
++# define _SURFMAN_H_
++
++#include "hw/xen.h"
++#include "ui/console.h"
++#include "xen-dmbus.h"
++#include "exec/memory.h"
++
++#define SURFMAN_DEBUG 0
++#define SURFMAN_FLAG "surfman-ui: "
++# define surfman_debug(fmt, ...)                            \
++    do {                                                    \
++        if (SURFMAN_DEBUG)                                  \
++            fprintf(stdout, SURFMAN_FLAG "%s:%d " fmt "\n", \
++                    __FILE__, __LINE__, ##__VA_ARGS__);     \
++    } while (0)
++#define surfman_info(fmt, ...) \
++    fprintf(stdout, SURFMAN_FLAG fmt "\n", ##__VA_ARGS__)
++#define surfman_warn(fmt, ...) \
++    fprintf(stderr, SURFMAN_FLAG "warning: " fmt "\n", ##__VA_ARGS__)
++#define surfman_error(fmt, ...) \
++    fprintf(stderr, SURFMAN_FLAG "error: " fmt "\n", ##__VA_ARGS__)
++
++/* Display on which a surface is drawn currently. */
++
++struct lfb_state {
++    unsigned int width;
++    unsigned int height;
++    unsigned int linesize;
++    FramebufferFormat format;
++    hwaddr addr;
++};
++struct SurfmanState {
++    struct DisplayState *ds;
++    dmbus_service_t dmbus_service;
++    MemoryRegion *vram;         // VRAM region hackishly recovered.
++    uint8_t *vram_ptr;		// Pointer to the vram mapped in the mapcache.
++    struct lfb_state current;
++};
++
++static inline FramebufferFormat surfman_get_format(pixman_format_code_t format)
++{
++    switch (format) {
++        /* 32b */
++        case PIXMAN_a8r8g8b8:
++        case PIXMAN_x8r8g8b8:
++            return FRAMEBUFFER_FORMAT_BGRX8888;	// TODO: Surfman does not care ?!
++        case PIXMAN_a8b8g8r8:
++        case PIXMAN_x8b8g8r8:
++            return 0;
++        case PIXMAN_b8g8r8a8:
++        case PIXMAN_b8g8r8x8:
++            return FRAMEBUFFER_FORMAT_BGRX8888;
++        case PIXMAN_x2r10g10b10:
++        case PIXMAN_a2r10g10b10:
++        case PIXMAN_x2b10g10r10:
++        case PIXMAN_a2b10g10r10:
++            return 0;
++
++    /* 24bpp formats */
++        case PIXMAN_r8g8b8:
++            return FRAMEBUFFER_FORMAT_RGB888;
++        case PIXMAN_b8g8r8:
++            return FRAMEBUFFER_FORMAT_BGR888;
++
++    /* 16bpp formats */
++        case PIXMAN_r5g6b5:
++            return FRAMEBUFFER_FORMAT_RGB565;
++        case PIXMAN_b5g6r5:
++            return FRAMEBUFFER_FORMAT_BGR565;
++        case PIXMAN_a1r5g5b5:
++        case PIXMAN_x1r5g5b5:
++            return FRAMEBUFFER_FORMAT_RGB555;
++        case PIXMAN_a1b5g5r5:
++        case PIXMAN_x1b5g5r5:
++            return FRAMEBUFFER_FORMAT_BGR555;
++
++        case PIXMAN_a4r4g4b4:
++        case PIXMAN_x4r4g4b4:
++        case PIXMAN_a4b4g4r4:
++        case PIXMAN_x4b4g4r4:
++            return 0;
++
++        /* 8bpp formats */
++        case PIXMAN_a8:
++        case PIXMAN_r3g3b2:
++        case PIXMAN_b2g3r3:
++        case PIXMAN_a2r2g2b2:
++        case PIXMAN_a2b2g2r2:
++        case PIXMAN_c8:
++        case PIXMAN_g8:
++        case PIXMAN_x4a4:
++//        case PIXMAN_x4c4:
++//        case PIXMAN_x4g4:
++
++        /* 4bpp formats */
++        case PIXMAN_a4:
++        case PIXMAN_r1g2b1:
++        case PIXMAN_b1g2r1:
++        case PIXMAN_a1r1g1b1:
++        case PIXMAN_a1b1g1r1:
++        case PIXMAN_c4:
++        case PIXMAN_g4:
++
++        /* 1bpp formats */
++        case PIXMAN_a1:
++        case PIXMAN_g1:
++
++        /* YUV formats */
++        case PIXMAN_yuy2:
++        case PIXMAN_yv12:
++        default:
++            return 0;
++    }
++}
++
++#endif /* !_SURFMAN_H_ */
++
+diff --git a/vl.c b/vl.c
+index e088734..354c0a8 100644
+--- a/vl.c
++++ b/vl.c
+@@ -182,7 +182,7 @@ int main(int argc, char **argv)
+ static const char *data_dir;
+ const char *bios_name = NULL;
+ enum vga_retrace_method vga_retrace_method = VGA_RETRACE_DUMB;
+-DisplayType display_type = DT_XEN;
++DisplayType display_type;
+ static int display_remote;
+ const char* keyboard_layout = NULL;
+ ram_addr_t ram_size;
+@@ -2207,6 +2207,13 @@ static DisplayType select_display(const char *p)
+         fprintf(stderr, "Curses support is disabled\n");
+         exit(1);
+ #endif
++    } else if (strstart(p, "surfman", &opts)) {
++#ifdef CONFIG_SURFMAN
++        display = DT_SURFMAN;
++#else
++        fprintf(stderr, "Surfman support is disabled\n");
++        exit(1);
++#endif
+     } else if (strstart(p, "none", &opts)) {
+         display = DT_NONE;
+     } else {
+@@ -4252,9 +4259,12 @@ int main(int argc, char **argv, char **envp)
+         cocoa_display_init(ds, full_screen);
+         break;
+ #endif
+-    case DT_XEN:
++#if defined(CONFIG_SURFMAN)
++    case DT_SURFMAN:
+         xen_input_init();
++        surfman_display_init(ds);
+         break;
++#endif
+     default:
+         break;
+     }
+diff --git a/xen-all.c b/xen-all.c
+index 110f958..b3651ce 100644
+--- a/xen-all.c
++++ b/xen-all.c
+@@ -37,7 +37,21 @@
+ #endif
+ 
+ static MemoryRegion ram_memory, ram_640k, ram_lo, ram_hi;
++
++/**
++ * The next two variables are references to the HVM domain's VGA framebuffer.
++ * We hold on to these so we can pass them to Surfman, the XenClient multiplexed
++ * display handler.
++ *
++ * Note that we effectively have two different references: one to the framebuffer from the
++ * HVM guest's perspective ("framebuffer"), and one to the region from the "host" QEMU's
++ * perspective ("framebuffer_mapped"). It's important that QEMU only read and modify the
++ * memory region using the second reference; as this is the only "window" into that memory
++ * mapped with the correct caching attributes.
++ **/
+ static MemoryRegion *framebuffer;
++static void * framebuffer_mapped;
++
+ static bool xen_in_migration;
+ 
+ /* Compatibility with older version */
+@@ -319,10 +333,14 @@ go_physmap:
+ 
+     QLIST_INSERT_HEAD(&state->physmap, physmap, list);
+ 
++    //"Pin" the guest's video memory in place with the correct cache attribute.
++    //Since we're sharing this video memory directly with the integrated graphics
++    //card, it's important that we set a proper caching policy on this memory--
++    //otherwise screen segments will only update as they're evicted from cache.
+     xc_domain_pin_memory_cacheattr(xen_xc, xen_domid,
+                                    start_addr >> TARGET_PAGE_BITS,
+                                    (start_addr + size) >> TARGET_PAGE_BITS,
+-                                   XEN_DOMCTL_MEM_CACHEATTR_WB);
++                                   XEN_DOMCTL_MEM_CACHEATTR_WC);
+ 
+     snprintf(path, sizeof(path),
+             "/local/domain/0/device-model/%d/physmap/%"PRIx64"/start_addr",
+@@ -1196,9 +1214,86 @@ void destroy_hvm_domain(bool reboot)
+     }
+ }
+ 
++
++/**
++ * Creates the internal framebuffer mapping used when QEMU internal
++ * components (e.g. the Surfman UI). This mapping is then used to get
++ * internal framebfufer pointers (in lieu of memory_region_get_ram_ptr),
++ * ensuring that our memory is mapped in a way that assures cache coherency.
++ */
++static void __xen_create_framebuffer_mapping(void)
++{
++    size_t number_of_pfns_to_map;
++    xen_pfn_t * pfns_to_map;
++    hwaddr vram_gmfn;
++    int i;
++
++    //Get the GMFN (guest machine frame) that contains the  framebuffer.
++    vram_gmfn = memory_region_get_ram_addr(framebuffer) >> TARGET_PAGE_BITS;
++
++    //Determine the total number of page frames used to store the framebuffer.
++    number_of_pfns_to_map = int128_get64(framebuffer->size) >> TARGET_PAGE_BITS;
++
++    //Build a list of guest page frames that will contain the framebuffer--
++    //we'll use this list to map the framebuffer into our memory space.
++    pfns_to_map = malloc(sizeof(*pfns_to_map) * number_of_pfns_to_map);
++    for(i = 0; i < number_of_pfns_to_map; ++i) {
++      pfns_to_map[i] =  vram_gmfn + i;
++    }
++
++    //Ask the hypervisor to perform the actual mapping, ensuring that we map
++    //the memory with write-combine caching. This ensures that any changes we
++    //make to the framebuffer are "immediately" applied to the VRAM (and thus 
++    //to the display), rather than sitting in a CPU cache until eviction.
++    framebuffer_mapped = xc_map_foreign_batch_cacheattr(xen_xc, xen_domid,
++                                                        PROT_READ | PROT_WRITE,
++                                                        pfns_to_map,
++                                                        number_of_pfns_to_map,
++                                                        XC_MAP_CACHEATTR_WC);
++    free(pfns_to_map);
++}
++
++/**
++ * Register a given guest memory region as a VRAM LFB (linear framebuffer).
++ * This allows us to "pass" this memory directly to Surfman, the XenClient 
++ * display multiplexer, which can map the region for zero-copy multiplexing.
++ */ 
+ void xen_register_framebuffer(MemoryRegion *mr)
+ {
++    //Store the fram
+     framebuffer = mr;
++    __xen_create_framebuffer_mapping();
++}
++
++/**
++ * Returns a MemoryRegion object descrbing the guest's video memory.
++ *
++ * WARNING: 
++ *  Consider this a "read-only" reference to the guest's memory; it should
++ *  not be used to generate references used to write into the guest's VRAM,
++ *  as references generated accordingly will not have the correct cache
++ *  attributes. For a reference that can be used to write to guest memory,
++ *  use xen_get_framebuffer_ptr().
++ */ 
++MemoryRegion *xen_get_framebuffer(void)
++{
++    return framebuffer;
++}
++
++/**
++ * Return a pointer to the Xen VRAM framebuffer that can be used for writing.
++ * The reference returned by this function will have the correct cache attributes
++ * to ensure cache coherency, even when using XenClient's multiplexed display.
++ *
++ * This function should be used when the guest framebuffer needs to be modified by QEMU
++ * (e.g. when rendering glyphs in text-mode), rather than memory_region_get_ram_ptr, as
++ * we need to ensure that the VRAM memory has been mapped with the correct cache attributes.
++ *
++ * @return A QEMU-accessible pointer to the Xen guest's framebuffer.
++ */
++void * xen_get_framebuffer_ptr(void)
++{
++    return framebuffer_mapped;
+ }
+ 
+ void xen_shutdown_fatal_error(const char *fmt, ...)
+-- 
+2.1.3
+

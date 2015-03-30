@@ -1,0 +1,80 @@
+From 60435ed4df5604896308b50339635eb28c642323 Mon Sep 17 00:00:00 2001
+From: Chris Patterson <pattersonc@ainfosec.com>
+Date: Thu, 5 Mar 2015 12:13:16 -0500
+Subject: [PATCH] qemu: add generic xenstore watch support
+
+Signed-off-by: Chris Patterson <pattersonc@ainfosec.com>
+---
+ hw/xen_backend.c |   18 ++++++++++++++++++
+ hw/xen_backend.h |    4 ++++
+ 2 files changed, 22 insertions(+)
+
+Index: qemu-1.4.0/hw/xen_backend.c
+===================================================================
+--- qemu-1.4.0.orig/hw/xen_backend.c	2015-03-05 17:12:48.000000000 -0500
++++ qemu-1.4.0/hw/xen_backend.c	2015-03-06 14:50:09.013377742 -0500
+@@ -658,6 +658,10 @@
+     if (sscanf(vec[XS_WATCH_TOKEN], "fe:%" PRIxPTR, &ptr) == 1) {
+         xenstore_update_fe(vec[XS_WATCH_PATH], (void*)ptr);
+     }
++    if (sscanf(vec[XS_WATCH_TOKEN], "cb:%" PRIxPTR ":%" PRIxPTR,
++               &ptr, &ops) == 2) {
++        ((xenstore_watch_cb_t)ptr)((void *)ops);
++    }
+ 
+ cleanup:
+     free(vec);
+@@ -685,7 +689,11 @@
+ 
+ int xen_be_init(void)
+ {
+-    xenstore = xs_daemon_open();
++    /* xenstore_add_watch() may have already opened xenstore */
++    if (!xenstore) {
++        xenstore = xs_daemon_open();
++    }
++
+     if (!xenstore) {
+         xen_be_printf(NULL, 0, "can't connect to xenstored\n");
+         return -1;
+@@ -785,3 +793,27 @@
+     }
+     qemu_log_flush();
+ }
++
++bool xenstore_add_watch(const char *path, xenstore_watch_cb_t cb,
++                           void *opaque)
++{
++    char token[XEN_BUFSIZE];
++
++    xen_be_printf(NULL, 1, "xenstore_add_watch: %s\n", path);
++
++    /* open xenstore if xen_be_init() has not yet been invoked */
++    if (!xenstore) {
++        xen_be_printf(NULL, 1, "xenstore_add_watch: opening xenstore\n");
++        xenstore = xs_daemon_open();
++        if (!xenstore) {
++            xen_be_printf(NULL, 0, "xenstore_add_watch: failed to open xs\n");
++            return false;
++        }
++    }
++
++    /* xs_watch copies this token and xenstore_update() parses it on event */
++    snprintf(token, sizeof(token), "cb:%p:%p", cb, opaque);
++    xen_be_printf(NULL, 1, "xenstore_add_watch: %s - %s\n", path, token);
++
++    return xs_watch(xenstore, path, token);
++}
+Index: qemu-1.4.0/hw/xen_backend.h
+===================================================================
+--- qemu-1.4.0.orig/hw/xen_backend.h	2015-03-05 17:12:48.000000000 -0500
++++ qemu-1.4.0/hw/xen_backend.h	2015-03-06 14:51:15.441378983 -0500
+@@ -104,4 +104,8 @@
+ int xen_config_dev_vkbd(int vdev);
+ int xen_config_dev_console(int vdev);
+ 
++/* xenstore watch cb */
++typedef void (*xenstore_watch_cb_t)(void*);
++bool xenstore_add_watch(const char *path, xenstore_watch_cb_t cb,
++                           void *opaque);
+ #endif /* QEMU_HW_XEN_BACKEND_H */
