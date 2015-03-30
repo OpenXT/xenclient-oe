@@ -325,6 +325,7 @@ create_category (xs_handle_t *xsh)
                         return -1;
                 }
         } while (ret != -1);
+        close (fd);
         /*  return integer value  */
         return random;
 }
@@ -634,10 +635,6 @@ do_directory (xs_handle_t *xsh, char* path, unsigned *len)
 static void
 exec_cmd (char** argv)
 {
-        /*  close file descriptors  */
-        close (STDIN_FILENO);
-        close (STDOUT_FILENO);
-        close (STDERR_FILENO);
         argv [0] = QEMU;
         execve (QEMU, argv, NULL);
         perror ("exec");
