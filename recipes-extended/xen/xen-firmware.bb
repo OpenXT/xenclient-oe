@@ -5,8 +5,13 @@ SRC_URI += "file://config.patch \
 	    file://disable-etherboot.patch \
 "
 
-DEPENDS += "seabios ipxe"
-DEPENDS += "util-linux"
+DEPENDS += "\
+    seabios \
+    ipxe \
+    util-linux \
+    vgabios \
+"
+PR = "${INC_PR}.1"
 
 FILES_${PN} += "/usr/lib/xen/boot/hvmloader"
 
