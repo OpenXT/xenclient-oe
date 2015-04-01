@@ -15,11 +15,12 @@ SRC_URI += "file://xen-fix-vbe-size-computation-overflow.patch;patch=1  \
             file://vga-spinlock.patch;patch=1                           \
             file://vga-shadow-bda.patch;patch=1                         \
             file://xen-log-to-ioport-0xe9.patch;patch=1                 \
+            file://vbe-extended-edid-modes.patch                        \
             "
 SRC_URI[tarball.md5sum] = "2c0fe5c0ca08082a9293e3a7b23dc900"
 SRC_URI[tarball.sha256sum] = "9d24c33d4bfb7831e2069cf3644936a53ef3de21d467872b54ce2ea30881b865"
 
-PR = "r0"
+PR = "r1"
 
 FILES_${PN} = "/usr/share/firmware/${PN}-${PV}*.bin"
 FILES_${PN}-dbg = "/usr/share/firmware/${PN}-${PV}*.debug.bin"
