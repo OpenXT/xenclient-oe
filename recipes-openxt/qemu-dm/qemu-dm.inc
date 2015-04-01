@@ -31,6 +31,7 @@ SRC_URI = "http://wiki.qemu-project.org/download/qemu-${PV}.tar.bz2 \
             file://0018-vga-shadow-bda.patch;striplevel=1 \
             file://0019-surfman-dcl.patch;striplevel=1 \
             file://0023-msix-cap-disable.patch;striplevel=1 \
+            file://0024-Xenstore-based-ISO-media-change-detection-for-both-s.patch;striplevel=1 \
             "
 
 SRC_URI[md5sum] = "78f13b774814b6b7ebcaf4f9b9204318"
@@ -80,4 +81,4 @@ do_install(){
     DESTDIR=${D} oe_runmake STRIP='' install
 }
 
-INC_PR = "r7"
+INC_PR = "r8"
