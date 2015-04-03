@@ -7,10 +7,10 @@ PV = "0+git${SRCPV}"
 
 SRCREV = "${AUTOREV}"
 SRC_URI = "git://${OPENXT_GIT_MIRROR}/xctools.git;protocol=${OPENXT_GIT_PROTOCOL};branch=${OPENXT_BRANCH} \
-          file://audio_helper_start"
+           file://audio_helper_start"
 
 FILES_${PN} += "/usr/lib/xen/bin/audio_helper \
-               /usr/lib/xen/bin/audio_helper_start "
+                /usr/lib/xen/bin/audio_helper_start "
 
 S = "${WORKDIR}/git/audio_helper"
 
@@ -19,7 +19,7 @@ inherit pkgconfig
 inherit xenclient
 
 do_install(){
-        install -d ${D}/usr/lib/xen/bin
-        install -m 755 ${S}/src/audio_helper ${D}/usr/lib/xen/bin/
-	install -m 755 ${WORKDIR}/audio_helper_start ${D}/usr/lib/xen/bin/
+    install -d ${D}/usr/lib/xen/bin
+    install -m 755 ${S}/src/audio_helper ${D}/usr/lib/xen/bin/
+    install -m 755 ${WORKDIR}/audio_helper_start ${D}/usr/lib/xen/bin/
 }

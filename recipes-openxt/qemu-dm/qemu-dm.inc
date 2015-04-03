@@ -12,15 +12,19 @@ DEPENDS = "xen-tools alsa-lib pciutils libpng blktap libxenacpi libv4v openssl z
 #            file://0010-xc-emulated-nic-link-state-propagation.patch;striplevel=1 \
 #            file://0012-audio-alsa.patch;striplevel=1 \
 #            file://0014-audio-alsa-stub.patch;striplevel=1 \
-#            file://0020-audio-policy.patch;striplevel=1 \
 #            file://0026-openxtaudio.patch;striplevel=1 \
+#            file://0007-pci-reserve-igd-slot.patch;striplevel=1 \
 
-SRC_URI = "http://wiki.qemu-project.org/download/qemu-${PV}.tar.bz2 \
-            file://0001-generic-xenstore-extensions.patch \
+# Leave this in it's own definition so that it can be replaced with a local
+# tarball (the QEMU download speed is terrible). If this is combined with the
+# other patches, it doesn't seem to work
+SRC_URI = "http://wiki.qemu-project.org/download/qemu-${PV}.tar.bz2"
+
+# QEMU Patch Queue
+SRC_URI += "file://0001-generic-xenstore-extensions.patch \
             file://0003-hvm-param-dm-domain.patch;striplevel=1 \
             file://0005-logging-syslog.patch;striplevel=1 \
             file://0006-dmbus.patch;striplevel=1 \
-            file://0007-pci-reserve-igd-slot.patch;striplevel=1 \
             file://0008-switcher.patch;striplevel=1 \
             file://0009-acpi.patch;striplevel=1 \
             file://0011-battery.patch;striplevel=1 \
@@ -30,7 +34,9 @@ SRC_URI = "http://wiki.qemu-project.org/download/qemu-${PV}.tar.bz2 \
             file://0017-vga-spinlock.patch;striplevel=1 \
             file://0018-vga-shadow-bda.patch;striplevel=1 \
             file://0019-surfman-dcl.patch;striplevel=1 \
+            file://0020-audio-policy.patch;striplevel=1 \
             file://0023-msix-cap-disable.patch;striplevel=1 \
+            file://0026-openxtaudio.patch;striplevel=1 \
             "
 
 SRC_URI[md5sum] = "78f13b774814b6b7ebcaf4f9b9204318"
@@ -55,20 +61,30 @@ PACKAGES += "${PN}-extra-keymaps ${PN}-extra-roms"
 do_configure(){
     ${S}/configure ${EXTRA_OECONF} --enable-xen \
                 --target-list=i386-softmmu \
-                --prefix=${prefix} --sysconfdir=${sysconfdir} \
+                --prefix=${prefix} \
+                --sysconfdir=${sysconfdir} \
                 --extra-cflags="-I${STAGING_INCDIR}" \
                 --extra-ldflags="-L${STAGING_LIBDIR}" \
-                --disable-sdl --disable-vnc \
-                --disable-pie --disable-docs\
-                --disable-virtfs --disable-bluez \
-                --disable-guest-agent --disable-curses \
-                --disable-slirp --disable-curl \
-                --disable-kvm --disable-tools \
-                --disable-guest-base --enable-werror \
                 --without-system-pixman \
-                --enable-debug \
+                --disable-sdl \
+                --disable-vnc \
+                --disable-pie \
+                --disable-docs \
+                --disable-strip \
+                --disable-virtfs \
+                --disable-bluez \
+                --disable-guest-agent \
+                --disable-curses \
+                --disable-slirp \
+                --disable-curl \
+                --disable-kvm \
+                --disable-tools \
+                --disable-guest-base \
+                --enable-werror \
                 --enable-surfman \
-                --enable-atapi-pt --enable-atapi-pt-v4v
+                --enable-atapi-pt \
+                --enable-atapi-pt-v4v \
+                --enable-debug
 }
 
 do_compile(){
