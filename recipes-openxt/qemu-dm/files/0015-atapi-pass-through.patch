@@ -183,8 +183,8 @@ Signed-off-by: Chris Patterson <pattersonc@ainfosec.com>
 
 Index: qemu-1.4.0/block/Makefile.objs
 ===================================================================
---- qemu-1.4.0.orig/block/Makefile.objs	2015-03-23 14:37:17.400870330 -0400
-+++ qemu-1.4.0/block/Makefile.objs	2015-03-23 14:37:18.436870349 -0400
+--- qemu-1.4.0.orig/block/Makefile.objs	2015-04-06 10:29:26.443299695 -0400
++++ qemu-1.4.0/block/Makefile.objs	2015-04-06 10:29:27.531299715 -0400
 @@ -6,6 +6,7 @@
  block-obj-$(CONFIG_WIN32) += raw-win32.o win32-aio.o
  block-obj-$(CONFIG_POSIX) += raw-posix.o
@@ -196,7 +196,7 @@ Index: qemu-1.4.0/block/Makefile.objs
 Index: qemu-1.4.0/block/atapi-pt-posix.c
 ===================================================================
 --- /dev/null	1970-01-01 00:00:00.000000000 +0000
-+++ qemu-1.4.0/block/atapi-pt-posix.c	2015-03-31 09:24:18.229494089 -0400
++++ qemu-1.4.0/block/atapi-pt-posix.c	2015-04-06 10:31:02.195301492 -0400
 @@ -0,0 +1,1401 @@
 +/*
 + * ATAPI guest commands translation.
@@ -512,8 +512,8 @@ Index: qemu-1.4.0/block/atapi-pt-posix.c
 +        return true;
 +    }
 +
-+    /* if autolock is disabled, lockable only if assigned */
-+    if (!info->autolock && info->assigned) {
++    /* if assigned, assume lockable */
++    if (info->assigned) {
 +        return true;
 +    }
 +
@@ -1601,8 +1601,8 @@ Index: qemu-1.4.0/block/atapi-pt-posix.c
 +block_init(bdrv_pt_init);
 Index: qemu-1.4.0/blockdev.c
 ===================================================================
---- qemu-1.4.0.orig/blockdev.c	2015-03-23 14:37:17.400870330 -0400
-+++ qemu-1.4.0/blockdev.c	2015-03-27 15:52:17.255442964 -0400
+--- qemu-1.4.0.orig/blockdev.c	2015-04-06 10:29:26.443299695 -0400
++++ qemu-1.4.0/blockdev.c	2015-04-06 10:30:15.835300622 -0400
 @@ -33,6 +33,9 @@
      [IF_SD] = "sd",
      [IF_VIRTIO] = "virtio",
@@ -1673,18 +1673,18 @@ Index: qemu-1.4.0/blockdev.c
              type != IF_NONE && type != IF_PFLASH) {
 Index: qemu-1.4.0/configure
 ===================================================================
---- qemu-1.4.0.orig/configure	2015-03-23 14:37:17.400870330 -0400
-+++ qemu-1.4.0/configure	2015-03-23 14:37:18.408870348 -0400
-@@ -228,6 +228,8 @@
+--- qemu-1.4.0.orig/configure	2015-04-06 10:29:26.439299695 -0400
++++ qemu-1.4.0/configure	2015-04-06 10:30:15.987300625 -0400
+@@ -227,6 +227,8 @@
+ seccomp=""
  glusterfs=""
- surfman="no"
  virtio_blk_data_plane=""
 +atapipt="no"
 +atapiptv4v="no"
  
  # parse CC options first
  for opt do
-@@ -895,6 +897,14 @@
+@@ -894,6 +896,14 @@
    ;;
    --disable-seccomp) seccomp="no"
    ;;
@@ -1699,8 +1699,8 @@ Index: qemu-1.4.0/configure
    --disable-glusterfs) glusterfs="no"
    ;;
    --enable-glusterfs) glusterfs="yes"
-@@ -3409,6 +3419,8 @@
- echo "Surfman support   $surfman"
+@@ -3379,6 +3389,8 @@
+ echo "virtio-blk-data-plane $virtio_blk_data_plane"
  echo "gcov              $gcov_tool"
  echo "gcov enabled      $gcov"
 +echo "ATAPI PT support  $atapipt"
@@ -1708,7 +1708,7 @@ Index: qemu-1.4.0/configure
  
  if test "$sdl_too_old" = "yes"; then
  echo "-> Your SDL version is too old - please upgrade to have SDL support"
-@@ -3764,6 +3776,14 @@
+@@ -3734,6 +3746,14 @@
    echo "CONFIG_GLUSTERFS=y" >> $config_host_mak
  fi
  
@@ -1725,8 +1725,8 @@ Index: qemu-1.4.0/configure
  fi
 Index: qemu-1.4.0/hw/ide/Makefile.objs
 ===================================================================
---- qemu-1.4.0.orig/hw/ide/Makefile.objs	2015-03-23 14:37:17.400870330 -0400
-+++ qemu-1.4.0/hw/ide/Makefile.objs	2015-03-23 14:37:18.640870353 -0400
+--- qemu-1.4.0.orig/hw/ide/Makefile.objs	2015-04-06 10:29:26.443299695 -0400
++++ qemu-1.4.0/hw/ide/Makefile.objs	2015-04-06 10:29:27.803299720 -0400
 @@ -8,3 +8,4 @@
  common-obj-$(CONFIG_IDE_VIA) += via.o
  common-obj-$(CONFIG_AHCI) += ahci.o
@@ -1734,8 +1734,8 @@ Index: qemu-1.4.0/hw/ide/Makefile.objs
 +common-obj-$(CONFIG_ATAPI_PT) += atapi_pt.o
 Index: qemu-1.4.0/hw/ide/atapi.c
 ===================================================================
---- qemu-1.4.0.orig/hw/ide/atapi.c	2015-03-23 14:37:17.400870330 -0400
-+++ qemu-1.4.0/hw/ide/atapi.c	2015-03-23 14:37:18.628870353 -0400
+--- qemu-1.4.0.orig/hw/ide/atapi.c	2015-04-06 10:29:26.443299695 -0400
++++ qemu-1.4.0/hw/ide/atapi.c	2015-04-06 10:29:27.799299720 -0400
 @@ -242,7 +242,10 @@
  }
  
@@ -1751,7 +1751,7 @@ Index: qemu-1.4.0/hw/ide/atapi.c
 Index: qemu-1.4.0/hw/ide/atapi_pt.c
 ===================================================================
 --- /dev/null	1970-01-01 00:00:00.000000000 +0000
-+++ qemu-1.4.0/hw/ide/atapi_pt.c	2015-03-27 17:09:36.707530063 -0400
++++ qemu-1.4.0/hw/ide/atapi_pt.c	2015-04-06 10:29:27.799299720 -0400
 @@ -0,0 +1,1923 @@
 +/*
 + * ATAPI guest commands translation.
@@ -3679,7 +3679,7 @@ Index: qemu-1.4.0/hw/ide/atapi_pt.c
 Index: qemu-1.4.0/hw/ide/atapi_pt.h
 ===================================================================
 --- /dev/null	1970-01-01 00:00:00.000000000 +0000
-+++ qemu-1.4.0/hw/ide/atapi_pt.h	2015-03-26 17:59:16.801963951 -0400
++++ qemu-1.4.0/hw/ide/atapi_pt.h	2015-04-06 10:29:27.803299720 -0400
 @@ -0,0 +1,150 @@
 +/*
 + * ATAPI guest commands translation.
@@ -3833,8 +3833,8 @@ Index: qemu-1.4.0/hw/ide/atapi_pt.h
 +#endif /* !ATAPI_PT_H_ */
 Index: qemu-1.4.0/hw/ide/core.c
 ===================================================================
---- qemu-1.4.0.orig/hw/ide/core.c	2015-03-23 14:37:17.400870330 -0400
-+++ qemu-1.4.0/hw/ide/core.c	2015-03-23 14:37:18.628870353 -0400
+--- qemu-1.4.0.orig/hw/ide/core.c	2015-04-06 10:29:26.443299695 -0400
++++ qemu-1.4.0/hw/ide/core.c	2015-04-06 10:29:27.799299720 -0400
 @@ -1399,8 +1399,13 @@
          s->status = READY_STAT | SEEK_STAT;
          s->atapi_dma = s->feature & 1;
@@ -3926,8 +3926,8 @@ Index: qemu-1.4.0/hw/ide/core.c
  static int transfer_end_table_idx(EndTransferFunc *fn)
 Index: qemu-1.4.0/hw/ide/internal.h
 ===================================================================
---- qemu-1.4.0.orig/hw/ide/internal.h	2015-03-23 14:37:17.400870330 -0400
-+++ qemu-1.4.0/hw/ide/internal.h	2015-03-23 14:37:18.624870353 -0400
+--- qemu-1.4.0.orig/hw/ide/internal.h	2015-04-06 10:29:26.443299695 -0400
++++ qemu-1.4.0/hw/ide/internal.h	2015-04-06 10:29:27.795299720 -0400
 @@ -316,7 +316,11 @@
  #define SMART_DISABLE         0xd9
  #define SMART_STATUS          0xda
@@ -3976,8 +3976,8 @@ Index: qemu-1.4.0/hw/ide/internal.h
  uint32_t ide_ioport_read(void *opaque, uint32_t addr1);
 Index: qemu-1.4.0/hw/ide/pci.c
 ===================================================================
---- qemu-1.4.0.orig/hw/ide/pci.c	2015-03-23 14:37:17.400870330 -0400
-+++ qemu-1.4.0/hw/ide/pci.c	2015-03-23 14:37:18.628870353 -0400
+--- qemu-1.4.0.orig/hw/ide/pci.c	2015-04-06 10:29:26.443299695 -0400
++++ qemu-1.4.0/hw/ide/pci.c	2015-04-06 10:29:27.799299720 -0400
 @@ -308,6 +308,10 @@
               * whole DMA operation will be submitted to disk with a single
               * aio operation with preadv/pwritev.
@@ -3991,8 +3991,8 @@ Index: qemu-1.4.0/hw/ide/pci.c
                  assert(bm->bus->dma->aiocb == NULL);
 Index: qemu-1.4.0/hw/ide/qdev.c
 ===================================================================
---- qemu-1.4.0.orig/hw/ide/qdev.c	2015-03-23 14:37:17.400870330 -0400
-+++ qemu-1.4.0/hw/ide/qdev.c	2015-03-23 14:37:18.628870353 -0400
+--- qemu-1.4.0.orig/hw/ide/qdev.c	2015-04-06 10:29:26.443299695 -0400
++++ qemu-1.4.0/hw/ide/qdev.c	2015-04-06 10:29:27.799299720 -0400
 @@ -105,7 +105,15 @@
  {
      DeviceState *dev;
@@ -4010,7 +4010,7 @@ Index: qemu-1.4.0/hw/ide/qdev.c
      qdev_prop_set_uint32(dev, "unit", unit);
      qdev_prop_set_drive_nofail(dev, "drive", drive->bdrv);
      qdev_init_nofail(dev);
-@@ -251,6 +259,35 @@
+@@ -245,6 +253,35 @@
      .class_init    = ide_cd_class_init,
  };
  
@@ -4046,7 +4046,7 @@ Index: qemu-1.4.0/hw/ide/qdev.c
  static Property ide_drive_properties[] = {
      DEFINE_IDE_DEV_PROPERTIES(),
      DEFINE_PROP_END_OF_LIST(),
-@@ -297,6 +334,9 @@
+@@ -291,6 +328,9 @@
      type_register_static(&ide_cd_info);
      type_register_static(&ide_drive_info);
      type_register_static(&ide_device_type_info);
@@ -4058,8 +4058,8 @@ Index: qemu-1.4.0/hw/ide/qdev.c
  type_init(ide_register_types)
 Index: qemu-1.4.0/include/qemu/event_notifier.h
 ===================================================================
---- qemu-1.4.0.orig/include/qemu/event_notifier.h	2015-03-23 14:37:17.400870330 -0400
-+++ qemu-1.4.0/include/qemu/event_notifier.h	2015-03-23 14:37:18.852870357 -0400
+--- qemu-1.4.0.orig/include/qemu/event_notifier.h	2015-04-06 10:29:26.443299695 -0400
++++ qemu-1.4.0/include/qemu/event_notifier.h	2015-04-06 10:29:27.955299723 -0400
 @@ -26,6 +26,10 @@
      int rfd;
      int wfd;
@@ -4081,8 +4081,8 @@ Index: qemu-1.4.0/include/qemu/event_notifier.h
  #endif
 Index: qemu-1.4.0/include/sysemu/blockdev.h
 ===================================================================
---- qemu-1.4.0.orig/include/sysemu/blockdev.h	2015-03-23 14:37:17.400870330 -0400
-+++ qemu-1.4.0/include/sysemu/blockdev.h	2015-03-23 14:37:18.868870357 -0400
+--- qemu-1.4.0.orig/include/sysemu/blockdev.h	2015-04-06 10:29:26.443299695 -0400
++++ qemu-1.4.0/include/sysemu/blockdev.h	2015-04-06 10:29:27.967299723 -0400
 @@ -26,6 +26,9 @@
      IF_IDE = 0,
      IF_NONE,
@@ -4105,8 +4105,8 @@ Index: qemu-1.4.0/include/sysemu/blockdev.h
  DriveInfo *drive_get(BlockInterfaceType type, int bus, int unit);
 Index: qemu-1.4.0/util/event_notifier-posix.c
 ===================================================================
---- qemu-1.4.0.orig/util/event_notifier-posix.c	2015-03-23 14:37:17.400870330 -0400
-+++ qemu-1.4.0/util/event_notifier-posix.c	2015-03-23 14:37:18.836870356 -0400
+--- qemu-1.4.0.orig/util/event_notifier-posix.c	2015-04-06 10:29:26.443299695 -0400
++++ qemu-1.4.0/util/event_notifier-posix.c	2015-04-06 10:29:27.935299723 -0400
 @@ -119,3 +119,41 @@
  
      return value;
@@ -4152,7 +4152,7 @@ Index: qemu-1.4.0/util/event_notifier-posix.c
 Index: qemu-1.4.0/include/block/atapi_pt_ioctl.h
 ===================================================================
 --- /dev/null	1970-01-01 00:00:00.000000000 +0000
-+++ qemu-1.4.0/include/block/atapi_pt_ioctl.h	2015-03-25 15:47:53.236193930 -0400
++++ qemu-1.4.0/include/block/atapi_pt_ioctl.h	2015-04-06 10:29:27.963299723 -0400
 @@ -0,0 +1,37 @@
 +/*
 + *
@@ -4194,7 +4194,7 @@ Index: qemu-1.4.0/include/block/atapi_pt_ioctl.h
 Index: qemu-1.4.0/include/block/atapi_pt_v4v.h
 ===================================================================
 --- /dev/null	1970-01-01 00:00:00.000000000 +0000
-+++ qemu-1.4.0/include/block/atapi_pt_v4v.h	2015-03-23 16:11:51.524976853 -0400
++++ qemu-1.4.0/include/block/atapi_pt_v4v.h	2015-04-06 10:29:27.963299723 -0400
 @@ -0,0 +1,93 @@
 +/*
 + *
