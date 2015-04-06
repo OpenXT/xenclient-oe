@@ -196,8 +196,8 @@ Index: qemu-1.4.0/block/Makefile.objs
 Index: qemu-1.4.0/block/atapi-pt-posix.c
 ===================================================================
 --- /dev/null	1970-01-01 00:00:00.000000000 +0000
-+++ qemu-1.4.0/block/atapi-pt-posix.c	2015-04-06 10:31:02.195301492 -0400
-@@ -0,0 +1,1401 @@
++++ qemu-1.4.0/block/atapi-pt-posix.c	2015-04-06 12:18:25.759422461 -0400
+@@ -0,0 +1,1403 @@
 +/*
 + * ATAPI guest commands translation.
 + *
@@ -1289,6 +1289,8 @@ Index: qemu-1.4.0/block/atapi-pt-posix.c
 +
 +    /* signal that medium is ejected */
 +    atapi_pt_notify_medium_ejected(pts->dev_info.ide_state);
++
++    PT_LOG("released lock: %s\n", pts->dev_info.device_path);
 +}
 +
 +
@@ -1751,8 +1753,8 @@ Index: qemu-1.4.0/hw/ide/atapi.c
 Index: qemu-1.4.0/hw/ide/atapi_pt.c
 ===================================================================
 --- /dev/null	1970-01-01 00:00:00.000000000 +0000
-+++ qemu-1.4.0/hw/ide/atapi_pt.c	2015-04-06 10:29:27.799299720 -0400
-@@ -0,0 +1,1923 @@
++++ qemu-1.4.0/hw/ide/atapi_pt.c	2015-04-07 10:29:56.036922289 -0400
+@@ -0,0 +1,2038 @@
 +/*
 + * ATAPI guest commands translation.
 + *
@@ -2722,7 +2724,13 @@ Index: qemu-1.4.0/hw/ide/atapi_pt.c
 +
 +    if (!as->allow_notifications) {
 +        /* nothing to do if guest has not yet communicated to drive */
++        PT_LOG("ignoring request to notify guest that medium has changed\n");
 +        return;
++    }
++
++    /* if the global state suggests media is in the drive, setup notify */
++    if (ptcmd_get_global_media_state(s->bs)) {
++        as->notify_new_media = true;
 +    }
 +
 +    PT_LOG("notifying guest that medium has (possibly) changed\n");
@@ -2736,8 +2744,11 @@ Index: qemu-1.4.0/hw/ide/atapi_pt.c
 +
 +    if (!as->allow_notifications) {
 +        /* nothing to do if guest has not yet communicated to drive */
++        PT_LOG("ignoring request to notify guest that medium has ejected\n");
 +        return;
 +    }
++
++    as->notify_eject_requested = true;
 +
 +    PT_LOG("notifying guest that medium has ejected\n");
 +    atapi_pt_set_error(s, NOT_READY, ASC_MEDIUM_NOT_PRESENT, 0, 0x70);
@@ -2886,6 +2897,7 @@ Index: qemu-1.4.0/hw/ide/atapi_pt.c
 +
 +static void event_status_notification_complete(IDEState *s)
 +{
++    ATAPIPassThroughState *as = s->atapipts;
 +    uint8_t *b = s->io_buffer;
 +    int ev_class = b[2];
 +    int ev_code = b[4];
@@ -2901,8 +2913,64 @@ Index: qemu-1.4.0/hw/ide/atapi_pt.c
 +        PT_LOG("media removed\n");
 +        ptcmd_set_global_media_state(s->bs, false);
 +    }
-+}
 +
++    if (ev_class == 4) {
++        PT_VERBOSE("media class event\n");
++    } else if (b[4] == 0 && b[5] == 0 && b[6] == 0 && b[7] == 0) {
++        PT_VERBOSE("no requested classes available event\n");
++    } else {
++        /* no spoofing other event types, just allow it through */
++        PT_VERBOSE("passthrough event status notification\n");
++        return;
++    }
++
++    if (as->notify_eject_requested) {
++        PT_VERBOSE("spoofing MEC_EJECT_REQUESTED\n");
++        b[2] = 4;
++        b[4] = MEC_EJECT_REQUESTED;
++        b[5] = MS_TRAY_OPEN;
++        b[6] = 0;
++        b[7] = 0;
++        as->notify_eject_requested = false;
++        as->notify_media_removed = true;
++        return;
++    }
++
++    if (as->notify_media_removed) {
++        PT_VERBOSE("spoofing MEC_MEDIA_REMOVAL\n");
++        b[2] = 4;
++        b[4] = MEC_MEDIA_REMOVAL;
++        b[5] = MS_TRAY_OPEN;
++        b[6] = 0;
++        b[7] = 0;
++        as->notify_media_removed = false;
++        return;
++    }
++
++    if (as->notify_new_media) {
++        PT_VERBOSE("spoofing MEC_NEW_MEDIA\n");
++        b[2] = 4;
++        b[4] = MEC_NEW_MEDIA;
++        b[5] = MS_MEDIA_PRESENT;
++        b[6] = 0;
++        b[7] = 0;
++        as->notify_new_media = false;
++        return;
++    }
++
++    /* if we don't have the lock, we need to hijack this message */
++    if (!ptcmd_get_global_media_lock(s->bs)) {
++        PT_VERBOSE("spoofing MEC_NO_CHANGE\n");
++        b[2] = 4;
++        b[4] = MEC_NO_CHANGE;
++        b[5] = MS_TRAY_OPEN;
++        b[6] = 0;
++        b[7] = 0;
++        return;
++    }
++
++    PT_VERBOSE("passthrough media class event status notification\n");
++}
 +
 +/* AIO Read handler:
 + * This function is call to receive message from the sgio_dispatch_fd.
@@ -2951,9 +3019,25 @@ Index: qemu-1.4.0/hw/ide/atapi_pt.c
 +        event_status_notification_complete(s);
 +    }
 +
++    if (!ptcmd_get_global_media_lock(s->bs)) {
++        if (as->request[0] == GPCMD_GET_CONFIGURATION) {
++            PT_VERBOSE("spoofing GPCMD_GET_CONFIGURATION\n");
++            /*
++             * report no current profile if media should be not present in guest.
++             * udev uses the current profile to detect media presence.
++             * Bytes 6,7 hold current profile.
++             */
++            s->io_buffer[6] = 0;
++            s->io_buffer[7] = 0;
++        }
++    }
++
 +    if (as->din_xfer_len == 0) {
 +        /* Nothing else to do */
 +        ide_atapi_cmd_ok(s);
++
++        /* commands have gone through - make sure to allow notifications */
++        as->allow_notifications = true;
 +        return;
 +    }
 +
@@ -2990,6 +3074,9 @@ Index: qemu-1.4.0/hw/ide/atapi_pt.c
 +                                                         as->din_xfer_len);
 +
 +    ide_atapi_cmd_reply(s, din_actual, as->din_xfer_len);
++
++    /* commands have gone through - make sure to allow notifications */
++    as->allow_notifications = true;
 +}
 +
 +int atapi_pt_init(IDEState * s)
@@ -3409,7 +3496,7 @@ Index: qemu-1.4.0/hw/ide/atapi_pt.c
 +                                0x00, 0x00, 0x00, 0x00,
 +                                0x00, 0x00, 0x00, 0x00};
 +
-+    PT_LOG("sending fake inquiry reply\n");
++    PT_VERBOSE("sending fake inquiry reply\n");
 +
 +    memcpy(s->io_buffer, inquiry_data, sizeof(inquiry_data));
 +
@@ -3420,6 +3507,25 @@ Index: qemu-1.4.0/hw/ide/atapi_pt.c
 +
 +    /* faked commands to drive - allow notifications */
 +    as->allow_notifications = true;
++}
++
++static bool atapi_pt_cmd_requires_ready(uint8_t cmd)
++{
++    switch (cmd)
++    {
++        case GPCMD_TEST_UNIT_READY:
++        case GPCMD_READ_CDVD_CAPACITY:
++        case GPCMD_READ_10:
++        case GPCMD_SEEK:
++        case GPCMD_READ_TOC_PMA_ATIP:
++        case GPCMD_READ_DISC_INFO:
++        case GPCMD_READ_12:
++        case GPCMD_READ_DVD_STRUCTURE:
++        case GPCMD_READ_CD:
++            return true;
++    }
++
++    return false;
 +}
 +
 +void atapi_pt_cmd(IDEState * s)
@@ -3449,6 +3555,17 @@ Index: qemu-1.4.0/hw/ide/atapi_pt.c
 +
 +    /* emulate commands when we don't have exclusive media lock */
 +    if (!ptcmd_get_global_media_lock(s->bs)) {
++        if (atapi_pt_cmd_requires_ready(cmd_code)) {
++            /* error with medium not present for commands requiring lock */
++            PT_VERBOSE("refusing command early: 0x%02x (%s) dma=%d timeout=%u\n",
++                   cmd_code, atapi_cmd_to_str(cmd_code), s->atapi_dma,
++                   s->atapipts->timeout);
++
++            atapi_pt_set_error(s, SENSE_NOT_READY,
++                               ASC_MEDIUM_NOT_PRESENT, 0, 0x70);
++            return;
++        }
++
 +        switch (cmd_code)
 +        {
 +            case GPCMD_INQUIRY:
@@ -3460,7 +3577,7 @@ Index: qemu-1.4.0/hw/ide/atapi_pt.c
 +            /* XXX: the below were allowed through in ioemu patch :( */
 +            case GPCMD_GET_CONFIGURATION:
 +            case GPCMD_GET_EVENT_STATUS_NOTIFICATION:
-+            case GPCMD_TEST_UNIT_READY:
++            //case GPCMD_TEST_UNIT_READY: /* requires ready */
 +            case GPCMD_GET_PERFORMANCE:
 +            case GPCMD_MECHANISM_STATUS:
 +            case GPCMD_MODE_SENSE_10:
@@ -3470,7 +3587,7 @@ Index: qemu-1.4.0/hw/ide/atapi_pt.c
 +                break;
 +            default:
 +                /* error with medium not present for commands requiring lock */
-+                PT_LOG("refusing command: 0x%02x (%s) dma=%d timeout=%u\n",
++                PT_VERBOSE("refusing command: 0x%02x (%s) dma=%d timeout=%u\n",
 +                       cmd_code, atapi_cmd_to_str(cmd_code), s->atapi_dma,
 +                       s->atapipts->timeout);
 +
@@ -3679,8 +3796,8 @@ Index: qemu-1.4.0/hw/ide/atapi_pt.c
 Index: qemu-1.4.0/hw/ide/atapi_pt.h
 ===================================================================
 --- /dev/null	1970-01-01 00:00:00.000000000 +0000
-+++ qemu-1.4.0/hw/ide/atapi_pt.h	2015-04-06 10:29:27.803299720 -0400
-@@ -0,0 +1,150 @@
++++ qemu-1.4.0/hw/ide/atapi_pt.h	2015-04-06 16:47:46.439725858 -0400
+@@ -0,0 +1,153 @@
 +/*
 + * ATAPI guest commands translation.
 + *
@@ -3824,6 +3941,9 @@ Index: qemu-1.4.0/hw/ide/atapi_pt.h
 +
 +    /* flag to enable/disable disc notifications (guest is ready) */
 +    bool allow_notifications;
++    bool notify_eject_requested;
++    bool notify_media_removed;
++    bool notify_new_media;
 +} ATAPIPassThroughState;
 +
 +int32_t atapi_pt_init(IDEState *s);
