@@ -8,7 +8,9 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=94d55d512a9ba36caa9b7df079bae19f"
 PRIORITY = "optional"
 
 SRC_URI = "${SOURCEFORGE_MIRROR}/linux-usb/usbutils-${PV}.tar.gz \
-	  file://add_new_entries_to_usb_ids.patch;patch=1"
+	  file://add_new_entries_to_usb_ids.patch;patch=1 \
+	  file://fix_lsusb-t.patch;patch=1 \
+"
 inherit autotools
 
 EXTRA_OECONF = "--program-prefix="
