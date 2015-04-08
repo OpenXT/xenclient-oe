@@ -8,14 +8,14 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=751419260aa954499f7abaabaa882bbe"
 DEPENDS = "zlib"
 
 SRC_URI = "ftp://ftp.kernel.org/pub/software/utils/pciutils/pciutils-${PV}.tar.bz2"
-SRC_URI += "file://pci.ids.gz.20110801 \
+SRC_URI += "file://pci.ids.gz.20141108 \
 "
 
 SRC_URI_append_nylon = "file://gcc-3-compatibility.patch;patch=1 "
 
 PARALLEL_MAKE = ""
 
-PR = "r6"
+PR = "r7"
 
 EXTRA_OEMAKE += "'STRIP = ' PREFIX=${prefix} LIBDIR=${libdir}"
 export SHARED = "yes"
@@ -37,7 +37,7 @@ do_install () {
 	# "make install" misses the debug file for the library
 	oe_libinstall -so -C lib libpci ${D}/${libdir}
 
-	install -m 0644 ${WORKDIR}/pci.ids.gz.20110801 ${D}/${datadir}/pci.ids.gz
+	install -m 0644 ${WORKDIR}/pci.ids.gz.20141108 ${D}/${datadir}/pci.ids.gz
 }
 
 #do_stage () {
