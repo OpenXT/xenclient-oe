@@ -80,4 +80,4 @@ do_install(){
     DESTDIR=${D} oe_runmake STRIP='' install
 }
 
-INC_PR = "r7"
+INC_PR = "r8"
