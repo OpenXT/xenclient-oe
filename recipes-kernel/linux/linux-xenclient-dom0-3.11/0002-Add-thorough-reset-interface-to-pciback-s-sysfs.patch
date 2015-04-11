@@ -1,7 +1,7 @@
-From 02a1f1b44e8e81bedf7fccbe210aaec108be33b8 Mon Sep 17 00:00:00 2001
+From d686351d8ea4a1ea1d755d0a10f6f14d1c870911 Mon Sep 17 00:00:00 2001
 From: Kyle Temkin <ktemkin@binghamton.edu>
 Date: Wed, 8 Apr 2015 00:58:24 -0400
-Subject: [PATCH 1/2] Add thorough reset interface to pciback's sysfs.
+Subject: [PATCH] Add thorough reset interface to pciback's sysfs.
 
 --------------------------------------------------------------------------------
 SHORT DESCRIPTION:
@@ -160,11 +160,11 @@ accomplishing its functionality.
 PATCHES
 --------------------------------------------------------------------------------
 ---
- drivers/xen/xen-pciback/pci_stub.c | 300 +++++++++++++++++++++++++++++++++----
- 1 file changed, 274 insertions(+), 26 deletions(-)
+ drivers/xen/xen-pciback/pci_stub.c | 338 ++++++++++++++++++++++++++++++++++---
+ 1 file changed, 312 insertions(+), 26 deletions(-)
 
 diff --git a/drivers/xen/xen-pciback/pci_stub.c b/drivers/xen/xen-pciback/pci_stub.c
-index 98ea8cc..33cd229 100644
+index 98ea8cc..635fa3f 100644
 --- a/drivers/xen/xen-pciback/pci_stub.c
 +++ b/drivers/xen/xen-pciback/pci_stub.c
 @@ -100,14 +100,9 @@ static void pcistub_device_release(struct kref *kref)
@@ -193,16 +193,15 @@ index 98ea8cc..33cd229 100644
  	kfree(dev_data);
  	pci_set_drvdata(dev, NULL);
  
-@@ -222,6 +214,227 @@ struct pci_dev *pcistub_get_pci_dev_by_slot(struct xen_pcibk_device *pdev,
+@@ -222,6 +214,265 @@ struct pci_dev *pcistub_get_pci_dev_by_slot(struct xen_pcibk_device *pdev,
  	return found_dev;
  }
  
 +
 +/**
-+ * Returns true iff the given device adverstises supporting function-
-+ * level-reset (FLR).
++ * Returns true iff the given device supports PCIe FLRs.
 + */
-+static bool device_supports_flr(struct pci_dev *dev)
++static bool __device_supports_pcie_flr(struct pci_dev *dev)
 +{
 +	u32 cap;
 +
@@ -213,6 +212,44 @@ index 98ea8cc..33cd229 100644
 +
 +	//Return true iff the device advertises supporting an FLR.
 +	return (cap & PCI_EXP_DEVCAP_FLR);
++}
++
++
++/**
++ * Returns true iff the given device supports PCI Advanced Functionality (AF) FLRs.
++ */
++static bool __device_supports_pci_af_flr(struct pci_dev *dev)
++{
++	int pos;
++	u8 capability_flags;
++
++	//First, try to find the location of the PCI Advanced Functionality capability byte.
++	pos = pci_find_capability(dev, PCI_CAP_ID_AF);
++
++	//If we weren't able to find the capability byte, this device doesn't support
++	//the Advanced Functionality extensions, and thus won't support AF FLR.
++	if(!pos)
++		return false;
++
++	//Read the capabilities advertised in the AF capability byte.
++	capability_flags = pci_read_config_byte(dev, pos + PCI_AF_CAP, &capability_flags);
++
++	//If the device does support AF, it will advertise FLR support via the
++	//PCI_AF_CAP_FLR bit. We'll also check for the Transactions Pending (TP)
++	//mechanism, as the kernel requires this extension to issue an AF FLR.
++	//(Internally, the PCI reset code needs to be able to wait for all
++	//pending transactions to complete prior to issuing the AF FLR.)
++	return (capability_flags & PCI_AF_CAP_TP) && (capability_flags & PCI_AF_CAP_FLR);
++}
++
++
++/**
++ * Returns true iff the given device adverstises supporting function-
++ * level-reset (FLR).
++ */
++static bool device_supports_flr(struct pci_dev *dev)
++{
++	return __device_supports_pci_af_flr(dev) || __device_supports_pcie_flr(dev);
 +}
 +
 +
@@ -302,7 +339,8 @@ index 98ea8cc..33cd229 100644
 +	spin_unlock_irqrestore(&pcistub_devices_lock, flags);
 +
 +	//... and report if we've found a device that's not owned by pciback.
-+	dev_dbg(&dev->dev, "%s\n", device_owned_by_pciback ? "OK" : "not owned by pciback!");
++	dev_dbg(&dev->dev, "%s\n", device_owned_by_pciback ? "is owned by pciback, and can be reset if not in use."
++			: "not owned by pciback, and thus cannot be reset.");
 +
 +	//If we've found a device that's not owned by pciback, update our data
 +	//argument so it points to the most recent unowned device. (We check
@@ -330,7 +368,7 @@ index 98ea8cc..33cd229 100644
 +
 +	//If the device is in use, emit a warning error.
 +	if(walk_result.use_count > 0)
-+		dev_err(&dev->dev, "is in use!\n");
++		dev_dbg(&dev->dev, "is in use; currently not safe to SBR device.\n");
 +
 +	//Return true iff we did not pick up any other devices
 +	//that were either in use, or not owned by pciback.
@@ -421,7 +459,7 @@ index 98ea8cc..33cd229 100644
  struct pci_dev *pcistub_get_pci_dev(struct xen_pcibk_device *pdev,
  				    struct pci_dev *dev)
  {
-@@ -264,21 +477,13 @@ void pcistub_put_pci_dev(struct pci_dev *dev)
+@@ -264,21 +515,13 @@ void pcistub_put_pci_dev(struct pci_dev *dev)
  	* pcistub and xen_pcibk when AER is in processing
  	*/
  	down_write(&pcistub_sem);
@@ -448,7 +486,7 @@ index 98ea8cc..33cd229 100644
  	xen_pcibk_config_reset_dev(found_psdev->dev);
  
  	xen_unregister_device_domain_owner(found_psdev->dev);
-@@ -544,12 +749,15 @@ static void pcistub_remove(struct pci_dev *dev)
+@@ -544,12 +787,15 @@ static void pcistub_remove(struct pci_dev *dev)
  	spin_unlock_irqrestore(&pcistub_devices_lock, flags);
  
  	if (found_psdev) {
@@ -468,7 +506,7 @@ index 98ea8cc..33cd229 100644
  			pr_warn("****** driver domain may still access this device's i/o resources!\n");
  			pr_warn("****** shutdown driver domain before binding device\n");
  			pr_warn("****** to other drivers or domains\n");
-@@ -1384,6 +1592,41 @@ static ssize_t restrictive_add(struct device_driver *drv, const char *buf,
+@@ -1384,6 +1630,41 @@ static ssize_t restrictive_add(struct device_driver *drv, const char *buf,
  }
  static DRIVER_ATTR(restrictive, S_IWUSR, NULL, restrictive_add);
  
@@ -510,7 +548,7 @@ index 98ea8cc..33cd229 100644
  
  static void pcistub_exit(void)
  {
-@@ -1400,6 +1643,8 @@ static void pcistub_exit(void)
+@@ -1400,6 +1681,8 @@ static void pcistub_exit(void)
  			   &driver_attr_irq_handlers);
  	driver_remove_file(&xen_pcibk_pci_driver.driver,
  			   &driver_attr_irq_handler_state);
@@ -519,7 +557,7 @@ index 98ea8cc..33cd229 100644
  	pci_unregister_driver(&xen_pcibk_pci_driver);
  }
  
-@@ -1496,6 +1741,9 @@ static int __init pcistub_init(void)
+@@ -1496,6 +1779,9 @@ static int __init pcistub_init(void)
  	if (!err)
  		err = driver_create_file(&xen_pcibk_pci_driver.driver,
  					&driver_attr_irq_handler_state);
