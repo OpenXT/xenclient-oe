@@ -37,7 +37,11 @@ do_install () {
 	# "make install" misses the debug file for the library
 	oe_libinstall -so -C lib libpci ${D}/${libdir}
 
+	install -d -m 0755 ${datadir}
 	install -m 0644 ${WORKDIR}/pci.ids.gz.20141108 ${D}/${datadir}/pci.ids.gz
+	# TODO: call gunzip instead of zcat to remove the gzipped version...
+	#       ...once xenmgr is patched to use the non-gzipped file
+	zcat ${D}/${datadir}/pci.ids.gz > ${D}/${datadir}/pci.ids
 }
 
 #do_stage () {
@@ -52,4 +56,4 @@ do_install () {
 
 
 PACKAGES =+ "${PN}-ids"
-FILES_${PN}-ids = "${datadir}/pci.ids.gz"
+FILES_${PN}-ids = "${datadir}/pci.ids.gz ${datadir}/pci.ids"

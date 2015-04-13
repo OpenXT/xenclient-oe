@@ -1,7 +1,12 @@
 PRINC = "4"
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
-EXTRA_OECONF += "--enable-static --with-selinux"
+EXTRA_OECONF += " \
+        --enable-static \
+        --with-selinux \
+        --with-usb-ids-path=/usr/share/usb.ids \
+        --with-pci-ids-path=/usr/share/pci.ids \
+"
 FILESEXTRAPATHS := "${THISDIR}/${PN}"
 
 inherit update-rc.d
@@ -15,6 +20,7 @@ SRC_URI += " \
         file://${PACKAGE_ARCH}-init \
         file://usb-hid-no-autosleep.patch;patch=1 \
         file://disable-cdrom-locking-by-dom0.patch;patch=2 \
+        file://05-db.rules \
         "
 
 do_install_append () {
@@ -23,4 +29,9 @@ do_install_append () {
 
         install -d ${D}${sysconfdir}/init.d
         install -m 0755 ${WORKDIR}/${PACKAGE_ARCH}-init ${D}${sysconfdir}/init.d/udev
+
+        install -d ${D}/etc
+        install -d ${D}/etc/udev
+        install -d ${D}/etc/udev/rules.d
+        install ${WORKDIR}/05-db.rules ${D}/etc/udev/rules.d
 }
