@@ -38,6 +38,7 @@ SRC_URI += "file://0001-generic-xenstore-extensions.patch \
             file://0020-audio-policy.patch;striplevel=1 \
             file://0023-msix-cap-disable.patch;striplevel=1 \
             file://0026-openxtaudio.patch;striplevel=1 \
+            file://0027-nic-link-state-propagation.patch;striplevel=1 \
             "
 
 SRC_URI[md5sum] = "78f13b774814b6b7ebcaf4f9b9204318"

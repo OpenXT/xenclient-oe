@@ -1,0 +1,246 @@
+################################################################################
+SHORT DESCRIPTION: 
+################################################################################
+Have the emulated NICs mirror the link-status of the network back-end, exposed
+through XenStore.
+
+################################################################################
+LONG DESCRIPTION: 
+################################################################################
+QEMU's current default network configuration is to have two NICs (rtl8139
+emulations), one for the Ethernet interface and one for the Wireless.
+Each emulated card is connected to a "QEMU vlan" (not 802.1q VLAN), actually an
+emulated hub (-net option behaviour), to which is also connected the tap
+interface of its backend.
+
+For each NIC created by QEMU, we add a XenStore watch on the node of the
+network back-end plugged in the same hub. This let us retrieve the back-end
+information using the nd_table (NICInfo).
+
+################################################################################
+CHANGELOG 
+################################################################################
+Port & documentation: Eric Chanudet, chanudete@ainfosec.com, 17/04/2015
+Intial Commit: Unknown
+
+################################################################################
+REMOVAL 
+################################################################################
+With the current OpenXT guest network configuration, removing this patch will
+trigger routing issues in the guest.
+
+################################################################################
+UPSTREAM PLAN 
+################################################################################
+There is no plan to upstream this patch, it is OpenXT specific.
+
+################################################################################
+INTERNAL DEPENDENCIES 
+################################################################################
+None
+
+################################################################################
+PATCHES 
+################################################################################
+--- a/hw/xen.h
++++ b/hw/xen.h
+@@ -38,6 +38,9 @@ void xen_piix_pci_write_config_client(ui
+ void xen_hvm_inject_msi(uint64_t addr, uint32_t data);
+ void xen_cmos_set_s3_resume(void *opaque, int irq, int level);
+ 
++int xenstore_register_nic(NetClientState *nc);
++int xenstore_unregister_nic(NetClientState *nc);
++
+ qemu_irq *xen_interrupt_controller_init(void);
+ 
+ int xen_init(void);
+--- a/hw/xen_backend.c
++++ b/hw/xen_backend.c
+@@ -38,6 +38,7 @@
+ #include "char/char.h"
+ #include "qemu/log.h"
+ #include "xen_backend.h"
++#include "qmp-commands.h"
+ 
+ #include <xen/grant_table.h>
+ 
+@@ -589,6 +590,143 @@ static int xenstore_scan(const char *typ
+     return 0;
+ }
+ 
++/*
++ * OpenXT: Get type and id from \([a-zA-Z]\+\)\([0-9]\+\).
++ */
++static void xenstore_nic_parse_name(const char *name, char *type, char *id)
++{
++    if (name) {
++        while (isalpha(*name)) {
++            *(type++) = *(name++);
++        }
++        while (isdigit(*name)) {
++            *(id++) = *(name++);
++        }
++    }
++    *type = '\0';
++    *id = '\0';
++}
++
++/*
++ * OpenXT: Get network backend type and ID from NIC information table.
++ */
++static int xenstore_net_client_state_fetch_backend_info(NetClientState *ncs, char *type, char *id)
++{
++    size_t i;
++
++    for (i = 0; i < MAX_NICS; ++i) {
++        /* We assume there is only one NIC per hub. So, if a NIC is on our
++         * hub, it is our back-end. */
++        if (nd_table[i].netdev == ncs->peer) {
++            xenstore_nic_parse_name(nd_table[i].name, type, id);
++            return 0;
++        }
++    }
++    return -1;
++}
++
++/* Define constants for network devices XenStore data representation. */
++#define XENSTORE_NET_TYPE_LEN   5   /* Currently "vif"|"vwif" */
++#define XENSTORE_NET_ID_LEN     5
++/* OpenXT: Read the appropriate Base Register and check if we have to change
++ * the device status. */
++static void xenstore_update_nic(void *opaque)
++{
++    NetClientState *nc = opaque;
++    char *dompath;
++    char type[XENSTORE_NET_TYPE_LEN];
++    char id[XENSTORE_NET_ID_LEN];
++    char base[XEN_BUFSIZE];
++    int val;
++
++    if (xenstore_net_client_state_fetch_backend_info(nc, type, id)) {
++        fprintf(stderr, "Failed to find a network back-end for `%s'.\n", nc->name);
++        return;
++    }
++
++    dompath = xs_get_domain_path(xenstore, xen_domid);
++    if (!dompath) {
++        fprintf(stderr, "Could not retrieve domain path.\n");
++        return;
++    }
++    snprintf(base, sizeof (base), "%s/device/%s/%s", dompath, type, id);
++    free(dompath);
++
++    if (xenstore_read_int(base, "disconnect", &val)) {
++        fprintf(stderr, "Failed to read xenstore path (%s/%s).\n", base, "disconnect");
++        return;
++    }
++
++    /* The value is actually a boolean. */
++    if (nc->link_down != !!val) {
++        fprintf(stderr, "%s (%s%s): link status is now %s.\n", nc->name, type, id, !!val ? "down" : "up");
++        /* Notify the emulation through QMP.
++         * Note that qmp_set_link boolean is "link-up?", not nc->link_down "link-down?". */
++        qmp_set_link(nc->name, !val, NULL);
++    }
++}
++
++/* OpenXT: Register a Net Client in Xenstore. */
++int xenstore_register_nic(NetClientState *nc)
++{
++    char *dompath;
++    char type[XENSTORE_NET_TYPE_LEN];
++    char id[XENSTORE_NET_ID_LEN];
++    char base[XEN_BUFSIZE];
++
++    if (xenstore_net_client_state_fetch_backend_info(nc, type, id)) {
++        fprintf(stderr, "Failed to find a network back-end for `%s'.\n", nc->name);
++        return -1;
++    }
++
++    dompath = xs_get_domain_path(xenstore, xen_domid);
++    if (!dompath) {
++        fprintf(stderr, "Could not retrieve domain path.\n");
++        return -1;
++    }
++    snprintf(base, sizeof (base), "%s/device/%s/%s", dompath, type, id);
++    free(dompath);
++
++    if (xenstore_add_watch(base, "disconnect", xenstore_update_nic, nc)) {
++        fprintf(stderr, "Could not install xenstore watch on path `%s/disconnect'.\n", base);
++        return -1;
++    }
++
++    xenstore_update_nic(nc);
++
++    return 0;
++}
++
++/* OpenXT: Unregister a Net Client in Xenstore.
++ * Called when a device is removed and no longer used. */
++int xenstore_unregister_nic(NetClientState *nc)
++{
++    char *dompath;
++    char type[XENSTORE_NET_TYPE_LEN];
++    char id[XENSTORE_NET_ID_LEN];
++    char base[XEN_BUFSIZE];
++
++    if (xenstore_net_client_state_fetch_backend_info(nc, type, id)) {
++        fprintf(stderr, "Failed to find a network back-end for `%s'.\n", nc->name);
++        return -1;
++    }
++
++    dompath = xs_get_domain_path(xenstore, xen_domid);
++    if (!dompath) {
++        fprintf(stderr, "Could not retrieve domain path.\n");
++        return -1;
++    }
++    snprintf(base, sizeof (base), "%s/device/%s/%s", dompath, type, id);
++    free(dompath);
++
++    if (xenstore_remove_watch(base, "disconnect", xenstore_update_nic, id)) {
++        fprintf(stderr, "Could not remove xenstore watch on path `%s/disconnect'.\n", base);
++        return -1;
++    }
++    /* TODO: xenstore_update_nic() and force disconnect if not already? */
++    return 0;
++}
++
+ static void xenstore_update_be(char *watch, char *type, int dom,
+                                struct XenDevOps *ops)
+ {
+--- a/net/net.c
++++ b/net/net.c
+@@ -40,6 +40,9 @@
+ #include "qapi/opts-visitor.h"
+ #include "qapi/dealloc-visitor.h"
+ 
++/* OpenXT: xenstore_register_nic() and xenstore_unregister_nic(). */
++#include "hw/xen.h"
++
+ /* Net bridge is currently not supported for W32. */
+ #if !defined(_WIN32)
+ # define CONFIG_NET_BRIDGE
+@@ -256,6 +259,12 @@ NICState *qemu_new_nic(NetClientInfo *in
+         nic->ncs[i].queue_index = i;
+     }
+ 
++    /* OpenXT: Register the new NetClientState to Xenstore.
++     * Required for link-state propagation logic. */
++    if (xen_enabled()) {
++        xenstore_register_nic(nc);
++    }
++
+     return nic;
+ }
+ 
+@@ -364,6 +373,10 @@ void qemu_del_nic(NICState *nic)
+ 
+     for (i = queues - 1; i >= 0; i--) {
+         NetClientState *nc = qemu_get_subqueue(nic, i);
++        /* OpenXT: Unregister NetClientState from Xenstore. */
++        if (xen_enabled()) {
++            xenstore_unregister_nic(nc);
++        }
+ 
+         qemu_cleanup_net_client(nc);
+         qemu_free_net_client(nc);
