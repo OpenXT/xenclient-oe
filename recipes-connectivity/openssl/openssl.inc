@@ -31,7 +31,7 @@ export DIRS = "crypto ssl apps"
 export EX_LIBS = "-lgcc -ldl"
 export AS = "${CC} -c"
 
-inherit pkgconfig siteinfo multilib_header ptest
+inherit pkgconfig siteinfo multilib_header
 
 PACKAGES =+ "libcrypto libssl ${PN}-misc openssl-conf"
 FILES_libcrypto = "${base_libdir}/libcrypto${SOLIBS}"
@@ -48,7 +48,6 @@ FILES_${PN}-dev += "${base_libdir}/libcrypto${SOLIBSDEV}"
 FILES_openssl-conf = "${libdir}/ssl/openssl.cnf"
 CONFFILES_openssl-conf = "${libdir}/ssl/openssl.cnf"
 RRECOMMENDS_libcrypto += "openssl-conf"
-RDEPENDS_${PN}-ptest += "${PN}-misc make perl perl-module-filehandle bc"
 
 do_configure_prepend_darwin () {
 	sed -i -e '/version-script=openssl\.ld/d' Configure
@@ -147,10 +146,6 @@ do_compile () {
 	oe_runmake
 }
 
-do_compile_ptest () {
-	oe_runmake buildtest
-}
-
 do_install () {
 	oe_runmake INSTALL_PREFIX="${D}" MANDIR="${mandir}" install
 
@@ -178,19 +173,6 @@ do_install () {
 		rm -f ${D}${bindir}/c_rehash
 		rm -f ${D}${libdir}/ssl/misc/CA.pl ${D}${libdir}/ssl/misc/tsget
 	fi
-}
-
-do_install_ptest () {
-	cp -r Makefile test ${D}${PTEST_PATH}
-	cp -r certs ${D}${PTEST_PATH}
-	mkdir -p ${D}${PTEST_PATH}/apps
-	ln -sf /usr/lib/ssl/misc/CA.sh  ${D}${PTEST_PATH}/apps
-	ln -sf /usr/lib/ssl/openssl.cnf ${D}${PTEST_PATH}/apps
-	ln -sf /usr/bin/openssl         ${D}${PTEST_PATH}/apps
-	cp apps/server2.pem             ${D}${PTEST_PATH}/apps
-	mkdir -p ${D}${PTEST_PATH}/util
-	install util/opensslwrap.sh    ${D}${PTEST_PATH}/util
-	install util/shlib_wrap.sh     ${D}${PTEST_PATH}/util
 }
 
 do_install_append_virtclass-native() {
