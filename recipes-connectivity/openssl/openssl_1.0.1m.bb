@@ -29,14 +29,16 @@ SRC_URI += "file://configure-targets.patch \
             file://openssl_fix_for_x32.patch \
             file://fix-cipher-des-ede3-cfb1.patch \
             file://openssl-avoid-NULL-pointer-dereference-in-EVP_DigestInit_ex.patch \
-            file://openssl-avoid-NULL-pointer-dereference-in-dh_pub_encode.patch \
             file://initial-aarch64-bits.patch \
             file://find.pl \
             file://openssl-fix-des.pod-error.patch \
+            file://Makefiles-ptest.patch \
+            file://ptest-deps.patch \
+            file://run-ptest \
            "
 
-SRC_URI[md5sum] = "8d6d684a9430d5cc98a62a5d8fbda8cf"
-SRC_URI[sha256sum] = "9d1c8a9836aa63e2c6adb684186cbd4371c9e9dcc01d6e3bb447abf2d4d3d093"
+SRC_URI[md5sum] = "d143d1555d842a069cb7cc34ba745a06"
+SRC_URI[sha256sum] = "095f0b7b09116c0c5526422088058dc7e6e000aa14d22acca6a4e2babcdfef74"
 
 PACKAGES =+ " \
 	${PN}-engines \
