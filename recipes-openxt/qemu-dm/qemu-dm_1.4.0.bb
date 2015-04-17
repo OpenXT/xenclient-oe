@@ -5,6 +5,6 @@ SRC_URI += " \
     file://0025-Enable-changing-of-ISO-media-in-non-stubdom-device-m.patch;striplevel=1 \
     "
 
-EXTRA_OECONF += "--enable-debug --disable-strip --audio-drv-list=alsa "
+EXTRA_OECONF += " --audio-drv-list=alsa "
 
 PR = "${INC_PR}.4"
