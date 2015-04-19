@@ -5,10 +5,11 @@ BUGTRACKER = "http://www.openssl.org/news/vulnerabilities.html"
 SECTION = "libs/network"
 
 # "openssl | SSLeay" dual license
-LICENSE = "OpenSSL"
+LICENSE = "openssl"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=f9a8f968107345e0b75aa8c2ecaa7ec8"
 
 DEPENDS = "perl-native-runtime"
+DEPENDS_append_class-target = " openssl-native"
 
 SRC_URI = "http://www.openssl.org/source/openssl-${PV}.tar.gz \
           "
@@ -37,7 +38,7 @@ FILES_libcrypto = "${base_libdir}/libcrypto${SOLIBS}"
 FILES_libssl = "${libdir}/libssl.so.*"
 FILES_${PN} =+ " ${libdir}/ssl/*"
 FILES_${PN}-misc = "${libdir}/ssl/misc ${bindir}/c_rehash"
-RDEPENDS_${PN}-misc = "${@base_contains('PACKAGECONFIG', 'perl', 'perl', '', d)}"
+RDEPENDS_${PN}-misc = "${@bb.utils.contains('PACKAGECONFIG', 'perl', 'perl', '', d)}"
 FILES_${PN}-dev += "${base_libdir}/libcrypto${SOLIBSDEV}"
 
 # Add the openssl.cnf file to the openssl-conf package.  Make the libcrypto
@@ -59,17 +60,18 @@ do_configure () {
 	ln -sf apps/openssl.pod crypto/crypto.pod ssl/ssl.pod doc/
 
 	os=${HOST_OS}
-	if [ "x$os" = "xlinux-uclibc" ]; then
+	case $os in
+	linux-uclibc |\
+	linux-uclibceabi |\
+	linux-gnueabi |\
+	linux-uclibcspe |\
+	linux-gnuspe |\
+	linux-musl*)
 		os=linux
-	elif [ "x$os" = "xlinux-uclibceabi" ]; then
-		os=linux
-	elif [ "x$os" = "xlinux-uclibcspe" ]; then
-		os=linux
-	elif [ "x$os" = "xlinux-gnuspe" ]; then
-		os=linux
-	elif [ "x$os" = "xlinux-gnueabi" ]; then
-		os=linux
-	fi
+		;;
+		*)
+		;;
+	esac
 	target="$os-${HOST_ARCH}"
 	case $target in
 	linux-arm)
@@ -136,6 +138,10 @@ do_configure () {
 	perl ./Configure ${EXTRA_OECONF} shared --prefix=$useprefix --openssldir=${libdir}/ssl --libdir=`basename ${libdir}` $target
 }
 
+do_compile_prepend_class-target () {
+    sed -i 's/\((OPENSSL=\)".*"/\1"openssl"/' Makefile
+}
+
 do_compile () {
 	oe_runmake
 }
@@ -157,7 +163,7 @@ do_install () {
 	cp --dereference -R include/openssl ${D}${includedir}
 
 	oe_multilib_header openssl/opensslconf.h
-	if [ "${@base_contains('PACKAGECONFIG', 'perl', 'perl', '', d)}" = "perl" ]; then
+	if [ "${@bb.utils.contains('PACKAGECONFIG', 'perl', 'perl', '', d)}" = "perl" ]; then
 		install -m 0755 ${S}/tools/c_rehash ${D}${bindir}
 		sed -i -e '1s,.*,#!${bindir}/env perl,' ${D}${bindir}/c_rehash
 		sed -i -e '1s,.*,#!${bindir}/env perl,' ${D}${libdir}/ssl/misc/CA.pl
@@ -169,5 +175,12 @@ do_install () {
 	fi
 }
 
-BBCLASSEXTEND = "native nativesdk"
+do_install_append_virtclass-native() {
+	create_wrapper ${D}${bindir}/openssl \
+	    OPENSSL_CONF=${libdir}/ssl/openssl.cnf \
+	    SSL_CERT_DIR=${libdir}/ssl/certs \
+	    SSL_CERT_FILE=${libdir}/ssl/cert.pem \
+	    OPENSSL_ENGINES=${libdir}/ssl/engines
+}
 
+BBCLASSEXTEND = "native nativesdk"
