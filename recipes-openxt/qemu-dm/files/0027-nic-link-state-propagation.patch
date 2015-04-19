@@ -64,50 +64,80 @@ PATCHES
  
  #include <xen/grant_table.h>
  
-@@ -589,6 +590,143 @@ static int xenstore_scan(const char *typ
+@@ -589,6 +590,188 @@ static int xenstore_scan(const char *typ
      return 0;
  }
  
 +/*
-+ * OpenXT: Get type and id from \([a-zA-Z]\+\)\([0-9]\+\).
++ * OpenXT: Get type and id from \([a-zA-Z]\\{1,XENSTORE_NET_TYPE_LEN - 1\}\)\([0-9]\{1,XENSTORE_NET_ID_LEN\}\).
++ *
++ * @param name is a null terminated character string.
++ * @param type is able to store at least XENSTORE_NET_TYPE_LEN bytes.
++ * @param id is able to store at least XENSTORE_NET_ID_LEN bytes.
++ * @return 0 on success, -ERRNO else.
 + */
-+static void xenstore_nic_parse_name(const char *name, char *type, char *id)
++/* Define constants for network devices XenStore data representation. */
++#define XENSTORE_NET_TYPE_LEN   5   /* Currently "vif"|"vwif" */
++#define XENSTORE_NET_ID_LEN     5
++static int xenstore_nic_parse_name(const char *name, char *type, char *id)
 +{
-+    if (name) {
-+        while (isalpha(*name)) {
-+            *(type++) = *(name++);
-+        }
-+        while (isdigit(*name)) {
-+            *(id++) = *(name++);
-+        }
++    size_t i;
++
++    assert(name);
++    assert(type);
++    assert(id);
++
++    for (i = 0; isalpha(*name) && (i < XENSTORE_NET_TYPE_LEN - 1); ++i) {
++        type[i] = *(name++);
 +    }
-+    *type = '\0';
-+    *id = '\0';
++    if (!i) {
++        return -EINVAL;
++    }
++    type[i] = '\0';
++
++    for (i = 0; isdigit(*name) && (i < XENSTORE_NET_ID_LEN - 1); ++i) {
++        id[i] = *(name++);
++    }
++    if (!i) {
++        return -EINVAL;
++    }
++    id[i] = '\0';
++
++    return 0;
 +}
 +
 +/*
 + * OpenXT: Get network backend type and ID from NIC information table.
++ *
++ * @param ncs a valid NetClientState.
++ * @param type is able to store at least XENSTORE_NET_TYPE_LEN bytes.
++ * @param id is able to store at least XENSTORE_NET_ID_LEN bytes.
++ * @return 0 on success, -ERRNO else.
 + */
 +static int xenstore_net_client_state_fetch_backend_info(NetClientState *ncs, char *type, char *id)
 +{
 +    size_t i;
 +
++    assert(ncs);
++    assert(type);
++    assert(id);
++
 +    for (i = 0; i < MAX_NICS; ++i) {
 +        /* We assume there is only one NIC per hub. So, if a NIC is on our
-+         * hub, it is our back-end. */
-+        if (nd_table[i].netdev == ncs->peer) {
-+            xenstore_nic_parse_name(nd_table[i].name, type, id);
-+            return 0;
++         * hub, it is our back-end. Also make sure name is still valid (reset at
++         * guest shutdown apparently).*/
++        if (nd_table[i].netdev == ncs->peer && nd_table[i].name) {
++            return xenstore_nic_parse_name(nd_table[i].name, type, id);
 +        }
 +    }
-+    return -1;
++    return -ENODEV;
 +}
 +
-+/* Define constants for network devices XenStore data representation. */
-+#define XENSTORE_NET_TYPE_LEN   5   /* Currently "vif"|"vwif" */
-+#define XENSTORE_NET_ID_LEN     5
 +/* OpenXT: Read the appropriate Base Register and check if we have to change
-+ * the device status. */
++ * the device status.
++ *
++ * @param opaque a valid pointer to a NetClientState object.
++ */
 +static void xenstore_update_nic(void *opaque)
 +{
 +    NetClientState *nc = opaque;
@@ -116,6 +146,8 @@ PATCHES
 +    char id[XENSTORE_NET_ID_LEN];
 +    char base[XEN_BUFSIZE];
 +    int val;
++
++    assert(opaque);
 +
 +    if (xenstore_net_client_state_fetch_backend_info(nc, type, id)) {
 +        fprintf(stderr, "Failed to find a network back-end for `%s'.\n", nc->name);
@@ -144,13 +176,20 @@ PATCHES
 +    }
 +}
 +
-+/* OpenXT: Register a Net Client in Xenstore. */
++/*
++ * OpenXT: Register a Net Client in Xenstore.
++ *
++ * @param nc a valid pointer to a NetClientState object.
++ * @return 0 on success, -1 else.
++ * */
 +int xenstore_register_nic(NetClientState *nc)
 +{
 +    char *dompath;
 +    char type[XENSTORE_NET_TYPE_LEN];
 +    char id[XENSTORE_NET_ID_LEN];
 +    char base[XEN_BUFSIZE];
++
++    assert(nc);
 +
 +    if (xenstore_net_client_state_fetch_backend_info(nc, type, id)) {
 +        fprintf(stderr, "Failed to find a network back-end for `%s'.\n", nc->name);
@@ -175,14 +214,21 @@ PATCHES
 +    return 0;
 +}
 +
-+/* OpenXT: Unregister a Net Client in Xenstore.
-+ * Called when a device is removed and no longer used. */
++/*
++ * OpenXT: Unregister a Net Client in Xenstore.
++ * Called when a device is removed and no longer used.
++ *
++ * @param nc a valid pointer to a NetClientState object.
++ * @return 0 on success, -1 else.
++ */
 +int xenstore_unregister_nic(NetClientState *nc)
 +{
 +    char *dompath;
 +    char type[XENSTORE_NET_TYPE_LEN];
 +    char id[XENSTORE_NET_ID_LEN];
 +    char base[XEN_BUFSIZE];
++
++    assert(nc);
 +
 +    if (xenstore_net_client_state_fetch_backend_info(nc, type, id)) {
 +        fprintf(stderr, "Failed to find a network back-end for `%s'.\n", nc->name);
@@ -201,7 +247,6 @@ PATCHES
 +        fprintf(stderr, "Could not remove xenstore watch on path `%s/disconnect'.\n", base);
 +        return -1;
 +    }
-+    /* TODO: xenstore_update_nic() and force disconnect if not already? */
 +    return 0;
 +}
 +
