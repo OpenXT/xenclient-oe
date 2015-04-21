@@ -22,6 +22,7 @@ SRC_URI = "http://wiki.qemu-project.org/download/qemu-${PV}.tar.bz2"
 
 # QEMU Patch Queue
 SRC_URI += "file://0001-generic-xenstore-extensions.patch \
+            file://0001-readonly-ide.patch;striplevel=1 \
             file://0003-hvm-param-dm-domain.patch;striplevel=1 \
             file://0005-logging-syslog.patch;striplevel=1 \
             file://0006-dmbus.patch;striplevel=1 \
@@ -84,6 +85,7 @@ do_configure(){
                 --enable-surfman \
                 --enable-atapi-pt \
                 --enable-atapi-pt-v4v \
+                --enable-readonly-ide \
                 --enable-debug
 }
 
@@ -96,4 +98,4 @@ do_install(){
     DESTDIR=${D} oe_runmake STRIP='' install
 }
 
-INC_PR = "r8"
+INC_PR = "r9"
