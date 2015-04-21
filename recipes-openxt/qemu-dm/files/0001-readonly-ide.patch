@@ -1,0 +1,152 @@
+--------------------------------------------------------------------------------
+SHORT DESCRIPTION:
+--------------------------------------------------------------------------------
+
+Provide readonly capability for IDE disk drives.
+
+--------------------------------------------------------------------------------
+LONG DESCRIPTION:
+--------------------------------------------------------------------------------
+
+Abort on IDE write commands (in a manner similarly done in legacy-ioemu),
+effectively providing a read-only IDE disk device for OpenXT.
+
+Upstream Qemu does not support this, but IDE disk devices must be used
+as Xen/Qemu will only unplug IDE disk devices in favor of PV (blkfront)
+usage within the guest.  Other options such as SCSI do not allow for this unplug
+without more intrusive changes.
+
+Can be toggled in ./configure stage (disabled by default):
+* To disable: --disable-readonly-ide
+* To enable: --enable-readonly-ide
+
+--------------------------------------------------------------------------------
+UPSTREAM PLAN
+--------------------------------------------------------------------------------
+
+Unlikely to upstream, qemu purposely does not support read-only IDE disk drives.
+
+--------------------------------------------------------------------------------
+DEPENDENCIES
+--------------------------------------------------------------------------------
+
+None.
+
+--------------------------------------------------------------------------------
+CHANGELOG
+--------------------------------------------------------------------------------
+
+Chris Patterson, <pattersonc@ainfosec.com>, 04/21/2015
+- Initial commit.
+
+diff --git a/blockdev.c b/blockdev.c
+index 63e6f1e..f6f6ab1 100644
+--- a/blockdev.c
++++ b/blockdev.c
+@@ -603,6 +603,9 @@ DriveInfo *drive_init(QemuOpts *opts, BlockInterfaceType block_default_type)
+         ro = 1;
+     } else if (ro == 1) {
+         if (type != IF_SCSI && type != IF_VIRTIO && type != IF_FLOPPY &&
++#ifdef CONFIG_READONLY_IDE
++            type != IF_IDE &&
++#endif
+             type != IF_NONE && type != IF_PFLASH) {
+             error_report("readonly not supported by this bus type");
+             goto err;
+diff --git a/configure b/configure
+index 8789324..ba867ff 100755
+--- a/configure
++++ b/configure
+@@ -149,6 +149,7 @@ fdt=""
+ nptl=""
+ pixman=""
+ sdl=""
++readonly_ide="no"
+ virtfs=""
+ vnc="yes"
+ sparse="no"
+@@ -673,6 +674,10 @@ for opt do
+   ;;
+   --enable-sdl) sdl="yes"
+   ;;
++  --disable-readonly-ide) readonly_ide="no"
++  ;;
++  --enable-readonly-ide) readonly_ide="yes"
++  ;;
+   --disable-virtfs) virtfs="no"
+   ;;
+   --enable-virtfs) virtfs="yes"
+@@ -3285,6 +3290,7 @@ if test "$darwin" = "yes" ; then
+ fi
+ echo "pixman            $pixman"
+ echo "SDL support       $sdl"
++echo "readonly IDE support       $readonly_ide"
+ echo "curses support    $curses"
+ echo "curl support      $curl"
+ echo "mingw32 support   $mingw32"
+@@ -3503,6 +3509,9 @@ if test "$sdl" = "yes" ; then
+   echo "CONFIG_SDL=y" >> $config_host_mak
+   echo "SDL_CFLAGS=$sdl_cflags" >> $config_host_mak
+ fi
++if test "$readonly_ide" = "yes" ; then
++  echo "CONFIG_READONLY_IDE=y" >> $config_host_mak
++fi
+ if test "$cocoa" = "yes" ; then
+   echo "CONFIG_COCOA=y" >> $config_host_mak
+ fi
+diff --git a/hw/ide/core.c b/hw/ide/core.c
+index 3743dc3..73ae4c0 100644
+--- a/hw/ide/core.c
++++ b/hw/ide/core.c
+@@ -1188,6 +1188,12 @@ void ide_exec_cmd(IDEBus *bus, uint32_t val)
+         if (!s->bs) {
+             goto abort_cmd;
+         }
++#ifdef CONFIG_READONLY_IDE
++        if (bdrv_is_read_only(s->bs)) {
++            //printf("IDE write attempted for read-only device\n");
++            goto abort_cmd;
++        }
++#endif
+ 	ide_cmd_lba48_transform(s, lba48);
+         s->error = 0;
+         s->status = SEEK_STAT | READY_STAT;
+@@ -1222,6 +1228,12 @@ void ide_exec_cmd(IDEBus *bus, uint32_t val)
+         if (!s->mult_sectors) {
+             goto abort_cmd;
+         }
++#ifdef CONFIG_READONLY_IDE
++        if (bdrv_is_read_only(s->bs)) {
++            //printf("IDE write attempted for read-only device\n");
++            goto abort_cmd;
++        }
++#endif
+ 	ide_cmd_lba48_transform(s, lba48);
+         s->error = 0;
+         s->status = SEEK_STAT | READY_STAT;
+@@ -1253,6 +1265,12 @@ void ide_exec_cmd(IDEBus *bus, uint32_t val)
+         if (!s->bs) {
+             goto abort_cmd;
+         }
++#ifdef CONFIG_READONLY_IDE
++        if (bdrv_is_read_only(s->bs)) {
++            //printf("IDE write attempted for read-only device\n");
++            goto abort_cmd;
++        }
++#endif
+ 	ide_cmd_lba48_transform(s, lba48);
+         ide_sector_start_dma(s, IDE_DMA_WRITE);
+         s->media_changed = 1;
+@@ -1999,10 +2017,12 @@ int ide_init_drive(IDEState *s, BlockDriverState *bs, IDEDriveKind kind,
+             error_report("Device needs media, but drive is empty");
+             return -1;
+         }
++#ifndef CONFIG_READONLY_IDE
+         if (bdrv_is_read_only(bs)) {
+             error_report("Can't use a read-only drive");
+             return -1;
+         }
++#endif
+     }
+     if (serial) {
+         pstrcpy(s->drive_serial_str, sizeof(s->drive_serial_str), serial);
