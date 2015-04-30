@@ -120,4 +120,4 @@ do_install () {
 		${D}/usr/bin/selinux-state
 }
 
-INC_PR="r2"
+INC_PR="r3"

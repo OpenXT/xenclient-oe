@@ -52,6 +52,9 @@ fi
 TMP_MNT=$(mktemp --directory)
 mount --bind / ${TMP_MNT}
 rsync --archive --xattrs --ignore-existing ${TMP_MNT}/config/ /config
+
+# update the passwd file for the upgrade case
+cp -p ${TMP_MNT}/config/etc/passwd /config/etc/passwd
 umount ${TMP_MNT}
 rmdir ${TMP_MNT}
 
@@ -64,6 +67,9 @@ if [ ! -s ${PS_FILE} ]; then
     install -m 700 -o ${TSS_USER} -g ${TSS_USER} -d ${PS_DIR}
     install -m 600 -o ${TSS_USER} -g ${TSS_USER} ${PS_FILE_SRC} ${PS_FILE}
 fi
+
+# update the uid/gids for the upgrade case (new passwd and group files are shipped)
+chown -R ${TSS_USER}:${TSS_USER} ${PS_DIR}
 
 # Make /var/log/wtmp volatile.
 if [ ! -L /var/log/wtmp ] ; then
