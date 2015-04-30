@@ -28,7 +28,6 @@ SRC_URI += "file://0001-generic-xenstore-extensions.patch \
             file://0006-dmbus.patch;striplevel=1 \
             file://0008-switcher.patch;striplevel=1 \
             file://0009-acpi.patch;striplevel=1 \
-            file://0011-battery.patch;striplevel=1 \
             file://0013-xenmou.patch;striplevel=1 \
             file://0015-atapi-pass-through.patch;striplevel=1 \
             file://0016-vbe-xt-extensions.patch;striplevel=1 \
