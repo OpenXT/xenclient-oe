@@ -50,8 +50,8 @@ fi
 # bind rootfs to tmp location and rsync dom0 /config on to config partition
 # to pick up new files after upgrade
 TMP_MNT=$(mktemp --directory)
-mount --bind / ${TMP_MOUNT}
-rsync --archive --xattrs --ignore-existing ${TMP_MOUNT}/config/ /config
+mount --bind / ${TMP_MNT}
+rsync --archive --xattrs --ignore-existing ${TMP_MNT}/config/ /config
 umount ${TMP_MNT}
 rmdir ${TMP_MNT}
 
