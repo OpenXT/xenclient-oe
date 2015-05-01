@@ -119,3 +119,5 @@ do_install () {
 	install -m 0755 ${WORKDIR}/selinux-state \
 		${D}/usr/bin/selinux-state
 }
+
+INC_PR="r3"
