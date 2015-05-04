@@ -58,8 +58,6 @@ PATCHES
  xen-all.c        |   4 +
  4 files changed, 246 insertions(+), 1 deletion(-)
 
-diff --git a/blockdev.c b/blockdev.c
-index f25d242..3e69183 100644
 --- a/blockdev.c
 +++ b/blockdev.c
 @@ -20,7 +20,7 @@
@@ -71,7 +69,7 @@ index f25d242..3e69183 100644
  static QTAILQ_HEAD(drivelist, DriveInfo) drives = QTAILQ_HEAD_INITIALIZER(drives);
  
  static const char *const if_name[IF_COUNT] = {
-@@ -648,6 +648,12 @@ DriveInfo *drive_init(QemuOpts *opts, BlockInterfaceType block_default_type)
+@@ -654,6 +654,12 @@ DriveInfo *drive_init(QemuOpts *opts, Bl
          goto err;
      }
  
@@ -84,24 +82,18 @@ index f25d242..3e69183 100644
      if (bdrv_key_required(dinfo->bdrv))
          autostart = 0;
      return dinfo;
-diff --git a/hw/xen_backend.c b/hw/xen_backend.c
-index a8af20f..79f3073 100644
 --- a/hw/xen_backend.c
 +++ b/hw/xen_backend.c
-@@ -33,16 +33,20 @@
- #include <sys/stat.h>
- #include <sys/mman.h>
- #include <sys/signal.h>
-+#include <syslog.h>
- 
+@@ -37,6 +37,8 @@
  #include "hw.h"
  #include "char/char.h"
  #include "qemu/log.h"
 +#include "block/block.h"
 +#include "sysemu/blockdev.h"
  #include "xen_backend.h"
+ #include "qmp-commands.h"
  
- #include <xen/grant_table.h>
+@@ -44,6 +46,7 @@
  
  #include "ui/xen-input.h"
  #include "xen-dmbus.h"
@@ -109,7 +101,7 @@ index a8af20f..79f3073 100644
  
  /* ------------------------------------------------------------- */
  
-@@ -54,6 +58,7 @@ const char *xen_protocol;
+@@ -55,6 +58,7 @@ const char *xen_protocol;
  
  /* private */
  static QTAILQ_HEAD(XenDeviceHead, XenDevice) xendevs = QTAILQ_HEAD_INITIALIZER(xendevs);
@@ -117,7 +109,7 @@ index a8af20f..79f3073 100644
  static int debug = 0;
  
  /* ------------------------------------------------------------- */
-@@ -643,6 +648,81 @@ static void xenstore_update_fe(char *watch, struct XenDevice *xendev)
+@@ -784,6 +788,81 @@ static void xenstore_update_fe(char *wat
      xen_be_check_state(xendev);
  }
  
@@ -173,7 +165,7 @@ index a8af20f..79f3073 100644
 +            strstr(watch, node->xen_vbd_id) && !node->first_watch) {
 +
 +            newFile = xs_read(xenstore, XBT_NULL, watch, &fileLen);
-+            
++
 +            // Switch out the file path to the iso, so change gets made
 +            // when the node->timer fires.
 +            if (newFile) {
@@ -199,24 +191,24 @@ index a8af20f..79f3073 100644
  static void xenstore_update(void *unused)
  {
      char **vec = NULL;
-@@ -665,6 +745,11 @@ static void xenstore_update(void *unused)
+@@ -806,6 +885,11 @@ static void xenstore_update(void *unused
                 &ptr, &ops) == 2) {
          ((xenstore_watch_cb_t)ptr)((void *)ops);
      }
 +    /* OpenXT:
 +     * Notify the emulator of a change in media */
 +    if (!strcmp(vec[XS_WATCH_TOKEN], "iso")) {
-+      xenstore_update_iso(vec[XS_WATCH_PATH]);
++        xenstore_update_iso(vec[XS_WATCH_PATH]);
 +    }
  
  cleanup:
      free(vec);
-@@ -874,3 +959,150 @@ bool xenstore_is_legacy_res_only(void)
+@@ -1076,3 +1160,150 @@ bool xenstore_is_legacy_res_only(void)
      return !!val;
  }
  
 +/****************************************************
-+ * OpenXT: Media change handling 
++ * OpenXT: Media change handling
 +   Kind of a hack to get ISO updates when the UI changes it
 +   from dom0.
 +*/
@@ -225,17 +217,17 @@ index a8af20f..79f3073 100644
 +    struct IsoNode *node = NULL;
 +
 +    if (!file || !dinfo) {
-+	fprintf(stderr, "Failed to register iso device due to incorrect parameters");
-+	return -EINVAL;  
++        fprintf(stderr, "Failed to register iso device due to incorrect parameters");
++        return -EINVAL;
 +    }
 +
 +    node = g_malloc0(sizeof(*node));
 +
 +    if (!node) {
-+	return -ENOMEM;
++        return -ENOMEM;
 +    }
 +
-+    /* 
++    /*
 +       We can't do our Xen business just yet, because hvm init domain hasn't
 +       been called yet. So we have to save any information needed for registering
 +       until later.
@@ -249,12 +241,12 @@ index a8af20f..79f3073 100644
 +    node->first_watch = true;
 +
 +    if (!node->iso_file || !node->timer) {
-+	g_free(node);
-+	return -ENOMEM;
++        g_free(node);
++        return -ENOMEM;
 +    }
 +
 +    QTAILQ_INSERT_TAIL(&iso_list, node, next);
-+    
++
 +    return 0;
 +}
 +
@@ -265,121 +257,117 @@ index a8af20f..79f3073 100644
 +    char **vbd_devs = NULL;
 +    char path[XEN_BUFSIZE];
 +    char token[XEN_BUFSIZE];
-+    
++
 +    memset(path, 0x00, XEN_BUFSIZE);
 +    memset(token, 0x00, XEN_BUFSIZE);
-+    
++
 +    if (!xenstore) {
-+	syslog(LOG_ERR, "%s: No handle to xenstore", __FUNCTION__);
-+	return -1;
++        fprintf(stderr, "%s: No handle to xenstore", __FUNCTION__);
++        return -1;
 +    }
-+    
++
 +    // Gives us the /local/domain/<domid>
 +    dompath = xs_get_domain_path(xenstore, xen_domid);
-+    
++
 +    if (!dompath) {
-+	syslog(LOG_ERR, "%s: Failed to retrieve dompath", __FUNCTION__);
-+	return -1;
++        fprintf(stderr, "%s: Failed to retrieve dompath", __FUNCTION__);
++        return -1;
 +    }
-+    
++
 +    snprintf(path, XEN_BUFSIZE, "%s/device/vbd", dompath);
-+    
++
 +    // Find the virtual-device id that blkfront is using for this device
 +    vbd_devs = xs_directory(xenstore, XBT_NULL, path, &dirNum);
-+    
++
 +    if (!vbd_devs) {
-+	return -1;
++        return -1;
 +    }
 +
 +    for (i = 0; i < dirNum; i++) {
 +
-+	if (!vbd_devs[i]) {
-+	    continue;
-+	}
-+	
-+	// Build paths to get necessary information from Xenstore
-+	// Check the device type as CDROM, and get the backend path
-+	memset(path, 0x00, XEN_BUFSIZE);
-+	snprintf(path, XEN_BUFSIZE, "%s/device/vbd/%s", dompath, vbd_devs[i]);
-+	char *dev_type = xenstore_read_str(path, "device-type");
-+	char *be = xenstore_read_str(path, "backend");
-+	
-+	if (dev_type && be && !strcmp(dev_type, "cdrom")) {
-+	    // We need to watch the backend for this device now.
-+	    char *params = xenstore_read_str(be, "params");
-+	    struct IsoNode *node;
-+	    
-+	    QTAILQ_FOREACH(node, &iso_list, next) {
-+		if (node && params && 
-+		    node->xen_vbd_id == NULL &&
-+		    node->frontend_state == NULL) {
-+		    // For mapping a fired watch to a specific device later
-+		    node->xen_vbd_id = strdup(be);
-+		    
-+		    // Before the guest disk change can occur, make sure the state
-+		    // of the specified blkfront device is ready
-+		    memset(path, 0x00, XEN_BUFSIZE);
-+		    snprintf(path, XEN_BUFSIZE, "%s/device/vbd/%s/state", dompath, vbd_devs[i]);
-+		    node->frontend_state = strdup(path);
-+		    break;
-+		}
-+	    } 
++        if (!vbd_devs[i]) {
++            continue;
++        }
 +
-+	    // Set up the watch on the backend vbd path params key
-+	    memset(path, 0x00, XEN_BUFSIZE);
-+	    snprintf(path, XEN_BUFSIZE, "%s/params", be);   
++        // Build paths to get necessary information from Xenstore
++        // Check the device type as CDROM, and get the backend path
++        memset(path, 0x00, XEN_BUFSIZE);
++        snprintf(path, XEN_BUFSIZE, "%s/device/vbd/%s", dompath, vbd_devs[i]);
++        char *dev_type = xenstore_read_str(path, "device-type");
++        char *be = xenstore_read_str(path, "backend");
 +
-+	    if (!xs_watch(xenstore, path, "iso")) {
-+		fprintf(stderr, "[OXT-ISO] Failed to install xenstore watch on path: %s", path);
-+	    }
-+	    
-+	    if (be) {
-+		free(be);
-+		be = NULL;
-+	    }
++        if (dev_type && be && !strcmp(dev_type, "cdrom")) {
++            // We need to watch the backend for this device now.
++            char *params = xenstore_read_str(be, "params");
++            struct IsoNode *node;
 +
-+	    if (dev_type) {
-+		free(dev_type);
-+		dev_type = NULL;
-+	    }
-+	    
-+	    if (params) {
-+		free(params);
-+		params = NULL;
-+	    }
-+	}
++            QTAILQ_FOREACH(node, &iso_list, next) {
++                if (node && params &&
++                    node->xen_vbd_id == NULL &&
++                    node->frontend_state == NULL) {
++                    // For mapping a fired watch to a specific device later
++                    node->xen_vbd_id = strdup(be);
++
++                    // Before the guest disk change can occur, make sure the state
++                    // of the specified blkfront device is ready
++                    memset(path, 0x00, XEN_BUFSIZE);
++                    snprintf(path, XEN_BUFSIZE, "%s/device/vbd/%s/state", dompath, vbd_devs[i]);
++                    node->frontend_state = strdup(path);
++                    break;
++                }
++            }
++
++            // Set up the watch on the backend vbd path params key
++            memset(path, 0x00, XEN_BUFSIZE);
++            snprintf(path, XEN_BUFSIZE, "%s/params", be);
++
++            if (!xs_watch(xenstore, path, "iso")) {
++                fprintf(stderr, "[OXT-ISO] Failed to install xenstore watch on path: %s", path);
++            }
++
++            if (be) {
++                free(be);
++                be = NULL;
++            }
++
++            if (dev_type) {
++                free(dev_type);
++                dev_type = NULL;
++            }
++
++            if (params) {
++                free(params);
++                params = NULL;
++            }
++        }
 +    }
 +
 +    if (dompath) {
-+	free(dompath);
-+	dompath = NULL;
++        free(dompath);
++        dompath = NULL;
 +    }
-+    
++
 +    if (vbd_devs) {
-+	free(vbd_devs);
-+	vbd_devs = NULL;
++        free(vbd_devs);
++        vbd_devs = NULL;
 +    }
-+        
++
 +    return 0;
 +}
-diff --git a/hw/xen_backend.h b/hw/xen_backend.h
-index f1e12e0..d5f086b 100644
 --- a/hw/xen_backend.h
 +++ b/hw/xen_backend.h
-@@ -111,4 +111,8 @@
- int xenstore_add_watch(const char *base, const char *node,
-                        xenstore_watch_cb_t cb, void *opaque);
+@@ -113,4 +113,8 @@ int xenstore_add_watch(const char *base,
+ int xenstore_remove_watch(const char *base, const char *node,
+                           xenstore_watch_cb_t cb, void *opaque);
  
 +/* TODO: get me outta here! */
 +int xenstore_register_iso_dev(const char *file, DriveInfo *disk);
 +int xenstore_init_iso_dev(void);
 +
  #endif /* QEMU_HW_XEN_BACKEND_H */
-diff --git a/xen-all.c b/xen-all.c
-index 2a1a711..2264e40 100644
 --- a/xen-all.c
 +++ b/xen-all.c
-@@ -1180,6 +1180,10 @@ int xen_hvm_init(void)
+@@ -1197,6 +1197,10 @@ int xen_hvm_init(void)
      xen_be_register("qdisk", &xen_blkdev_ops);
  #endif
  
@@ -390,6 +378,3 @@ index 2a1a711..2264e40 100644
      xen_read_physmap(state);
  
      return 0;
--- 
-2.1.0
-
