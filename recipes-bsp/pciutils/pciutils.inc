@@ -39,9 +39,7 @@ do_install () {
 
 	install -d -m 0755 ${datadir}
 	install -m 0644 ${WORKDIR}/pci.ids.gz.20141108 ${D}/${datadir}/pci.ids.gz
-	# TODO: call gunzip instead of zcat to remove the gzipped version...
-	#       ...once xenmgr is patched to use the non-gzipped file
-	zcat ${D}/${datadir}/pci.ids.gz > ${D}/${datadir}/pci.ids
+	gunzip ${D}/${datadir}/pci.ids.gz
 }
 
 #do_stage () {
@@ -56,4 +54,4 @@ do_install () {
 
 
 PACKAGES =+ "${PN}-ids"
-FILES_${PN}-ids = "${datadir}/pci.ids.gz ${datadir}/pci.ids"
+FILES_${PN}-ids = "${datadir}/pci.ids"
