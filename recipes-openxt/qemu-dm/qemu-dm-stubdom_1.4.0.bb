@@ -6,11 +6,11 @@ SRC_URI += " \
             file://qemu-ifup-stubdom \
             "
 
-EXTRA_OECONF += " --audio-drv-list=openxt "
+EXTRA_OECONF += " --audio-drv-list=openxt --enable-openxt-stubdom "
 
 do_install_append(){
     install -m 0755 -d ${D}${sysconfdir}/qemu
     install -m 0755 ${WORKDIR}/qemu-ifup-stubdom ${D}${sysconfdir}/qemu/qemu-ifup
 }
 
-PR = "${INC_PR}.5"
+PR = "${INC_PR}.6"
