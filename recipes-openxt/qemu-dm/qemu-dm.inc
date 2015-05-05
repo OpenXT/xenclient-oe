@@ -21,7 +21,8 @@ DEPENDS = "xen-tools alsa-lib pciutils libpng blktap libxenacpi libv4v openssl z
 SRC_URI = "http://wiki.qemu-project.org/download/qemu-${PV}.tar.bz2"
 
 # QEMU Patch Queue
-SRC_URI += "file://0001-generic-xenstore-extensions.patch \
+SRC_URI += "file://0001-compile-time-stubdom-flag.patch \
+            file://0001-generic-xenstore-extensions.patch \
             file://0001-readonly-ide.patch;striplevel=1 \
             file://0003-hvm-param-dm-domain.patch;striplevel=1 \
             file://0005-logging-syslog.patch;striplevel=1 \
@@ -38,7 +39,6 @@ SRC_URI += "file://0001-generic-xenstore-extensions.patch \
             file://0023-msix-cap-disable.patch;striplevel=1 \
             file://0026-openxtaudio.patch;striplevel=1 \
             file://0027-nic-link-state-propagation.patch;striplevel=1 \
-            file://0028-compile-time-stubdom-flag.patch;striplevel=1 \
             "
 
 SRC_URI[md5sum] = "78f13b774814b6b7ebcaf4f9b9204318"
