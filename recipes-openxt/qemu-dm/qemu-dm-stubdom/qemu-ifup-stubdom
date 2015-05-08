@@ -41,7 +41,22 @@ else
     echo 1 > /sys/class/net/$bridgename/bridge/break_8021d
 fi
 
-ethname="eth${ifnumber}"
+#Query xenstore for mac address of vif and match with mac found in
+#sys/class/net
+domid=$(xenstore-read domid)
+xenstore_mac=$(xenstore-read /local/domain/${domid}/device/vif/${ifnumber}/mac)
+
+for netif in $(ls /sys/class/net/); do
+    if [ "${xenstore_mac}" == "$(cat /sys/class/net/${netif}/address)" ]; then
+        ethname="${netif}"
+        break
+    fi
+done
+
+if [ -z ${ethname} ]; then
+    echo "For mac address: ${xenstore_mac} from interface: ${1} from xenstore, could not match with any known network interface."
+    exit 1
+fi
 
 if [ ! -e "/sys/class/net/$ethname" ]; then
     echo "$ethname does not exist, strange (invoked for $1)"
