@@ -37,7 +37,9 @@ do_install () {
 	# "make install" misses the debug file for the library
 	oe_libinstall -so -C lib libpci ${D}/${libdir}
 
+	install -d -m 0755 ${datadir}
 	install -m 0644 ${WORKDIR}/pci.ids.gz.20141108 ${D}/${datadir}/pci.ids.gz
+	gunzip ${D}/${datadir}/pci.ids.gz
 }
 
 #do_stage () {
@@ -52,4 +54,4 @@ do_install () {
 
 
 PACKAGES =+ "${PN}-ids"
-FILES_${PN}-ids = "${datadir}/pci.ids.gz"
+FILES_${PN}-ids = "${datadir}/pci.ids"
