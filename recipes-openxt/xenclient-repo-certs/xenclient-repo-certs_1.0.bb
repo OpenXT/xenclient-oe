@@ -12,14 +12,13 @@ FILES_${PN} = "${datadir}/xenclient/repo-certs \
 inherit xenclient
 
 do_install() {
-    install -d ${D}${datadir}/xenclient/repo-certs/prod
+    CERTDIR_PROD=${D}${datadir}/xenclient/repo-certs/prod
+    CERTDIR_DEV=${D}${datadir}/xenclient/repo-certs/dev
+    install -d ${CERTDIR_PROD}
+    install -d ${CERTDIR_DEV}
 
-    for i in prod dev ; do
-        CERTDIR=${D}${datadir}/xenclient/repo-certs/$i
-
-        install -d ${CERTDIR}
-        install -m 0644 ${WORKDIR}/$i-cacert.pem ${CERTDIR}/cert.pem
-    done
+    install -m 0644 ${WORKDIR}/$(basename ${REPO_PROD_CACERT}) ${CERTDIR_PROD}/cert.pem
+    install -m 0644 ${WORKDIR}/$(basename ${REPO_DEV_CACERT}) ${CERTDIR_DEV}/cert.pem
 
     install -d ${D}${bindir}
     install -m 0755 ${WORKDIR}/verify-repo-metadata ${D}${bindir}/
