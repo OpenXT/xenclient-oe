@@ -68,9 +68,6 @@ if [ ! -s ${PS_FILE} ]; then
     install -m 600 -o ${TSS_USER} -g ${TSS_USER} ${PS_FILE_SRC} ${PS_FILE}
 fi
 
-# update the uid/gids for the upgrade case (new passwd and group files are shipped)
-chown -R ${TSS_USER}:${TSS_USER} ${PS_DIR}
-
 # Make /var/log/wtmp volatile.
 if [ ! -L /var/log/wtmp ] ; then
     rm -f /var/log/wtmp
