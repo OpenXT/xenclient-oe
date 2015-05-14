@@ -1,3 +1,63 @@
+################################################################################
+SHORT DESCRIPTION: 
+################################################################################
+Add machine option "max-ram-below-4g" to configure the RAM limit below 32b
+address boundary.
+
+################################################################################
+LONG DESCRIPTION: 
+################################################################################
+QEMU configures the guest memory layout using assumptions that will not always
+match what hvmloader sets up later, leaving the guest with an e820 not matching
+either the i440fx emulation or Xen configuration.
+
+By default, QEMU Xen memory listener will assume RAM below 4G cannot grow past
+0xf0000000, leaving a 256MB region for reserved IO regions. The memory layout
+is then set up based on this assumption. If the guest is 64bits capable and has
+more than 3840MB memory, another memory region will be created above the 4G
+limit to account for it. Also, the main memory region ("xen.ram") size will be
+processed based on that.
+The i440fx emulation, however, assumes RAM below 4G cannot grow past
+0xe0000000, leaving a 512MB region for reserved IO regions.
+Hvmloader will then process the size of the PCI hole the guest would require to
+be able to manage all its PCI devices resources and modify the e820
+accordingly, depending on what PCI devices it finds.
+
+This patch does 2 things:
+- When using Xen support, have i440fx and the Xen memory listener use the same
+  below 4G RAM boundary.
+- Add a machine option to change that limit so the PCI hole can be bigger to
+  accomodate more PCI resources (e.g, GPU pass-through)
+
+Hvmloader will still try to process the size of the PCI hole to map every PCI
+resource (max RAM below 4G will be 0x{f,e,c,8}0000000). Therefor,
+max-ram-below-4g should predict that.
+
+################################################################################
+CHANGELOG 
+################################################################################
+Intial Commit: Eric Chanudet, chanudete@ainfosec.com, 14/05/2015
+
+################################################################################
+REMOVAL 
+################################################################################
+The same option has been introduced since QEMU 2.2 upstream.
+
+################################################################################
+UPSTREAM PLAN 
+################################################################################
+There is no plan to upstream this patch, it is an OpenXT workaround for QEMU<2.2
+
+################################################################################
+INTERNAL DEPENDENCIES 
+################################################################################
+The toolstack will process the value for max-ram-below-4g.
+dm-agent will read the value processed by the toolstack and pass it on QEMU
+command line.
+
+################################################################################
+PATCHES 
+################################################################################
 --- a/hw/pc.h
 +++ b/hw/pc.h
 @@ -129,6 +129,7 @@ extern int no_hpet;
