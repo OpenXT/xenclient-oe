@@ -101,4 +101,4 @@ do_install(){
     DESTDIR=${D} oe_runmake STRIP='' install
 }
 
-INC_PR = "r10"
+INC_PR = "r11"
