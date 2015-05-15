@@ -59,6 +59,13 @@ SRC_URI = "${XEN_SRC_URI};name=source \
     file://dom0_auto_mem.patch;patch=1 \
     file://rombios-faster.patch;patch=1 \
     file://include-seabios.patch;patch=1 \
+    file://XSA-59_chipset_updates.patch;patch=1 \
+    file://XSA-104_fix_race_condition_with_dirty_vram_state.patch;patch=1 \
+    file://XSA-105_priv_check_in_x86_HLT_LGDT_LIDT_LMSW.patch;patch=1 \
+    file://XSA-106_privilege_check_in_x86_sw_int.patch;patch=1 \
+    file://XSA-108_properly_bound_x2APIC_MSR_range.patch;patch=1 \
+    file://xsa109.patch;patch=1 \
+    file://xsa110-4.3-and-4.2.patch;patch=1 \
     file://xc-xt-hvm-get-time.patch;patch=1 \
     file://hvm-rtc-refresh-time.patch;patch=1 \
     file://fix-race-between-udev-and-tapctl.patch;patch=1 \
