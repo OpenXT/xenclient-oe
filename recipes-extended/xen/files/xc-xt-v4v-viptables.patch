@@ -1,17 +1,16 @@
-diff --git a/xen/common/v4v.c b/xen/common/v4v.c
-index ae6a2b0..b673872 100644
---- a/xen/common/v4v.c
-+++ b/xen/common/v4v.c
-@@ -286,7 +286,7 @@ v4v_memcpy_to_guest_ring (struct v4v_ring_info *ring_info, uint32_t offset,
-   return 0;
- }
+Index: xen-4.3.4/xen/common/v4v.c
+===================================================================
+--- xen-4.3.4.orig/xen/common/v4v.c	2015-05-15 13:41:30.706006653 -0400
++++ xen-4.3.4/xen/common/v4v.c	2015-05-15 13:42:54.038479478 -0400
+@@ -70,6 +70,7 @@
+ /* guest ring_data and the pending list. To take L3 you must */
+ /* already have R(L2). W(L2) implies L3 */
  
--
 +struct list_head viprules = LIST_HEAD_INIT(viprules);
  
- /*called must have L3*/
- static int
-@@ -1327,6 +1327,216 @@ v4v_ring_add (struct domain *d, XEN_GUEST_HANDLE (v4v_ring_t) ring_hnd,
+ /*Debugs*/
+ 
+@@ -1327,6 +1328,216 @@
    return ret;
  }
  
@@ -129,7 +128,7 @@ index ae6a2b0..b673872 100644
 +      list_for_each(tmp, &viprules)
 +        {
 +          node = list_entry(tmp, struct v4v_viptables_rule_node, list);
-+          
++
 +          if ((node->src.domain == r->src.domain) &&
 +              (node->src.port   == r->src.port)   &&
 +              (node->dst.domain == r->dst.domain) &&
@@ -228,47 +227,39 @@ index ae6a2b0..b673872 100644
  
  /**************************** io ***************************/
  
-@@ -1483,6 +1693,15 @@ v4v_send (struct domain *src_d, v4v_addr_t * src_addr,
-              src_addr->domain, dst_addr->domain);
-       return -ECONNREFUSED;
+@@ -1483,6 +1694,15 @@
+       ret = -ECONNREFUSED;
+       goto out;
      }
 +  /* VIPTables*/
 +  if (v4v_viptables_check(src_addr, dst_addr) != 0)
 +    {
-+      read_unlock (&v4v_lock);
 +      printk(KERN_ERR "V4V: VIPTables REJECTED %i:%u -> %i:%u\n",
 +             src_addr->domain, src_addr->port,
 +             dst_addr->domain, dst_addr->port);
-+      return -ECONNREFUSED;
++      ret = -ECONNREFUSED;
++      goto out;
 +    }
  
    do
      {
-@@ -1584,6 +1803,15 @@ v4v_sendv (struct domain *src_d, v4v_addr_t * src_addr,
-              src_addr->domain, dst_addr->domain);
-       return -ECONNREFUSED;
+@@ -1585,6 +1805,15 @@
+       ret = -ECONNREFUSED;
+       goto out;
      }
 +  /* VIPTables*/
 +  if (v4v_viptables_check(src_addr, dst_addr) != 0)
 +    {
-+      read_unlock (&v4v_lock);
 +      printk(KERN_ERR "V4V: VIPTables REJECTED %i:%u -> %i:%u\n",
 +             src_addr->domain, src_addr->port,
 +             dst_addr->domain, dst_addr->port);
-+      return -ECONNREFUSED;
++      ret = -ECONNREFUSED;
++      goto out;
 +    }
  
    do
      {
-@@ -1640,6 +1868,7 @@ v4v_sendv (struct domain *src_d, v4v_addr_t * src_addr,
-   return ret;
- }
- 
-+
- /**************** hypercall glue ************/
- long
- do_v4v_op (int cmd, XEN_GUEST_HANDLE (void) arg1,
-@@ -1740,11 +1969,43 @@ do_v4v_op (int cmd, XEN_GUEST_HANDLE (void) arg1,
+@@ -1742,6 +1971,38 @@
          rc = v4v_notify (d, ring_data_hnd);
          break;
        }
@@ -281,7 +272,7 @@ index ae6a2b0..b673872 100644
 +        if (!d->is_privileged)
 +            goto out;
 +        rc = v4v_viptables_add (d, rule_hnd, position);
-+        break;        
++        break;
 +      }
 +    case V4VOP_viptables_del:
 +      {
@@ -292,7 +283,7 @@ index ae6a2b0..b673872 100644
 +        if (!d->is_privileged)
 +            goto out;
 +        rc = v4v_viptables_del (d, rule_hnd, position);
-+        break;        
++        break;
 +      }
 +    case V4VOP_viptables_list:
 +      {
@@ -307,17 +298,11 @@ index ae6a2b0..b673872 100644
      default:
        rc = -ENOSYS;
        break;
-     }
--out:
-+ out:
-   domain_unlock (d);
- #ifdef V4V_DEBUG
-   printk (KERN_ERR "<-do_v4v_op()=%d\n", (int) rc);
-diff --git a/xen/include/public/v4v.h b/xen/include/public/v4v.h
-index 6157c20..5ecc518 100644
---- a/xen/include/public/v4v.h
-+++ b/xen/include/public/v4v.h
-@@ -74,6 +74,25 @@ typedef struct v4v_addr
+Index: xen-4.3.4/xen/include/public/v4v.h
+===================================================================
+--- xen-4.3.4.orig/xen/include/public/v4v.h	2015-05-15 13:40:40.000000000 -0400
++++ xen-4.3.4/xen/include/public/v4v.h	2015-05-15 13:42:54.038479478 -0400
+@@ -74,6 +74,25 @@
  
  DEFINE_XEN_GUEST_HANDLE (v4v_addr_t);
  
@@ -343,7 +328,7 @@ index 6157c20..5ecc518 100644
  typedef struct v4v_ring_id
  {
      struct v4v_addr addr;
-@@ -230,6 +249,9 @@ struct v4v_ring_message_header
+@@ -230,6 +249,9 @@
  /* Identical to V4VOP_send except rather than buf and len it takes 
   * an array of v4v_iov_t and a length of the array */
  
@@ -353,15 +338,14 @@ index 6157c20..5ecc518 100644
  
  #if !defined(__GNUC__)
  #pragma warning(pop)
-diff --git a/xen/include/xen/v4v.h b/xen/include/xen/v4v.h
-index 8358c36..3baa827 100644
---- a/xen/include/xen/v4v.h
-+++ b/xen/include/xen/v4v.h
-@@ -35,7 +35,13 @@ struct v4v_pending_ent
-   uint32_t len;
+Index: xen-4.3.4/xen/include/xen/v4v.h
+===================================================================
+--- xen-4.3.4.orig/xen/include/xen/v4v.h	2015-05-15 13:40:40.000000000 -0400
++++ xen-4.3.4/xen/include/xen/v4v.h	2015-05-15 13:42:54.042476105 -0400
+@@ -36,6 +36,13 @@
  };
  
--
+ 
 +struct v4v_viptables_rule_node
 +{
 +    struct list_head list;
