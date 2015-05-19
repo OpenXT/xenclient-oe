@@ -1,0 +1,345 @@
+diff -urN linux-3.11.10.4/drivers/block/xen-blkback/blkback.c linux-3.18.13/drivers/block/xen-blkback/blkback.c
+--- linux-3.11.10.4/drivers/block/xen-blkback/blkback.c	2014-02-12 06:24:47.000000000 -0500
++++ linux-3.18.13/drivers/block/xen-blkback/blkback.c	2015-05-05 12:39:05.000000000 -0400
+@@ -299,7 +299,7 @@
+ 	BUG_ON(num != 0);
+ }
+ 
+-static void unmap_purged_grants(struct work_struct *work)
++void xen_blkbk_unmap_purged_grants(struct work_struct *work)
+ {
+ 	struct gnttab_unmap_grant_ref unmap[BLKIF_MAX_SEGMENTS_PER_REQUEST];
+ 	struct page *pages[BLKIF_MAX_SEGMENTS_PER_REQUEST];
+@@ -375,7 +375,7 @@
+ 
+ 	pr_debug(DRV_PFX "Going to purge %u persistent grants\n", num_clean);
+ 
+-	INIT_LIST_HEAD(&blkif->persistent_purge_list);
++	BUG_ON(!list_empty(&blkif->persistent_purge_list));
+ 	root = &blkif->persistent_gnts;
+ purge_list:
+ 	foreach_grant_safe(persistent_gnt, n, root, node) {
+@@ -420,7 +420,6 @@
+ 	blkif->vbd.overflow_max_grants = 0;
+ 
+ 	/* We can defer this work */
+-	INIT_WORK(&blkif->persistent_purge_work, unmap_purged_grants);
+ 	schedule_work(&blkif->persistent_purge_work);
+ 	pr_debug(DRV_PFX "Purged %u/%u\n", (total - num_clean), total);
+ 	return;
+@@ -625,9 +624,23 @@
+ 			print_stats(blkif);
+ 	}
+ 
+-	/* Since we are shutting down remove all pages from the buffer */
+-	shrink_free_pagepool(blkif, 0 /* All */);
++	/* Drain pending purge work */
++	flush_work(&blkif->persistent_purge_work);
+ 
++	if (log_stats)
++		print_stats(blkif);
++
++	blkif->xenblkd = NULL;
++	xen_blkif_put(blkif);
++
++	return 0;
++}
++
++/*
++ * Remove persistent grants and empty the pool of free pages
++ */
++void xen_blkbk_free_caches(struct xen_blkif *blkif)
++{
+ 	/* Free all persistent grant pages */
+ 	if (!RB_EMPTY_ROOT(&blkif->persistent_gnts))
+ 		free_persistent_gnts(blkif, &blkif->persistent_gnts,
+@@ -636,13 +649,8 @@
+ 	BUG_ON(!RB_EMPTY_ROOT(&blkif->persistent_gnts));
+ 	blkif->persistent_gnt_c = 0;
+ 
+-	if (log_stats)
+-		print_stats(blkif);
+-
+-	blkif->xenblkd = NULL;
+-	xen_blkif_put(blkif);
+-
+-	return 0;
++	/* Since we are shutting down remove all pages from the buffer */
++	shrink_free_pagepool(blkif, 0 /* All */);
+ }
+ 
+ /*
+@@ -755,6 +763,7 @@
+ 			BUG_ON(new_map_idx >= segs_to_map);
+ 			if (unlikely(map[new_map_idx].status != 0)) {
+ 				pr_debug(DRV_PFX "invalid buffer -- could not remap it\n");
++				put_free_pages(blkif, &pages[seg_idx]->page, 1);
+ 				pages[seg_idx]->handle = BLKBACK_INVALID_HANDLE;
+ 				ret |= 1;
+ 				goto next;
+@@ -934,9 +943,7 @@
+ {
+ 	atomic_set(&blkif->drain, 1);
+ 	do {
+-		/* The initial value is one, and one refcnt taken at the
+-		 * start of the xen_blkif_schedule thread. */
+-		if (atomic_read(&blkif->refcnt) <= 2)
++		if (atomic_read(&blkif->inflight) == 0)
+ 			break;
+ 		wait_for_completion_interruptible_timeout(
+ 				&blkif->drain_complete, HZ);
+@@ -976,17 +983,30 @@
+ 	 * the proper response on the ring.
+ 	 */
+ 	if (atomic_dec_and_test(&pending_req->pendcnt)) {
+-		xen_blkbk_unmap(pending_req->blkif,
++		struct xen_blkif *blkif = pending_req->blkif;
++
++		xen_blkbk_unmap(blkif,
+ 		                pending_req->segments,
+ 		                pending_req->nr_pages);
+-		make_response(pending_req->blkif, pending_req->id,
++		make_response(blkif, pending_req->id,
+ 			      pending_req->operation, pending_req->status);
+-		xen_blkif_put(pending_req->blkif);
+-		if (atomic_read(&pending_req->blkif->refcnt) <= 2) {
+-			if (atomic_read(&pending_req->blkif->drain))
+-				complete(&pending_req->blkif->drain_complete);
++		free_req(blkif, pending_req);
++		/*
++		 * Make sure the request is freed before releasing blkif,
++		 * or there could be a race between free_req and the
++		 * cleanup done in xen_blkif_free during shutdown.
++		 *
++		 * NB: The fact that we might try to wake up pending_free_wq
++		 * before drain_complete (in case there's a drain going on)
++		 * it's not a problem with our current implementation
++		 * because we can assure there's no thread waiting on
++		 * pending_free_wq if there's a drain going on, but it has
++		 * to be taken into account if the current model is changed.
++		 */
++		if (atomic_dec_and_test(&blkif->inflight) && atomic_read(&blkif->drain)) {
++			complete(&blkif->drain_complete);
+ 		}
+-		free_req(pending_req->blkif, pending_req);
++		xen_blkif_put(blkif);
+ 	}
+ }
+ 
+@@ -1240,6 +1260,7 @@
+ 	 * below (in "!bio") if we are handling a BLKIF_OP_DISCARD.
+ 	 */
+ 	xen_blkif_get(blkif);
++	atomic_inc(&blkif->inflight);
+ 
+ 	for (i = 0; i < nseg; i++) {
+ 		while ((bio == NULL) ||
+diff -urN linux-3.11.10.4/drivers/block/xen-blkback/common.h linux-3.18.13/drivers/block/xen-blkback/common.h
+--- linux-3.11.10.4/drivers/block/xen-blkback/common.h	2014-02-12 06:24:47.000000000 -0500
++++ linux-3.18.13/drivers/block/xen-blkback/common.h	2015-05-05 12:39:05.000000000 -0400
+@@ -278,6 +278,7 @@
+ 	/* for barrier (drain) requests */
+ 	struct completion	drain_complete;
+ 	atomic_t		drain;
++	atomic_t		inflight;
+ 	/* One thread per one blkif. */
+ 	struct task_struct	*xenblkd;
+ 	unsigned int		waiting_reqs;
+@@ -313,7 +314,7 @@
+ 	unsigned long long			st_rd_sect;
+ 	unsigned long long			st_wr_sect;
+ 
+-	wait_queue_head_t	waiting_to_free;
++	struct work_struct	free_work;
+ 	/* Thread shutdown wait queue. */
+ 	wait_queue_head_t	shutdown_wq;
+ };
+@@ -360,7 +361,7 @@
+ #define xen_blkif_put(_b)				\
+ 	do {						\
+ 		if (atomic_dec_and_test(&(_b)->refcnt))	\
+-			wake_up(&(_b)->waiting_to_free);\
++			schedule_work(&(_b)->free_work);\
+ 	} while (0)
+ 
+ struct phys_req {
+@@ -376,6 +377,7 @@
+ irqreturn_t xen_blkif_be_int(int irq, void *dev_id);
+ int xen_blkif_schedule(void *arg);
+ int xen_blkif_purge_persistent(void *arg);
++void xen_blkbk_free_caches(struct xen_blkif *blkif);
+ 
+ int xen_blkbk_flush_diskcache(struct xenbus_transaction xbt,
+ 			      struct backend_info *be, int state);
+@@ -383,6 +385,7 @@
+ int xen_blkbk_barrier(struct xenbus_transaction xbt,
+ 		      struct backend_info *be, int state);
+ struct xenbus_device *xen_blkbk_xenbus(struct backend_info *be);
++void xen_blkbk_unmap_purged_grants(struct work_struct *work);
+ 
+ static inline void blkif_get_x86_32_req(struct blkif_request *dst,
+ 					struct blkif_x86_32_request *src)
+diff -urN linux-3.11.10.4/drivers/block/xen-blkback/xenbus.c linux-3.18.13/drivers/block/xen-blkback/xenbus.c
+--- linux-3.11.10.4/drivers/block/xen-blkback/xenbus.c	2014-02-12 06:24:47.000000000 -0500
++++ linux-3.18.13/drivers/block/xen-blkback/xenbus.c	2015-05-05 12:39:05.000000000 -0400
+@@ -35,12 +35,26 @@
+ static int connect_ring(struct backend_info *);
+ static void backend_changed(struct xenbus_watch *, const char **,
+ 			    unsigned int);
++static void xen_blkif_free(struct xen_blkif *blkif);
++static void xen_vbd_free(struct xen_vbd *vbd);
+ 
+ struct xenbus_device *xen_blkbk_xenbus(struct backend_info *be)
+ {
+ 	return be->dev;
+ }
+ 
++/*
++ * The last request could free the device from softirq context and
++ * xen_blkif_free() can sleep.
++ */
++static void xen_blkif_deferred_free(struct work_struct *work)
++{
++	struct xen_blkif *blkif;
++
++	blkif = container_of(work, struct xen_blkif, free_work);
++	xen_blkif_free(blkif);
++}
++
+ static int blkback_name(struct xen_blkif *blkif, char *buf)
+ {
+ 	char *devpath, *devname;
+@@ -121,14 +135,17 @@
+ 	init_completion(&blkif->drain_complete);
+ 	atomic_set(&blkif->drain, 0);
+ 	blkif->st_print = jiffies;
+-	init_waitqueue_head(&blkif->waiting_to_free);
+ 	blkif->persistent_gnts.rb_node = NULL;
+ 	spin_lock_init(&blkif->free_pages_lock);
+ 	INIT_LIST_HEAD(&blkif->free_pages);
++	INIT_LIST_HEAD(&blkif->persistent_purge_list);
+ 	blkif->free_pages_num = 0;
+ 	atomic_set(&blkif->persistent_gnt_in_use, 0);
++	atomic_set(&blkif->inflight, 0);
++	INIT_WORK(&blkif->persistent_purge_work, xen_blkbk_unmap_purged_grants);
+ 
+ 	INIT_LIST_HEAD(&blkif->pending_free);
++	INIT_WORK(&blkif->free_work, xen_blkif_deferred_free);
+ 
+ 	for (i = 0; i < XEN_BLKIF_REQS; i++) {
+ 		req = kzalloc(sizeof(*req), GFP_KERNEL);
+@@ -228,7 +245,7 @@
+ 	return 0;
+ }
+ 
+-static void xen_blkif_disconnect(struct xen_blkif *blkif)
++static int xen_blkif_disconnect(struct xen_blkif *blkif)
+ {
+ 	if (blkif->xenblkd) {
+ 		kthread_stop(blkif->xenblkd);
+@@ -236,9 +253,12 @@
+ 		blkif->xenblkd = NULL;
+ 	}
+ 
+-	atomic_dec(&blkif->refcnt);
+-	wait_event(blkif->waiting_to_free, atomic_read(&blkif->refcnt) == 0);
+-	atomic_inc(&blkif->refcnt);
++	/* The above kthread_stop() guarantees that at this point we
++	 * don't have any discard_io or other_io requests. So, checking
++	 * for inflight IO is enough.
++	 */
++	if (atomic_read(&blkif->inflight) > 0)
++		return -EBUSY;
+ 
+ 	if (blkif->irq) {
+ 		unbind_from_irqhandler(blkif->irq, blkif);
+@@ -249,6 +269,11 @@
+ 		xenbus_unmap_ring_vfree(blkif->be->dev, blkif->blk_ring);
+ 		blkif->blk_rings.common.sring = NULL;
+ 	}
++
++	/* Remove all persistent grants and the cache of ballooned pages. */
++	xen_blkbk_free_caches(blkif);
++
++	return 0;
+ }
+ 
+ static void xen_blkif_free(struct xen_blkif *blkif)
+@@ -256,8 +281,16 @@
+ 	struct pending_req *req, *n;
+ 	int i = 0, j;
+ 
+-	if (!atomic_dec_and_test(&blkif->refcnt))
+-		BUG();
++	xen_blkif_disconnect(blkif);
++	xen_vbd_free(&blkif->vbd);
++
++	/* Make sure everything is drained before shutting down */
++	BUG_ON(blkif->persistent_gnt_c != 0);
++	BUG_ON(atomic_read(&blkif->persistent_gnt_in_use) != 0);
++	BUG_ON(blkif->free_pages_num != 0);
++	BUG_ON(!list_empty(&blkif->persistent_purge_list));
++	BUG_ON(!list_empty(&blkif->free_pages));
++	BUG_ON(!RB_EMPTY_ROOT(&blkif->persistent_gnts));
+ 
+ 	/* Check that there is no request in use */
+ 	list_for_each_entry_safe(req, n, &blkif->pending_free, free_list) {
+@@ -435,16 +468,15 @@
+ 		be->backend_watch.node = NULL;
+ 	}
+ 
++	dev_set_drvdata(&dev->dev, NULL);
++
+ 	if (be->blkif) {
+ 		xen_blkif_disconnect(be->blkif);
+-		xen_vbd_free(&be->blkif->vbd);
+-		xen_blkif_free(be->blkif);
+-		be->blkif = NULL;
++		xen_blkif_put(be->blkif);
+ 	}
+ 
+ 	kfree(be->mode);
+ 	kfree(be);
+-	dev_set_drvdata(&dev->dev, NULL);
+ 	return 0;
+ }
+ 
+@@ -467,10 +499,15 @@
+ 	struct xenbus_device *dev = be->dev;
+ 	struct xen_blkif *blkif = be->blkif;
+ 	int err;
+-	int state = 0;
++	int state = 0, discard_enable;
+ 	struct block_device *bdev = be->blkif->vbd.bdev;
+ 	struct request_queue *q = bdev_get_queue(bdev);
+ 
++	err = xenbus_scanf(XBT_NIL, dev->nodename, "discard-enable", "%d",
++			   &discard_enable);
++	if (err == 1 && !discard_enable)
++		return;
++
+ 	if (blk_queue_discard(q)) {
+ 		err = xenbus_printf(xbt, dev->nodename,
+ 			"discard-granularity", "%u",
+@@ -620,7 +657,7 @@
+ 	}
+ 
+ 	/* Front end dir is a number, which is used as the handle. */
+-	err = strict_strtoul(strrchr(dev->otherend, '/') + 1, 0, &handle);
++	err = kstrtoul(strrchr(dev->otherend, '/') + 1, 0, &handle);
+ 	if (err)
+ 		return;
+ 
+@@ -686,7 +723,11 @@
+ 		 * Enforce precondition before potential leak point.
+ 		 * xen_blkif_disconnect() is idempotent.
+ 		 */
+-		xen_blkif_disconnect(be->blkif);
++		err = xen_blkif_disconnect(be->blkif);
++		if (err) {
++			xenbus_dev_fatal(dev, err, "pending I/O");
++			break;
++		}
+ 
+ 		err = connect_ring(be);
+ 		if (err)
