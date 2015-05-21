@@ -13,9 +13,9 @@ Each emulated card is connected to a "QEMU vlan" (not 802.1q VLAN), actually an
 emulated hub (-net option behaviour), to which is also connected the tap
 interface of its backend.
 
-For each NIC created by QEMU, we add a XenStore watch on the node of the
-network back-end plugged in the same hub. This let us retrieve the back-end
-information using the nd_table (NICInfo).
+Each emulated NIC registers a Xenstore watch on its related backend
+"disconnect" node. The value of that node is then forwarded via QMP to any NIC
+emulation peered with this backend.
 
 ################################################################################
 CHANGELOG 
@@ -64,7 +64,7 @@ PATCHES
  
  #include <xen/grant_table.h>
  
-@@ -589,6 +590,188 @@ static int xenstore_scan(const char *typ
+@@ -589,6 +590,199 @@ static int xenstore_scan(const char *typ
      return 0;
  }
  
@@ -107,109 +107,124 @@ PATCHES
 +}
 +
 +/*
-+ * OpenXT: Get network backend type and ID from NIC information table.
++ * OpenXT: Fill base with the Xenstore path of the network backend for that NICInfo element.
 + *
-+ * @param ncs a valid NetClientState.
-+ * @param type is able to store at least XENSTORE_NET_TYPE_LEN bytes.
-+ * @param id is able to store at least XENSTORE_NET_ID_LEN bytes.
++ * @param ni a valid pointer to a NICInfo, likely an element of nd_table.
++ * @param base is able to store at least XEN_BUFSIZE bytes.
 + * @return 0 on success, -ERRNO else.
 + */
-+static int xenstore_net_client_state_fetch_backend_info(NetClientState *ncs, char *type, char *id)
++static int xenstore_get_nic_path(const NICInfo *ni, char *base)
++{
++    char *dompath;
++    char type[XENSTORE_NET_TYPE_LEN];
++    char id[XENSTORE_NET_ID_LEN];
++
++    assert(ni);
++    assert(base);
++
++    if (xenstore_nic_parse_name(ni->name, type, id)) {
++        fprintf(stderr, "failed to parse nic backend xenstore name `%s'.\n", ni->name);
++        return -EINVAL;
++    }
++    dompath = xs_get_domain_path(xenstore, xen_domid);
++    if (!dompath) {
++        fprintf(stderr, "Could not retrieve domain path.\n");
++        return -ENOENT;
++    }
++    snprintf(base, XEN_BUFSIZE, "%s/device/%s/%s", dompath, type, id);
++    free(dompath);
++
++    return 0;
++}
++
++/*
++ * OpenXT: Return the NICInfo entry of the backend peered with the given NetClientState.
++ *
++ * @param ncs a valid pointer to a NetClientState.
++ * @return a pointer to the corresponding NICInfo, NULL else.
++ */
++static /* const */ NICInfo *qemu_find_nicinfo(const NetClientState *ncs)
 +{
 +    size_t i;
 +
 +    assert(ncs);
-+    assert(type);
-+    assert(id);
++    assert(ncs->info);
++    assert(ncs->info->type == NET_CLIENT_OPTIONS_KIND_NIC);
 +
 +    for (i = 0; i < MAX_NICS; ++i) {
-+        /* We assume there is only one NIC per hub. So, if a NIC is on our
-+         * hub, it is our back-end. Also make sure name is still valid (reset at
-+         * guest shutdown apparently).*/
-+        if (nd_table[i].netdev == ncs->peer && nd_table[i].name) {
-+            return xenstore_nic_parse_name(nd_table[i].name, type, id);
++        if (nd_table[i].used && nd_table[i].name &&
++            nd_table[i].netdev == ncs->peer) {
++            return &nd_table[i];
 +        }
 +    }
-+    return -ENODEV;
++    return NULL;
 +}
 +
-+/* OpenXT: Read the appropriate Base Register and check if we have to change
-+ * the device status.
++/*
++ * OpenXT: Read Xenstore for link-state change to be forwarded to the NetClients of this netdev.
 + *
-+ * @param opaque a valid pointer to a NetClientState object.
++ * @param opaque a valid pointer to a NICInfo object.
 + */
 +static void xenstore_update_nic(void *opaque)
 +{
-+    NetClientState *nc = opaque;
-+    char *dompath;
-+    char type[XENSTORE_NET_TYPE_LEN];
-+    char id[XENSTORE_NET_ID_LEN];
++    const NICInfo *ni = opaque;
 +    char base[XEN_BUFSIZE];
 +    int val;
 +
 +    assert(opaque);
++    assert(ni->used);
++    assert(ni->netdev);
++    assert(ni->netdev->peer);
 +
-+    if (xenstore_net_client_state_fetch_backend_info(nc, type, id)) {
-+        fprintf(stderr, "Failed to find a network back-end for `%s'.\n", nc->name);
++    if (xenstore_get_nic_path(ni, base)) {
++        fprintf(stderr, "Could not find xenstore path for dom%d NIC `%s'.\n", xen_domid, ni->name);
 +        return;
 +    }
-+
-+    dompath = xs_get_domain_path(xenstore, xen_domid);
-+    if (!dompath) {
-+        fprintf(stderr, "Could not retrieve domain path.\n");
-+        return;
-+    }
-+    snprintf(base, sizeof (base), "%s/device/%s/%s", dompath, type, id);
-+    free(dompath);
-+
 +    if (xenstore_read_int(base, "disconnect", &val)) {
-+        fprintf(stderr, "Failed to read xenstore path (%s/%s).\n", base, "disconnect");
++        fprintf(stderr, "failed to read xenstore path (%s/%s).\n", base, "disconnect");
 +        return;
 +    }
 +
-+    /* The value is actually a boolean. */
-+    if (nc->link_down != !!val) {
-+        fprintf(stderr, "%s (%s%s): link status is now %s.\n", nc->name, type, id, !!val ? "down" : "up");
-+        /* Notify the emulation through QMP.
-+         * Note that qmp_set_link boolean is "link-up?", not nc->link_down "link-down?". */
-+        qmp_set_link(nc->name, !val, NULL);
++    NetClientState *ncs = ni->netdev->peer;
++    if (ncs->link_down != !!val) {
++        /* notify the emulation through qmp.
++         * note that qmp_set_link boolean is "link-up?",
++         * not nc->link_down "link-down?". */
++        qmp_set_link(ncs->name, !val, NULL);
++        fprintf(stderr, "%s (%s): link status is now %s.\n",
++                ncs->name, ni->name, !!val ? "down" : "up");
 +    }
 +}
 +
 +/*
 + * OpenXT: Register a Net Client in Xenstore.
 + *
-+ * @param nc a valid pointer to a NetClientState object.
-+ * @return 0 on success, -1 else.
-+ * */
-+int xenstore_register_nic(NetClientState *nc)
++ * @param ncs a valid pointer to a NetClientState object.
++ * @return 0 on success, -ERRNO else.
++ */
++int xenstore_register_nic(NetClientState *ncs)
 +{
-+    char *dompath;
-+    char type[XENSTORE_NET_TYPE_LEN];
-+    char id[XENSTORE_NET_ID_LEN];
 +    char base[XEN_BUFSIZE];
++    /* const */ NICInfo *ni;
 +
-+    assert(nc);
++    assert(ncs);
++    assert(ncs->info);
++    assert(ncs->info->type == NET_CLIENT_OPTIONS_KIND_NIC);
 +
-+    if (xenstore_net_client_state_fetch_backend_info(nc, type, id)) {
-+        fprintf(stderr, "Failed to find a network back-end for `%s'.\n", nc->name);
-+        return -1;
++    ni = qemu_find_nicinfo(ncs);
++    if (!ni) {
++        fprintf(stderr, "Failed to find backend device for emulated NIC `%s'.\n", ncs->name);
++        return -ENODEV;
 +    }
-+
-+    dompath = xs_get_domain_path(xenstore, xen_domid);
-+    if (!dompath) {
-+        fprintf(stderr, "Could not retrieve domain path.\n");
-+        return -1;
++    if (xenstore_get_nic_path(ni, base)) {
++        fprintf(stderr, "Could not find xenstore path for dom%d NIC `%s'.\n", xen_domid, ni->name);
++        return -ENOENT;
 +    }
-+    snprintf(base, sizeof (base), "%s/device/%s/%s", dompath, type, id);
-+    free(dompath);
-+
-+    if (xenstore_add_watch(base, "disconnect", xenstore_update_nic, nc)) {
++    if (xenstore_add_watch(base, "disconnect", xenstore_update_nic, ni)) {
 +        fprintf(stderr, "Could not install xenstore watch on path `%s/disconnect'.\n", base);
 +        return -1;
 +    }
-+
-+    xenstore_update_nic(nc);
++    xenstore_update_nic(ni);
 +
 +    return 0;
 +}
@@ -218,33 +233,29 @@ PATCHES
 + * OpenXT: Unregister a Net Client in Xenstore.
 + * Called when a device is removed and no longer used.
 + *
-+ * @param nc a valid pointer to a NetClientState object.
-+ * @return 0 on success, -1 else.
++ * @param ncs a valid pointer to a NetClientState object.
++ * @return 0 on success, -ERRNO else.
 + */
-+int xenstore_unregister_nic(NetClientState *nc)
++int xenstore_unregister_nic(NetClientState *ncs)
 +{
-+    char *dompath;
-+    char type[XENSTORE_NET_TYPE_LEN];
-+    char id[XENSTORE_NET_ID_LEN];
 +    char base[XEN_BUFSIZE];
++    /* const */ NICInfo *ni;
 +
-+    assert(nc);
++    assert(ncs);
++    assert(ncs->info);
++    assert(ncs->info->type == NET_CLIENT_OPTIONS_KIND_NIC);
 +
-+    if (xenstore_net_client_state_fetch_backend_info(nc, type, id)) {
-+        fprintf(stderr, "Failed to find a network back-end for `%s'.\n", nc->name);
-+        return -1;
++    ni = qemu_find_nicinfo(ncs);
++    if (!ni) {
++        fprintf(stderr, "Failed to find backend device for emulated NIC `%s'.\n", ncs->name);
++        return -ENODEV;
 +    }
-+
-+    dompath = xs_get_domain_path(xenstore, xen_domid);
-+    if (!dompath) {
-+        fprintf(stderr, "Could not retrieve domain path.\n");
-+        return -1;
++    if (xenstore_get_nic_path(ni, base)) {
++        fprintf(stderr, "Could not find xenstore path for dom%d NIC `%s'.\n", xen_domid, ni->name);
++        return -ENOENT;
 +    }
-+    snprintf(base, sizeof (base), "%s/device/%s/%s", dompath, type, id);
-+    free(dompath);
-+
-+    if (xenstore_remove_watch(base, "disconnect", xenstore_update_nic, id)) {
-+        fprintf(stderr, "Could not remove xenstore watch on path `%s/disconnect'.\n", base);
++    if (xenstore_remove_watch(base, "disconnect", xenstore_update_nic, ni)) {
++        fprintf(stderr, "Could not install xenstore watch on path `%s/disconnect'.\n", base);
 +        return -1;
 +    }
 +    return 0;
