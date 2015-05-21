@@ -13,9 +13,9 @@ Each emulated card is connected to a "QEMU vlan" (not 802.1q VLAN), actually an
 emulated hub (-net option behaviour), to which is also connected the tap
 interface of its backend.
 
-Each emulated NIC registers a Xenstore watch on its related backend
-"disconnect" node. The value of that node is then forwarded via QMP to any NIC
-emulation peered with this backend.
+For each NIC created by QEMU, we add a XenStore watch on the node of the
+network back-end plugged in the same hub. This let us retrieve the back-end
+information using the nd_table (NICInfo).
 
 ################################################################################
 CHANGELOG 
@@ -42,9 +42,11 @@ None
 ################################################################################
 PATCHES 
 ################################################################################
---- a/hw/xen.h
-+++ b/hw/xen.h
-@@ -38,6 +38,9 @@ void xen_piix_pci_write_config_client(ui
+Index: qemu-1.4.0/hw/xen.h
+===================================================================
+--- qemu-1.4.0.orig/hw/xen.h	2015-05-21 17:26:59.110257000 +0200
++++ qemu-1.4.0/hw/xen.h	2015-05-21 17:39:19.154257001 +0200
+@@ -38,6 +38,9 @@
  void xen_hvm_inject_msi(uint64_t addr, uint32_t data);
  void xen_cmos_set_s3_resume(void *opaque, int irq, int level);
  
@@ -54,8 +56,10 @@ PATCHES
  qemu_irq *xen_interrupt_controller_init(void);
  
  int xen_init(void);
---- a/hw/xen_backend.c
-+++ b/hw/xen_backend.c
+Index: qemu-1.4.0/hw/xen_backend.c
+===================================================================
+--- qemu-1.4.0.orig/hw/xen_backend.c	2015-05-21 17:26:59.018257000 +0200
++++ qemu-1.4.0/hw/xen_backend.c	2015-05-21 17:39:12.622257000 +0200
 @@ -38,6 +38,7 @@
  #include "char/char.h"
  #include "qemu/log.h"
@@ -64,7 +68,7 @@ PATCHES
  
  #include <xen/grant_table.h>
  
-@@ -589,6 +590,199 @@ static int xenstore_scan(const char *typ
+@@ -589,6 +590,199 @@
      return 0;
  }
  
@@ -264,8 +268,10 @@ PATCHES
  static void xenstore_update_be(char *watch, char *type, int dom,
                                 struct XenDevOps *ops)
  {
---- a/net/net.c
-+++ b/net/net.c
+Index: qemu-1.4.0/net/net.c
+===================================================================
+--- qemu-1.4.0.orig/net/net.c	2013-02-16 00:05:35.000000000 +0100
++++ qemu-1.4.0/net/net.c	2015-05-21 17:26:59.238257000 +0200
 @@ -40,6 +40,9 @@
  #include "qapi/opts-visitor.h"
  #include "qapi/dealloc-visitor.h"
@@ -276,7 +282,7 @@ PATCHES
  /* Net bridge is currently not supported for W32. */
  #if !defined(_WIN32)
  # define CONFIG_NET_BRIDGE
-@@ -256,6 +259,12 @@ NICState *qemu_new_nic(NetClientInfo *in
+@@ -256,6 +259,12 @@
          nic->ncs[i].queue_index = i;
      }
  
@@ -289,7 +295,7 @@ PATCHES
      return nic;
  }
  
-@@ -364,6 +373,10 @@ void qemu_del_nic(NICState *nic)
+@@ -364,6 +373,10 @@
  
      for (i = queues - 1; i >= 0; i--) {
          NetClientState *nc = qemu_get_subqueue(nic, i);
