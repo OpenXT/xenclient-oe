@@ -9,3 +9,6 @@ export DISTRIBUTION_ECJ_PATCHES += " \
     patches/icedtea-ecj-fix-compil-gcc-4.7.patch \
     patches/icedtea-ecj-fix-currency-data.patch \
 "
+
+#Allow icedtea to build on 4.0+ host kernels.
+export DISABLE_HOTSPOT_OS_VERSION_CHECK = "1"
