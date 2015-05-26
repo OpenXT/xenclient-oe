@@ -41,6 +41,8 @@ SRC_URI += "file://0001-compile-time-stubdom-flag.patch \
             file://0027-nic-link-state-propagation.patch;striplevel=1 \
             file://0029-stubdom-read-gsi-from-device-config-space.patch;striplevel=1 \
             file://0030-xenfv-i440fx-max-ram-below-4g.patch;striplevel=1 \
+            file://0031-bp-rt8139-net-queue-flush-fix-00b7ade807b5ce6779ddd86ce29c5521ec5c529a.patch;striplevel=1 \
+            file://0032-bp-hub-net-queue-flush-fix-199ee608f0d08510b5c6c37f31a7fbff211d63c4.patch;striplevel=1 \
             "
 
 SRC_URI[md5sum] = "78f13b774814b6b7ebcaf4f9b9204318"
@@ -101,4 +103,4 @@ do_install(){
     DESTDIR=${D} oe_runmake STRIP='' install
 }
 
-INC_PR = "r11"
+INC_PR = "r12"
