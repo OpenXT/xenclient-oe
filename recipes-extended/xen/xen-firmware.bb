@@ -3,6 +3,7 @@ require xen.inc
 SRC_URI += "file://config.patch \
 	    file://disable-xen-root-check.patch \
 	    file://disable-etherboot.patch \
+	    file://acpi-pm-feature.patch \
 "
 
 DEPENDS += "\
