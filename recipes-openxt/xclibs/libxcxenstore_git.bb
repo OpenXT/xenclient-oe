@@ -10,5 +10,7 @@ SRC_URI = "git://${OPENXT_GIT_MIRROR}/xclibs.git;protocol=${OPENXT_GIT_PROTOCOL}
 
 S = "${WORKDIR}/git/xcxenstore"
 
+PARALLEL_MAKE = "-j 1"
+
 inherit autotools
 inherit xenclient

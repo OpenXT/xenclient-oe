@@ -10,5 +10,7 @@ S = "${WORKDIR}/git"
 TEMPLATES_DIR="xc-rpcgen-1.0/templates"
 EXCLUSIVE_CONFIGURE_LOCK = "1"
 
-
 inherit xenclient
+
+LDFLAGS += "-pthread"
+CFLAGS += "-pthread"

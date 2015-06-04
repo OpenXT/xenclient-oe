@@ -23,6 +23,7 @@ inherit ${@"xenclient-simple-deb"if(bb.data.getVar("MACHINE",d,1)=="xenclient-ni
 DEB_SUITE = "wheezy"
 DEB_ARCH = "i386"
 
+ASNEEDED = ""
 DEB_NAME = "xenclient-dbusbouncer"
 DEB_DESC="V4V - UNIX socket proxy"
 DEB_DESC_EXT="This package provides a proxy for remote socket access using V4V."
