@@ -39,7 +39,7 @@ PATCHES
 Index: qemu-1.4.0/hw/Makefile.objs
 ===================================================================
 --- qemu-1.4.0.orig/hw/Makefile.objs	2013-02-15 18:05:35.000000000 -0500
-+++ qemu-1.4.0/hw/Makefile.objs	2015-05-30 16:36:33.239414036 -0400
++++ qemu-1.4.0/hw/Makefile.objs	2015-06-05 09:22:08.461081630 -0400
 @@ -195,6 +195,7 @@
  # xen backend driver support
  common-obj-$(CONFIG_XEN_BACKEND) += xen_backend.o xen_devconfig.o
@@ -50,8 +50,8 @@ Index: qemu-1.4.0/hw/Makefile.objs
  # virtio has to be here due to weird dependency between PCI and virtio-net.
 Index: qemu-1.4.0/hw/acpi_piix4.c
 ===================================================================
---- qemu-1.4.0.orig/hw/acpi_piix4.c	2015-05-30 16:36:32.379412744 -0400
-+++ qemu-1.4.0/hw/acpi_piix4.c	2015-05-30 16:36:33.239414036 -0400
+--- qemu-1.4.0.orig/hw/acpi_piix4.c	2015-06-05 09:22:07.488746183 -0400
++++ qemu-1.4.0/hw/acpi_piix4.c	2015-06-05 09:22:08.461081630 -0400
 @@ -30,9 +30,12 @@
  #include "fw_cfg.h"
  #include "exec/address-spaces.h"
@@ -147,8 +147,8 @@ Index: qemu-1.4.0/hw/acpi_piix4.c
      PIIX4PMState *s = opaque;
 Index: qemu-1.4.0/hw/pc.h
 ===================================================================
---- qemu-1.4.0.orig/hw/pc.h	2015-05-30 16:36:33.059414254 -0400
-+++ qemu-1.4.0/hw/pc.h	2015-05-30 16:36:33.239414036 -0400
+--- qemu-1.4.0.orig/hw/pc.h	2015-06-05 09:22:08.301080308 -0400
++++ qemu-1.4.0/hw/pc.h	2015-06-05 09:22:08.461081630 -0400
 @@ -121,6 +121,7 @@
                         qemu_irq sci_irq, qemu_irq smi_irq,
                         int kvm_enabled, void *fw_cfg);
@@ -159,8 +159,8 @@ Index: qemu-1.4.0/hw/pc.h
  extern int no_hpet;
 Index: qemu-1.4.0/qemu-options.hx
 ===================================================================
---- qemu-1.4.0.orig/qemu-options.hx	2015-05-30 16:36:33.079414656 -0400
-+++ qemu-1.4.0/qemu-options.hx	2015-05-30 16:36:33.239414036 -0400
+--- qemu-1.4.0.orig/qemu-options.hx	2015-06-05 09:22:08.309082268 -0400
++++ qemu-1.4.0/qemu-options.hx	2015-06-05 09:22:08.461081630 -0400
 @@ -2566,6 +2566,9 @@
      "-xen-attach     attach to existing xen domain\n"
      "                xend will use this when starting QEMU\n",
@@ -183,8 +183,8 @@ Index: qemu-1.4.0/qemu-options.hx
  DEF("no-reboot", 0, QEMU_OPTION_no_reboot, \
 Index: qemu-1.4.0/vl.c
 ===================================================================
---- qemu-1.4.0.orig/vl.c	2015-05-30 16:36:33.067413203 -0400
-+++ qemu-1.4.0/vl.c	2015-05-30 16:36:33.243412677 -0400
+--- qemu-1.4.0.orig/vl.c	2015-06-05 09:22:08.305083999 -0400
++++ qemu-1.4.0/vl.c	2015-06-05 09:22:08.465082089 -0400
 @@ -171,6 +171,8 @@
  #include "qapi/string-input-visitor.h"
  #include "ui/xen-input.h"
@@ -222,8 +222,8 @@ Index: qemu-1.4.0/vl.c
 Index: qemu-1.4.0/hw/xen_acpi_pm.c
 ===================================================================
 --- /dev/null	1970-01-01 00:00:00.000000000 +0000
-+++ qemu-1.4.0/hw/xen_acpi_pm.c	2015-05-31 14:49:57.419439797 -0400
-@@ -0,0 +1,969 @@
++++ qemu-1.4.0/hw/xen_acpi_pm.c	2015-06-05 09:27:57.439435545 -0400
+@@ -0,0 +1,999 @@
 +/*
 + * APCI PM feature for battery/AC/lid management for OpenXT guests.
 + *
@@ -293,11 +293,16 @@ Index: qemu-1.4.0/hw/xen_acpi_pm.c
 +#define BATTERY_OP_GET_DATA_LENGTH 0x79 /* Battery operation data length */
 +#define BATTERY_OP_GET_DATA        0x7d /* Battery operation data read */
 +
++#define BATTERY_PRESENT            0x01 /* Battery in slot is present */
++#define BATTERY_INFO_UPDATE        0x80 /* Battery information updated */
++
 +#define ACPI_PM_STATUS_PORT        0x9c /* General ACPI PM status port */
 +
 +#define ACPI_PM_STATUS_ENABLED     0x01 /* Bit indicates Xen ACPI PM enbled */
 +#define ACPI_PM_STATUS_LID_OPEN    0x02 /* Bit indicates lid current open */
 +#define ACPI_PM_STATUS_AC_ON       0x04 /* Bit indicates AC power plugged */
++#define ACPI_PM_STATUS_NOT_PRESENT 0x80 /* Bit indicates AC/battery devices
++                                           not present */
 +
 +/* GPE EN/STS bits for Xen ACPI PM */
 +#define ACPI_PM_SLEEP_BUTTON       0x05 /* _LO5 0x0020 is (1 << 5) */
@@ -353,6 +358,7 @@ Index: qemu-1.4.0/hw/xen_acpi_pm.c
 +
 +    uint8_t ac_adapter_present;      /* /pm/ac_adapter */
 +    uint8_t lid_state_open;          /* /pm/lid_state */
++    uint8_t not_present_mode;        /* AC/battery not present mode */
 +    MemoryRegion mr;                 /* General ACPI MemoryRegion to register IO ops */
 +} XenACPIPMState;
 +
@@ -805,8 +811,8 @@ Index: qemu-1.4.0/hw/xen_acpi_pm.c
 +/*
 + * Battery 1 (BAT0) status IO port write.
 + *
-+ * Returns 0x01 if battery present.
-+ *         0x80 if battery information is updated.
++ * Returns BATTERY_PRESENT (0x01) if battery present.
++ *         BATTERY_INFO_UPDATE (0x80) if battery information is updated.
 + */
 +static uint64_t battery_port_3_read(void *opaque, hwaddr addr, uint32_t size)
 +{
@@ -818,12 +824,12 @@ Index: qemu-1.4.0/hw/xen_acpi_pm.c
 +    xen_battery_update_bif(&(xbm->batteries[0]), 0);
 +
 +    if (NULL != xbm->batteries[0]._bif) {
-+        system_state |= 0x1;
++        system_state |= BATTERY_PRESENT;
 +    }
 +
 +    if (1 == xbm->batteries[0].bif_changed) {
 +        xbm->batteries[0].bif_changed = 0;
-+        system_state |= 0x80;
++        system_state |= BATTERY_INFO_UPDATE;
 +    }
 +
 +    XBM_DPRINTF("BAT0 system_state == 0x%02llx\n", system_state);
@@ -842,8 +848,8 @@ Index: qemu-1.4.0/hw/xen_acpi_pm.c
 +/*
 + * Battery 2 (BAT1) status IO port write.
 + *
-+ * Returns 0x01 if battery present.
-+ *         0x80 if battery information is updated.
++ * Returns BATTERY_PRESENT (0x01) if battery present.
++ *         BATTERY_INFO_UPDATE (0x80) if battery information is updated.
 + */
 +static uint64_t battery_port_4_read(void *opaque, hwaddr addr, uint32_t size)
 +{
@@ -855,12 +861,12 @@ Index: qemu-1.4.0/hw/xen_acpi_pm.c
 +    xen_battery_update_bif(&(xbm->batteries[1]), 1);
 +
 +    if (NULL != xbm->batteries[1]._bif) {
-+        system_state |= 0x1;
++        system_state |= BATTERY_PRESENT;
 +    }
 +
 +    if (1 == xbm->batteries[1].bif_changed) {
 +        xbm->batteries[1].bif_changed = 0;
-+        system_state |= 0x80;
++        system_state |= BATTERY_INFO_UPDATE;
 +    }
 +
 +    XBM_DPRINTF("BAT1 system_state == 0x%02llx\n", system_state);
@@ -993,16 +999,22 @@ Index: qemu-1.4.0/hw/xen_acpi_pm.c
 + * Returns 0x01 - Xen ACPI PM device model present and enabled.
 + *         0x02 - Lid open
 + *         0x04 - AC power on
++ *         0x80 - Not present mode (no other bits set)
 + */
 +static uint64_t acpi_pm_port_sts_read(void *opaque, hwaddr addr, uint32_t size)
 +{
 +    XenACPIPMState *s = opaque;
 +    uint64_t system_state = 0x0000000000000000ULL;
 +
++    system_state |= ACPI_PM_STATUS_ENABLED;
++
++    if (s->not_present_mode) {
++        return (system_state | ACPI_PM_STATUS_NOT_PRESENT);
++    }
++
 +    xen_pm_update_ac_adapter(s);
 +    xen_pm_update_lid_state(s);
 +
-+    system_state |= ACPI_PM_STATUS_ENABLED;
 +    system_state |= (s->lid_state_open ? ACPI_PM_STATUS_LID_OPEN : 0);
 +    system_state |= (s->ac_adapter_present ? ACPI_PM_STATUS_AC_ON : 0);
 +
@@ -1044,34 +1056,41 @@ Index: qemu-1.4.0/hw/xen_acpi_pm.c
 +    char const *base;
 +    char const *node;
 +    xenstore_watch_cb_t cb;
-+    int set;
++    uint8_t not_present_mode;
++    uint8_t set;
 +} watchTab[] = {
 +    { .base = "/pm/events",
 +      .node = "sleepbuttonpressed",
 +      .cb = sleep_button_changed_cb,
++      .not_present_mode = 1,
 +      .set = 0, },
 +    { .base = "/pm/events",
 +      .node = "pwrbuttonpressedevt",
 +      .cb = power_button_changed_cb,
++      .not_present_mode = 1,
 +      .set = 0, },
 +    { .base = "/pm",
 +      .node = "lid_state",
 +      .cb = lid_status_changed_cb,
++      .not_present_mode = 0,
 +      .set = 0, },
 +    { .base = "/pm",
 +      .node = "ac_adapter",
 +      .cb = ac_power_status_changed_cb,
++      .not_present_mode = 0,
 +      .set = 0, },
 +    { .base = "/pm/events",
 +      .node = "batterystatuschanged",
 +      .cb = battery_status_changed_cb,
++      .not_present_mode = 0,
 +      .set = 0, },
 +    { .base = "/pm",
 +      .node = "battery_present",
 +      .cb = battery_info_changed_cb,
++      .not_present_mode = 0,
 +      .set = 0, },
 +    /* /!\ END OF ARRAY */
-+    { .base =  NULL, .node = NULL, .cb = NULL, .set = 0},
++    { .base =  NULL, .node = NULL, .cb = NULL, .not_present_mode = 0, .set = 0},
 +};
 +
 +static int xen_acpi_pm_init_gpe_watches(XenACPIPMState *s)
@@ -1079,6 +1098,10 @@ Index: qemu-1.4.0/hw/xen_acpi_pm.c
 +    int i, err;
 +
 +    for (i = 0; (NULL != watchTab[i].base); i++) {
++        if (s->not_present_mode && !watchTab[i].not_present_mode) {
++            continue;
++        }
++
 +        err = xenstore_add_watch(watchTab[i].base, watchTab[i].node,
 +                                 watchTab[i].cb, s);
 +        if (err) {
@@ -1101,13 +1124,15 @@ Index: qemu-1.4.0/hw/xen_acpi_pm.c
 +
 +    /*
 +     * First check if there are any /pm nodes to even work with. If not then
-+     * just exit. This will effectively disable the ACPI PM feature causing
-+     * the guest FW to not load the PM SSDT.
++     * use not present mode. This allows the sleep and power buttons to still
++     * fucntion without batteries or AC present. This is done by having the
++     * _STA methods for battery and AC device report not present.
 +     */
++    s->not_present_mode = 0;
 +    if ( (0 != xen_pm_read_str("battery_present", NULL)) &&
 +         (0 != xen_pm_read_str("ac_adapter", NULL)) ) {
-+        fprintf(stdout, "Xen ACPI PM disabled, no /pm nodes to process\n");
-+        return 0;
++        fprintf(stdout, "Xen ACPI PM AC/battery not present mode\n");
++        s->not_present_mode = 1;
 +    }
 +
 +    memset(&s->xbm, 0, sizeof(struct xen_battery_manager));
@@ -1119,12 +1144,14 @@ Index: qemu-1.4.0/hw/xen_acpi_pm.c
 +        goto error_init;
 +    }
 +
-+    if (0 != xen_battery_update_battery_present(&s->xbm)) {
-+        goto error_init;
-+    }
++    if (!s->not_present_mode) {
++        if (0 != xen_battery_update_battery_present(&s->xbm)) {
++            goto error_init;
++        }
 +
-+    if (0 != xen_battery_update_status_info(&s->xbm)) {
-+        goto error_init;
++        if (0 != xen_battery_update_status_info(&s->xbm)) {
++            goto error_init;
++        }
 +    }
 +
 +    switch (s->xbm.mode) {
@@ -1142,8 +1169,11 @@ Index: qemu-1.4.0/hw/xen_acpi_pm.c
 +        goto error_init;
 +    }
 +
-+    xen_pm_update_ac_adapter(s);
-+    xen_pm_update_lid_state(s);
++    if (!s->not_present_mode) {
++        xen_pm_update_ac_adapter(s);
++        xen_pm_update_lid_state(s);
++    }
++
 +    xen_acpi_pm_register_port(s);
 +
 +    if (0 != xen_acpi_pm_init_gpe_watches(s)) {
@@ -1196,7 +1226,7 @@ Index: qemu-1.4.0/hw/xen_acpi_pm.c
 Index: qemu-1.4.0/hw/xen_acpi_pm.h
 ===================================================================
 --- /dev/null	1970-01-01 00:00:00.000000000 +0000
-+++ qemu-1.4.0/hw/xen_acpi_pm.h	2015-05-30 16:36:33.243412677 -0400
++++ qemu-1.4.0/hw/xen_acpi_pm.h	2015-06-05 09:27:08.639024480 -0400
 @@ -0,0 +1,37 @@
 +/*
 + * APCI PM feature for battery/AC/lid management for OpenXT guests.
