@@ -1,0 +1,108 @@
+################################################################################
+SHORT DESCRIPTION: 
+################################################################################
+
+Maintain RTC time offset for guests, typically useful for those that set RTC
+to localtime instead of UTC (which is supplied by default in OpenXT). 
+This patch provides the functionality within qemu to support this.
+
+################################################################################
+LONG DESCRIPTION: 
+################################################################################
+
+Add hook to catch ioreq events for IOREQ_TYPE_TIMEOFFSET.  Save off RTC offset
+and write to the xenstore @ /vm/<uuid>/rtc/timeoffset.
+
+During initialization, call timeoffset_init which will read in the currently
+configured timeoffset @ /vm/<uuid>/rtc/timeoffset and use that for 
+xc_domain_set_time_offset().
+
+################################################################################
+REMOVAL 
+################################################################################
+
+This is OpenXT-specific glue to match the system state with the guest VM time
+offset.
+
+################################################################################
+UPSTREAM PLAN
+################################################################################
+
+None
+
+################################################################################
+INTERNAL DEPENDENCIES 
+################################################################################
+
+None
+
+Index: qemu-1.4.0/xen-all.c
+===================================================================
+--- qemu-1.4.0.orig/xen-all.c	2015-06-09 13:36:45.784411751 -0400
++++ qemu-1.4.0/xen-all.c	2015-06-09 13:38:30.272409961 -0400
+@@ -821,6 +821,47 @@
+     }
+ }
+ 
++static void timeoffset_init(void)
++{
++    char *vmstr = xenstore_vm_base_path();
++    int time_offset;
++
++    if (!vmstr) {
++        fprintf(stderr, "timeoffset_init failed to read vm key\n");
++        return;
++    }
++
++    if (xenstore_read_int(vmstr, "rtc/timeoffset", &time_offset) != 0) {
++        fprintf(stderr, "timeoffset_init failed to read from xenstore!\n");
++        return;
++    }
++
++    fprintf(stderr, "timeoffset_init setting offset = %d\n", time_offset);
++
++    xc_domain_set_time_offset(xen_xc, xen_domid, time_offset);
++
++    g_free(vmstr);
++}
++
++static void cpu_ioreq_timeoffset(ioreq_t *req)
++{
++    char *vmstr = xenstore_vm_base_path();
++    int time_offset;
++
++    if (!vmstr) {
++        fprintf(stderr, "cpu_ioreq_timeoffset failed to read vm key\n");
++        return;
++    }
++
++    time_offset = (int)req->data;
++
++    fprintf(stderr, "cpu_ioreq_timeoffset writing offset = %d\n", time_offset);
++
++    xenstore_write_int(vmstr, "rtc/timeoffset", time_offset);
++
++    g_free(vmstr);
++}
++
+ static void handle_ioreq(ioreq_t *req)
+ {
+     if (!req->data_is_ptr && (req->dir == IOREQ_WRITE) &&
+@@ -836,6 +877,7 @@
+             cpu_ioreq_move(req);
+             break;
+         case IOREQ_TYPE_TIMEOFFSET:
++            cpu_ioreq_timeoffset(req);
+             break;
+         case IOREQ_TYPE_INVALIDATE:
+             xen_invalidate_map_cache();
+@@ -1223,6 +1265,9 @@
+ 
+     xen_read_physmap(state);
+ 
++    /* Initialize time offset */
++    timeoffset_init();
++
+     return 0;
+ }
+ 
