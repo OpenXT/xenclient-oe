@@ -11,6 +11,7 @@ DEPENDS += "\
     ipxe \
     util-linux \
     vgabios \
+    iasl-native \
 "
 PR = "${INC_PR}.1"
 

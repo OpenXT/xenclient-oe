@@ -9,7 +9,7 @@ SRC_URI += "file://xenstored.initscript \
 	    file://do-not-overwrite-cc-and-ld.patch \
 "
 
-DEPENDS += " gettext ncurses openssl python zlib seabios ipxe gmp lzo glib-2.0"
+DEPENDS += " gettext ncurses openssl python zlib seabios ipxe gmp lzo glib-2.0 iasl-native"
 DEPENDS += "util-linux"
 # lzo2 required by libxenguest.
 RDEPENDS += " lzo"
