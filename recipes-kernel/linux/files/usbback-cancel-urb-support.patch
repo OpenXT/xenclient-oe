@@ -1,0 +1,199 @@
+Index: linux-3.11.10.4/drivers/usb/xen-usbback/common.h
+===================================================================
+--- linux-3.11.10.4.orig/drivers/usb/xen-usbback/common.h	2015-06-13 15:16:47.195413878 -0400
++++ linux-3.11.10.4/drivers/usb/xen-usbback/common.h	2015-06-13 15:16:47.247412740 -0400
+@@ -108,6 +108,11 @@
+ 	return (req->type == USBIF_T_GET_SPEED);
+ }
+ 
++static inline int usbif_request_cancel(usbif_request_t *req)
++{
++	return (req->type == USBIF_T_CANCEL);
++}
++
+ static inline int usbif_request_type_valid(usbif_request_t *req)
+ {
+ 	return (req->type <= USBIF_T_MAX);
+Index: linux-3.11.10.4/drivers/usb/xen-usbback/usbback.c
+===================================================================
+--- linux-3.11.10.4.orig/drivers/usb/xen-usbback/usbback.c	2015-06-13 15:16:47.147415601 -0400
++++ linux-3.11.10.4/drivers/usb/xen-usbback/usbback.c	2015-06-15 10:49:22.990884589 -0400
+@@ -1,13 +1,12 @@
+ /******************************************************************************
+  * 
+- * Back-end of the driver for virtual block devices. This portion of the
+- * driver exports a 'unified' block-device interface that can be accessed
+- * by any operating system that implements a compatible front end. A 
+- * reference front-end implementation can be found in:
+- *  arch/xen/drivers/blkif/frontend
+- * 
++ * Back-end of the driver for PV USB.
++ *
++ * Originally based on blkback:
+  * Copyright (c) 2003-2004, Keir Fraser & Steve Hand
+  * Copyright (c) 2005, Christopher Clark
++ *
++ * PV usbback:
+  * Copyright (c) Citrix Systems Inc.
+  * 
+  * This program is free software; you can redistribute it and/or
+@@ -302,7 +301,8 @@
+ 		urb = req->urb;
+ 		free_req(req);
+ 
+-		/* The urb had its ref count bumped to keep it alive before being queued for
++		/*
++		 * The urb had its ref count bumped to keep it alive before being queued for
+ 		 * cleanup in this bottom half routine. Dropping that ref here will likely
+ 		 * cleanup and release the urb.
+ 	 	 */
+@@ -326,7 +326,7 @@
+ 	unmap = kmalloc(sizeof(struct gnttab_unmap_grant_ref) *
+ 			req->pending_indirect_segments, GFP_ATOMIC);
+ 	if (!unmap) {
+-		debug_print(LOG_LVL_ERROR, "%s kmalloc failed for %ld bytes!\n",
++		debug_print(LOG_LVL_ERROR, "%s kmalloc failed for 0x%x bytes!\n",
+ 				__FUNCTION__, sizeof(struct gnttab_unmap_grant_ref) *
+                         req->pending_indirect_segments);
+ 		return;
+@@ -382,6 +382,37 @@
+ 	BUG_ON(ret);
+ }
+ 
++/*
++ * This is our special version of usb_kill_anchored_urbs. Our routine
++ * is a bit like that one except it is used to snipe a single URB.
++ */
++static void cancel_urb(struct usb_anchor *anchor, u64 cancel_id)
++{
++	struct urb *victim;
++	bool found = false;
++
++	spin_lock_irq(&anchor->lock);
++	list_for_each_entry(victim, &anchor->urb_list, anchor_list) {
++		if (((pending_req_t*)victim->context)->id == cancel_id) {
++			usb_get_urb(victim);
++			found = true;
++			break;
++		}
++	}
++	spin_unlock_irq(&anchor->lock);
++
++	if (!found)
++		return;
++
++	/*
++	 * Now there is an extra ref of the URB. After killing it, drop the ref
++	 * count. The docs say the URB cannot be deleted within the kill call.
++	 * The ref count will prevent the async cleanup part of the completion
++	 * routines from doing this.
++	 */
++	usb_kill_urb(victim);
++	usb_put_urb(victim);
++}
+ 
+ /******************************************************************
+  * SCHEDULER FUNCTIONS
+@@ -595,7 +626,10 @@
+ 	cancel_timeout(pending_req);
+ #endif
+ 
+-	/* don't need to unanchor, usb_hcd_giveback_urb does it */
++	/*
++	 * Don't need to unanchor, usb_hcd_giveback_urb has already done it
++	 * before calling this completion routine.
++	 */
+ 	if ((urb->status != -ENODEV) &&		/* device removed */
+ 		(urb->status != -ESHUTDOWN) &&	/* device disabled */
+ 		(urb->status != -EPROTO)) { /* timeout or unknown USB error */
+@@ -614,7 +648,8 @@
+ 		urb->start_frame, get_usb_status(status));
+ 	usbif_put(pending_req->usbif);
+ 
+-	/* Schedule async free as it causes an oops on 32bit kernel doing dma frees in
++	/*
++	 * Schedule async free as it causes an oops on 32bit kernel doing dma frees in
+ 	 * this completion handler with irqs disabled (the WARN_ON(irqs_disabled())
+ 	 * in dma_free_attrs).  We have to bump the ref count on the urb since it will
+ 	 * be released after this completion routine returns. See the code in
+@@ -721,6 +756,11 @@
+ 			make_response(usbif, req.id, 0,
+ 				vusb_get_speed(&usbif->vusb), 0);
+ 			free_req(pending_req);
++		} else if (usbif_request_cancel(&req)) {
++			cancel_urb(&usbif->vusb.anchor, *((u64*)(&req.u.data[0])));
++
++			make_response(usbif, req.id, 0, 0, USBIF_RSP_OKAY);
++			free_req(pending_req);
+ 		} else
+ 			dispatch_usb_io(usbif, &req, pending_req);
+ 	}
+@@ -990,7 +1030,7 @@
+ 			goto fail_response;
+ 		}
+ 
+-		if ((err = map_request(pending_req, 0, usbif->domid, req->gref,
++		if ((err = map_request(pending_req, 0, usbif->domid, req->u.gref,
+ 				       req->nr_segments,
+ 				       !usbif_request_dir_in(req) || indirect,
+ 				       0))) {
+@@ -1057,7 +1097,7 @@
+ 		usbif_put(usbif);
+ 		goto fail_flush;
+ 	}
+-	
++
+ 	/* release our urb reference from the alloc, the core now owns it */
+ 	usb_free_urb(urb);
+ 
+@@ -1141,8 +1181,12 @@
+ 	if (more_to_do)
+ 		usbif_notify_work(usbif);
+ 
++	/*
++	 * OXT-311 it is unlikely the Xen ring code is broken since it is
++	 * the backbone of PV drivers. This needs investigation and fixing.
++	 */
+ 	/* always notify, there seems to be a bug in the Xen ring code */
+-//	if (notify)
++	/*if (notify)*/
+ 		notify_remote_via_irq(usbif->irq);
+ }
+ 
+Index: linux-3.11.10.4/include/xen/interface/io/usbif.h
+===================================================================
+--- linux-3.11.10.4.orig/include/xen/interface/io/usbif.h	2015-06-13 15:16:47.047413849 -0400
++++ linux-3.11.10.4/include/xen/interface/io/usbif.h	2015-06-15 10:54:45.831439087 -0400
+@@ -60,14 +60,16 @@
+ #define USBIF_T_ABORT_PIPE	5
+ #define USBIF_T_GET_FRAME	6
+ #define USBIF_T_GET_SPEED	7
++#define USBIF_T_CANCEL		8
+ 
+-#define USBIF_T_MAX		(USBIF_T_GET_SPEED)
++#define USBIF_T_MAX		(USBIF_T_CANCEL)
+ 
+ #define USBIF_F_SHORTOK		0x01
+ #define USBIF_F_RESET		0x02
+-#define USBIF_F_ASAP		0x04 // start ISO request on next available frame
+-#define USBIF_F_INDIRECT	0x08 // this request contains indirect segments 
+-#define USBIF_F_CYCLE_PORT	0x10 // force re-enumeration of this device
++#define USBIF_F_ASAP		0x04 /* start ISO request on next available frame */
++#define USBIF_F_INDIRECT	0x08 /* this request contains indirect segments */
++#define USBIF_F_CYCLE_PORT	0x10 /* force re-enumeration of this device */
++#define USBIF_F_DIRECT_DATA	0x20 /* request contains data directly inline */
+ 
+ /*
+  * Maximum scatter/gather segments per request.
+@@ -90,7 +92,10 @@
+     uint8_t             flags;
+     uint16_t            nr_packets;   /* number of ISO packets */
+     uint32_t            startframe;
+-    grant_ref_t         gref[USBIF_MAX_SEGMENTS_PER_REQUEST];
++    union {
++        grant_ref_t     gref[USBIF_MAX_SEGMENTS_PER_REQUEST];
++        uint8_t         data[sizeof(grant_ref_t)*USBIF_MAX_SEGMENTS_PER_REQUEST];
++    } u;
+     uint32_t            pad;
+ };
+ typedef struct usbif_request usbif_request_t;

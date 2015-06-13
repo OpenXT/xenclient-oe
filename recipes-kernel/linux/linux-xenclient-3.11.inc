@@ -50,6 +50,7 @@ SRC_URI = "http://mirror.openxt.org/linux-3.11.10.4.tar.gz;name=kernel \
     file://usbback-optional-configuration.patch;patch=1 \
     file://usbback-async-urb-free.patch;patch=1 \
     file://usbback-map-ring-valloc.patch;patch=1 \
+    file://usbback-cancel-urb-support.patch;patch=1 \
     file://blkback-3.18.13-backport.patch;patch=1 \
     file://defconfig"
 
