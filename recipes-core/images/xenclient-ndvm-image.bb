@@ -33,8 +33,7 @@ IMAGE_INSTALL = "\
     xenclient-dbusbouncer \
     networkmanager \
     xenclient-toolstack \
-    intel-e1000e \
-    intel-e1000e-conf \
+    kernel-module-e1000e \
     linux-firmware \
     rt2870-firmware \
     rt3572 \
