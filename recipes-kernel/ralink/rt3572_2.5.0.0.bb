@@ -12,6 +12,7 @@ SRC_URI = "${OPENXT_MIRROR}/2011_0427_RT3572_Linux_STA_v2.5.0.0.DPO.tar.gz \
            file://other-makefile-fixes.patch;patch=1 \
            file://fix-makefile-6.patch;patch=1 \
            file://add-wifi-usb-device-id.patch;patch=1 \
+           file://linux-3.x-uidgid-compat.patch;patch=1 \
            file://RT2870STA.dat"
 
 S = "${WORKDIR}/2011_0427_RT3572_Linux_STA_v2.5.0.0.DPO"

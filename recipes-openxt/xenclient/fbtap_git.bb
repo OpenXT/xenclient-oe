@@ -8,7 +8,9 @@ export MODULE_MAKE_FLAGS
 PV = "0+git${SRCPV}"
 
 SRCREV = "${AUTOREV}"
-SRC_URI = "git://${OPENXT_GIT_MIRROR}/fbtap.git;protocol=${OPENXT_GIT_PROTOCOL};branch=${OPENXT_BRANCH}"
+SRC_URI = "git://${OPENXT_GIT_MIRROR}/fbtap.git;protocol=${OPENXT_GIT_PROTOCOL};branch=${OPENXT_BRANCH} \
+           file://linux-3.x-pgtable-types-compat.patch;patch=1 \
+           "
 
 S = "${WORKDIR}/git"
 MAKE_TARGETS += "modules"

@@ -1,0 +1,466 @@
+Index: linux-3.18.16/drivers/gpu/drm/i915/Makefile
+===================================================================
+--- linux-3.18.16.orig/drivers/gpu/drm/i915/Makefile	2015-06-29 15:17:13.925682052 +0200
++++ linux-3.18.16/drivers/gpu/drm/i915/Makefile	2015-06-29 15:19:42.184019001 +0200
+@@ -27,6 +27,7 @@
+ 	  i915_gem.o \
+ 	  i915_gem_stolen.o \
+ 	  i915_gem_tiling.o \
++	  i915_gem_foreign.o \
+ 	  i915_gem_userptr.o \
+ 	  i915_gpu_error.o \
+ 	  i915_irq.o \
+Index: linux-3.18.16/drivers/gpu/drm/i915/i915_dma.c
+===================================================================
+--- linux-3.18.16.orig/drivers/gpu/drm/i915/i915_dma.c	2015-06-29 15:17:13.909015573 +0200
++++ linux-3.18.16/drivers/gpu/drm/i915/i915_dma.c	2015-06-29 15:19:42.370683575 +0200
+@@ -2049,6 +2049,7 @@
+ 	DRM_IOCTL_DEF_DRV(I915_REG_READ, i915_reg_read_ioctl, DRM_UNLOCKED|DRM_RENDER_ALLOW),
+ 	DRM_IOCTL_DEF_DRV(I915_GET_RESET_STATS, i915_get_reset_stats_ioctl, DRM_UNLOCKED|DRM_RENDER_ALLOW),
+ 	DRM_IOCTL_DEF_DRV(I915_GEM_USERPTR, i915_gem_userptr_ioctl, DRM_UNLOCKED|DRM_RENDER_ALLOW),
++	DRM_IOCTL_DEF_DRV(I915_GEM_FOREIGN, i915_gem_foreign_ioctl, DRM_UNLOCKED),
+ };
+ 
+ int i915_max_ioctl = ARRAY_SIZE(i915_ioctls);
+Index: linux-3.18.16/drivers/gpu/drm/i915/i915_drv.h
+===================================================================
+--- linux-3.18.16.orig/drivers/gpu/drm/i915/i915_drv.h	2015-06-29 15:17:13.942348532 +0200
++++ linux-3.18.16/drivers/gpu/drm/i915/i915_drv.h	2015-06-29 15:19:42.464015862 +0200
+@@ -1838,6 +1838,7 @@
+ 
+ 	struct sg_table *pages;
+ 	int pages_pin_count;
++	dma_addr_t *pfnlist;
+ 
+ 	/* prime dma-buf support */
+ 	void *dma_buf_vmapping;
+@@ -2352,6 +2353,8 @@
+ unsigned long i915_gem_shrink(struct drm_i915_private *dev_priv,
+ 			      long target,
+ 			      unsigned flags);
++int i915_gem_foreign_ioctl(struct drm_device *dev, void *data,
++			   struct drm_file *file);
+ #define I915_SHRINK_PURGEABLE 0x1
+ #define I915_SHRINK_UNBOUND 0x2
+ #define I915_SHRINK_BOUND 0x4
+Index: linux-3.18.16/drivers/gpu/drm/i915/i915_gem_foreign.c
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ linux-3.18.16/drivers/gpu/drm/i915/i915_gem_foreign.c	2015-06-29 15:30:21.353498156 +0200
+@@ -0,0 +1,244 @@
++/*
++ * Copyright © 2013 Citrix Systems, Inc.
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining a
++ * copy of this software and associated documentation files (the "Software"),
++ * to deal in the Software without restriction, including without limitation
++ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
++ * and/or sell copies of the Software, and to permit persons to whom the
++ * Software is furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice (including the next
++ * paragraph) shall be included in all copies or substantial portions of the
++ * Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
++ * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
++ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
++ * IN THE SOFTWARE.
++ *
++ */
++
++#include "drmP.h"
++#include "i915_drm.h"
++#include "i915_drv.h"
++#include "i915_trace.h"
++#include "intel_drv.h"
++#include <linux/mmu_notifier.h>
++#include <linux/swap.h>
++#include <asm/xen/hypervisor.h>
++#include <asm/xen/hypercall.h>
++#include <xen/page.h>
++#include <xen/xen-ops.h>
++#include <xen/balloon.h>
++#include <xen/interface/memory.h>
++
++struct i915_gem_foreign_object {
++	struct drm_i915_gem_object gem;
++	uint64_t *mfns;
++	size_t num_pages;
++	uint32_t flags;
++	struct page **pvec;
++};
++
++static inline struct i915_gem_foreign_object *
++to_foreign_object(struct drm_i915_gem_object *obj)
++{
++	return container_of(obj, struct i915_gem_foreign_object, gem);
++}
++
++static void
++i915_gem_foreign_free_pages(struct i915_gem_foreign_object *vmap,
++			    int num_pages)
++{
++	int i;
++
++	if ((vmap->flags & I915_FOREIGN_BALLOON_PAGES) == 0)
++		for (i = 0; i < num_pages; i++)
++			__free_page(vmap->pvec[i]);
++        else
++		free_xenballooned_pages(num_pages, vmap->pvec);
++}
++
++static void
++i915_gem_foreign_remove_override(struct i915_gem_foreign_object *vmap,
++				 int num_pages)
++{
++	int i;
++
++	for (i = 0; i < num_pages; i++)
++		if (m2p_remove_override_legacy(vmap->pvec[i]))
++			BUG();
++}
++
++static int
++i915_gem_foreign_get_pages(struct drm_i915_gem_object *obj)
++{
++	struct i915_gem_foreign_object *vmap = to_foreign_object(obj);
++	struct sg_table *st = NULL;
++	struct scatterlist *sg = NULL;
++	int i, ret;
++
++	vmap->pvec = kmalloc(vmap->num_pages * sizeof(struct page *),
++			 GFP_KERNEL | __GFP_NOWARN | __GFP_NORETRY);
++	if (vmap->pvec == NULL) {
++		vmap->pvec = drm_malloc_ab(vmap->num_pages,
++					   sizeof(struct page *));
++		if (vmap->pvec == NULL)
++			return -ENOMEM;
++	}
++
++	st = kmalloc(sizeof(*st), GFP_KERNEL);
++	if (st == NULL) {
++		ret = -ENOMEM;
++		goto err0;
++	}
++
++	if (sg_alloc_table(st, vmap->num_pages, GFP_KERNEL)) {
++		ret = -ENOMEM;
++		goto err0;
++	}
++
++	if ((vmap->flags & I915_FOREIGN_BALLOON_PAGES) == 0) {
++		for (i = 0; i < vmap->num_pages; i++) {
++			vmap->pvec[i] = alloc_page(GFP_HIGHUSER);
++			if (!vmap->pvec[i]) {
++				i915_gem_foreign_free_pages(vmap, i - 1);
++				ret = -ENOMEM;
++				goto err0;
++			}
++		}
++	} else {
++		/* Using balloon allocated pages to override */
++		ret = alloc_xenballooned_pages(vmap->num_pages, vmap->pvec,
++				vmap->flags & I915_FOREIGN_BALLOON_HIGH);
++		if (ret) {
++			DRM_ERROR("Xen allocate balloon memory failed\n");
++			goto err0;
++		}
++	}
++
++	for (i = 0; i < vmap->num_pages; i++) {
++		ret = m2p_add_override_legacy(vmap->mfns[i], vmap->pvec[i]);
++		if (ret) {
++			i915_gem_foreign_remove_override(vmap, i - 1);
++			goto err1;
++		}
++	}
++
++	for_each_sg(st->sgl, sg, vmap->num_pages, i) {
++		sg_set_page(sg, vmap->pvec[i], PAGE_SIZE, 0);
++	}
++
++	obj->pages = st;
++
++	return 0;
++
++err1:
++	i915_gem_foreign_free_pages(vmap, vmap->num_pages);
++err0:
++	if (st) {
++		sg_free_table(st);
++		kfree(st);
++	}
++	drm_free_large(vmap->pvec);
++
++	return ret;
++}
++
++static void
++i915_gem_foreign_put_pages(struct drm_i915_gem_object *obj)
++{
++	struct i915_gem_foreign_object *vmap = to_foreign_object(obj);
++	int num_pages = obj->base.size >> PAGE_SHIFT;
++
++	i915_gem_foreign_remove_override(vmap, num_pages);
++
++	i915_gem_foreign_free_pages(vmap, num_pages);
++
++	sg_free_table(obj->pages);
++	kfree(obj->pages);
++	drm_free_large(vmap->pvec);
++}
++
++static void
++i915_gem_foreign_release(struct drm_i915_gem_object *obj)
++{
++	struct i915_gem_foreign_object *vmap = to_foreign_object(obj);
++
++	kfree(vmap->mfns);
++}
++
++static const struct drm_i915_gem_object_ops i915_gem_foreign_ops = {
++	.get_pages = i915_gem_foreign_get_pages,
++	.put_pages = i915_gem_foreign_put_pages,
++	.release = i915_gem_foreign_release,
++};
++
++/*
++ * Creates a new mm object that wraps some user memory.
++ */
++int
++i915_gem_foreign_ioctl(struct drm_device *dev, void *data,
++			struct drm_file *file)
++{
++	struct drm_i915_private *dev_priv = dev->dev_private;
++	struct drm_i915_gem_foreign *args = data;
++	struct i915_gem_foreign_object *obj;
++	uint32_t size;
++	int ret = -ENOMEM;
++	u32 handle;
++
++	if ((args->num_pages * PAGE_SIZE) > dev_priv->gtt.base.total)
++		return -E2BIG;
++
++	/* Allocate the new object */
++	obj = kzalloc(sizeof(*obj), GFP_KERNEL);
++	if (!obj)
++		return -ENOMEM;
++
++	drm_gem_private_object_init(dev, &obj->gem.base,
++				    args->num_pages * PAGE_SIZE);
++
++	i915_gem_object_init(&obj->gem, &i915_gem_foreign_ops);
++	obj->gem.cache_level = I915_CACHE_LLC;
++        /* What about CACHE_L3_LLC? */
++
++	//obj->gem.gtt_offset = 0;
++	obj->num_pages = args->num_pages;
++	obj->flags = args->flags;
++
++	/* Pull up MFN list from userland */
++	size = args->num_pages * sizeof(uint64_t);
++	obj->mfns = kzalloc(size, GFP_KERNEL);
++	if (!obj->mfns)
++		goto err;
++
++	if (copy_from_user(obj->mfns, args->mfns, size)) {
++		ret = -EFAULT;
++		goto err;
++	}
++
++	ret = drm_gem_handle_create(file, &obj->gem.base, &handle);
++	/*
++	 * Drop reference from allocate - handle holds it now. If the
++	 * previous call failed, this will drop the ref cound to 0
++	 * freeing undoing everything above and cleaning up in the
++	 * release function above.
++         */
++	drm_gem_object_unreference(&obj->gem.base);
++	if (ret)
++		return ret;
++
++	args->handle = handle;
++	return 0;
++
++err:
++	kfree(obj->mfns);
++	kfree(obj);
++	return ret;
++}
++
+Index: linux-3.18.16/include/uapi/drm/i915_drm.h
+===================================================================
+--- linux-3.18.16.orig/include/uapi/drm/i915_drm.h	2015-06-29 15:17:13.892349093 +0200
++++ linux-3.18.16/include/uapi/drm/i915_drm.h	2015-06-29 15:19:42.620680773 +0200
+@@ -224,6 +224,7 @@
+ #define DRM_I915_REG_READ		0x31
+ #define DRM_I915_GET_RESET_STATS	0x32
+ #define DRM_I915_GEM_USERPTR		0x33
++#define DRM_I915_GEM_FOREIGN		0x34
+ 
+ #define DRM_IOCTL_I915_INIT		DRM_IOW( DRM_COMMAND_BASE + DRM_I915_INIT, drm_i915_init_t)
+ #define DRM_IOCTL_I915_FLUSH		DRM_IO ( DRM_COMMAND_BASE + DRM_I915_FLUSH)
+@@ -275,6 +276,7 @@
+ #define DRM_IOCTL_I915_REG_READ			DRM_IOWR (DRM_COMMAND_BASE + DRM_I915_REG_READ, struct drm_i915_reg_read)
+ #define DRM_IOCTL_I915_GET_RESET_STATS		DRM_IOWR (DRM_COMMAND_BASE + DRM_I915_GET_RESET_STATS, struct drm_i915_reset_stats)
+ #define DRM_IOCTL_I915_GEM_USERPTR			DRM_IOWR (DRM_COMMAND_BASE + DRM_I915_GEM_USERPTR, struct drm_i915_gem_userptr)
++#define DRM_IOCTL_I915_GEM_FOREIGN		DRM_IOWR (DRM_COMMAND_BASE + DRM_I915_GEM_FOREIGN, struct drm_i915_gem_foreign)
+ 
+ /* Allow drivers to submit batchbuffers directly to hardware, relying
+  * on the security mechanisms provided by hardware.
+@@ -1052,6 +1054,15 @@
+ 	__u32 pad;
+ };
+ 
++struct drm_i915_gem_foreign {
++	__u64 __user *mfns;
++	__u32 num_pages;
++#define I915_FOREIGN_BALLOON_PAGES 0x00000001
++#define I915_FOREIGN_BALLOON_HIGH  0x00000002
++	__u32 flags;
++	__u32 handle;
++};
++
+ struct drm_i915_gem_userptr {
+ 	__u64 user_ptr;
+ 	__u64 user_size;
+Index: linux-3.18.16/arch/x86/include/asm/xen/page.h
+===================================================================
+--- linux-3.18.16.orig/arch/x86/include/asm/xen/page.h	2015-06-29 15:17:13.875682613 +0200
++++ linux-3.18.16/arch/x86/include/asm/xen/page.h	2015-06-29 15:19:50.210595610 +0200
+@@ -54,12 +54,14 @@
+ 				   struct page **pages, unsigned int count);
+ extern int m2p_add_override(unsigned long mfn, struct page *page,
+ 			    struct gnttab_map_grant_ref *kmap_op);
++extern int m2p_add_override_legacy(unsigned long mfn, struct page *page);
+ extern int clear_foreign_p2m_mapping(struct gnttab_unmap_grant_ref *unmap_ops,
+ 				     struct gnttab_map_grant_ref *kmap_ops,
+ 				     struct page **pages, unsigned int count);
+ extern int m2p_remove_override(struct page *page,
+ 			       struct gnttab_map_grant_ref *kmap_op,
+ 			       unsigned long mfn);
++extern int m2p_remove_override_legacy(struct page *page);
+ extern struct page *m2p_find_override(unsigned long mfn);
+ extern unsigned long m2p_find_override_pfn(unsigned long mfn, unsigned long pfn);
+ 
+Index: linux-3.18.16/arch/x86/xen/p2m.c
+===================================================================
+--- linux-3.18.16.orig/arch/x86/xen/p2m.c	2015-06-29 15:19:31.207475499 +0200
++++ linux-3.18.16/arch/x86/xen/p2m.c	2015-06-29 15:31:18.672844412 +0200
+@@ -991,18 +991,18 @@
+ 	spin_unlock_irqrestore(&m2p_override_lock, flags);
+ 
+ 	/* p2m(m2p(mfn)) == mfn: the mfn is already present somewhere in
+-	 * this domain. Set the FOREIGN_FRAME_BIT in the p2m for the other
++	 * this domain. set the FOREIGN_FRAME_BIT in the p2m for the other
+ 	 * pfn so that the following mfn_to_pfn(mfn) calls will return the
+ 	 * pfn from the m2p_override (the backend pfn) instead.
+-	 * We need to do this because the pages shared by the frontend
++	 * we need to do this because the pages shared by the frontend
+ 	 * (xen-blkfront) can be already locked (lock_page, called by
+ 	 * do_read_cache_page); when the userspace backend tries to use them
+-	 * with direct_IO, mfn_to_pfn returns the pfn of the frontend, so
+-	 * do_blockdev_direct_IO is going to try to lock the same pages
++	 * with direct_io, mfn_to_pfn returns the pfn of the frontend, so
++	 * do_blockdev_direct_io is going to try to lock the same pages
+ 	 * again resulting in a deadlock.
+-	 * As a side effect get_user_pages_fast might not be safe on the
++	 * as a side effect get_user_pages_fast might not be safe on the
+ 	 * frontend pages while they are being shared with the backend,
+-	 * because mfn_to_pfn (that ends up being called by GUPF) will
++	 * because mfn_to_pfn (that ends up being called by gupf) will
+ 	 * return the backend pfn rather than the frontend pfn. */
+ 	pfn = mfn_to_pfn_no_overrides(mfn);
+ 	if (get_phys_to_machine(pfn) == mfn)
+@@ -1012,6 +1012,87 @@
+ }
+ EXPORT_SYMBOL_GPL(m2p_add_override);
+ 
++int m2p_add_override_legacy(unsigned long mfn, struct page *page)
++{
++	unsigned long flags;
++	unsigned long pfn;
++	unsigned long uninitialized_var(address);
++	unsigned level;
++	pte_t *ptep = NULL;
++	int ret = 0;
++
++	pfn = page_to_pfn(page);
++	if (!PageHighMem(page)) {
++		address = (unsigned long)__va(pfn << PAGE_SHIFT);
++		ptep = lookup_address(address, &level);
++		if (WARN(ptep == NULL || level != PG_LEVEL_4K,
++					"m2p_add_override: pfn %lx not mapped", pfn))
++			return -EINVAL;
++	}
++	WARN_ON(PagePrivate(page));
++	SetPagePrivate(page);
++	set_page_private(page, mfn);
++	page->index = pfn_to_mfn(pfn);
++
++	if (unlikely(!set_phys_to_machine(pfn, FOREIGN_FRAME(mfn))))
++		return -ENOMEM;
++
++	spin_lock_irqsave(&m2p_override_lock, flags);
++	list_add(&page->lru,  &m2p_overrides[mfn_hash(mfn)]);
++	spin_unlock_irqrestore(&m2p_override_lock, flags);
++
++	return 0;
++}
++EXPORT_SYMBOL_GPL(m2p_add_override_legacy);
++
++int m2p_remove_override_legacy(struct page *page)
++{
++	unsigned long flags;
++	unsigned long mfn;
++	unsigned long pfn;
++	unsigned long uninitialized_var(address);
++	unsigned level;
++	pte_t *ptep = NULL;
++	int ret = 0;
++
++	pfn = page_to_pfn(page);
++	mfn = get_phys_to_machine(pfn);
++	if (mfn == INVALID_P2M_ENTRY || !(mfn & FOREIGN_FRAME_BIT))
++		return -EINVAL;
++
++	if (!PageHighMem(page)) {
++		address = (unsigned long)__va(pfn << PAGE_SHIFT);
++		ptep = lookup_address(address, &level);
++
++		if (WARN(ptep == NULL || level != PG_LEVEL_4K,
++					"m2p_remove_override: pfn %lx not mapped", pfn))
++			return -EINVAL;
++	}
++
++	spin_lock_irqsave(&m2p_override_lock, flags);
++	list_del(&page->lru);
++	spin_unlock_irqrestore(&m2p_override_lock, flags);
++	WARN_ON(!PagePrivate(page));
++	ClearPagePrivate(page);
++
++	set_phys_to_machine(pfn, page->index);
++
++	/*
++         * If there are no other entries in the m2p_override corresponding
++	 * to this mfn, then remove the FOREIGN_FRAME_BIT from the p2m for
++	 * the original pfn.
++         * Removing the FOREIGN_FRAME_BIT from the p2m entry of the original
++         * pfn causes mfn_to_pfn(mfn) to return the frontend pfn again.
++         */
++	mfn &= ~FOREIGN_FRAME_BIT;
++	ret = __get_user(pfn, &machine_to_phys_mapping[mfn]);
++	if (ret == 0 && get_phys_to_machine(pfn) == FOREIGN_FRAME(mfn) &&
++			m2p_find_override(mfn) == NULL)
++		set_phys_to_machine(pfn, mfn);
++	return 0;
++}
++EXPORT_SYMBOL_GPL(m2p_remove_override_legacy);
++
+ int clear_foreign_p2m_mapping(struct gnttab_unmap_grant_ref *unmap_ops,
+ 			      struct gnttab_map_grant_ref *kmap_ops,
+ 			      struct page **pages, unsigned int count)

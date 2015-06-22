@@ -1,0 +1,104 @@
+Index: linux-3.18.16/drivers/usb/core/devio.c
+===================================================================
+--- linux-3.18.16.orig/drivers/usb/core/devio.c	2015-06-14 18:19:31.000000000 +0200
++++ linux-3.18.16/drivers/usb/core/devio.c	2015-06-19 15:18:48.499807442 +0200
+@@ -900,6 +900,12 @@
+ 	if (dev->state == USB_STATE_NOTATTACHED)
+ 		goto out_unlock_device;
+ 
++	/* XC: Set the bind inhibit flag so that the device is not
++	 * bound by usb-storage when a usb bus reset occurs.  Arguably
++	 * a bug in Linx anyway since the open usbfs handle stays
++	 * valid across usb resets and usb-storage shouldn't be able
++	 * to bind the device while it's in use through usbfs. */
++	dev->xenclient_inhibit_bind = 1;
+ 	ret = usb_autoresume_device(dev);
+ 	if (ret)
+ 		goto out_unlock_device;
+@@ -952,6 +958,7 @@
+ 	}
+ 	destroy_all_async(ps);
+ 	usb_autosuspend_device(dev);
++	dev->xenclient_inhibit_bind = 0;
+ 	usb_unlock_device(dev);
+ 	usb_put_dev(dev);
+ 	put_pid(ps->disc_pid);
+Index: linux-3.18.16/drivers/usb/core/driver.c
+===================================================================
+--- linux-3.18.16.orig/drivers/usb/core/driver.c	2015-06-14 18:19:31.000000000 +0200
++++ linux-3.18.16/drivers/usb/core/driver.c	2015-06-19 15:18:48.669805457 +0200
+@@ -260,6 +260,7 @@
+ 
+ 	if (!error)
+ 		error = udriver->probe(udev);
++	udev->xenclient_inhibit_bind = 0;
+ 	return error;
+ }
+ 
+Index: linux-3.18.16/drivers/usb/core/hub.c
+===================================================================
+--- linux-3.18.16.orig/drivers/usb/core/hub.c	2015-06-14 18:19:31.000000000 +0200
++++ linux-3.18.16/drivers/usb/core/hub.c	2015-06-19 15:18:48.773137585 +0200
+@@ -2430,6 +2430,7 @@
+ 	 */
+ 	usb_disable_autosuspend(udev);
+ 
++	udev->xenclient_inhibit_bind = 1;
+ 	err = usb_enumerate_device(udev);	/* Read descriptors */
+ 	if (err < 0)
+ 		goto fail;
+Index: linux-3.18.16/drivers/usb/storage/usb.c
+===================================================================
+--- linux-3.18.16.orig/drivers/usb/storage/usb.c	2015-06-14 18:19:31.000000000 +0200
++++ linux-3.18.16/drivers/usb/storage/usb.c	2015-06-19 15:18:48.869803123 +0200
+@@ -89,6 +89,9 @@
+ module_param_string(quirks, quirks, sizeof(quirks), S_IRUGO | S_IWUSR);
+ MODULE_PARM_DESC(quirks, "supplemental list of device IDs and their quirks");
+ 
++static unsigned int inhibit_bind = 1;
++module_param(inhibit_bind, uint, S_IRUGO | S_IWUSR);
++MODULE_PARM_DESC(inhibit_bind, "inhibit bind of usb storage devices");
+ 
+ /*
+  * The entries in this table correspond, line for line,
+@@ -1063,6 +1066,7 @@
+ 	struct us_data *us;
+ 	int result;
+ 	int size;
++	struct usb_device *usb_dev = interface_to_usbdev(intf);
+ 
+ 	/* If uas is enabled and this device can do uas then ignore it. */
+ #if IS_ENABLED(CONFIG_USB_UAS)
+@@ -1077,6 +1081,12 @@
+ 	if (usb_usual_ignore_device(intf))
+ 		return -ENXIO;
+ 
++	if (inhibit_bind && usb_dev->xenclient_inhibit_bind) {
++		printk(KERN_NOTICE
++		       "XC: Not autobinding USB Mass Storage device\n");
++		return -ENXIO;
++	}
++
+ 	/*
+ 	 * Call the general probe procedures.
+ 	 *
+Index: linux-3.18.16/include/linux/usb.h
+===================================================================
+--- linux-3.18.16.orig/include/linux/usb.h	2015-06-14 18:19:31.000000000 +0200
++++ linux-3.18.16/include/linux/usb.h	2015-06-19 15:18:48.989801722 +0200
+@@ -531,6 +531,7 @@
+  *	to keep track of the number of functions that require USB 3.0 Link Power
+  *	Management to be disabled for this usb_device.  This count should only
+  *	be manipulated by those functions, with the bandwidth_mutex is held.
++ * @xenclient_inhibit_bind: Xenclient flag to inhibit bind
+  *
+  * Notes:
+  * Usbcore drivers should not set usbdev->state directly.  Instead use
+@@ -610,6 +611,7 @@
+ 	struct usb3_lpm_parameters u1_params;
+ 	struct usb3_lpm_parameters u2_params;
+ 	unsigned lpm_disable_count;
++	int xenclient_inhibit_bind;
+ };
+ #define	to_usb_device(d) container_of(d, struct usb_device, dev)
+ 

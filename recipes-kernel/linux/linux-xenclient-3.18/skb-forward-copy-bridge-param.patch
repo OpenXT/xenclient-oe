@@ -1,0 +1,49 @@
+Index: linux-3.18.16/net/bridge/br_forward.c
+===================================================================
+--- linux-3.18.16.orig/net/bridge/br_forward.c	2015-06-14 18:19:31.000000000 +0200
++++ linux-3.18.16/net/bridge/br_forward.c	2015-06-19 15:18:52.626425932 +0200
+@@ -11,6 +11,7 @@
+  *	2 of the License, or (at your option) any later version.
+  */
+ 
++#include <linux/module.h>
+ #include <linux/err.h>
+ #include <linux/slab.h>
+ #include <linux/kernel.h>
+@@ -21,6 +22,10 @@
+ #include <linux/netfilter_bridge.h>
+ #include "br_private.h"
+ 
++static int br_skb_forward_copy = 0;
++module_param_named(skb_forward_copy, br_skb_forward_copy, uint, S_IRUGO);
++MODULE_PARM_DESC(skb_forward_copy, "Enable or disable SKB copying on forward path");
++
+ static int deliver_clone(const struct net_bridge_port *prev,
+ 			 struct sk_buff *skb,
+ 			 void (*__packet_hook)(const struct net_bridge_port *p,
+@@ -37,6 +42,8 @@
+ 
+ int br_dev_queue_push_xmit(struct sk_buff *skb)
+ {
++	struct sk_buff *new_skb;
++
+ 	/* ip_fragment doesn't copy the MAC header */
+ 	if (nf_bridge_maybe_copy_header(skb) ||
+ 	    !is_skb_forwardable(skb->dev, skb)) {
+@@ -44,7 +51,15 @@
+ 	} else {
+ 		skb_push(skb, ETH_HLEN);
+ 		br_drop_fake_rtable(skb);
+-		dev_queue_xmit(skb);
++		if (!br_skb_forward_copy)
++			dev_queue_xmit(skb);
++		else {
++			new_skb = skb_copy(skb, GFP_ATOMIC);
++			if (new_skb) {
++				dev_queue_xmit(new_skb);
++				kfree_skb(skb);
++			}
++		}
+ 	}
+ 
+ 	return 0;

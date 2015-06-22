@@ -1,0 +1,161 @@
+Index: linux-3.18.16/drivers/gpu/drm/i915/i915_gem.c
+===================================================================
+--- linux-3.18.16.orig/drivers/gpu/drm/i915/i915_gem.c	2015-06-26 19:08:12.446850412 +0200
++++ linux-3.18.16/drivers/gpu/drm/i915/i915_gem.c	2015-06-26 19:08:31.363297376 +0200
+@@ -478,8 +478,10 @@
+ 	}
+ 
+ 	ret = i915_gem_object_get_pages(obj);
+-	if (ret)
++	if (ret) {
++		DRM_DEBUG_DRIVER("i915_gem_object_get_pages failed\n");
+ 		return ret;
++        }
+ 
+ 	i915_gem_object_pin_pages(obj);
+ 
+@@ -2125,6 +2127,7 @@
+ 	return 0;
+ 
+ err_pages:
++	DRM_DEBUG_DRIVER("shmem_read_mapping_page_gfp failed\n");
+ 	sg_mark_end(sg);
+ 	for_each_sg_page(st->sgl, &sg_iter, st->nents, 0)
+ 		page_cache_release(sg_page_iter_page(&sg_iter));
+@@ -3504,8 +3507,10 @@
+ 					       obj->cache_level,
+ 					       start, end,
+ 					       flags);
+-		if (ret == 0)
++		if (ret == 0) {
++			DRM_DEBUG_DRIVER("drm_mm_insert_* failed... retrying\n");
+ 			goto search_free;
++                }
+ 
+ 		goto err_free_vma;
+ 	}
+@@ -3515,8 +3520,10 @@
+ 	}
+ 
+ 	ret = i915_gem_gtt_prepare_object(obj);
+-	if (ret)
++	if (ret) {
++		DRM_DEBUG_DRIVER("i915_gem_gtt_prepare_object failed\n");
+ 		goto err_remove_node;
++	}
+ 
+ 	list_move_tail(&obj->global_list, &dev_priv->mm.bound_list);
+ 	list_add_tail(&vma->mm_list, &vm->inactive_list);
+@@ -3896,8 +3903,10 @@
+ 
+ 	if (pipelined != obj->ring) {
+ 		ret = i915_gem_object_sync(obj, pipelined);
+-		if (ret)
++		if (ret) {
++			DRM_DEBUG_DRIVER("i915_gem_object_sync failed\n");
+ 			return ret;
++		}
+ 	}
+ 
+ 	/* Mark the pin_display early so that we account for the
+@@ -3917,16 +3926,20 @@
+ 	 */
+ 	ret = i915_gem_object_set_cache_level(obj,
+ 					      HAS_WT(obj->base.dev) ? I915_CACHE_WT : I915_CACHE_NONE);
+-	if (ret)
++	if (ret) {
++		DRM_DEBUG_DRIVER("i915_gem_object_set_cache_level failed\n");
+ 		goto err_unpin_display;
++	}
+ 
+ 	/* As the user may map the buffer once pinned in the display plane
+ 	 * (e.g. libkms for the bootup splash), we have to ensure that we
+ 	 * always use map_and_fenceable for all scanout buffers.
+ 	 */
+ 	ret = i915_gem_obj_ggtt_pin(obj, alignment, PIN_MAPPABLE);
+-	if (ret)
++	if (ret) {
++		DRM_DEBUG_DRIVER("i915_gem_obj_ggtt_pin failed\n");
+ 		goto err_unpin_display;
++	}
+ 
+ 	i915_gem_object_flush_cpu_write_domain(obj, true);
+ 
+@@ -4139,8 +4152,10 @@
+ 
+ 	if (vma == NULL || !drm_mm_node_allocated(&vma->node)) {
+ 		vma = i915_gem_object_bind_to_vm(obj, vm, alignment, flags);
+-		if (IS_ERR(vma))
++		if (IS_ERR(vma)) {
++			DRM_DEBUG_DRIVER("i915_gem_object_bind_to_vm failed\n");
+ 			return PTR_ERR(vma);
++		}
+ 	}
+ 
+ 	if (flags & PIN_GLOBAL && !obj->has_global_gtt_mapping)
+Index: linux-3.18.16/drivers/gpu/drm/i915/i915_gem_foreign.c
+===================================================================
+--- linux-3.18.16.orig/drivers/gpu/drm/i915/i915_gem_foreign.c	2015-06-26 19:08:28.166667849 +0200
++++ linux-3.18.16/drivers/gpu/drm/i915/i915_gem_foreign.c	2015-06-26 19:11:31.984533671 +0200
+@@ -69,9 +69,16 @@
+ {
+ 	int i;
+ 
+-	for (i = 0; i < num_pages; i++)
++	for (i = 0; i < num_pages; i++) {
+ 		if (m2p_remove_override_legacy(vmap->pvec[i]))
+ 			BUG();
++		if (!(i % 100)) {
++			DRM_DEBUG_DRIVER("Foreign unmap(%d) pfn = %lx, kaddr = %p\n",
++					 i, page_to_pfn(vmap->pvec[i]),
++					 pfn_to_kaddr(page_to_pfn(vmap->pvec[i])));
++
++		}
++        }
+ }
+ 
+ static int
+@@ -82,6 +89,7 @@
+ 	struct scatterlist *sg = NULL;
+ 	int i, ret;
+ 
++        DRM_DEBUG_DRIVER("Foreign get pages.\n");
+ 	vmap->pvec = kmalloc(vmap->num_pages * sizeof(struct page *),
+ 			 GFP_KERNEL | __GFP_NOWARN | __GFP_NORETRY);
+ 	if (vmap->pvec == NULL) {
+@@ -127,9 +135,18 @@
+ 			i915_gem_foreign_remove_override(vmap, i - 1);
+ 			goto err1;
+ 		}
++		if (!(i % 100)) {
++			DRM_DEBUG_DRIVER("Foreign map(%d) mfn = %llx, pfn = %lx, kaddr = %p, valid = %d\n",
++					 i, vmap->mfns[i], page_to_pfn(vmap->pvec[i]),
++					 pfn_to_kaddr(page_to_pfn(vmap->pvec[i])),
++					 virt_addr_valid(pfn_to_kaddr(page_to_pfn(vmap->pvec[i]))));
++		}
+ 	}
+ 
+ 	for_each_sg(st->sgl, sg, vmap->num_pages, i) {
++		if (!(i % 100)) {
++			DRM_DEBUG_DRIVER("Foreign page[%d] = %p\n", i, vmap->pvec[i]);
++		}
+ 		sg_set_page(sg, vmap->pvec[i], PAGE_SIZE, 0);
+ 	}
+ 
+@@ -155,6 +172,7 @@
+ 	struct i915_gem_foreign_object *vmap = to_foreign_object(obj);
+ 	int num_pages = obj->base.size >> PAGE_SHIFT;
+ 
++        DRM_DEBUG_DRIVER("Foreign put pages.\n");
+ 	i915_gem_foreign_remove_override(vmap, num_pages);
+ 
+ 	i915_gem_foreign_free_pages(vmap, num_pages);
+@@ -192,6 +210,8 @@
+ 	int ret = -ENOMEM;
+ 	u32 handle;
+ 
++	DRM_DEBUG_DRIVER("Foreign init - mfns:%p num_pages:0x%x flags: 0x%x\n",
++			 args->mfns, args->num_pages, args->flags);
+ 	if ((args->num_pages * PAGE_SIZE) > dev_priv->gtt.base.total)
+ 		return -E2BIG;
+ 

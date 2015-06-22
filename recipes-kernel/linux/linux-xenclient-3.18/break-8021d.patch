@@ -1,0 +1,98 @@
+Index: linux-3.18.16/net/bridge/br_if.c
+===================================================================
+--- linux-3.18.16.orig/net/bridge/br_if.c	2015-06-19 15:18:40.636565902 +0200
++++ linux-3.18.16/net/bridge/br_if.c	2015-06-19 15:18:54.233073842 +0200
+@@ -343,6 +343,7 @@
+ int br_add_bridge(struct net *net, const char *name)
+ {
+ 	struct net_device *dev;
++	struct net_bridge *br;
+ 	int res;
+ 
+ 	dev = alloc_netdev(sizeof(struct net_bridge), name, NET_NAME_UNKNOWN,
+@@ -351,6 +352,9 @@
+ 	if (!dev)
+ 		return -ENOMEM;
+ 
++	br = netdev_priv(dev);
++	br->break_8021d = 0;
++
+ 	dev_net_set(dev, net);
+ 	dev->rtnl_link_ops = &br_link_ops;
+ 
+Index: linux-3.18.16/net/bridge/br_input.c
+===================================================================
+--- linux-3.18.16.orig/net/bridge/br_input.c	2015-06-14 18:19:31.000000000 +0200
++++ linux-3.18.16/net/bridge/br_input.c	2015-06-19 15:18:54.386405385 +0200
+@@ -197,7 +197,8 @@
+ 		case 0x00:	/* Bridge Group Address */
+ 			/* If STP is turned off,
+ 			   then must forward to keep loop detection */
+-			if (p->br->stp_enabled == BR_NO_STP ||
++			if ((p->br->stp_enabled == BR_NO_STP &&
++                             p->br->break_8021d) ||
+ 			    fwd_mask & (1u << dest[5]))
+ 				goto forward;
+ 			break;
+Index: linux-3.18.16/net/bridge/br_private.h
+===================================================================
+--- linux-3.18.16.orig/net/bridge/br_private.h	2015-06-19 15:18:40.789897451 +0200
++++ linux-3.18.16/net/bridge/br_private.h	2015-06-19 15:18:54.486404218 +0200
+@@ -290,6 +290,8 @@
+ #endif /* IS_ENABLED(CONFIG_IPV6) */
+ #endif
+ 
++	u8				break_8021d;
++
+ 	struct timer_list		hello_timer;
+ 	struct timer_list		tcn_timer;
+ 	struct timer_list		topology_change_timer;
+Index: linux-3.18.16/net/bridge/br_sysfs_br.c
+===================================================================
+--- linux-3.18.16.orig/net/bridge/br_sysfs_br.c	2015-06-19 15:18:41.093227243 +0200
++++ linux-3.18.16/net/bridge/br_sysfs_br.c	2015-06-19 15:18:54.589736345 +0200
+@@ -760,6 +760,36 @@
+ static DEVICE_ATTR_RW(default_pvid);
+ #endif
+ 
++static ssize_t show_break_8021d(struct device *d,
++				struct device_attribute *attr,
++				char *buf)
++{
++	return sprintf(buf, "%x\n", to_bridge(d)->break_8021d);
++}
++
++static ssize_t store_break_8021d(struct device *d,
++				 struct device_attribute *attr,
++				 const char *buf, size_t len)
++{
++	struct net_bridge *br = to_bridge(d);
++
++	spin_lock_bh(&br->lock);
++	switch (buf[0]) {
++	case '1':
++		br->break_8021d = 1;
++		break;
++	case '0':
++		br->break_8021d = 0;
++		break;
++	}
++
++	spin_unlock_bh(&br->lock);
++	return len;
++}
++
++static DEVICE_ATTR(break_8021d, S_IRUGO | S_IWUSR,
++		   show_break_8021d, store_break_8021d);
++
+ static struct attribute *bridge_attrs[] = {
+ 	&dev_attr_forward_delay.attr,
+ 	&dev_attr_hello_time.attr,
+@@ -807,6 +837,7 @@
+ 	&dev_attr_vlan_protocol.attr,
+ 	&dev_attr_default_pvid.attr,
+ #endif
++	&dev_attr_break_8021d.attr,
+ 	NULL
+ };
+ 

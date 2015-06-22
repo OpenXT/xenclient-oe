@@ -1,0 +1,62 @@
+Index: linux-3.18.16/drivers/xen/xenbus/xenbus_probe.c
+===================================================================
+--- linux-3.18.16.orig/drivers/xen/xenbus/xenbus_probe.c	2015-06-14 18:19:31.000000000 +0200
++++ linux-3.18.16/drivers/xen/xenbus/xenbus_probe.c	2015-06-19 15:19:06.509597181 +0200
+@@ -545,12 +545,34 @@
+ 	return (len == 0) ? i : -ERANGE;
+ }
+ 
++static int move_otherend(struct xenbus_device *dev)
++{
++	int err;
++
++	/* Only move netdevs. */
++	if (!xenbus_dev_is_vif(dev))
++		return 0;
++
++	DPRINTK("xenbus %s: otherend possibly changed location;\
++		  renegotiating connection\n", dev->nodename);
++	err = talk_to_otherend(dev);
++	if (err) {
++		DPRINTK("talk_to_otherend on %s failed.\n", dev->nodename);
++		return err;
++	}
++        err = watch_otherend(dev);
++        if (err)
++		DPRINTK("watch_otherend on %s failed.\n", dev->nodename);
++
++	return err;
++}
++
+ void xenbus_dev_changed(const char *node, struct xen_bus_type *bus)
+ {
+ 	int exists, rootlen;
+ 	struct xenbus_device *dev;
+ 	char type[XEN_BUS_ID_SIZE];
+-	const char *p, *root;
++	const char *p, *root, *ending;
+ 
+ 	if (char_count(node, '/') < 2)
+ 		return;
+@@ -573,12 +595,20 @@
+ 	if (!root)
+ 		return;
+ 
++	ending = kasprintf(GFP_KERNEL, "%.*s", strlen(node)-rootlen, node + rootlen);
++	if (!ending)
++		return;
+ 	dev = xenbus_device_find(root, &bus->bus);
+ 	if (!dev)
+ 		xenbus_probe_node(bus, type, root);
+-	else
++	else {
++		if (!strcmp(ending, "/backend") || !strcmp(ending, "/frontend"))
++			/* reconfigure xenstore watches if backend/frontend node pointer has changed */
++			move_otherend(dev);
+ 		put_device(&dev->dev);
++	}
+ 
++	kfree(ending);
+ 	kfree(root);
+ }
+ EXPORT_SYMBOL_GPL(xenbus_dev_changed);

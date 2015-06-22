@@ -1,0 +1,49 @@
+Index: linux-3.18.16/drivers/xen/xenbus/xenbus_probe_backend.c
+===================================================================
+--- linux-3.18.16.orig/drivers/xen/xenbus/xenbus_probe_backend.c	2015-06-14 18:19:31.000000000 +0200
++++ linux-3.18.16/drivers/xen/xenbus/xenbus_probe_backend.c	2015-06-19 15:19:05.646273925 +0200
+@@ -187,6 +187,19 @@
+ 	xenbus_otherend_changed(watch, vec, len, 0);
+ }
+ 
++void xenbus_dev_shutdown_backend(struct device *_dev)
++{
++	struct xenbus_device *dev = to_xenbus_device(_dev);
++
++	get_device(&dev->dev);
++	if (system_state > SYSTEM_RUNNING && !xenbus_dev_is_vif(dev))
++		DPRINTK("%s: skipping wait for frontend to close\n",
++			dev->nodename);
++	else
++		xenbus_dev_shutdown(_dev);
++	put_device(&dev->dev);
++}
++
+ static struct xen_bus_type xenbus_backend = {
+ 	.root = "backend",
+ 	.levels = 3,		/* backend/type/<frontend>/<id> */
+@@ -199,7 +212,7 @@
+ 		.uevent		= xenbus_uevent_backend,
+ 		.probe		= xenbus_dev_probe,
+ 		.remove		= xenbus_dev_remove,
+-		.shutdown	= xenbus_dev_shutdown,
++		.shutdown	= xenbus_dev_shutdown_backend,
+ 		.dev_groups	= xenbus_dev_groups,
+ 	},
+ };
+Index: linux-3.18.16/drivers/xen/xenbus/xenbus_probe.h
+===================================================================
+--- linux-3.18.16.orig/drivers/xen/xenbus/xenbus_probe.h	2015-06-14 18:19:31.000000000 +0200
++++ linux-3.18.16/drivers/xen/xenbus/xenbus_probe.h	2015-06-19 15:19:05.816271942 +0200
+@@ -85,4 +85,11 @@
+ 
+ void xenbus_ring_ops_init(void);
+ 
++static inline bool xenbus_dev_is_vif(const struct xenbus_device *dev)
++{
++	return (dev &&
++		(!strcmp("vif", dev->devicetype) ||
++		 !strcmp("vwif", dev->devicetype)));
++}
++
+ #endif

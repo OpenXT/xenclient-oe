@@ -1,0 +1,96 @@
+Index: linux-3.18.16/drivers/xen/privcmd.c
+===================================================================
+--- linux-3.18.16.orig/drivers/xen/privcmd.c	2015-06-14 18:19:31.000000000 +0200
++++ linux-3.18.16/drivers/xen/privcmd.c	2015-06-19 15:18:44.759851104 +0200
+@@ -498,6 +498,48 @@
+ 	goto out;
+ }
+ 
++static long privcmd_ioctl_mmap_cache_attr(void __user *udata)
++{
++	struct privcmd_mmapcacheattr m;
++	struct mm_struct *mm = current->mm;
++	struct vm_area_struct *vma;
++	unsigned long prot;
++
++	if (copy_from_user(&m, udata, sizeof(m)))
++		return -EFAULT;
++
++	vma = find_vma(mm, m.addr);
++	if (vma == NULL)
++		return -EINVAL;
++
++	switch (m.type) {
++		case XEN_DOMCTL_MEM_CACHEATTR_UC:
++			prot = cachemode2protval(_PAGE_CACHE_MODE_UC);
++			break;
++		case XEN_DOMCTL_MEM_CACHEATTR_WC:
++			prot = cachemode2protval(_PAGE_CACHE_MODE_WC);
++			break;
++		case XEN_DOMCTL_MEM_CACHEATTR_WT:
++			prot = cachemode2protval(_PAGE_CACHE_MODE_WT);
++			break;
++		case XEN_DOMCTL_MEM_CACHEATTR_WP:
++			prot = cachemode2protval(_PAGE_CACHE_MODE_WP);
++			break;
++		case XEN_DOMCTL_MEM_CACHEATTR_WB:
++			prot = cachemode2protval(_PAGE_CACHE_MODE_WB);
++			break;
++		case XEN_DOMCTL_MEM_CACHEATTR_UCM:
++			prot = cachemode2protval(_PAGE_CACHE_MODE_UC_MINUS);
++			break;
++		default:
++			return -EINVAL;
++	}
++
++	pgprot_val(vma->vm_page_prot) |= prot;
++
++	return 0;
++}
++
+ static long privcmd_ioctl(struct file *file,
+ 			  unsigned int cmd, unsigned long data)
+ {
+@@ -521,6 +563,10 @@
+ 		ret = privcmd_ioctl_mmap_batch(udata, 2);
+ 		break;
+ 
++	case IOCTL_PRIVCMD_MMAPCACHEATTR:
++		ret = privcmd_ioctl_mmap_cache_attr(udata);
++		break;
++
+ 	default:
+ 		ret = -EINVAL;
+ 		break;
+Index: linux-3.18.16/include/uapi/xen/privcmd.h
+===================================================================
+--- linux-3.18.16.orig/include/uapi/xen/privcmd.h	2015-06-14 18:19:31.000000000 +0200
++++ linux-3.18.16/include/uapi/xen/privcmd.h	2015-06-19 15:18:44.913182648 +0200
+@@ -73,6 +73,19 @@
+ 	int __user *err;  /* array of error codes */
+ };
+ 
++#define XEN_DOMCTL_MEM_CACHEATTR_UC  0
++#define XEN_DOMCTL_MEM_CACHEATTR_WC  1
++#define XEN_DOMCTL_MEM_CACHEATTR_WT  4
++#define XEN_DOMCTL_MEM_CACHEATTR_WP  5
++#define XEN_DOMCTL_MEM_CACHEATTR_WB  6
++#define XEN_DOMCTL_MEM_CACHEATTR_UCM 7
++
++struct privcmd_mmapcacheattr {
++       __u64 addr;
++       int type;
++};
++
++
+ /*
+  * @cmd: IOCTL_PRIVCMD_HYPERCALL
+  * @arg: &privcmd_hypercall_t
+@@ -94,5 +107,7 @@
+ 	_IOC(_IOC_NONE, 'P', 3, sizeof(struct privcmd_mmapbatch))
+ #define IOCTL_PRIVCMD_MMAPBATCH_V2				\
+ 	_IOC(_IOC_NONE, 'P', 4, sizeof(struct privcmd_mmapbatch_v2))
++#define IOCTL_PRIVCMD_MMAPCACHEATTR                            \
++       _IOC(_IOC_NONE, 'P', 200, sizeof(struct privcmd_mmapcacheattr))
+ 
+ #endif /* __LINUX_PUBLIC_PRIVCMD_H__ */

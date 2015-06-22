@@ -1,0 +1,65 @@
+Index: linux-3.18.16/drivers/pci/pci.c
+===================================================================
+--- linux-3.18.16.orig/drivers/pci/pci.c	2015-06-19 15:19:03.236302064 +0200
++++ linux-3.18.16/drivers/pci/pci.c	2015-06-19 15:19:03.936293890 +0200
+@@ -3354,6 +3354,10 @@
+ 
+ 	rc = pci_parent_bus_reset(dev, probe);
+ done:
++	/* larger delay for gpus */
++	if (!probe && (dev->class == 0x30000 || dev->class == 0x38000))
++	  msleep(500);
++
+ 	return rc;
+ }
+ 
+Index: linux-3.18.16/drivers/pci/quirks.c
+===================================================================
+--- linux-3.18.16.orig/drivers/pci/quirks.c	2015-06-14 18:19:31.000000000 +0200
++++ linux-3.18.16/drivers/pci/quirks.c	2015-06-19 15:19:04.092958729 +0200
+@@ -3349,10 +3349,15 @@
+ 	void __iomem *mmio_base;
+ 	unsigned long timeout;
+ 	u32 val;
++	u16 cmd;
+ 
+ 	if (probe)
+ 		return 0;
+ 
++        /* enable response in memory space */
++        pci_read_config_word(dev, PCI_COMMAND, &cmd);
++        pci_write_config_word(dev, PCI_COMMAND, cmd | PCI_COMMAND_MEMORY);
++
+ 	mmio_base = pci_iomap(dev, 0, 0);
+ 	if (!mmio_base)
+ 		return -ENOMEM;
+@@ -3383,7 +3388,10 @@
+ 	iowrite32(0x00000002, mmio_base + NSDE_PWR_STATE);
+ 
+ 	pci_iounmap(dev, mmio_base);
+-	return 0;
++        pci_write_config_word(dev, PCI_COMMAND, cmd);
++        /* follow with regular flr, returning ENOTTY causes rest of the FLR non-device specific code
++           to execute. Alternatively we could execute it here explicitly and mby that would be cleaner */
++        return -ENOTTY;
+ }
+ 
+ /*
+Index: linux-3.18.16/drivers/xen/xen-pciback/pci_stub.c
+===================================================================
+--- linux-3.18.16.orig/drivers/xen/xen-pciback/pci_stub.c	2015-06-14 18:19:31.000000000 +0200
++++ linux-3.18.16/drivers/xen/xen-pciback/pci_stub.c	2015-06-19 15:19:04.189624266 +0200
+@@ -403,10 +403,13 @@
+ 	if (!dev_data->pci_saved_state)
+ 		dev_err(&dev->dev, "Could not store PCI conf saved state!\n");
+ 	else {
++#if 0
+ 		dev_dbg(&dev->dev, "resetting (FLR, D3, etc) the device\n");
+ 		__pci_reset_function_locked(dev);
+ 		pci_restore_state(dev);
++#endif
+ 	}
++
+ 	/* Now disable the device (this also ensures some private device
+ 	 * data is setup before we export)
+ 	 */
