@@ -39,7 +39,7 @@ PATCHES
 Index: qemu-1.4.0/hw/Makefile.objs
 ===================================================================
 --- qemu-1.4.0.orig/hw/Makefile.objs	2013-02-15 18:05:35.000000000 -0500
-+++ qemu-1.4.0/hw/Makefile.objs	2015-06-05 09:22:08.461081630 -0400
++++ qemu-1.4.0/hw/Makefile.objs	2015-06-15 12:37:48.149121126 -0400
 @@ -195,6 +195,7 @@
  # xen backend driver support
  common-obj-$(CONFIG_XEN_BACKEND) += xen_backend.o xen_devconfig.o
@@ -50,8 +50,8 @@ Index: qemu-1.4.0/hw/Makefile.objs
  # virtio has to be here due to weird dependency between PCI and virtio-net.
 Index: qemu-1.4.0/hw/acpi_piix4.c
 ===================================================================
---- qemu-1.4.0.orig/hw/acpi_piix4.c	2015-06-05 09:22:07.488746183 -0400
-+++ qemu-1.4.0/hw/acpi_piix4.c	2015-06-05 09:22:08.461081630 -0400
+--- qemu-1.4.0.orig/hw/acpi_piix4.c	2015-06-15 12:37:47.465121107 -0400
++++ qemu-1.4.0/hw/acpi_piix4.c	2015-06-18 16:28:11.528561613 -0400
 @@ -30,9 +30,12 @@
  #include "fw_cfg.h"
  #include "exec/address-spaces.h"
@@ -112,7 +112,15 @@ Index: qemu-1.4.0/hw/acpi_piix4.c
       * Enable ACPI, QEMU doesn't enable it by default */
      apm_ctrl_changed(ACPI_ENABLE, s);
  
-@@ -538,6 +553,32 @@
+@@ -523,6 +538,7 @@
+     PIIX4PMState *s = opaque;
+ 
+     acpi_gpe_ioport_writeb(&s->ar, addr, val);
++    xen_acpi_pm_gpe_ioport_writeb(s->ar.gpe.len, addr, val);
+     pm_update_sci(s);
+ 
+     PIIX4_DPRINTF("gpe write %x <== %d\n", addr, val);
+@@ -538,6 +554,32 @@
      .endianness = DEVICE_LITTLE_ENDIAN,
  };
  
@@ -147,8 +155,8 @@ Index: qemu-1.4.0/hw/acpi_piix4.c
      PIIX4PMState *s = opaque;
 Index: qemu-1.4.0/hw/pc.h
 ===================================================================
---- qemu-1.4.0.orig/hw/pc.h	2015-06-05 09:22:08.301080308 -0400
-+++ qemu-1.4.0/hw/pc.h	2015-06-05 09:22:08.461081630 -0400
+--- qemu-1.4.0.orig/hw/pc.h	2015-06-15 12:37:48.009121122 -0400
++++ qemu-1.4.0/hw/pc.h	2015-06-15 12:37:48.149121126 -0400
 @@ -121,6 +121,7 @@
                         qemu_irq sci_irq, qemu_irq smi_irq,
                         int kvm_enabled, void *fw_cfg);
@@ -159,8 +167,8 @@ Index: qemu-1.4.0/hw/pc.h
  extern int no_hpet;
 Index: qemu-1.4.0/qemu-options.hx
 ===================================================================
---- qemu-1.4.0.orig/qemu-options.hx	2015-06-05 09:22:08.309082268 -0400
-+++ qemu-1.4.0/qemu-options.hx	2015-06-05 09:22:08.461081630 -0400
+--- qemu-1.4.0.orig/qemu-options.hx	2015-06-15 12:37:48.013121122 -0400
++++ qemu-1.4.0/qemu-options.hx	2015-06-15 12:37:48.149121126 -0400
 @@ -2566,6 +2566,9 @@
      "-xen-attach     attach to existing xen domain\n"
      "                xend will use this when starting QEMU\n",
@@ -183,8 +191,8 @@ Index: qemu-1.4.0/qemu-options.hx
  DEF("no-reboot", 0, QEMU_OPTION_no_reboot, \
 Index: qemu-1.4.0/vl.c
 ===================================================================
---- qemu-1.4.0.orig/vl.c	2015-06-05 09:22:08.305083999 -0400
-+++ qemu-1.4.0/vl.c	2015-06-05 09:22:08.465082089 -0400
+--- qemu-1.4.0.orig/vl.c	2015-06-15 12:37:48.013121122 -0400
++++ qemu-1.4.0/vl.c	2015-06-15 12:37:48.153121126 -0400
 @@ -171,6 +171,8 @@
  #include "qapi/string-input-visitor.h"
  #include "ui/xen-input.h"
@@ -222,8 +230,8 @@ Index: qemu-1.4.0/vl.c
 Index: qemu-1.4.0/hw/xen_acpi_pm.c
 ===================================================================
 --- /dev/null	1970-01-01 00:00:00.000000000 +0000
-+++ qemu-1.4.0/hw/xen_acpi_pm.c	2015-06-05 09:27:57.439435545 -0400
-@@ -0,0 +1,999 @@
++++ qemu-1.4.0/hw/xen_acpi_pm.c	2015-06-18 16:26:52.184559450 -0400
+@@ -0,0 +1,1048 @@
 +/*
 + * APCI PM feature for battery/AC/lid management for OpenXT guests.
 + *
@@ -1115,6 +1123,51 @@ Index: qemu-1.4.0/hw/xen_acpi_pm.c
 +    return 0;
 +}
 +
++/* -------/ Guest Shutdown /------------------------------------------------ */
++
++static int xen_acpi_domain_pm_watch(XenACPIPMState *s)
++{
++   char base[XEN_BUFSIZE];
++   int err;
++
++   snprintf(base, sizeof(base), "/local/domain/%d/control", xen_domid);
++
++   err = xenstore_add_watch(base, "hvm-shutdown", power_button_changed_cb, s);
++
++   if (err) {
++        XBM_ERROR_MSG("failed to register watch for %s/%s err: %d\n",
++                      base, "hvm-shutdown", err);
++        return -1;
++   }
++   return 0;
++}
++
++void xen_acpi_pm_gpe_ioport_writeb(uint8_t gpe_len, uint32_t addr,
++				   uint32_t val)
++{
++    char base[XEN_BUFSIZE];
++    int err;
++
++    if ((addr < gpe_len / 2)||(addr >= gpe_len)) {
++       /* GPE_STS or invalid, don't care */
++	 	return;
++    }
++
++    /*
++     * GPE_EN - the power button bit _L06 is in the first byte of the enable
++     * register bank, which is addr == 0.
++     */
++    if (((addr - (gpe_len / 2)) == 0) && (val & (1 << ACPI_PM_POWER_BUTTON))) {
++        snprintf(base, sizeof(base), "/local/domain/%d/control", xen_domid);
++
++        err = xenstore_write_int(base, "hvm-powerbutton-enable", 1);
++        if (err) {
++            XBM_ERROR_MSG("failed to write xs for %s/%s err: %d\n",
++                          base, "hvm-powerbutton-enable", err);
++        }
++    }
++}
++
 +/* -------/ Initialization /------------------------------------------------ */
 +
 +static int xen_acpi_pm_initfn(SysBusDevice *dev)
@@ -1180,6 +1233,10 @@ Index: qemu-1.4.0/hw/xen_acpi_pm.c
 +        goto error_init;
 +    }
 +
++    if (0 != xen_acpi_domain_pm_watch(s)) {
++        goto error_init;
++    }
++
 +    fprintf(stdout, "Xen ACPI PM initialized\n");
 +
 +    return 0;
@@ -1226,8 +1283,8 @@ Index: qemu-1.4.0/hw/xen_acpi_pm.c
 Index: qemu-1.4.0/hw/xen_acpi_pm.h
 ===================================================================
 --- /dev/null	1970-01-01 00:00:00.000000000 +0000
-+++ qemu-1.4.0/hw/xen_acpi_pm.h	2015-06-05 09:27:08.639024480 -0400
-@@ -0,0 +1,37 @@
++++ qemu-1.4.0/hw/xen_acpi_pm.h	2015-06-18 16:29:34.932563886 -0400
+@@ -0,0 +1,41 @@
 +/*
 + * APCI PM feature for battery/AC/lid management for OpenXT guests.
 + *
@@ -1263,5 +1320,9 @@ Index: qemu-1.4.0/hw/xen_acpi_pm.h
 +
 +/* Get enabled/disable state of the ACPI PM device support */
 +bool xen_acpi_pm_get_enabled(void);
++
++/* Inform Xen ACPI PM model of update to GPE registers */
++void xen_acpi_pm_gpe_ioport_writeb(uint8_t gpe_len, uint32_t addr,
++				   uint32_t val);
 +
 +#endif /* !XEN_ACPI_PM_H_ */
