@@ -59,10 +59,6 @@ echo "Command line: `cat /proc/cmdline`"
 
 ln -s /proc/self/fd/2 /dev/stderr
 
-QEMU_CMDLINE=`cat /proc/cmdline | cut -d' ' -f4- `
-
-DOMID=`echo $QEMU_CMDLINE | cut -d' ' -f2 `
-
 echo $*
 echo 1 > /proc/sys/net/ipv4/ip_forward
 echo 0 > /proc/sys/net/ipv4/conf/all/rp_filter
@@ -73,12 +69,19 @@ export INTEL_DBUS=1
 
 rsyslogd -f /etc/rsyslog.conf -c4
 
-is_dmagent=`echo $QEMU_CMDLINE | cut -d' ' -f1`
+KERNEL_CMDLINE="`cat /proc/cmdline`"
 
-if [ "$is_dmagent" == "dmagent" ]; then
+echo "KERNEL_CMDLINE: $KERNEL_CMDLINE"
+if [ "${KERNEL_CMDLINE/dmagent/}" != "${KERNEL_CMDLINE}" ]; then
+    # Assumes we are stubbing for the domid passed at the end of the cmdline.
+    # TODO: That should be done in a more generic way...
+    DOMID=${KERNEL_CMDLINE##* }
     echo "start dm-agent"
     exec /usr/bin/dm-agent -q -n -t $DOMID
 else
-    echo "-stubdom -name qemu-$DOMID $QEMU_CMDLINE"
+    QEMU_CMDLINE=`cat /proc/cmdline | cut -d' ' -f4- `
+    DOMID=`echo $QEMU_CMDLINE | cut -d' ' -f2 `
+    echo "qemu-dm-wrapper $DOMID -stubdom -name qemu-$DOMID $QEMU_CMDLINE"
     exec /usr/bin/qemu-dm-wrapper $DOMID -stubdom -name qemu-$DOMID $QEMU_CMDLINE
 fi
+
