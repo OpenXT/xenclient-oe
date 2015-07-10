@@ -102,6 +102,7 @@ SRC_URI = "${XEN_SRC_URI};name=source \
     file://blktap-instrumentation.patch;patch=1 \
     file://blktap-timeout.patch;patch=1 \
     file://stubdomain-msi-irq-access.patch;striplevel=1 \
+    file://workaround-nehalem-igd-vtd.patch;patch=1 \
 "
 
 SRC_URI[source.md5sum] := "${XEN_SRC_MD5SUM}"
@@ -112,4 +113,4 @@ S = "${WORKDIR}/xen-${XEN_VERSION}"
 LICENSE = "GPLv2"
 LIC_FILES_CHKSUM = "file://COPYING;md5=e0f0f3ac55608719a82394cc353928df"
 
-INC_PR = "r1"
+INC_PR = "r3"

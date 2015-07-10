@@ -25,3 +25,5 @@ do_install() {
         DESTDIR=${D} oe_runmake install-xen
         ln -sf "`basename ${D}/boot/xen-*xc.gz`" ${D}/boot/xen-debug.gz
 }
+
+PR = "${INC_PR}.5"
