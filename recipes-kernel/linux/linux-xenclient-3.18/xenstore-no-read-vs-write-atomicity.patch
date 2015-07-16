@@ -1,0 +1,35 @@
+Index: linux-3.18.16/drivers/xen/xenbus/xenbus_dev_frontend.c
+===================================================================
+--- linux-3.18.16.orig/drivers/xen/xenbus/xenbus_dev_frontend.c	2015-07-10 15:23:52.288199493 +0200
++++ linux-3.18.16/drivers/xen/xenbus/xenbus_dev_frontend.c	2015-07-16 02:02:08.291449803 +0200
+@@ -547,6 +547,14 @@
+ 
+ 	filp->private_data = u;
+ 
++	/*
++	* we can't live with read() vs. write() atomicity, since we use
++	* write() as source of events returned by read() and write()
++	* called after another thread has blocked in read() waiting for
++	* events cannot be required to wait for that read() to finish.
++	*/
++	no_atomic_pos(filp);
++
+ 	return 0;
+ }
+ 
+Index: linux-3.18.16/include/linux/fs.h
+===================================================================
+--- linux-3.18.16.orig/include/linux/fs.h	2015-06-14 18:19:31.000000000 +0200
++++ linux-3.18.16/include/linux/fs.h	2015-07-16 01:59:31.219733198 +0200
+@@ -829,6 +829,11 @@
+ 	unsigned char f_handle[0];
+ };
+ 
++static inline void no_atomic_pos(struct file *f)
++{
++	f->f_mode &= ~FMODE_ATOMIC_POS;
++}
++
+ static inline struct file *get_file(struct file *f)
+ {
+ 	atomic_long_inc(&f->f_count);
