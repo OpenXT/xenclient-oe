@@ -45,6 +45,9 @@ SRC_URI += "file://0001-compile-time-stubdom-flag.patch \
             file://0032-bp-hub-net-queue-flush-fix-199ee608f0d08510b5c6c37f31a7fbff211d63c4.patch;striplevel=1 \
             file://0033-acpi-pm-feature.patch;striplevel=1 \
             file://0034-maintain-time-offset.patch;striplevel=1 \
+            file://0035-xsa138-qemuu-1.patch \
+            file://0036-xsa138-qemuu-2.patch \
+            file://0037-xsa138-qemuu-3.patch \
             "
 
 SRC_URI[md5sum] = "78f13b774814b6b7ebcaf4f9b9204318"
@@ -105,4 +108,4 @@ do_install(){
     DESTDIR=${D} oe_runmake STRIP='' install
 }
 
-INC_PR = "r14"
+INC_PR = "r15"
