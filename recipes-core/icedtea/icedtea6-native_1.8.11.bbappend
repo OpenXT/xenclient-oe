@@ -9,3 +9,5 @@ export DISTRIBUTION_ECJ_PATCHES += " \
     patches/icedtea-ecj-fix-compil-gcc-4.7.patch \
     patches/icedtea-ecj-fix-currency-data.patch \
 "
+
+PR .= ".1"
