@@ -22,7 +22,6 @@ PV = "git${SRCPV}"
 
 SRCREV = "${AUTOREV}"
 SRC_URI = "git://${OPENXT_GIT_MIRROR}/v4v.git;protocol=${OPENXT_GIT_PROTOCOL};branch=${OPENXT_BRANCH} \
-           file://linux-3.x-get-unused-fd-compat.patch;patch=1 \
 	   file://DEBIAN_postinst \
            "
 
