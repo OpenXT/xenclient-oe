@@ -34,6 +34,7 @@ IMAGE_INSTALL = "\
     networkmanager \
     xenclient-toolstack \
     kernel-module-e1000e \
+    kernel-module-iptable-nat \
     linux-firmware \
     rt2870-firmware \
     rt3572 \
