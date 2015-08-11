@@ -6,10 +6,10 @@ SECTION = "kernel"
 
 LICENSE = "Intel"
 
-LIC_FILES_CHKSUM = "file://LICENCE.iwlwifi_firmware;md5=8b938534f77ffd453690eb34ed84ae8b"
+LIC_FILES_CHKSUM = "file://LICENCE.iwlwifi_firmware;md5=3fd842911ea93c29cd32679aa23e1c88"
 
-SRCREV = "dec41bce44e0dff6a2c3358a958fadf22bf58858"
-PV = "0.0+git${SRCPV}"
+SRCREV = "75cc3ef8ba6712fd72c073b17a790282136cc743"
+PV = "0.1+git${SRCPV}"
 PR = "r1"
 
 SRC_URI = "git://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git;protocol=git"
