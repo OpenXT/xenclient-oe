@@ -38,11 +38,10 @@ SRC_URI = "https://www.kernel.org/pub/linux/kernel/v${PV_MAJOR}.x/linux-${PV}.ta
     file://usbback-base.patch;patch=1 \
     file://hvc-kgdb-fix.patch;patch=1 \
     file://xenstore-no-read-vs-write-atomicity.patch;patch=1 \
-    file://backport-config-Enable-NEED_DMA_MAP_STATE-by-default-when-SWIOTLB-is-selected.patch \
     file://defconfig"
 
-SRC_URI[kernel.md5sum] = "e2cb00e62421cbc3425272d437fab05e"
-SRC_URI[kernel.sha256sum] = "1055d0a121734061d2768c5296bf078ce716757965e30379c754f695db59078e"
+SRC_URI[kernel.md5sum] = "9ac668fd5d47f7755fbf81d025112796"
+SRC_URI[kernel.sha256sum] = "57649fc21be6929b5bd1a7241a711eae6671b8296b42135d0982661d4d1e224d"
 
 S = "${WORKDIR}/linux-${PV}"
 
