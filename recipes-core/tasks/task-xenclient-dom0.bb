@@ -22,14 +22,12 @@ RDEPENDS_${PN} = " \
     libv4v \
     libv4v-bin \
     libedid \
-    libxenacpi \
     lvm2 \
     bridge-utils \
     iptables \
     iproute2 \
     qemu-dm \
     xcpmd \
-    pmutil \
     vbetool-xc \
     xenclient-toolstack \
     xenclient-input-daemon \

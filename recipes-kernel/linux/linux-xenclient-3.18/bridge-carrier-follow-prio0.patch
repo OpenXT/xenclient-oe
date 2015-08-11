@@ -1,0 +1,121 @@
+Index: linux-3.18.16/net/bridge/br_if.c
+===================================================================
+--- linux-3.18.16.orig/net/bridge/br_if.c	2015-06-29 15:17:30.022168219 +0200
++++ linux-3.18.16/net/bridge/br_if.c	2015-06-29 15:19:16.507640428 +0200
+@@ -82,6 +82,7 @@
+ 		if (p->state != BR_STATE_DISABLED)
+ 			br_stp_disable_port(p);
+ 	}
++	br_maybe_copy_iface_carrier(p);
+ 	spin_unlock_bh(&br->lock);
+ }
+ 
+@@ -575,3 +576,28 @@
+ 	if (mask & BR_AUTO_MASK)
+ 		nbp_update_port_count(br);
+ }
++
++/* if p->priority == 0 either copy carier if p is forwarding
++ * or set carrier to off if p is is not forwarding
++ * */
++int br_maybe_copy_iface_carrier(struct net_bridge_port *p)
++{
++	int carrier;
++	if (p->priority == 0) {
++		if (p->state == BR_STATE_FORWARDING)
++			carrier = netif_carrier_ok(p->dev);
++		else
++			carrier = 0;
++		if (carrier != netif_carrier_ok(p->br->dev)) {
++			printk("prio 0 port %s carrier %s, update bridge %s state\n",
++			       p->dev->name, carrier ? "on" : "off",
++			       p->br->dev->name);
++			if (carrier)
++				netif_carrier_on(p->br->dev);
++			else
++				netif_carrier_off(p->br->dev);
++		}
++		return 1;
++	}
++	return 0;
++}
+Index: linux-3.18.16/net/bridge/br_private.h
+===================================================================
+--- linux-3.18.16.orig/net/bridge/br_private.h	2015-06-29 15:17:30.005501740 +0200
++++ linux-3.18.16/net/bridge/br_private.h	2015-06-29 15:19:16.660972043 +0200
+@@ -432,6 +432,7 @@
+ 					netdev_features_t features);
+ void br_port_flags_change(struct net_bridge_port *port, unsigned long mask);
+ void br_manage_promisc(struct net_bridge *br);
++extern int br_maybe_copy_iface_carrier(struct net_bridge_port *p);
+ 
+ /* br_input.c */
+ int br_handle_frame_finish(struct sk_buff *skb);
+Index: linux-3.18.16/net/bridge/br_stp.c
+===================================================================
+--- linux-3.18.16.orig/net/bridge/br_stp.c	2015-06-29 15:17:30.072167659 +0200
++++ linux-3.18.16/net/bridge/br_stp.c	2015-06-29 15:19:16.760970922 +0200
+@@ -457,8 +457,13 @@
+ 
+ 	if (liveports == 0)
+ 		netif_carrier_off(br->dev);
+-	else
+-		netif_carrier_on(br->dev);
++        else {
++                int carrier_copied = 0;
++                list_for_each_entry(p, &br->port_list, list)
++                        carrier_copied |= br_maybe_copy_iface_carrier(p);
++                if (!carrier_copied)
++                        netif_carrier_on(br->dev);
++        }
+ }
+ 
+ /* called under bridge lock */
+Index: linux-3.18.16/net/bridge/br_stp_if.c
+===================================================================
+--- linux-3.18.16.orig/net/bridge/br_stp_if.c	2015-06-29 15:17:30.055501179 +0200
++++ linux-3.18.16/net/bridge/br_stp_if.c	2015-06-29 15:19:16.860969801 +0200
+@@ -288,6 +288,7 @@
+ 		br_port_state_selection(p->br);
+ 	}
+ 
++	br_maybe_copy_iface_carrier(p);
+ 	return 0;
+ }
+ 
+Index: linux-3.18.16/net/bridge/br_sysfs_br.c
+===================================================================
+--- linux-3.18.16.orig/net/bridge/br_sysfs_br.c	2015-06-29 15:17:30.038834699 +0200
++++ linux-3.18.16/net/bridge/br_sysfs_br.c	2015-06-29 15:19:16.954302089 +0200
+@@ -344,6 +344,23 @@
+ }
+ static DEVICE_ATTR_WO(flush);
+ 
++static int set_link_state(struct net_bridge *br, unsigned long val)
++{
++	if (val)
++		netif_carrier_on(br->dev);
++	else
++		netif_carrier_off(br->dev);
++	return 0;
++}
++
++static ssize_t store_link_state(struct device *d,
++				struct device_attribute *attr,
++				const char *buf, size_t len)
++{
++	return store_bridge_parm(d, buf, len, set_link_state);
++}
++static DEVICE_ATTR(link_state, S_IWUSR, NULL, store_link_state);
++
+ #ifdef CONFIG_BRIDGE_IGMP_SNOOPING
+ static ssize_t multicast_router_show(struct device *d,
+ 				     struct device_attribute *attr, char *buf)
+@@ -763,6 +780,7 @@
+ 	&dev_attr_gc_timer.attr,
+ 	&dev_attr_group_addr.attr,
+ 	&dev_attr_flush.attr,
++	&dev_attr_link_state.attr,
+ #ifdef CONFIG_BRIDGE_IGMP_SNOOPING
+ 	&dev_attr_multicast_router.attr,
+ 	&dev_attr_multicast_snooping.attr,
