@@ -16,6 +16,9 @@ SRC_URI[ivb_snb.md5sum] = "b5d19bc8ac2185e3fa88d78d80a3e254"
 SRC_URI[ivb_snb.sha256sum] = "8618d72c00a824d693836d1334330e1cf831c952bb541a93a5e70e54c9e479a2"
 SRC_URI[hsw.md5sum] = "e1fbdd2b8c255d3ded6f33d14e30d498"
 SRC_URI[hsw.sha256sum] = "63ad2d0b8fdb4422e0f751c23472a0e9bfbc3c643959e21249c66336943b910b"
+SRC_URI[bdw.md5sum] = "f40771addcb12c82b44c2ad53dbbe994"
+SRC_URI[bdw.sha256sum] = "3057efadd6bcf9ddf192c6aa027cc28e07ae6997a5c0037ef1fa09e8938893f0"
+
 PR="r3"
 LICENSE = "IntelSINIT"
 LIC_FILES_CHKSUM = "file://GM45_GS45_PM45-SINIT_51/license.txt;md5=60d123634e0b94f8c425003389e64bda \
@@ -25,7 +28,9 @@ LIC_FILES_CHKSUM = "file://GM45_GS45_PM45-SINIT_51/license.txt;md5=60d123634e0b9
                     file://i7_QUAD-SINIT_51/license.txt;md5=60d123634e0b94f8c425003389e64bda \
                     file://license.txt;md5=203b6b806e49ca139abdf6706024c871 \
                     file://3rd_gen_i5_i7-SINIT_67/license.txt;md5=a879c484244808a2202d65166a2f3f72 \
-                    file://4th_gen_i5_i7-SINIT_75/license.txt;md5=a879c484244808a2202d65166a2f3f72"
+                    file://4th_gen_i5_i7-SINIT_75/license.txt;md5=a879c484244808a2202d65166a2f3f72 \
+                    file://5th_gen_i5_i7-SINIT_79/license.txt;md5=68248a22232ba4fd23010e9c65209406 \
+"
 
 SRC_URI = "${OPENXT_MIRROR}/GM45_GS45_PM45-SINIT_51.zip;name=gm45 \
            ${OPENXT_MIRROR}/Q45_Q43-SINIT_51.zip;name=q45 \
@@ -36,6 +41,7 @@ SRC_URI = "${OPENXT_MIRROR}/GM45_GS45_PM45-SINIT_51.zip;name=gm45 \
            ${OPENXT_MIRROR}/Xeon-E7-8800-4800-2800-SINIT-v1.1.zip;name=xeon_e7 \
            ${OPENXT_MIRROR}/3rd-gen-i5-i7-sinit-67.zip;name=ivb_snb \
            ${OPENXT_MIRROR}/4th-gen-i5-i7-sinit-75.zip;name=hsw \
+           ${OPENXT_MIRROR}/5th_gen_i5_i7-SINIT_79.zip;name=bdw \
 "
 
 FILES_${PN} = "/boot"
