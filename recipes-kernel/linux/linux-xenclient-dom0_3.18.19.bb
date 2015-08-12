@@ -15,5 +15,5 @@ SRC_URI += " \
             file://0002-Add-thorough-reset-interface-to-pciback-s-sysfs.patch;patch=1 \
             "
 
-PR = "1"
+PR = "r1"
 
