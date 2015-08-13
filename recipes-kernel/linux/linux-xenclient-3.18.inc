@@ -38,6 +38,8 @@ SRC_URI = "https://www.kernel.org/pub/linux/kernel/v${PV_MAJOR}.x/linux-${PV}.ta
     file://usbback-base.patch;patch=1 \
     file://hvc-kgdb-fix.patch;patch=1 \
     file://xenstore-no-read-vs-write-atomicity.patch;patch=1 \
+    file://pciback-restrictive-attr.patch;patch=1 \
+    file://add-thorough-reset-interface-to-pciback-s-sysfs.patch;patch=1 \
     file://defconfig"
 
 SRC_URI[kernel.md5sum] = "9ac668fd5d47f7755fbf81d025112796"
