@@ -45,7 +45,7 @@ do_force_rebuild[depends] = ""
 do_force_rebuild[nostamp] = "1"
 
 addtask makeclean
-do_makeclean[depends] = ""
+do_makeclean[depends] = "${PN}:do_force_rebuild"
 do_makeclean[nostamp] = "1"
 
 do_protos() {
