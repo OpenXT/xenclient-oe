@@ -37,6 +37,7 @@ SRC_URI += "file://0001-compile-time-stubdom-flag.patch \
             file://0019-surfman-dcl.patch;striplevel=1 \
             file://0020-audio-policy.patch;striplevel=1 \
             file://0023-msix-cap-disable.patch;striplevel=1 \
+            file://0024-Xenstore-based-ISO-media-change-detection-for-both-s.patch;striplevel=1 \
             file://0026-openxtaudio.patch;striplevel=1 \
             file://0027-nic-link-state-propagation.patch;striplevel=1 \
             file://0029-stubdom-read-gsi-from-device-config-space.patch;striplevel=1 \
@@ -108,4 +109,4 @@ do_install(){
     DESTDIR=${D} oe_runmake STRIP='' install
 }
 
-INC_PR = "r15"
+INC_PR = "r16"

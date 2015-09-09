@@ -1,8 +1,3 @@
-From 771168cc33dc319a931a186613c9f791e26d8c1e Mon Sep 17 00:00:00 2001
-From: Brendan Kerrigan <kerriganb@ainfosec.com>
-Date: Tue, 17 Mar 2015 11:12:04 -0400
-Subject: [PATCH] Stubdom support for ISO media changes after boot
-
 --------------------------------------------------------------------------------
 SHORT DESCRIPTION:
 --------------------------------------------------------------------------------
@@ -18,10 +13,18 @@ of ISO media changes. This code reintroduces the xenstore based mechanism for
 listening to the toolstack for the stubdomain, and calls the appropriate qmp
 code for the change.
 
-Special care has to be taken to ensure that the state between the blkfront
-and blkback drivers for the particular drive are correct. Basically the idea
-is to not tell qemu about the change until the backend for the drive gets to
-state 4.
+For the stubdom case special care has to be taken to ensure that the state
+between the blkfront and blkback drivers for the particular drive are correct.
+Basically the idea is to not tell qemu about the change until the backend for
+the drive gets to state 4.
+
+The non-stubdom case is far simpler than the stubdom one, as only the 'params'
+key for the particular blk device is needed. Once it changes, as long as the
+file exists, it's fine to tell qemu to do the change.
+
+This patch is also configurable, and can be disabled at compile time. It also
+introduces the define CONFIG_STUBDOM so code paths that are specific to the
+stubdom device model can coexist with non-stubdom code paths.
 
 --------------------------------------------------------------------------------
 CHANGELOG
@@ -46,91 +49,124 @@ and provide finer grain control over anything the qmp interface exposes.
 --------------------------------------------------------------------------------
 INTERNAL DEPENDENCIES
 --------------------------------------------------------------------------------
-0001-generic-xenstore-watch-callback-support.patch
-0015-atapi-pass-through.patch
+0001-generic-xenstore-extensions.patch
 
---------------------------------------------------------------------------------
-PATCHES
---------------------------------------------------------------------------------
----
- blockdev.c       |   9 ++-
- hw/xen_backend.c | 232 +++++++++++++++++++++++++++++++++++++++++++++++++++++++
- hw/xen_backend.h |   4 +
- xen-all.c        |   4 +
- 4 files changed, 248 insertions(+), 1 deletion(-)
+Signed-off-by: Brendan Kerrigan <kerriganb@ainfosec.com>
+Signed-off-by: Jed Lejosne <lejosnej@ainfosec.com>
 
+Index: qemu-1.4.0/Makefile.target
+===================================================================
+--- qemu-1.4.0.orig/Makefile.target	2015-08-17 16:00:15.154513605 -0400
++++ qemu-1.4.0/Makefile.target	2015-08-17 16:00:21.158511902 -0400
+@@ -122,6 +122,7 @@
+ # xen support
+ obj-$(CONFIG_XEN) += xen-all.o xen-mapcache.o
+ obj-$(CONFIG_XEN) += xen-dmbus.o
++obj-$(CONFIG_XEN_ISO_CHANGE) += xen-changeiso.o
+ obj-$(CONFIG_NO_XEN) += xen-stub.o
+ 
+ # Hardware support
 Index: qemu-1.4.0/blockdev.c
 ===================================================================
---- qemu-1.4.0.orig/blockdev.c	2015-06-09 13:36:45.628411754 -0400
-+++ qemu-1.4.0/blockdev.c	2015-06-09 13:36:45.856411749 -0400
-@@ -20,7 +20,7 @@
+--- qemu-1.4.0.orig/blockdev.c	2015-08-17 16:00:15.166516374 -0400
++++ qemu-1.4.0/blockdev.c	2015-08-17 16:00:21.158511902 -0400
+@@ -20,6 +20,7 @@
  #include "qmp-commands.h"
  #include "trace.h"
  #include "sysemu/arch_init.h"
--
-+#include "hw/xen_backend.h"
++#include "xen-changeiso.h"
+ 
  static QTAILQ_HEAD(drivelist, DriveInfo) drives = QTAILQ_HEAD_INITIALIZER(drives);
  
- static const char *const if_name[IF_COUNT] = {
-@@ -657,6 +657,13 @@
+@@ -657,6 +658,12 @@
          goto err;
      }
  
-+    if(xen_enabled() && media == MEDIA_CDROM && atapi_pt != 1) {
-+      if(0 > xenstore_register_iso_dev(file, dinfo))
-+	{
-+	  error_report("Failed to register device with xenstore for media changes");
-+	}
++#ifdef CONFIG_XEN_ISO_CHANGE
++    if(0 > xenstore_register_iso_dev(file, dinfo)) {
++        error_report("Failed to register device with xenstore for media changes");
 +    }
++#endif
 +
      if (bdrv_key_required(dinfo->bdrv))
          autostart = 0;
      return dinfo;
-Index: qemu-1.4.0/hw/xen_backend.c
+Index: qemu-1.4.0/configure
 ===================================================================
---- qemu-1.4.0.orig/hw/xen_backend.c	2015-06-09 13:36:45.756411752 -0400
-+++ qemu-1.4.0/hw/xen_backend.c	2015-06-09 13:36:45.856411749 -0400
-@@ -37,6 +37,8 @@
- #include "hw.h"
- #include "char/char.h"
- #include "qemu/log.h"
-+#include "block/block.h"
-+#include "sysemu/blockdev.h"
- #include "xen_backend.h"
- #include "qmp-commands.h"
+--- qemu-1.4.0.orig/configure	2015-08-17 16:00:15.182517508 -0400
++++ qemu-1.4.0/configure	2015-08-17 16:00:21.162011661 -0400
+@@ -232,6 +232,7 @@
+ stubdom="no"
+ atapipt="no"
+ atapiptv4v="no"
++oxtiso="no"
+ xenpt_hide_msix="yes"
  
-@@ -44,6 +46,7 @@
+ # parse CC options first
+@@ -912,6 +913,10 @@
+   ;;
+   --disable-atapi-pt-v4v) atapiptv4v="no"
+   ;;
++  --enable-openxt-iso) oxtiso="yes"
++  ;;
++  --disable-openxt-iso) oxtiso="no"
++  ;;
+   --disable-glusterfs) glusterfs="no"
+   ;;
+   --enable-glusterfs) glusterfs="yes"
+@@ -3415,6 +3420,7 @@
+ echo "OpenXT Stubdomain support   $stubdom"
+ echo "ATAPI PT support  $atapipt"
+ echo "ATAPI PT V4V support  $atapiptv4v"
++echo "OpenXT ISO CDROM  $oxtiso"
  
- #include "ui/xen-input.h"
- #include "xen-dmbus.h"
-+#include "qemu/timer.h"
+ if test "$sdl_too_old" = "yes"; then
+ echo "-> Your SDL version is too old - please upgrade to have SDL support"
+@@ -3781,6 +3787,10 @@
+   echo "CONFIG_ATAPI_PT_V4V=y" >> $config_host_mak
+ fi
  
- /* ------------------------------------------------------------- */
- 
-@@ -55,6 +58,7 @@
- 
- /* private */
- static QTAILQ_HEAD(XenDeviceHead, XenDevice) xendevs = QTAILQ_HEAD_INITIALIZER(xendevs);
++if test "$oxtiso" = "yes" ; then
++  echo "CONFIG_XEN_ISO_CHANGE=y" >> $config_host_mak
++fi
 +
- static int debug = 0;
+ if test "$virtio_blk_data_plane" = "yes" ; then
+   echo "CONFIG_VIRTIO_BLK_DATA_PLANE=y" >> $config_host_mak
+ fi
+Index: qemu-1.4.0/xen-all.c
+===================================================================
+--- qemu-1.4.0.orig/xen-all.c	2015-08-17 16:00:15.194517376 -0400
++++ qemu-1.4.0/xen-all.c	2015-08-17 16:00:21.162011661 -0400
+@@ -26,6 +26,11 @@
+ #include <xen/hvm/params.h>
+ #include <xen/hvm/e820.h>
  
- /* ------------------------------------------------------------- */
-@@ -837,6 +841,82 @@
-     xen_be_check_state(xendev);
- }
- 
-+/* OpenXT: Handle media changes through XenStore */
-+#define BLKFRONT_READY_STATE "4"
-+#define STUBDOMID(x) (x+1)
++#ifdef CONFIG_XEN_ISO_CHANGE
++#include "xen-changeiso.h"
++#endif
 +
-+struct IsoNode {
-+            DriveInfo *drive;
-+            char *iso_file;
-+            char *xen_vbd_id;
-+            char *frontend_state;
-+            QEMUTimer *timer;
-+            QTAILQ_ENTRY(IsoNode) next;
-+};
++
+ //#define DEBUG_XEN
+ 
+ #ifdef DEBUG_XEN
+@@ -1197,6 +1202,11 @@
+     xen_be_register("qdisk", &xen_blkdev_ops);
+ #endif
+ 
++#ifdef CONFIG_XEN_ISO_CHANGE
++    if (0 > xenstore_init_iso_dev()) {
++        fprintf(stderr, "%s: failed to initialize iso media changes, not fatal\n", __FUNCTION__);
++    }
++#endif
+     xen_read_physmap(state);
+ 
+     return 0;
+Index: qemu-1.4.0/xen-changeiso.c
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ qemu-1.4.0/xen-changeiso.c	2015-08-17 16:00:21.162011661 -0400
+@@ -0,0 +1,229 @@
++#include "xen-changeiso.h"
 +
 +static QTAILQ_HEAD(IsoNodeHead, IsoNode) iso_list = QTAILQ_HEAD_INITIALIZER(iso_list);
 +
@@ -149,77 +185,76 @@ Index: qemu-1.4.0/hw/xen_backend.c
 +    }
 +
 +    if (err) {
-+        fprintf(stderr, "[OXT-ISO] Error: %s", error_get_pretty(err));
++        fprintf(stderr, "%s Error: %s", __FUNCTION__, error_get_pretty(err));
 +    }
 +}
 +
-+static void xenstore_update_iso(char *watch)
++static void xenstore_update_iso(void *opaque)
 +{
-+    static bool first_watch = true;
++#ifdef CONFIG_STUBDOM
 +    char *state = NULL;
-+    struct IsoNode *node;
++#else
++    char *newFile = NULL;
++#endif
++    struct IsoNode *node = opaque;
 +    size_t len;
 +    char path[XEN_BUFSIZE];
 +
-+    if(!xenstore || !watch)
++    if(!xenstore || !node)
 +        return;
 +
-+    memset(path, 0x00, XEN_BUFSIZE);
++    if(!node->first_watch) {
++        memset(path, 0x00, XEN_BUFSIZE);
 +
-+    QTAILQ_FOREACH(node, &iso_list, next)
-+    {
-+        // Important thing her e is the strstr, where the currently
-+        // fired watch is matched with the drive of interest.
-+        if (node && node->drive && node->iso_file
-+            && node->xen_vbd_id && node->frontend_state
-+            && strstr(watch, node->xen_vbd_id) && !first_watch) {
++#ifdef CONFIG_STUBDOM
++        snprintf(path, XEN_BUFSIZE, "%s/state", node->xen_vbd_id);
++        state = xs_read(xenstore, XBT_NULL, path, &len);
 +
-+            // Retrieve the backend state for this particular blkfront
-+            // drive
-+            snprintf(path, XEN_BUFSIZE, "%s/state", node->xen_vbd_id);
-+            state = xs_read(xenstore, XBT_NULL, path, &len);
++        if (!state)
++            return;
++#else
++        snprintf(path, XEN_BUFSIZE, "%s/params", node->xen_vbd_id);
 +
-+            if (!state)
-+                continue;
++        newFile = xs_read(xenstore, XBT_NULL, path, &len);
 +
-+            // Wait for blkfront<->blkback to get ready before changing
-+            // the disk
-+            if (!strcmp(state,BLKFRONT_READY_STATE)) {
-+                qemu_mod_timer(node->timer, qemu_get_clock_ms(rt_clock) + 1000);
++        // Switch out the file path to the iso, so change gets made
++        // when the node->timer fires.
++        if (newFile) {
++            g_free(node->iso_file);
++            node->iso_file = NULL;
++            node->iso_file = g_strdup(newFile);
++            free(newFile);
++
++            if (!node->iso_file) {
++                return;
 +            }
-+
-+            free(state);
 +        }
-+    }
++#endif
 +
-+    first_watch = false;
++#ifdef CONFIG_STUBDOM
++        // Wait for blkfront<->blkback to get ready before changing
++        // the disk
++        if (!strcmp(state, BLKFRONT_READY_STATE)) {
++#endif
++            qemu_mod_timer(node->timer, qemu_get_clock_ms(rt_clock) + 1000);
++#ifdef CONFIG_STUBDOM
++        }
++
++        if(state) {
++            free(state);
++            state = NULL;
++        }
++#endif
++
++    } else {
++        node->first_watch = false;
++    }
 +}
 +
- static void xenstore_update(void *unused)
- {
-     char **vec = NULL;
-@@ -861,6 +941,11 @@
-             ((xenstore_watch_cb_t)ptr)((void *)ops);
-         }
-     }
-+    /* OpenXT:
-+     * Notify the emulator of a change in media */
-+    if (!strcmp(vec[XS_WATCH_TOKEN], "iso")) {
-+      xenstore_update_iso(vec[XS_WATCH_PATH]);
-+    }
- 
- cleanup:
-     free(vec);
-@@ -1152,3 +1237,149 @@
-     return !!val;
- }
- 
-+/****************************************************
-+ * OpenXT: Media change handling
-+   Kind of a hack to get ISO updates when the UI changes it
-+   from dom0.
++/*
++
 +*/
-+int xenstore_register_iso_dev(const char *file, DriveInfo* dinfo)
++int xenstore_register_iso_dev(const char *file, DriveInfo *dinfo)
 +{
 +    struct IsoNode *node = NULL;
 +
@@ -244,6 +279,7 @@ Index: qemu-1.4.0/hw/xen_backend.c
 +    node->drive = dinfo;
 +    node->xen_vbd_id = NULL;
 +    node->frontend_state = NULL;
++    node->first_watch = true;
 +    node->timer = qemu_new_timer_ms(rt_clock, update_iso_cb, node);
 +
 +    if (!node->iso_file || !node->timer) {
@@ -267,13 +303,16 @@ Index: qemu-1.4.0/hw/xen_backend.c
 +    memset(path, 0x00, XEN_BUFSIZE);
 +    memset(token, 0x00, XEN_BUFSIZE);
 +
-+    if (!xenstore) {
-+        fprintf(stderr, "%s: No handle to xenstore", __FUNCTION__);
-+        return -1;
++    if (0 > xenstore_generic_init()) {
++        return -ENOENT;
 +    }
 +
 +    // Stubdom domid is xen_domid+1
++#ifdef CONFIG_STUBDOM
 +    dompath = xs_get_domain_path(xenstore, STUBDOMID(xen_domid));
++#else
++    dompath = xs_get_domain_path(xenstore, xen_domid);
++#endif
 +
 +    if (!dompath) {
 +        fprintf(stderr, "%s: Failed to retrieve dompath", __FUNCTION__);
@@ -323,12 +362,8 @@ Index: qemu-1.4.0/hw/xen_backend.c
 +                }
 +            }
 +
-+            // Set up the watch on the backend vbd path params key
-+            memset(path, 0x00, XEN_BUFSIZE);
-+            snprintf(path, XEN_BUFSIZE, "%s/params", be);
-+
-+            if (!xs_watch(xenstore, path, "iso")) {
-+                fprintf(stderr, "[OXT-ISO] Failed to install xenstore watch on path: %s", path);
++            if (!xenstore_add_watch(be, "params", xenstore_update_iso, (void *) node)) {
++                fprintf(stderr, "[OXT-ISO] Failed to install xenstore watch on path: %s/params", be);
 +            }
 +
 +            if (be) {
@@ -360,30 +395,38 @@ Index: qemu-1.4.0/hw/xen_backend.c
 +
 +    return 0;
 +}
-Index: qemu-1.4.0/hw/xen_backend.h
+Index: qemu-1.4.0/xen-changeiso.h
 ===================================================================
---- qemu-1.4.0.orig/hw/xen_backend.h	2015-06-09 13:35:48.828412726 -0400
-+++ qemu-1.4.0/hw/xen_backend.h	2015-06-09 13:36:45.856411749 -0400
-@@ -114,4 +114,7 @@
- int xenstore_remove_watch(const char *base, const char *node,
-                           xenstore_watch_cb_t cb, void *opaque);
- 
-+int xenstore_register_iso_dev(const char *file, DriveInfo *disk);
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ qemu-1.4.0/xen-changeiso.h	2015-08-17 16:00:21.162011661 -0400
+@@ -0,0 +1,30 @@
++#ifndef XEN_CHANGEISO__H
++#define XEN_CHANGEISO__H
++
++/* OpenXT CD-ROM ISO Change
++ * Xenstore mechanism for informing a guest about changes in the media
++ * of a ISO backed CD-ROM drive within OpenXT
++ */
++
++#include "block/block.h"
++#include "sysemu/blockdev.h"
++#include "qemu/timer.h"
++#include "hw/xen_backend.h"
++
++#define BLKFRONT_READY_STATE "4"
++#define STUBDOMID(x) (x+1)
++
++struct IsoNode {
++    DriveInfo *drive;
++    char *iso_file;
++    char *xen_vbd_id;
++    char *frontend_state;
++    bool first_watch;
++    QEMUTimer *timer;
++    QTAILQ_ENTRY(IsoNode) next;
++};
++
++int xenstore_register_iso_dev(const char *file, DriveInfo *dinfo);
 +int xenstore_init_iso_dev(void);
 +
- #endif /* QEMU_HW_XEN_BACKEND_H */
-Index: qemu-1.4.0/xen-all.c
-===================================================================
---- qemu-1.4.0.orig/xen-all.c	2015-06-09 13:36:45.844411749 -0400
-+++ qemu-1.4.0/xen-all.c	2015-06-09 13:36:45.856411749 -0400
-@@ -1285,6 +1285,10 @@
-     xen_be_register("qdisk", &xen_blkdev_ops);
- #endif
- 
-+    if (0 > xenstore_init_iso_dev()) {
-+        fprintf(stderr, "%s: failed to initialize iso media changes, not fatal\n", __FUNCTION__);
-+    }
-+
-     xen_read_physmap(state);
- 
-     return 0;
++#endif
