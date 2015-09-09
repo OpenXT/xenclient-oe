@@ -55,13 +55,7 @@ do
  fi
 done
 
-echo "Command line: `cat /proc/cmdline`"
-
 ln -s /proc/self/fd/2 /dev/stderr
-
-QEMU_CMDLINE=`cat /proc/cmdline | cut -d' ' -f4- `
-
-DOMID=`echo $QEMU_CMDLINE | cut -d' ' -f2 `
 
 echo $*
 echo 1 > /proc/sys/net/ipv4/ip_forward
@@ -73,12 +67,36 @@ export INTEL_DBUS=1
 
 rsyslogd -f /etc/rsyslog.conf -c4
 
-is_dmagent=`echo $QEMU_CMDLINE | cut -d' ' -f1`
+# Agent cmdline parsing.
+KERNEL_CMDLINE=`cat /proc/cmdline`
+for arg in $KERNEL_CMDLINE; do
+    case "$arg" in
+        guest_agent=*) AGENT=${arg##*=} ;;
+        guest_domid=*)  DOMID=${arg##*=} ;;
+        *) continue ;;
+    esac
+done
 
-if [ "$is_dmagent" == "dmagent" ]; then
-    echo "start dm-agent"
-    exec /usr/bin/dm-agent -q -n -t $DOMID
-else
-    echo "-stubdom -name qemu-$DOMID $QEMU_CMDLINE"
-    exec /usr/bin/qemu-dm-wrapper $DOMID -stubdom -name qemu-$DOMID $QEMU_CMDLINE
-fi
+# Start requested agent.
+case "$AGENT" in
+    dmagent)
+        echo "Start dmagent..."
+        exec /usr/bin/dm-agent -q -n -t ${DOMID}
+        ;;
+
+    *)
+        echo "No agent specified. Assume retro-compatibility by falling back to the deprecated behaviour."
+        if [ "${KERNEL_CMDLINE/dmagent/}" != "${KERNEL_CMDLINE}" ]; then
+            # Assumes we are stubbing for the domid passed at the end of the cmdline.
+            DOMID=${KERNEL_CMDLINE##* }
+            echo "Start dmagent..."
+            exec /usr/bin/dm-agent -q -n -t $DOMID
+        else
+            QEMU_CMDLINE=`cat /proc/cmdline | cut -d' ' -f4- `
+            DOMID=`echo $QEMU_CMDLINE | cut -d' ' -f2 `
+            echo "Start qemu-dm-wrapper..."
+            exec /usr/bin/qemu-dm-wrapper $DOMID -stubdom -name qemu-$DOMID $QEMU_CMDLINE
+        fi
+        ;;
+esac
+
