@@ -1,7 +1,7 @@
 FILESEXTRA := "${THISDIR}/${PN}"
 FILESEXTRAPATHS_prepend := "${FILESEXTRA}:"
 
-PRINC := "${@int(PRINC) + 2}"
+PRINC := "${@int(PRINC) + 3}"
 
 SRC_URI += " \
     file://remove-xml-doc-gen.patch;patch=1 \
