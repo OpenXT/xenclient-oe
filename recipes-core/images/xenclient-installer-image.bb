@@ -39,7 +39,6 @@ IMAGE_INSTALL = "\
     task-xenclient-installer \
     kernel-module-e1000e \
     linux-firmware \
-    rt2870-firmware \
     ${ANGSTROM_EXTRA_INSTALL}"
 
 IMAGE_FSTYPES = "cpio.gz"
