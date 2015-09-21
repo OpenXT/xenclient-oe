@@ -34,8 +34,6 @@ IMAGE_INSTALL = "\
     networkmanager \
     xenclient-toolstack \
     linux-firmware \
-    rt2870-firmware \
-    rt3572 \
     bridge-utils \
     iptables \
     xenclient-ndvm-tweaks \
