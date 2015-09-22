@@ -15,6 +15,8 @@ SRC_URI = "http://downloads.sourceforge.net/tboot/tboot-1.8.3.tar.gz \
            file://tboot-adjust-grub2-modules.patch \
            file://tboot-fix-skip-cmdline-arg-CVE-2014-5118.patch \
            file://tboot-warn-on-failure-policy.patch \
+           file://tboot-lz-logging-bugs-workaround.patch \
+           file://tboot-txt-stat-fix-backport-cs426.patch \
            file://configure_tboot \
            file://lcp_data.bin \
            "
