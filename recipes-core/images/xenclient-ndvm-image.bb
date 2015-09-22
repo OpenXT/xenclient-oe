@@ -34,8 +34,6 @@ IMAGE_INSTALL = "\
     networkmanager \
     xenclient-toolstack \
     linux-firmware \
-    rt2870-firmware \
-    rt3572 \
     bridge-utils \
     iptables \
     xenclient-ndvm-tweaks \
@@ -54,9 +52,6 @@ IMAGE_INSTALL = "\
     ppp \
     iputils-ping \
 "
-
-# Packages disabled for Linux3 to be fixed
-# rt5370
 
 #IMAGE_PREPROCESS_COMMAND = "create_etc_timestamp"
 
