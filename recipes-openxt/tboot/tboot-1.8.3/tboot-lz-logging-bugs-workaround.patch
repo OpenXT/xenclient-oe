@@ -1,0 +1,142 @@
+################################################################################
+SHORT DESCRIPTION: 
+################################################################################
+Workaround for broken LZ log compression feature in 1.8.3
+
+################################################################################
+LONG DESCRIPTION: 
+################################################################################
+The LZ log compression feature has two major problems:
+
+1. The LZ compression algorithm is extremely slow. On the order of minutes to
+compress a 32K text buffer. It's author even says so:
+https://github.com/NordicSemiconductor/puck-central-ios/blob/master/PuckCentral/lz.c#L22
+
+2. The compression logic has no terminating condition so doing sleep/resume a
+number of times will eventually overrun the buffer.
+
+The workaround resets the memory logging pointers on S3/S4 giving us a clean
+snapshot of the current working session. The potential buffer overflow is fixed
+with a proper check before writing to the buffer.
+
+################################################################################
+CHANGELOG 
+################################################################################
+Created:
+Ross Philipson, philipsonr@ainfosec.com, 9/22/2015
+
+################################################################################
+REMOVAL 
+################################################################################
+It should be easy to remove once fixed in upstream TBOOT.
+
+################################################################################
+UPSTREAM PLAN 
+################################################################################
+Upstream-status: The exact details of the problem have been reported to the
+tboot-devel mailing list. No action has been taken to date nor have there been
+any responses. See:
+
+http://sourceforge.net/p/tboot/mailman/message/34459021/
+http://sourceforge.net/p/tboot/mailman/message/34462042/
+
+The problems were introduced by these change sets:
+
+http://hg.code.sf.net/p/tboot/code/rev/9040e000ccc4
+http://hg.code.sf.net/p/tboot/code/rev/78713e04bdd9
+
+################################################################################
+INTERNAL DEPENDENCIES 
+################################################################################
+None
+
+################################################################################
+PATCHES 
+################################################################################
+Index: tboot-1.8.3/tboot/common/printk.c
+===================================================================
+--- tboot-1.8.3.orig/tboot/common/printk.c	2015-09-22 12:56:17.228702288 -0400
++++ tboot-1.8.3/tboot/common/printk.c	2015-09-22 13:04:18.952385390 -0400
+@@ -81,10 +81,23 @@
+         g_log->curr_pos = g_log->zip_pos;
+ }
+ 
++void clear_mem_log(void)
++{
++    if (g_log != NULL) {
++        g_log->curr_pos = 0;
++        g_log->zip_pos = 0;
++        g_log->zip_size = 0;
++    }
++}
++
+ static void memlog_write( const char *str, unsigned int count)
+ {
+     /* allocate a 32K temp buffer for compressed log  */
+-    char buf[32*1024];
++    /* Don't put it on the stack, that is a bad idea since the stack for
++     * the BSP is small. Making it static is OK since there is a mutex
++     * around the logging.
++     */
++    static char buf[32*1024];
+     char *out=buf;
+ 
+     if ( g_log == NULL || count > g_log->max_size )
+@@ -93,6 +106,13 @@
+     /* do a compression of the log if curr_pos + count > max_size  */
+     if (g_log->curr_pos + count > g_log->max_size) {
+        g_log->zip_size = LZ_Compress(&g_log->buf[g_log->zip_pos], out, g_log->curr_pos - g_log->zip_pos);
++
++       /* Don't overrun past the end of the log buffer, that is no fun... */
++       if (g_log->zip_pos + g_log->zip_size + count > g_log->max_size) {
++           clear_mem_log();
++           return;
++       }
++
+        memcpy(&g_log->buf[g_log->zip_pos], out, g_log->zip_size); 
+        g_log->zip_pos += g_log->zip_size;
+        g_log->curr_pos = g_log->zip_pos;
+@@ -102,7 +122,7 @@
+           g_log->zip_pos--;
+           g_log->curr_pos--;
+        } 
+-           
++
+     }
+     memcpy(&g_log->buf[g_log->curr_pos], str, count);
+     g_log->curr_pos += count; 
+Index: tboot-1.8.3/tboot/include/printk.h
+===================================================================
+--- tboot-1.8.3.orig/tboot/include/printk.h	2015-09-22 12:57:13.704532203 -0400
++++ tboot-1.8.3/tboot/include/printk.h	2015-09-22 12:57:42.073023143 -0400
+@@ -61,6 +61,7 @@
+ #define vga_write(s,n)        vga_puts(s, n)
+ 
+ extern void printk_init(void);
++extern void clear_mem_log(void);
+ extern void printk(const char *fmt, ...)
+                          __attribute__ ((format (printf, 1, 2)));
+ 
+Index: tboot-1.8.3/tboot/common/tboot.c
+===================================================================
+--- tboot-1.8.3.orig/tboot/common/tboot.c	2015-09-22 13:05:47.008532146 -0400
++++ tboot-1.8.3/tboot/common/tboot.c	2015-09-22 13:08:38.875387352 -0400
+@@ -499,11 +499,18 @@
+     switch( shutdown_type ) {
+         case TB_SHUTDOWN_S3:
+             copy_s3_wakeup_entry();
++
++            /* Clear the mem log on S3/S4 so we get a single snapshot from
++             * a working session.
++             */
++            clear_mem_log();
++
+             /* write our S3 resume vector to ACPI resume addr */
+             set_s3_resume_vector(&_tboot_shared.acpi_sinfo,
+                                  TBOOT_S3_WAKEUP_ADDR);
+             /* fall through for rest of Sx handling */
+         case TB_SHUTDOWN_S4:
++            clear_mem_log();
+         case TB_SHUTDOWN_S5:
+             machine_sleep(&_tboot_shared.acpi_sinfo);
+             /* if machine_sleep() fails, fall through to reset */
