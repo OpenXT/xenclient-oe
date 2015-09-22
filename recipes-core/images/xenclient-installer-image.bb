@@ -40,6 +40,7 @@ IMAGE_INSTALL = "\
     kernel-module-e1000e \
     linux-firmware \
     rt2870-firmware \
+    rt3572 \
     ${ANGSTROM_EXTRA_INSTALL}"
 
 IMAGE_FSTYPES = "cpio.gz"
