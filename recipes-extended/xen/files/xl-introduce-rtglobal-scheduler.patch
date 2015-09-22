@@ -1,0 +1,188 @@
+diff --git a/tools/libxl/xl.h b/tools/libxl/xl.h
+index 5ad3e17..f82ae74 100644
+--- a/tools/libxl/xl.h
++++ b/tools/libxl/xl.h
+@@ -65,6 +65,7 @@ int main_memset(int argc, char **argv);
+ int main_sched_credit(int argc, char **argv);
+ int main_sched_credit2(int argc, char **argv);
+ int main_sched_sedf(int argc, char **argv);
++int main_sched_rtglobal(int argc, char **argv);
+ int main_domid(int argc, char **argv);
+ int main_domname(int argc, char **argv);
+ int main_rename(int argc, char **argv);
+diff --git a/tools/libxl/xl_cmdimpl.c b/tools/libxl/xl_cmdimpl.c
+index b251f4c..7c28ba7 100644
+--- a/tools/libxl/xl_cmdimpl.c
++++ b/tools/libxl/xl_cmdimpl.c
+@@ -4964,6 +4964,37 @@ static int sched_sedf_domain_output(
+     return 0;
+ }
+ 
++static int sched_rtglobal_domain_output(int domid)
++{
++	char *domname;
++	libxl_domain_sched_params scinfo;
++	int rc = 0;
++
++	if (domid < 0) {
++		printf("%-33s %4s %6s %6s %6s %6s\n", "Name", "ID", "Budget", "Period", "VCPU", "RT");
++		return 0;
++	}
++
++	libxl_domain_sched_params_init(&scinfo);
++	rc = sched_domain_get(LIBXL_SCHEDULER_RTGLOBAL, domid, &scinfo);
++	if (rc)
++		goto out;
++
++	domname = libxl_domid_to_name(ctx, domid);
++	printf("%-33s %4d %6d %6d %6d %6d\n",
++			domname,
++			domid,
++			scinfo.budget,
++			scinfo.period,
++			scinfo.vcpu,
++			scinfo.rt);
++	free(domname);
++
++out:
++	libxl_domain_sched_params_dispose(&scinfo);
++	return rc;
++}
++
+ static int sched_default_pool_output(uint32_t poolid)
+ {
+     char *poolname;
+@@ -4975,6 +5006,7 @@ static int sched_default_pool_output(uint32_t poolid)
+     return 0;
+ }
+ 
++
+ static int sched_domain_output(libxl_scheduler sched, int (*output)(int),
+                                int (*pooloutput)(uint32_t), const char *cpupool)
+ {
+@@ -5026,6 +5058,104 @@ static int sched_domain_output(libxl_scheduler sched, int (*output)(int),
+     return 0;
+ }
+ 
++
++
++int main_sched_rtglobal(int argc, char **argv)
++{
++	const char *cpupool = NULL;
++	const char *dom = NULL;
++	int period = 0; /* period is in microsecond */
++	int budget = 0; /* budget is in microsecond */
++	int vcpu = 0;
++	int rt = 0;
++	bool opt_p = false;
++	bool opt_b = false;
++	bool opt_v = false;
++	bool opt_r = false;
++	int opt, rc;
++	static struct option opts[] = {
++		{"domain", 1, 0, 'd'},
++		{"period", 1, 0, 'p'},
++		{"budget", 1, 0, 'b'},
++		{"vcpu", 1, 0, 'v'},
++		{"rt", 1, 0, 'r'},
++		{"cpupool", 1, 0, 'c'},
++		COMMON_LONG_OPTS,
++		{0, 0, 0, 0}
++	};
++
++	SWITCH_FOREACH_OPT(opt, "d:p:b:v:r:c:h", opts, "sched‐rtglobal", 0) {
++		case 'd':
++			dom = optarg;
++			break;
++		case 'p':
++			period = strtol(optarg, NULL, 10);
++			opt_p = 1;
++			break;
++		case 'b':
++			budget = strtol(optarg, NULL, 10);
++			opt_b = 1;
++			break;
++		case 'v':
++			vcpu = strtol(optarg, NULL, 10);
++			opt_v = 1;
++			break;
++		case 'r':
++			rt = strtol(optarg, NULL, 10);
++			opt_r = 1;
++			break;
++		case 'c':
++			cpupool = optarg;
++			break;
++	}
++
++
++	if (cpupool && (dom || opt_p || opt_b || opt_v || opt_r)) {
++		fprintf(stderr, "Specifying a cpupool is not allowed with other options.\n");
++		return 1;
++	}
++
++	if (!dom && (opt_p || opt_b || opt_v || opt_r)) {
++		fprintf(stderr, "Must specify a domain.\n");
++		return 1;
++	}
++
++	if (opt_p != opt_b) {
++		fprintf(stderr, "Must specify period and budget\n");
++		return 1;
++	}
++
++	if (!dom) { /* list all domain's rt scheduler info */
++		return -sched_domain_output(LIBXL_SCHEDULER_RTGLOBAL,
++				sched_rtglobal_domain_output,
++				sched_default_pool_output,
++				cpupool);
++	} else {
++		uint32_t domid = find_domain(dom);
++		if (!opt_p && !opt_b) { /* output rt scheduler info */
++			sched_rtglobal_domain_output(-1);
++
++			return -sched_rtglobal_domain_output(domid);
++
++		} else { /* set rt scheduler paramaters */
++			libxl_domain_sched_params scinfo;
++			libxl_domain_sched_params_init(&scinfo);
++
++			scinfo.sched = LIBXL_SCHEDULER_RTGLOBAL;
++			scinfo.period = period;
++			scinfo.budget = budget;
++			scinfo.vcpu = vcpu;
++			scinfo.rt = rt;
++
++			rc = sched_domain_set(domid, &scinfo);
++			libxl_domain_sched_params_dispose(&scinfo);
++			if (rc)
++				return -rc;
++		}
++	}
++
++	return 0;
++}
+ /* 
+  * <nothing>             : List all domain params and sched params from all pools
+  * -d [domid]            : List domain params for domain
+diff --git a/tools/libxl/xl_cmdtable.c b/tools/libxl/xl_cmdtable.c
+index 44b42b0..a5cbc40 100644
+--- a/tools/libxl/xl_cmdtable.c
++++ b/tools/libxl/xl_cmdtable.c
+@@ -271,6 +271,16 @@ struct cmd_spec cmd_table[] = {
+       "                               --period/--slice)\n"
+       "-c CPUPOOL, --cpupool=CPUPOOL  Restrict output to CPUPOOL"
+     },
++	{ "sched-rtglobal",
++	 &main_sched_rtglobal, 0, 1,
++	  "Get/set rtglobal scheduler parameters",
++	  "[‐d <Domain> [‐p[=PERIOD]] [‐b[=BUDGET]]]",
++	  "‐d DOMAIN, ‐‐domain=DOMAIN Domain to modify\n"
++	  "‐p PERIOD, ‐‐period=PERIOD Period (us)\n"
++	  "‐b BUDGET, ‐‐budget=BUDGET Budget (us)\n"
++	  "‐v VCPU, ‐‐vcpu=VCPU\n"
++	  "‐r RT, ‐‐rt=RT or Non RT (1 or 0)\n"
++	},
+     { "domid",
+       &main_domid, 0, 0,
+       "Convert a domain name to domain id",
