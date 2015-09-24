@@ -114,6 +114,7 @@ do_deb_package() {
 \${pkg_name}: changelog-file-missing-in-native-package
 \${pkg_name}: debian-changelog-file-missing
 \${pkg_name}: wrong-path-for-interpreter
+\${pkg_name}: shell-script-fails-syntax-check
 EOFOVD
 
 		pkg_size=\$(du -s . | cut -f1)
@@ -218,6 +219,7 @@ DEB_STEP
 \${pkg_name}: changelog-file-missing-in-native-package
 \${pkg_name}: debian-changelog-file-missing
 \${pkg_name}: wrong-path-for-interpreter
+\${pkg_name}: shell-script-fails-syntax-check
 EOFOVD
 
 		pkg_size=\$(du -s . | cut -f1)
