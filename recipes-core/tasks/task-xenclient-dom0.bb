@@ -96,7 +96,6 @@ RDEPENDS_${PN} = " \
     linux-firmware \
     libicbinn-server \
     monit \
-    upower \
     screen \
     xenclient-pcrdiff \
     drm-surfman-plugin \
