@@ -21,8 +21,6 @@ SRC_URI = "http://downloads.sourceforge.net/tboot/tboot-1.7.0.tar.gz \
            file://tboot-bypass-ffffffff-error.patch;patch=1 \
            file://tboot-adjust-grub2-modules.patch;patch=1 \
            file://set-tboot-private-region-as-reserved.patch;patch=1 \
-           file://configure_tboot \
-           file://lcp_data.bin \
            file://tboot-1.7.0-CVE-2014-5118.patch \
            "
 SRC_URI[md5sum] = "1913ec6170a10f16fdcc2220b6f45d4a"
