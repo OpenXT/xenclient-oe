@@ -39,8 +39,8 @@ SRC_URI = "https://www.kernel.org/pub/linux/kernel/v${PV_MAJOR}.x/linux-${PV}.ta
     file://xenstore-no-read-vs-write-atomicity.patch;patch=1 \
     file://defconfig"
 
-SRC_URI[kernel.md5sum] = "1090eecf5392227ad8f2218989a5922a"
-SRC_URI[kernel.sha256sum] = "497fa0bdda61ec1dd4bb469310683f279f60dd2fa63602fc9b741a217155538e"
+SRC_URI[kernel.md5sum] = "5d61c4f6423000989736330e305ecf4e"
+SRC_URI[kernel.sha256sum] = "8b21dd7e0a5b55a6dc7b9bc081c6bf0f46c8288015817ce6e6a53d0ad7f535f5"
 
 S = "${WORKDIR}/linux-${PV}"
 
