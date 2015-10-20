@@ -11,6 +11,8 @@ SRC_URI = "git://${OPENXT_GIT_MIRROR}/bootage.git;protocol=${OPENXT_GIT_PROTOCOL
 
 S = "${WORKDIR}/git"
 
+ASNEEDED = ""
+
 inherit autotools
 inherit xenclient
 

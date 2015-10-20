@@ -14,6 +14,8 @@ FILES_${PN} += "/usr/lib/xen/bin/audio-daemon \
 
 S = "${WORKDIR}/git/audio-daemon"
 
+ASNEEDED = ""
+
 inherit autotools
 inherit pkgconfig
 inherit xenclient

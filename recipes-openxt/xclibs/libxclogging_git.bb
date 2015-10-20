@@ -9,6 +9,8 @@ SRC_URI = "git://${OPENXT_GIT_MIRROR}/xclibs.git;protocol=${OPENXT_GIT_PROTOCOL}
 
 S = "${WORKDIR}/git/xclogging"
 
+PARALLEL_MAKE = "-j 1"
+
 inherit autotools
 inherit pkgconfig
 inherit xenclient

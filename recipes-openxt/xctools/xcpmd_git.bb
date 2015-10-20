@@ -14,6 +14,8 @@ EXTRA_OECONF += "--with-idldir=${STAGING_IDLDIR}"
 
 S = "${WORKDIR}/git/xcpmd"
 
+ASNEEDED = ""
+
 inherit autotools
 inherit xenclient
 inherit update-rc.d

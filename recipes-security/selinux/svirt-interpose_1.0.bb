@@ -11,6 +11,8 @@ inherit xenclient
 
 LDFLAGS += "-lxenstore -lselinux"
 
+ASNEEDED = ""
+
 do_compile() {
 	     oe_runmake svirt-interpose
 	     # ${STRIP} svirt-interpose

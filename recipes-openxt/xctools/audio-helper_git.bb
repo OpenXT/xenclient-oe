@@ -14,6 +14,8 @@ FILES_${PN} += "/usr/lib/xen/bin/audio_helper \
 
 S = "${WORKDIR}/git/audio_helper"
 
+ASNEEDED = ""
+
 inherit autotools
 inherit pkgconfig
 inherit xenclient

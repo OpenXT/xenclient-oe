@@ -11,6 +11,8 @@ SRC_URI = "file://xc-sha1sum.c \
 
 S = "${WORKDIR}"
 
+ASNEEDED = ""
+
 do_compile() {
 	oe_runmake xc-sha1sum LDFLAGS="-lssl -lcrypto"
 	${STRIP} xc-sha1sum

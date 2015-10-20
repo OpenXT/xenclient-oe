@@ -42,6 +42,8 @@ EXTRA_OECONF += " \
 "
 PACKAGE_ARCH_xenclient-uivm = "${MACHINE_ARCH}"
 
+CFLAGS += "-Wno-error=unused-but-set-variable"
+
 do_install_append() {
         install -d ${D}${datadir}/icons/hicolor/22x22/xenclient
 
