@@ -40,6 +40,9 @@ SRC_URI += " \
 EXTRA_OECONF += " \
                   --with-bluetooth=no \
 "
+
+CFLAGS += "-Wno-error=unused-but-set-variable"
+
 PACKAGE_ARCH_xenclient-uivm = "${MACHINE_ARCH}"
 
 do_install_append() {

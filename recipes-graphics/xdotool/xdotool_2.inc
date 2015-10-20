@@ -12,8 +12,12 @@ SRC_URI = "http://semicomplete.googlecode.com/files/xdotool-${PV}.tar.gz"
 
 S = "${WORKDIR}/xdotool-${PV}"
 
+
 do_install_prepend() {
   export PREFIX=/usr
 }
 
 inherit autotools
+
+LDFLAGS += "-lX11"
+ASNEEDED = ""

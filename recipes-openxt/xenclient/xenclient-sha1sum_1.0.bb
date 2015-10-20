@@ -23,3 +23,4 @@ do_install() {
 
 # Avoid GNU_HASH check
 INSANE_SKIP_${PN} = "1"
+ASNEEDED = ""

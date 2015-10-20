@@ -17,6 +17,9 @@ S = "${WORKDIR}/git/compleat"
 
 inherit xenclient
 
+LDFLAGS += "-pthread"
+CFLAGS += "-pthread"
+ 
 do_install() {
 	install -m 0755 -d ${D}/usr
 	install -m 0755 -d ${D}/usr/bin

@@ -7,4 +7,6 @@ PR = "r0"
 
 SRC_URI = "http://www.burtonini.com/computing/devilspie-0.22.tar.gz"
 
+LDFLAGS += "-lX11"
+
 inherit autotools pkgconfig

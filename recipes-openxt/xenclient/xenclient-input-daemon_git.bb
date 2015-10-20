@@ -12,6 +12,7 @@ SRC_URI = "git://${OPENXT_GIT_MIRROR}/input.git;protocol=${OPENXT_GIT_PROTOCOL};
 	   file://input-daemon.initscript \
 "
 EXTRA_OECONF += "--with-idldir=${STAGING_IDLDIR}"
+LDFLAGS += "-lm -lcrypto"
 
 S = "${WORKDIR}/git"
 
@@ -21,7 +22,7 @@ inherit update-rc.d
 
 INITSCRIPT_NAME = "xenclient-input"
 INITSCRIPT_PARAMS = "defaults 75"
-
+ASNEEDED = ""
 do_install_append() {
 	install -d ${D}${sysconfdir}/init.d
 	install -m 0755 ${WORKDIR}/input-daemon.initscript ${D}${sysconfdir}/init.d/xenclient-input

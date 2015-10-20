@@ -10,4 +10,6 @@ SRC_URI = "http://software.twotoasts.de/media/midori/midori-${PV}.tar.gz"
 
 EXTRA_OECONF = "  --disable-hildon "
 
+ASNEEDED = ""
+LDFLAGS += "-ljavascriptcoregtk-1.0"
 TARGET_CC_ARCH += "${LDFLAGS}"
