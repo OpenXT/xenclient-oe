@@ -31,6 +31,8 @@ DEB_PKG_MAINTAINER = "Citrix Systems <customerservice@citrix.com>"
 
 LDFLAGS += "-lv4v -lxenstore"
 
+ASNEEDED = ""
+
 do_compile() {
 	oe_runmake dbusbouncer
 	# ${STRIP} dbusbouncer

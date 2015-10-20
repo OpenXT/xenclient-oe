@@ -37,6 +37,8 @@ SRC_URI[sha256sum] = "035f98fae17d9cff002993c564ccc83dc4ed136127172caeff872b6abd
 S = "${WORKDIR}/sysvinit-${PV}"
 B = "${S}/src"
 
+ASNEEDED = ""
+
 inherit update-alternatives
 
 ALTERNATIVE_NAME = "init"

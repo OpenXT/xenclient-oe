@@ -13,6 +13,8 @@ SRC_URI = "${DEBIAN_MIRROR}/main/v/vbetool/vbetool_${PV}.orig.tar.gz"
 
 S = "${WORKDIR}/vbetool-${PV}"
 
+ASNEEDED = ""
+
 # vbetool's autoconf is seriously underpowered and it's much better to avoid it
 # so we compile it by hand instead
 do_configure() {

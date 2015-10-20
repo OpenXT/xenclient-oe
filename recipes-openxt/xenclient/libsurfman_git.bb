@@ -13,6 +13,8 @@ S = "${WORKDIR}/git/libsurfman"
 EXTRA_OECONF += "--with-libxc=yes"
 EXTRA_OEMAKE += "LIBDIR=${STAGING_LIBDIR}"
 
+ASNEEDED = ""
+
 inherit autotools
 inherit pkgconfig
 inherit lib_package

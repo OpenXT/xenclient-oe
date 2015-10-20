@@ -12,6 +12,9 @@ RDEPENDS_${PN}-dev = ""
 
 FILES_${PN}-dev  = " /usr/bin/* /usr/share/* " 
 
+LDFLAGS += "-pthread"
+CFLAGS += "-pthread"
+
 do_install() {
     install -d ${D}/${bindir}
     install -m 0755 ${WORKDIR}/git/rpcgen/dist/build/xc-rpcgen/xc-rpcgen ${D}/${bindir}

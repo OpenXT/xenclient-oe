@@ -12,6 +12,8 @@ FILES_${PN} += "/usr/lib/xen/bin/atapi_pt_helper"
 
 S = "${WORKDIR}/git/atapi_pt_helper"
 
+ASNEEDED = ""
+
 inherit autotools
 inherit pkgconfig
 inherit xenclient

@@ -12,6 +12,8 @@ FILES_${PN} += "/usr/lib/xen/bin/pci-dm-helper"
 
 S = "${WORKDIR}/git/pci-dm-helper"
 
+ASNEEDED = ""
+
 inherit autotools
 inherit pkgconfig
 inherit xenclient

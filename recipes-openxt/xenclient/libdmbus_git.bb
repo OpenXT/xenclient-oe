@@ -10,6 +10,8 @@ SRC_URI = "git://${OPENXT_GIT_MIRROR}/xctools.git;protocol=${OPENXT_GIT_PROTOCOL
 
 S = "${WORKDIR}/git/libdmbus"
 
+ASNEEDED = ""
+
 inherit autotools
 inherit pkgconfig
 inherit lib_package

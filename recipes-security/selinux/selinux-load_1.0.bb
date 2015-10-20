@@ -9,6 +9,8 @@ SRC_URI = " \
 
 S = "${WORKDIR}"
 
+ASNEEDED = ""
+
 inherit xenclient
 
 do_install() {

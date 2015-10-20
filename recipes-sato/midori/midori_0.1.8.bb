@@ -23,6 +23,9 @@ SRC_URI[sha256sum] = "3b0e4a2c5c3e4457ce8f44e6cbb9f14ddfb66a515017b430f4f4484893
 
 EXTRA_OECONF += " --disable-nls --disable-unique --disable-libidn --disable-sqlite --disable-addons --disable-docs --disable-userdocs --disable-apidocs"
 
+ASNEEDED = ""
+LDFLAGS += "-ljavascriptcoregtk-1.0"
+
 do_configure() {
 	cp -f ${WORKDIR}/waf ${S}/
 	sed -i -e 's:, shell=False::g' wscript 

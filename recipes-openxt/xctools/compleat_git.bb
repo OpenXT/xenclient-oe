@@ -15,6 +15,9 @@ SRC_URI = "git://${OPENXT_GIT_MIRROR}/xctools.git;protocol=${OPENXT_GIT_PROTOCOL
 
 S = "${WORKDIR}/git/compleat"
 
+LDFLAGS += "-pthread"
+CFLAGS += "-pthread"
+
 inherit xenclient
 
 do_install() {
