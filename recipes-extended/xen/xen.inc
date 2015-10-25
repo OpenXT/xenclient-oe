@@ -103,6 +103,10 @@ SRC_URI = "${XEN_SRC_URI};name=source \
     file://blktap-timeout.patch;patch=1 \
     file://stubdomain-msi-irq-access.patch;striplevel=1 \
     file://workaround-nehalem-igd-vtd.patch;patch=1 \
+    file://xl-introduce-rtglobal-scheduler.patch;patch=1 \
+    file://libxl-add-rtglobal-scheduler.patch;patch=1 \
+    file://libxc-add-rtglobal-scheduler.patch;patch=1 \
+    file://xen-add-real-time-scheduler-rtglobal.patch;patch=1 \
 "
 
 SRC_URI[source.md5sum] := "${XEN_SRC_MD5SUM}"
