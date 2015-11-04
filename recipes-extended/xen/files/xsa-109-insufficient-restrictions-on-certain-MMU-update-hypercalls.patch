@@ -1,0 +1,38 @@
+################################################################################
+SHORT DESCRIPTION: 
+################################################################################
+XSA-109 (http://xenbits.xen.org/xsa/advisory-109.html)
+x86: don't allow page table updates on non-PV page tables in do_mmu_update()
+
+################################################################################
+LONG DESCRIPTION: 
+################################################################################
+Source: http://xenbits.xen.org/xsa/advisory-109.html
+Patches: xsa109.patch
+
+paging_write_guest_entry() and paging_cmpxchg_guest_entry() aren't
+consistently supported for non-PV guests (they'd deref NULL for PVH or
+non-HAP HVM ones). Don't allow respective MMU_* operations on the
+page tables of such domains.
+
+################################################################################
+CHANGELOG 
+################################################################################
+Added in OpenXT, Xen 4.3.4 patch-queue: Eric Chanudet <chanudete@ainfosec.com>
+
+################################################################################
+PATCHES 
+################################################################################
+--- a/xen/arch/x86/mm.c
++++ b/xen/arch/x86/mm.c
+@@ -3493,6 +3493,10 @@ long do_mmu_update(
+         {
+             p2m_type_t p2mt;
+ 
++            rc = -EOPNOTSUPP;
++            if ( unlikely(paging_mode_refcounts(pt_owner)) )
++                break;
++
+             xsm_needed |= XSM_MMU_NORMAL_UPDATE;
+             if ( get_pte_flags(req.val) & _PAGE_PRESENT )
+             {

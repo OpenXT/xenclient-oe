@@ -1,59 +1,59 @@
-From 593fe52faa1b85567a7ec20c69d8cfbc7368ae5b Mon Sep 17 00:00:00 2001
-From: Ian Jackson <ian.jackson@eu.citrix.com>
-Date: Mon, 15 Jun 2015 14:50:42 +0100
-Subject: [PATCH] xl: Sane handling of extra config file arguments
+################################################################################
+SHORT DESCRIPTION: 
+################################################################################
+XSA-137 (http://xenbits.xen.org/xsa/advisory-137.html)
+xl: Sane handling of extra config file arguments
 
-Various xl sub-commands take additional parameters containing = as
-additional config fragments.
+################################################################################
+LONG DESCRIPTION: 
+################################################################################
+Source: http://xenbits.xen.org/xsa/advisory-137.html
+Patches: xsa137.patch
+
+Various xl sub-commands take additional parameters containing = as additional
+config fragments.
 
 The handling of these config fragments has a number of bugs:
 
- 1. Use of a static 1024-byte buffer.  (If truncation would occur,
-    with semi-trusted input, a security risk arises due to quotes
-    being lost.)
+ 1. Use of a static 1024-byte buffer.  (If truncation would occur, with
+    semi-trusted input, a security risk arises due to quotes being lost.)
 
- 2. Mishandling of the return value from snprintf, so that if
-    truncation occurs, the to-write pointer is updated with the
-    wanted-to-write length, resulting in stack corruption.  (This is
-    XSA-137.)
+ 2. Mishandling of the return value from snprintf, so that if truncation
+    occurs, the to-write pointer is updated with the wanted-to-write length,
+    resulting in stack corruption.  (This is XSA-137.)
 
- 3. Clone-and-hack of the code for constructing the appended
-    config file.
+ 3. Clone-and-hack of the code for constructing the appended config file.
 
-These are fixed here, by introducing a new function
-`string_realloc_append' and using it everywhere.  The `extra_info'
-buffers are replaced by pointers, which start off NULL and are
-explicitly freed on all return paths.
+These are fixed here, by introducing a new function `string_realloc_append' and
+using it everywhere.  The `extra_info' buffers are replaced by pointers, which
+start off NULL and are explicitly freed on all return paths.
 
-The separate variable which will become dom_info.extra_config is
-abolished (which involves moving the clearing of dom_info).
+The separate variable which will become dom_info.extra_config is abolished
+(which involves moving the clearing of dom_info).
 
 Additional bugs I observe, not fixed here:
 
- 4. The functions which now call string_realloc_append use ad-hoc
-    error returns, with multiple calls to `return'.  This currently
-    necessitates multiple new calls to `free'.
+ 4. The functions which now call string_realloc_append use ad-hoc error
+    returns, with multiple calls to `return'.  This currently necessitates
+    multiple new calls to `free'.
 
- 5. Many of the paths in xl call exit(-rc) where rc is a libxl status
-    code.  This is a ridiculous exit status `convention'.
+ 5. Many of the paths in xl call exit(-rc) where rc is a libxl status code.
+    This is a ridiculous exit status `convention'.
 
  6. The loops for handling extra config data are clone-and-hacks.
 
- 7. Once the extra config buffer is accumulated, it must be combined
-    with the appropriate main config file.  The code to do this
-    combining is clone-and-hacked too.
+ 7. Once the extra config buffer is accumulated, it must be combined with the
+    appropriate main config file.  The code to do this combining is
+    clone-and-hacked too.
 
-Signed-off-by: Ian Jackson <Ian.Jackson@eu.citrix.com>
-Tested-by: Ian Jackson <Ian.Jackson@eu.citrix.com>
-Acked-by: Ian Campbell <ian,campbell@citrix.com>
----
-v2: Use SSIZE_MAX, not INT_MAX.
-    Check *accumulate for NULL, not accumulate.
-    Move memset of dom_info.
----
- tools/libxl/xl_cmdimpl.c |   64 +++++++++++++++++++++++++++++-----------------
- 1 file changed, 40 insertions(+), 24 deletions(-)
+################################################################################
+CHANGELOG 
+################################################################################
+Added in OpenXT, Xen 4.3.4 patch-queue: Eric Chanudet <chanudete@ainfosec.com>
 
+################################################################################
+PATCHES 
+################################################################################
 --- a/tools/libxl/xl_cmdimpl.c
 +++ b/tools/libxl/xl_cmdimpl.c
 @@ -133,7 +133,7 @@ struct domain_create {

@@ -1,0 +1,68 @@
+################################################################################
+SHORT DESCRIPTION: 
+################################################################################
+XSA-127 (http://xenbits.xen.org/xsa/advisory-127.html)
+domctl: don't allow a toolstack domain to call domain_pause() on itself
+
+################################################################################
+LONG DESCRIPTION: 
+################################################################################
+Source: http://xenbits.xen.org/xsa/advisory-127.html
+Patches: xsa127-4.x.patch
+
+XSA-77 put the majority of the domctl operations on a list excepting
+them from having security advisories issued for them if any effects
+their use might have could hamper security. Subsequently some of them
+got declared disaggregation safe, but for a small subset this was not
+really correct: Their (mis-)use may result in host lockups.
+
+As a result, the potential security benefits of toolstack
+disaggregation are not always fully realised.
+
+################################################################################
+CHANGELOG 
+################################################################################
+Added in OpenXT, Xen 4.3.4 patch-queue: Eric Chanudet <chanudete@ainfosec.com>
+
+################################################################################
+PATCHES 
+################################################################################
+--- a/xen/arch/x86/domctl.c
++++ b/xen/arch/x86/domctl.c
+@@ -1047,6 +1047,10 @@ long arch_do_domctl(
+     {
+         xen_guest_tsc_info_t info;
+ 
++        ret = -EINVAL;
++        if ( d == current->domain ) /* no domain_pause() */
++            break;
++
+         domain_pause(d);
+         tsc_get_info(d, &info.tsc_mode,
+                         &info.elapsed_nsec,
+@@ -1062,6 +1066,10 @@ long arch_do_domctl(
+ 
+     case XEN_DOMCTL_settscinfo:
+     {
++        ret = -EINVAL;
++        if ( d == current->domain ) /* no domain_pause() */
++            break;
++
+         domain_pause(d);
+         tsc_set_info(d, domctl->u.tsc_info.info.tsc_mode,
+                      domctl->u.tsc_info.info.elapsed_nsec,
+--- a/xen/common/domctl.c
++++ b/xen/common/domctl.c
+@@ -391,8 +391,10 @@ long do_domctl(XEN_GUEST_HANDLE_PARAM(xe
+ 
+     case XEN_DOMCTL_resumedomain:
+     {
+-        domain_resume(d);
+-        ret = 0;
++        if ( d == current->domain ) /* no domain_pause() */
++            ret = -EINVAL;
++        else
++            domain_resume(d);
+     }
+     break;
+ 

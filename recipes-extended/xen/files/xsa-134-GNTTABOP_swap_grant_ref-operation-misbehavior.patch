@@ -1,0 +1,44 @@
+################################################################################
+SHORT DESCRIPTION: 
+################################################################################
+XSA-134 (http://xenbits.xen.org/xsa/advisory-134.html)
+add missing version check to GNTTABOP_swap_grant_ref handling
+
+################################################################################
+LONG DESCRIPTION: 
+################################################################################
+Source: http://xenbits.xen.org/xsa/advisory-134.html
+Patches: xsa134.patch
+
+With the introduction of version 2 grant table operations, a version
+check became necessary for most grant table related hypercalls.  The
+GNTTABOP_swap_grant_ref call was lacking such a check.  As a result,
+the subsequent code behaved as if version 2 was in use, when a guest
+issued this hypercall without a prior GNTTABOP_setup_table or
+GNTTABOP_set_version.
+
+The effect is a possible NULL pointer dereferences.  However, this
+cannot be exploited to elevate privileges of the attacking domain, as
+the maximum memory address that can be wrongly accessed this way is
+bounded to far below the start of hypervisor memory.
+
+################################################################################
+CHANGELOG 
+################################################################################
+Added in OpenXT, Xen 4.3.4 patch-queue: Eric Chanudet <chanudete@ainfosec.com>
+
+################################################################################
+PATCHES 
+################################################################################
+--- a/xen/common/grant_table.c
++++ b/xen/common/grant_table.c
+@@ -2394,6 +2394,9 @@ __gnttab_swap_grant_ref(grant_ref_t ref_
+ 
+     spin_lock(&gt->lock);
+ 
++    if ( gt->gt_version == 0 )
++        PIN_FAIL(out, GNTST_general_error, "grant table not yet set up\n");
++
+     /* Bounds check on the grant refs */
+     if ( unlikely(ref_a >= nr_grant_entries(d->grant_table)))
+         PIN_FAIL(out, GNTST_bad_gntref, "Bad ref-a (%d).\n", ref_a);
