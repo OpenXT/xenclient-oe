@@ -10,10 +10,5 @@ FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}-${PV_MAJOR}.${PV_MINOR}:"
 
 require linux-xenclient-${PV_MAJOR}.${PV_MINOR}.inc
 
-SRC_URI += " \
-            file://pciback-restrictive-attr.patch;patch=1 \
-            file://0002-Add-thorough-reset-interface-to-pciback-s-sysfs.patch;patch=1 \
-            "
-
 PR = "r1"
 
