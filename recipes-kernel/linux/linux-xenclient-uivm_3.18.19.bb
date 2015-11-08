@@ -10,4 +10,4 @@ FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}-${PV_MAJOR}.${PV_MINOR}:"
 
 require linux-xenclient-${PV_MAJOR}.${PV_MINOR}.inc
 
-PR = "r1"
+PR = "r2"
