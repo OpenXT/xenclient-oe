@@ -103,6 +103,19 @@ SRC_URI = "${XEN_SRC_URI};name=source \
     file://blktap-timeout.patch;patch=1 \
     file://stubdomain-msi-irq-access.patch;striplevel=1 \
     file://workaround-nehalem-igd-vtd.patch;patch=1 \
+    file://xsa-125-long-latency-MMIO-mapping-operations-are-not-preemptible.patch;patch=1 \
+    file://xsa-127-certain-domctl-operations-may-be-abused-to-lock-up-the-host.patch;patch=1 \
+    file://xsa-132-information-leak-through-XEN_DOMCTL_gettscinfo.patch;patch=1 \
+    file://xsa-134-GNTTABOP_swap_grant_ref-operation-misbehavior.patch;patch=1 \
+    file://xsa-136-vulnerability-in-the-iret-hypercall-handler.patch;patch=1 \
+    file://xsa-137-xl-command-line-config-handling-stack-overflow.patch;patch=1 \
+    file://xsa-142-libxl-fails-to-honour-readonly-flag-on-disks-with-qemu-xen.patch;patch=1 \
+    file://xsa-148-uncontrolled-creation-of-large-page-mappings-by-PV-guests.patch;patch=1 \
+    file://xsa-149-leak-of-main-per-domain-vcpu-pointer-array.patch;patch=1 \
+    file://xsa-150-long-latency-populate-on-demand-operation-is-not-preemptible.patch;patch=1 \
+    file://xsa-151-leak-of-per-domain-profiling-related-vcpu-pointer-array.patch;patch=1 \
+    file://xsa-152-some-pmu-and-profiling-hypercalls-log-without-rate-limiting.patch;patch=1 \
+    file://xsa-153-populate-on-demand-balloon-size-inaccuracy-can-crash-guests.patch;patch=1 \
 "
 
 SRC_URI[source.md5sum] := "${XEN_SRC_MD5SUM}"

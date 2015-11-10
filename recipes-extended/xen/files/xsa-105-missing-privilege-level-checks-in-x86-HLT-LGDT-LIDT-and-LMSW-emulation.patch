@@ -1,0 +1,66 @@
+################################################################################
+SHORT DESCRIPTION: 
+################################################################################
+XSA-105 (http://xenbits.xen.org/xsa/advisory-105.html)
+x86/emulate: check cpl for all privileged instructions
+
+################################################################################
+LONG DESCRIPTION: 
+################################################################################
+Source: http://xenbits.xen.org/xsa/advisory-105.html
+Patches: xsa105.patch
+
+The emulation of the instructions HLT, LGDT, LIDT, and LMSW fails to
+perform supervisor mode permission checks.
+
+However these instructions are not usually handled by the emulator.
+Exceptions to this are
+ - when the instruction's memory operand (if any) lives in (emulated or passed
+   through) memory mapped IO space,
+ - in the case of guests running in 32-bit PAE mode, when such an instruction
+   is (in execution flow) within four instructions of one doing a page table
+   update,
+ - when an Invalid Opcode exception gets raised by a guest instruction, and the
+   guest then (likely maliciously) alters the instruction to become one of the
+   affected ones.
+
+Malicious guest user mode code may be able to leverage this to install
+e.g. its own Interrupt Descriptor Table (IDT).
+
+Without this, it is possible for userspace to load its own IDT or GDT.
+
+################################################################################
+CHANGELOG 
+################################################################################
+Added in OpenXT, Xen 4.3.4 patch-queue: unknown
+
+################################################################################
+PATCHES 
+################################################################################
+
+--- a/xen/arch/x86/x86_emulate/x86_emulate.c
++++ b/xen/arch/x86/x86_emulate/x86_emulate.c
+@@ -3314,6 +3314,7 @@ x86_emulate(
+         goto swint;
+ 
+     case 0xf4: /* hlt */
++        generate_exception_if(!mode_ring0(), EXC_GP, 0);
+         ctxt->retire.flags.hlt = 1;
+         break;
+ 
+@@ -3710,6 +3711,7 @@ x86_emulate(
+             break;
+         case 2: /* lgdt */
+         case 3: /* lidt */
++            generate_exception_if(!mode_ring0(), EXC_GP, 0);
+             generate_exception_if(ea.type != OP_MEM, EXC_UD, -1);
+             fail_if(ops->write_segment == NULL);
+             memset(&reg, 0, sizeof(reg));
+@@ -3738,6 +3740,7 @@ x86_emulate(
+         case 6: /* lmsw */
+             fail_if(ops->read_cr == NULL);
+             fail_if(ops->write_cr == NULL);
++            generate_exception_if(!mode_ring0(), EXC_GP, 0);
+             if ( (rc = ops->read_cr(0, &cr0, ctxt)) )
+                 goto done;
+             if ( ea.type == OP_REG )

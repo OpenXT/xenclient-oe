@@ -46,9 +46,16 @@ SRC_URI += "file://0001-compile-time-stubdom-flag.patch \
             file://0032-bp-hub-net-queue-flush-fix-199ee608f0d08510b5c6c37f31a7fbff211d63c4.patch;striplevel=1 \
             file://0033-acpi-pm-feature.patch;striplevel=1 \
             file://0034-maintain-time-offset.patch;striplevel=1 \
-            file://0035-xsa138-qemuu-1.patch \
-            file://0036-xsa138-qemuu-2.patch \
-            file://0037-xsa138-qemuu-3.patch \
+            file://xsa-126-unmediated-pci-command-register-access-in-qemu.patch;patch=1 \
+            file://xsa-128-potential-unintended-writes-to-host-msi-message-data-field-via-qemu.patch;patch=1 \
+            file://xsa-129-pci-msi-mask-bits-inadvertently-exposed-to-guests.patch;patch=1 \
+            file://xsa-130-guest-triggerable-qemu-msi-x-pass-through-error-messages.patch;patch=1 \
+            file://xsa-131-unmediated-pci-register-access-in-qemu.patch;patch=1 \
+            file://xsa-133-privilege-escalation-via-emulated-floppy-disk-drive.patch;patch=1 \
+            file://xsa-135-heap-overflow-in-qemu-pcnet-controller.patch;patch=1 \
+            file://xsa-138-qemu-heap-overflow-flaw-while-processing-certain-atapi-commands.patch;patch=1 \
+            file://xsa-139-use-after-free-in-qemu-xen-block-unplug-protocol.patch;patch=1 \
+            file://xsa-140-qemu-leak-of-uninitialized-heap-memory-in-rtl8139-device-model.patch;patch=1 \
             "
 
 SRC_URI[md5sum] = "78f13b774814b6b7ebcaf4f9b9204318"
