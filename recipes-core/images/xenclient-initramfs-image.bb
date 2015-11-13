@@ -5,7 +5,7 @@
 COMPATIBLE_MACHINE = "(xenclient-dom0)"
 
 IMAGE_FSTYPES = "cpio.gz"
-IMAGE_INSTALL = "busybox-static lvm2-static initramfs-xenclient"
+IMAGE_INSTALL = "busybox lvm2-static initramfs-xenclient"
 IMAGE_INSTALL += "xenclient-initramfs-tpm-config-files"
 IMAGE_INSTALL += "kernel-module-tpm"
 IMAGE_INSTALL += "kernel-module-tpm-tis"
