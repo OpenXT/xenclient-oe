@@ -37,10 +37,12 @@ SRC_URI = "https://www.kernel.org/pub/linux/kernel/v${PV_MAJOR}.x/linux-${PV}.ta
     file://usbback-base.patch;patch=1 \
     file://hvc-kgdb-fix.patch;patch=1 \
     file://xenstore-no-read-vs-write-atomicity.patch;patch=1 \
+    file://pciback-restrictive-attr.patch;patch=1 \
+    file://thorough-reset-interface-to-pciback-s-sysfs.patch;patch=1 \
     file://defconfig"
 
-SRC_URI[kernel.md5sum] = "5d61c4f6423000989736330e305ecf4e"
-SRC_URI[kernel.sha256sum] = "8b21dd7e0a5b55a6dc7b9bc081c6bf0f46c8288015817ce6e6a53d0ad7f535f5"
+SRC_URI[kernel.md5sum] = "f8adf8afc4de69663b53ae54919e01d4"
+SRC_URI[kernel.sha256sum] = "fd725f60fd9080efd2c65302cf74dae1627d973a301ca60e75b49cc40568be8b"
 
 S = "${WORKDIR}/linux-${PV}"
 
