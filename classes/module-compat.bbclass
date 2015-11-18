@@ -1,5 +1,12 @@
 inherit module
 
+export KERNEL_PATH="${STAGING_KERNEL_DIR}"
+export KERNEL_SRC="${STAGING_KERNEL_DIR}"
+export KERNELDIR="${STAGING_KERNEL_DIR}"
+export CC="${KERNEL_CC}"
+export LD="${KERNEL_LD}"
+export AR="${KERNEL_AR}"
+
 # Overwrite do_compile and do install tasks as new OE does not set KERNELDIR
 do_compile() {
         unset CFLAGS CPPFLAGS CXXFLAGS LDFLAGS
