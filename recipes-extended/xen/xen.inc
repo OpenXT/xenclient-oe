@@ -116,6 +116,7 @@ SRC_URI = "${XEN_SRC_URI};name=source \
     file://xsa-151-leak-of-per-domain-profiling-related-vcpu-pointer-array.patch;patch=1 \
     file://xsa-152-some-pmu-and-profiling-hypercalls-log-without-rate-limiting.patch;patch=1 \
     file://xsa-153-populate-on-demand-balloon-size-inaccuracy-can-crash-guests.patch;patch=1 \
+    file://xsa-156-cpu-lockup-during-exception-delivery.patch;patch=1 \
 "
 
 SRC_URI[source.md5sum] := "${XEN_SRC_MD5SUM}"
