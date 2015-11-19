@@ -1,7 +1,12 @@
 DESCRIPTION = "Linux kernel XenClient nilfvm"
 COMPATIBLE_MACHINE = "(xenclient-nilfvm)"
 
-require linux-xenclient-${PV}.inc
+PV_MAJOR = "${@"${PV}".split('.', 3)[0]}"
+PV_MINOR = "${@"${PV}".split('.', 3)[1]}"
+
+require linux-xenclient-${PV_MAJOR}.${PV_MINOR}.inc
+
+PR = "1"
 
 inherit xenclient-deb-kernel
 
@@ -12,6 +17,4 @@ DEPENDS = " ${@deb_bootstrap_deps(d)} "
 
 DEB_DESC = "${DESCRIPTION}"
 DEB_DESC_EXT = "This package provides the linux kernel image for XenClient VPN domain."
-
-FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}-3.11"
 

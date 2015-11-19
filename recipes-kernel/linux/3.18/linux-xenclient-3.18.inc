@@ -1,13 +1,9 @@
-inherit xenclient
-
 # Use the one from meta-openembedded/meta-oe
 require recipes-kernel/linux/linux.inc
+require recipes-kernel/linux/linux-xenclient.inc
 
-DEPENDS += "bc-native"
-
-KERNEL_IMAGETYPE = "bzImage"
-
-SRC_URI = "https://www.kernel.org/pub/linux/kernel/v${PV_MAJOR}.x/linux-${PV}.tar.gz;name=kernel \
+FILESEXTRAPATHS_prepend := "${THISDIR}/patches:"
+SRC_URI += "https://www.kernel.org/pub/linux/kernel/v${PV_MAJOR}.x/linux-${PV}.tar.gz;name=kernel \
     file://bp-xen-pv-guest-pat-support.patch;patch=1 \
     file://bridge-carrier-follow-prio0.patch;patch=1 \
     file://privcmd-mmapnocache-ioctl.patch;patch=1 \
@@ -37,12 +33,12 @@ SRC_URI = "https://www.kernel.org/pub/linux/kernel/v${PV_MAJOR}.x/linux-${PV}.ta
     file://usbback-base.patch;patch=1 \
     file://hvc-kgdb-fix.patch;patch=1 \
     file://xenstore-no-read-vs-write-atomicity.patch;patch=1 \
-    file://defconfig"
+    file://pciback-restrictive-attr.patch;patch=1 \
+    file://0002-Add-thorough-reset-interface-to-pciback-s-sysfs.patch;patch=1 \
+    "
 
 SRC_URI[kernel.md5sum] = "9ac668fd5d47f7755fbf81d025112796"
 SRC_URI[kernel.sha256sum] = "57649fc21be6929b5bd1a7241a711eae6671b8296b42135d0982661d4d1e224d"
-
-S = "${WORKDIR}/linux-${PV}"
 
 LIC_FILES_CHKSUM = "file://COPYING;md5=d7810fab7487fb0aad327b76f1be7cd7"
 
