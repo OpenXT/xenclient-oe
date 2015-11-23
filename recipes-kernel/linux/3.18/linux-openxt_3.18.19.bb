@@ -2,7 +2,7 @@ DESCRIPTION = "Linux kernel for OpenXT service VMs."
 
 # Use the one from meta-openembedded/meta-oe
 require recipes-kernel/linux/linux.inc
-require recipes-kernel/linux/linux-xenclient.inc
+require recipes-kernel/linux/linux-openxt.inc
 
 PV_MAJOR = "${@"${PV}".split('.', 3)[0]}"
 PV_MINOR = "${@"${PV}".split('.', 3)[1]}"

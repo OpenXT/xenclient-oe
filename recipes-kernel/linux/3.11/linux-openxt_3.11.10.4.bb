@@ -1,7 +1,7 @@
 DESCRIPTION = "Linux kernel for OpenXT service VMs."
 
 require recipes-kernel/linux/3.11/linux.inc
-require recipes-kernel/linux/linux-xenclient.inc
+require recipes-kernel/linux/linux-openxt.inc
 
 FILESEXTRAPATHS_prepend := "${THISDIR}/patches:"
 SRC_URI += "http://mirror.openxt.org/linux-3.11.10.4.tar.gz;name=kernel \
