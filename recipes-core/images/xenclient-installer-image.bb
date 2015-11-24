@@ -26,17 +26,17 @@ ANGSTROM_EXTRA_INSTALL += ""
 
 export IMAGE_BASENAME = "xenclient-installer-image"
 
-DEPENDS = "task-base task-xenclient-installer"
+DEPENDS = "packagegroup-base packagegroup-xenclient-installer"
 
 IMAGE_INSTALL = "\
     ${ROOTFS_PKGMANAGE} \
     ${IMAGE_INITSCRIPTS} \
     modules-installer \
     linux-firmware \
-    task-core-boot \
-    task-base \
-    task-xenclient-common \
-    task-xenclient-installer \
+    packagegroup-core-boot \
+    packagegroup-base \
+    packagegroup-xenclient-common \
+    packagegroup-xenclient-installer \
     kernel-module-e1000e \
     linux-firmware \
     ${ANGSTROM_EXTRA_INSTALL}"

@@ -4,7 +4,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/GPL-2.0;md5=801f80980d171dd6425
                     file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302"
 PR = "r11"
 
-inherit task
+inherit packagegroup
 
 RDEPENDS_${PN} = " \
     kernel-modules \
@@ -16,7 +16,6 @@ RDEPENDS_${PN} = " \
     dialog \
     e2fsprogs \
     e2fsprogs-e2fsck \
-    e2fsprogs-fsck \
     e2fsprogs-mke2fs \
     e2fsprogs-tune2fs \
     eject \

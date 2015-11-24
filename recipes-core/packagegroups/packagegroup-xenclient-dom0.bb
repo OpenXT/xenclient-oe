@@ -4,7 +4,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/GPL-2.0;md5=801f80980d171dd6425
                     file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302"
 
 inherit xenclient
-inherit task
+inherit packagegroup
 
 RDEPENDS_${PN} = " \
     openssh \
@@ -39,7 +39,7 @@ RDEPENDS_${PN} = " \
     xenclient-get-config-key \
     xenclient-root-ro \
     alsa-utils-alsactl \
-    alsa-utils-alsaconf \
+    alsa-utils-scripts \
     alsa-utils-alsamixer \
     xenclient-boot-sound \
     curl \

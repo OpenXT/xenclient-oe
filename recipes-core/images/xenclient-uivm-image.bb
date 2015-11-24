@@ -18,16 +18,16 @@ XSERVER ?= "xserver-kdrive-fbdev"
 
 export IMAGE_BASENAME = "xenclient-uivm-image"
 
-DEPENDS = "task-base"
+DEPENDS = "packagegroup-base"
 IMAGE_INSTALL = "\
     ${ROOTFS_PKGMANAGE} \
     ${XSERVER} \
     modules \
-    task-xenclient-common \
-    task-xenclient-xfce-minimal \
+    packagegroup-xenclient-common \
+    packagegroup-xenclient-xfce-minimal \
     openssh \
-    task-core-boot \
-    task-base \
+    packagegroup-core-boot \
+    packagegroup-base \
     xenfb2 \
     kernel-modules \
     v4v-module \
@@ -92,7 +92,7 @@ IMAGE_INSTALL = "\
 # OE upgrade - temporarly disabled:
 
 # angstrom-x11-base-depends \
-# task-xfce46-base \
+# packagegroup-xfce46-base \
 # angstrom-gnome-icon-theme-enable \
 # battery-applet-4-xfce4 \
 # battery-applet-4-xfce4-locale-de \
@@ -106,17 +106,17 @@ IMAGE_INSTALL = "\
 #
 
 
-#    angstrom-gpe-task-base \
+#    angstrom-gpe-packagegroup-base \
 #    ${SPLASH} \
 
 #IMAGE_INSTALL = "\
 #    ${XSERVER} \
-#    task-base-extended \
+#    packagegroup-base-extended \
 #    coreutils \
 #    bash \
 #    angstrom-x11-base-depends \
-#    angstrom-gpe-task-base \
-#    angstrom-gpe-task-settings \
+#    angstrom-gpe-packagegroup-base \
+#    angstrom-gpe-packagegroup-settings \
 #    kernel-modules \
 #    hal \
 #    devilspie \

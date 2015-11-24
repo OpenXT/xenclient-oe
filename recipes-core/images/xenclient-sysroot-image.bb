@@ -18,15 +18,15 @@ ANGSTROM_EXTRA_INSTALL += " \
 export IMAGE_BASENAME = "xenclient-sysroot-image"
 export STAGING_KERNEL_DIR
 
-DEPENDS = "task-base task-xenclient-dom0"
+DEPENDS = "packagegroup-base packagegroup-xenclient-dom0"
 IMAGE_INSTALL = "\
     ${ROOTFS_PKGMANAGE} \
     ${IMAGE_INITSCRIPTS} \
     modules \
-    task-base \
-    task-core-boot \
-    task-xenclient-common \
-    task-xenclient-dom0 \
+    packagegroup-base \
+    packagegroup-core-boot \
+    packagegroup-xenclient-common \
+    packagegroup-xenclient-dom0 \
     essential-target-builddepends \
     ${ANGSTROM_EXTRA_INSTALL}"
 
