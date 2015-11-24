@@ -13,7 +13,9 @@ SRC_URI[archive.sha256sum] = "6bcfce70a26ed9c3162ba23fd0591029441c57e146d7ff4b2f
 
 S = "${WORKDIR}/ModemManager-${PV}"
 
-inherit autotools
+CFLAGS_append += " -Wno-deprecated-declarations "
+
+inherit autotools pkgconfig
 
 FILES_${PN} += "${libdir}/ModemManager/*.so \
                 ${libdir}/pppd/*/*.so \
