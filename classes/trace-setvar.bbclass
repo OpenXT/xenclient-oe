@@ -3,11 +3,11 @@
 python () {
     import bb
     def interposeSetVar(name, value, d):
-        path = bb.data.getVar("FILE", d, True)
+        path = d.getVar("FILE", True)
         if not path:
             path = "Unknown"
         file = path.split("/")[-1]
-        runqueue = bb.data.getVar("__RUNQUEUE_DO_NOT_USE_EXTERNALLY", d, False)
+        runqueue = d.getVar("__RUNQUEUE_DO_NOT_USE_EXTERNALLY", False)
         if not runqueue:
             task = "Unknown"
         else:
@@ -15,7 +15,7 @@ python () {
         bb.note("SETVAR %s %s: setVar('%s', '%s', d)" % (file, task, name, str(value)[:50]))
         orig_bb_data_setVar(name, value, d)
 
-    if bb.data.setVar != interposeSetVar:
-        orig_bb_data_setVar = bb.data.setVar
-        bb.data.setVar = interposeSetVar
+    if d.setVar != interposeSetVar:
+        orig_bb_data_setVar = d.setVar
+        d.setVar = interposeSetVar
 }

@@ -47,6 +47,6 @@ python locking_eventhandler () {
         #print "Task over: %s" % e.task
         release_tasklock(e.data, e.task)
 
-    #print "The file we run for is %s" % bb.data.getVar('FILE', e.data, True)
+    #print "The file we run for is %s" % e.data.getVar('FILE', True)
     return NotHandled
 }

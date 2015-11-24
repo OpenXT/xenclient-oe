@@ -27,7 +27,7 @@ python __log_event_eh () {
         task = e.task
     else:
         task = "-"
-    recipe = bb.data.getVar('FILE', data, True).split("/")[-1]
+    recipe = d.getVar('FILE', True).split("/")[-1]
     logfile = bb.data.expand('${EVENT_LOG_FILE}', data)
     stamp = time.time()
     timeformat = "%H:%M:%S"
