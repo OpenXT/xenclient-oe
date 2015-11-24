@@ -12,9 +12,9 @@ INC_PR = "r3"
 DEPENDS = "zlib openssl"
 DEPENDS += "${@base_contains('DISTRO_FEATURES', 'pam', 'libpam', '', d)}"
 
-RDEPENDS += " pam-plugin-keyinit pam-plugin-loginuid "
+RDEPENDS_${PN} += " pam-plugin-keyinit pam-plugin-loginuid "
 
-RPROVIDES = "ssh sshd"
+RPROVIDES_${PN} = "ssh sshd"
 
 CONFLICTS_${PN} = "dropbear"
 RCONFLICTS_${PN}-sshd = "dropbear"
@@ -30,7 +30,7 @@ INITSCRIPT_PACKAGES = "${PN}-sshd"
 INITSCRIPT_NAME_${PN}-sshd = "sshd_v4v"
 INITSCRIPT_PARAMS_${PN}-sshd = "defaults 9"
 
-inherit autotools
+inherit autotools-brokensep
 
 # LFS support:
 CFLAGS += "-D__FILE_OFFSET_BITS=64"
