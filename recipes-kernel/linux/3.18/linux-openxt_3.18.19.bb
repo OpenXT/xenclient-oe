@@ -7,7 +7,7 @@ require recipes-kernel/linux/linux-openxt.inc
 PV_MAJOR = "${@"${PV}".split('.', 3)[0]}"
 PV_MINOR = "${@"${PV}".split('.', 3)[1]}"
 
-FILESEXTRAPATHS_prepend := "${THISDIR}/patches:"
+FILESEXTRAPATHS_prepend := "${THISDIR}/patches:${THISDIR}/defconfigs:"
 SRC_URI += "https://www.kernel.org/pub/linux/kernel/v${PV_MAJOR}.x/linux-${PV}.tar.gz;name=kernel \
     file://bp-xen-pv-guest-pat-support.patch;patch=1 \
     file://bridge-carrier-follow-prio0.patch;patch=1 \
@@ -40,6 +40,7 @@ SRC_URI += "https://www.kernel.org/pub/linux/kernel/v${PV_MAJOR}.x/linux-${PV}.t
     file://xenstore-no-read-vs-write-atomicity.patch;patch=1 \
     file://pciback-restrictive-attr.patch;patch=1 \
     file://0002-Add-thorough-reset-interface-to-pciback-s-sysfs.patch;patch=1 \
+    file://defconfig \
     "
 
 SRC_URI[kernel.md5sum] = "9ac668fd5d47f7755fbf81d025112796"

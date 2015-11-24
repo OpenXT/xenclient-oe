@@ -3,7 +3,7 @@ DESCRIPTION = "Linux kernel for OpenXT service VMs."
 require recipes-kernel/linux/3.11/linux.inc
 require recipes-kernel/linux/linux-openxt.inc
 
-FILESEXTRAPATHS_prepend := "${THISDIR}/patches:"
+FILESEXTRAPATHS_prepend := "${THISDIR}/patches:${THISDIR}/defconfigs:"
 SRC_URI += "http://mirror.openxt.org/linux-3.11.10.4.tar.gz;name=kernel \
     file://bp-msix-passthru-fix-0e4ccb1505-v2.patch;patch=1 \
     file://xen-acpi-wmi.patch;patch=1 \
@@ -51,6 +51,7 @@ SRC_URI += "http://mirror.openxt.org/linux-3.11.10.4.tar.gz;name=kernel \
     file://pciback-restrictive-attr.patch;striplevel=1 \
     file://0001-Backport-PCI-bus-and-slot-reset-functionality.patch;striplevel=1 \
     file://0002-Add-thorough-reset-interface-to-pciback-s-sysfs.patch;striplevel=1 \
+    file://defconfig \
     "
 
 SRC_URI[kernel.md5sum] = "de35143a3d9bc37c87a13c2d3760e522"
