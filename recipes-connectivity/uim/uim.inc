@@ -13,7 +13,7 @@ EXTRA_OECONF += "--disable-applet \
                  --without-mana \
                  --without-eb"
 #                 --without-qt \
-
+#
 SRC_URI = "http://uim.googlecode.com/files/uim-${PV}.tar.bz2"
 
 FILES_${PN}-dbg += "${libdir}/*/*/*/.debug ${libdir}/*/*/.debug"

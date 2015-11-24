@@ -23,7 +23,7 @@ SRC_URI += "file://uim-module-manager.patch;patch=1 \
             file://translations/ja.po \
             file://translations/zh_CN.po"
 
-inherit autotools pkgconfig gettext
+inherit autotools-brokensep pkgconfig gettext
 
 PACKAGES += "uim-xim uim-utils uim-skk uim-gtk2.0 uim-fep uim-common uim-anthy libuim0 libuim-dev"
 
