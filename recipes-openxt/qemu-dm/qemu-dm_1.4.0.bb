@@ -10,4 +10,4 @@ require qemu-dm.inc
 
 EXTRA_OECONF += " --audio-drv-list=alsa --enable-openxt-iso "
 
-PR = "${INC_PR}.5"
+PR = "${INC_PR}.6"
