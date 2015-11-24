@@ -41,10 +41,23 @@ ASNEEDED = ""
 
 inherit update-alternatives
 
-ALTERNATIVE_NAME = "init"
-ALTERNATIVE_LINK = "${base_sbindir}/init"
-ALTERNATIVE_PATH = "${base_sbindir}/init.sysvinit"
-ALTERNATIVE_PRIORITY = "60"
+#ALTERNATIVE_NAME = "init"
+#ALTERNATIVE_LINK = "${base_sbindir}/init"
+#ALTERNATIVE_PATH = "${base_sbindir}/init.sysvinit"
+#ALTERNATIVE_PRIORITY = "60"
+
+ALTERNATIVE_${PN} = "init halt reboot runlevel shutdown poweroff"
+
+ALTERNATIVE_PRIORITY = "200"
+
+ALTERNATIVE_LINK_NAME[init] = "${base_sbindir}/init"
+ALTERNATIVE_PRIORITY[init] = "50"
+
+ALTERNATIVE_LINK_NAME[halt] = "${base_sbindir}/halt"
+ALTERNATIVE_LINK_NAME[reboot] = "${base_sbindir}/reboot"
+ALTERNATIVE_LINK_NAME[runlevel] = "${base_sbindir}/runlevel"
+ALTERNATIVE_LINK_NAME[shutdown] = "${base_sbindir}/shutdown"
+ALTERNATIVE_LINK_NAME[poweroff] = "${base_sbindir}/poweroff"
 
 PACKAGES =+ "sysvinit-utils sysvinit-pidof sysvinit-sulogin"
 FILES_${PN} += "${base_sbindir}/* ${base_bindir}/*"
