@@ -1,14 +1,8 @@
-commit 55c67a4999e0025d561d377921f15246593db994
-Author: Tomasz Wroblewski <tomasz.wroblewski@citrix.com>
-Date:   Fri Oct 8 11:43:45 2010 +0100
-
-    add DOMID authentication mechanism and GetConnectionDOMID driver function
-
 diff --git a/bus/driver.c b/bus/driver.c
-index 5e8a7a2..0bc040b 100644
+index e95a79d..b79b3e1 100644
 --- a/bus/driver.c
 +++ b/bus/driver.c
-@@ -1328,6 +1328,80 @@ bus_driver_handle_get_connection_unix_user (DBusConnection *connection,
+@@ -1352,6 +1352,80 @@ bus_driver_handle_get_connection_unix_user (DBusConnection *connection,
  }
  
  static dbus_bool_t
@@ -89,7 +83,7 @@ index 5e8a7a2..0bc040b 100644
  bus_driver_handle_get_connection_unix_process_id (DBusConnection *connection,
  						  BusTransaction *transaction,
  						  DBusMessage    *message,
-@@ -1713,6 +1787,10 @@ static struct
+@@ -1756,6 +1830,10 @@ static const MessageHandler dbus_message_handlers[] = {
      DBUS_TYPE_STRING_AS_STRING,
      DBUS_TYPE_UINT32_AS_STRING,
      bus_driver_handle_get_connection_unix_process_id },
@@ -101,15 +95,10 @@ index 5e8a7a2..0bc040b 100644
      DBUS_TYPE_STRING_AS_STRING,
      DBUS_TYPE_ARRAY_AS_STRING DBUS_TYPE_BYTE_AS_STRING,
 diff --git a/dbus/dbus-auth.c b/dbus/dbus-auth.c
-index b81c7f2..811b5f9 100644
+index c21449f..83c9a86 100644
 --- a/dbus/dbus-auth.c
 +++ b/dbus/dbus-auth.c
-@@ -1079,10 +1079,15 @@ handle_server_data_external_mech (DBusAuth         *auth,
-                      _dbus_string_get_const_data (&auth->identity));
-       return send_rejected (auth);
-     }
--  
-+
+@@ -1097,6 +1097,11 @@ handle_server_data_external_mech (DBusAuth         *auth,
    if (_dbus_credentials_are_superset (auth->credentials,
                                        auth->desired_identity))
      {
@@ -121,7 +110,7 @@ index b81c7f2..811b5f9 100644
        /* client has authenticated */
        if (!_dbus_credentials_add_credentials (auth->authorized_identity,
                                                auth->desired_identity))
-@@ -1170,6 +1175,146 @@ handle_client_shutdown_external_mech (DBusAuth *auth)
+@@ -1184,6 +1189,145 @@ handle_client_shutdown_external_mech (DBusAuth *auth)
  }
  
  /*
@@ -263,12 +252,11 @@ index b81c7f2..811b5f9 100644
 +
 +}
 +
-+
 +/*
   * ANONYMOUS mechanism
   */
  
-@@ -1302,6 +1447,14 @@ all_mechanisms[] = {
+@@ -1304,6 +1448,14 @@ all_mechanisms[] = {
      handle_client_data_external_mech,
      NULL, NULL,
      handle_client_shutdown_external_mech },
@@ -284,10 +272,10 @@ index b81c7f2..811b5f9 100644
      handle_server_data_cookie_sha1_mech,
      NULL, NULL,
 diff --git a/dbus/dbus-bus.c b/dbus/dbus-bus.c
-index 92ec20e..3f3e00d 100644
+index 0fd4831..61c029c 100644
 --- a/dbus/dbus-bus.c
 +++ b/dbus/dbus-bus.c
-@@ -917,6 +917,71 @@ dbus_bus_get_unix_user (DBusConnection *connection,
+@@ -926,6 +926,71 @@ dbus_bus_get_unix_user (DBusConnection *connection,
    return (unsigned long) uid;
  }
  
@@ -360,24 +348,25 @@ index 92ec20e..3f3e00d 100644
   * Asks the bus to return its globally unique ID, as described in the
   * D-Bus specification. For the session bus, this is useful as a way
 diff --git a/dbus/dbus-bus.h b/dbus/dbus-bus.h
-index e36449c..be44ce1 100644
+index 02a9571..268ce26 100644
 --- a/dbus/dbus-bus.h
 +++ b/dbus/dbus-bus.h
-@@ -49,6 +49,9 @@ const char*     dbus_bus_get_unique_name  (DBusConnection *connection);
- unsigned long   dbus_bus_get_unix_user    (DBusConnection *connection,
+@@ -56,6 +56,10 @@ unsigned long   dbus_bus_get_unix_user    (DBusConnection *connection,
  			                   const char     *name,
                                             DBusError      *error);
+ DBUS_EXPORT
 +dbus_int32_t    dbus_bus_get_domid        (DBusConnection *connection,
 +                                           const char *name,
 +                                           DBusError *error);
++DBUS_EXPORT
  char*           dbus_bus_get_id           (DBusConnection *connection,
                                             DBusError      *error);
- int             dbus_bus_request_name     (DBusConnection *connection,
+ DBUS_EXPORT
 diff --git a/dbus/dbus-connection.c b/dbus/dbus-connection.c
-index 9526d3c..7256b52 100644
+index f0b6871..e3a41af 100644
 --- a/dbus/dbus-connection.c
 +++ b/dbus/dbus-connection.c
-@@ -4994,6 +4994,26 @@ dbus_connection_get_unix_user (DBusConnection *connection,
+@@ -5185,6 +5185,25 @@ dbus_connection_get_unix_user (DBusConnection *connection,
    return result;
  }
  
@@ -390,7 +379,7 @@ index 9526d3c..7256b52 100644
 +  
 +  CONNECTION_LOCK (connection);
 +
-+  if (!_dbus_transport_get_is_authenticated (connection->transport))
++  if (!_dbus_transport_try_to_authenticate (connection->transport))
 +    result = FALSE;
 +  else
 +    result = _dbus_transport_get_domid(connection->transport, domid);
@@ -400,31 +389,31 @@ index 9526d3c..7256b52 100644
 +  return result;
 +}
 +
-+
  /**
   * Gets the process ID of the connection if any.
   * Returns #TRUE if the pid is filled in.
 diff --git a/dbus/dbus-connection.h b/dbus/dbus-connection.h
-index 29a2f5e..0f7e0e0 100644
+index fe4d04e..9a1ccdb 100644
 --- a/dbus/dbus-connection.h
 +++ b/dbus/dbus-connection.h
-@@ -229,6 +229,8 @@ void               dbus_connection_set_dispatch_status_function (DBusConnection
-                                                                  DBusFreeFunction            free_data_function);
+@@ -262,6 +262,9 @@ DBUS_EXPORT
  dbus_bool_t        dbus_connection_get_unix_user                (DBusConnection             *connection,
                                                                   unsigned long              *uid);
+ DBUS_EXPORT
 +dbus_bool_t        dbus_connection_get_domid                    (DBusConnection             *connection,
 +                                                                 dbus_int32_t               *domid);
++DBUS_EXPORT
  dbus_bool_t        dbus_connection_get_unix_process_id          (DBusConnection             *connection,
                                                                   unsigned long              *pid);
- dbus_bool_t        dbus_connection_get_adt_audit_session_data   (DBusConnection             *connection,
+ DBUS_EXPORT
 diff --git a/dbus/dbus-credentials.c b/dbus/dbus-credentials.c
-index ff69f3b..a1fca8d 100644
+index 7325125..9301324 100644
 --- a/dbus/dbus-credentials.c
 +++ b/dbus/dbus-credentials.c
 @@ -49,6 +49,7 @@ struct DBusCredentials {
    int refcount;
    dbus_uid_t unix_uid;
-   dbus_pid_t unix_pid;
+   dbus_pid_t pid;
 +  dbus_int32_t domid;
    char *windows_sid;
    void *adt_audit_data;
@@ -432,12 +421,12 @@ index ff69f3b..a1fca8d 100644
 @@ -78,6 +79,7 @@ _dbus_credentials_new (void)
    creds->refcount = 1;
    creds->unix_uid = DBUS_UID_UNSET;
-   creds->unix_pid = DBUS_PID_UNSET;
+   creds->pid = DBUS_PID_UNSET;
 +  creds->domid = DBUS_DOMID_UNSET;
    creds->windows_sid = NULL;
    creds->adt_audit_data = NULL;
    creds->adt_audit_data_size = 0;
-@@ -85,6 +87,18 @@ _dbus_credentials_new (void)
+@@ -85,6 +87,17 @@ _dbus_credentials_new (void)
    return creds;
  }
  
@@ -452,11 +441,10 @@ index ff69f3b..a1fca8d 100644
 +  return credentials->domid;
 +}
 +
-+
  /**
   * Creates a new object with credentials (user ID and process ID) from the current process.
   * @returns the new object or #NULL if no memory
-@@ -238,6 +252,8 @@ _dbus_credentials_include (DBusCredentials    *credentials,
+@@ -238,6 +251,8 @@ _dbus_credentials_include (DBusCredentials    *credentials,
        return credentials->windows_sid != NULL;
      case DBUS_CREDENTIAL_ADT_AUDIT_DATA_ID:
        return credentials->adt_audit_data != NULL;
@@ -465,17 +453,17 @@ index ff69f3b..a1fca8d 100644
      }
  
    _dbus_assert_not_reached ("Unknown credential enum value");
-@@ -324,6 +340,8 @@ _dbus_credentials_are_superset (DBusCredentials    *credentials,
+@@ -324,6 +339,8 @@ _dbus_credentials_are_superset (DBusCredentials    *credentials,
    return
-     (possible_subset->unix_pid == DBUS_PID_UNSET ||
-      possible_subset->unix_pid == credentials->unix_pid) &&
+     (possible_subset->pid == DBUS_PID_UNSET ||
+      possible_subset->pid == credentials->pid) &&
 +    (possible_subset->domid == DBUS_DOMID_UNSET ||
 +     possible_subset->domid == credentials->domid) &&
      (possible_subset->unix_uid == DBUS_UID_UNSET ||
       possible_subset->unix_uid == credentials->unix_uid) &&
      (possible_subset->windows_sid == NULL ||
-@@ -348,7 +366,8 @@ _dbus_credentials_are_empty (DBusCredentials    *credentials)
-     credentials->unix_pid == DBUS_PID_UNSET &&
+@@ -348,7 +365,8 @@ _dbus_credentials_are_empty (DBusCredentials    *credentials)
+     credentials->pid == DBUS_PID_UNSET &&
      credentials->unix_uid == DBUS_UID_UNSET &&
      credentials->windows_sid == NULL &&
 -    credentials->adt_audit_data == NULL;
@@ -484,7 +472,7 @@ index ff69f3b..a1fca8d 100644
  }
  
  /**
-@@ -389,6 +408,9 @@ _dbus_credentials_add_credentials (DBusCredentials    *credentials,
+@@ -389,6 +407,9 @@ _dbus_credentials_add_credentials (DBusCredentials    *credentials,
                                        other_credentials) &&
      _dbus_credentials_add_credential (credentials,
                                        DBUS_CREDENTIAL_WINDOWS_SID,
@@ -494,7 +482,7 @@ index ff69f3b..a1fca8d 100644
                                        other_credentials);
  }
  
-@@ -433,6 +455,12 @@ _dbus_credentials_add_credential (DBusCredentials    *credentials,
+@@ -433,6 +454,12 @@ _dbus_credentials_add_credential (DBusCredentials    *credentials,
        if (!_dbus_credentials_add_adt_audit_data (credentials, other_credentials->adt_audit_data, other_credentials->adt_audit_data_size))
          return FALSE;
      }
@@ -507,21 +495,16 @@ index ff69f3b..a1fca8d 100644
  
    return TRUE;
  }
-@@ -447,6 +475,7 @@ _dbus_credentials_clear (DBusCredentials    *credentials)
- {
-   credentials->unix_pid = DBUS_PID_UNSET;
+@@ -449,6 +476,7 @@ _dbus_credentials_clear (DBusCredentials    *credentials)
    credentials->unix_uid = DBUS_UID_UNSET;
-+  credentials->domid = DBUS_DOMID_UNSET;
    dbus_free (credentials->windows_sid);
    credentials->windows_sid = NULL;
++  credentials->domid = DBUS_DOMID_UNSET;
    dbus_free (credentials->adt_audit_data);
-@@ -548,3 +577,4 @@ oom:
- /** @} */
- 
- /* tests in dbus-credentials-util.c */
-+
+   credentials->adt_audit_data = NULL;
+   credentials->adt_audit_data_size = 0;
 diff --git a/dbus/dbus-credentials.h b/dbus/dbus-credentials.h
-index ef6124f..d7283ce 100644
+index abcc4bb..44dc4fb 100644
 --- a/dbus/dbus-credentials.h
 +++ b/dbus/dbus-credentials.h
 @@ -34,7 +34,8 @@ typedef enum {
@@ -534,7 +517,7 @@ index ef6124f..d7283ce 100644
  } DBusCredentialType;
  
  DBusCredentials* _dbus_credentials_new_from_current_process (void);
-@@ -45,6 +46,8 @@ dbus_bool_t      _dbus_credentials_add_unix_pid             (DBusCredentials
+@@ -45,6 +46,8 @@ dbus_bool_t      _dbus_credentials_add_pid                  (DBusCredentials
                                                               dbus_pid_t          pid);
  dbus_bool_t      _dbus_credentials_add_unix_uid             (DBusCredentials    *credentials,
                                                               dbus_uid_t          uid);
@@ -545,17 +528,17 @@ index ef6124f..d7283ce 100644
  dbus_bool_t      _dbus_credentials_add_adt_audit_data       (DBusCredentials    *credentials,
 @@ -54,6 +57,7 @@ dbus_bool_t      _dbus_credentials_include                  (DBusCredentials
                                                               DBusCredentialType  type);
- dbus_pid_t       _dbus_credentials_get_unix_pid             (DBusCredentials    *credentials);
+ dbus_pid_t       _dbus_credentials_get_pid                  (DBusCredentials    *credentials);
  dbus_uid_t       _dbus_credentials_get_unix_uid             (DBusCredentials    *credentials);
 +dbus_int32_t     _dbus_credentials_get_domid                (DBusCredentials    *credentials);
  const char*      _dbus_credentials_get_windows_sid          (DBusCredentials    *credentials);
  void *           _dbus_credentials_get_adt_audit_data       (DBusCredentials    *credentials);
  dbus_int32_t     _dbus_credentials_get_adt_audit_data_size  (DBusCredentials    *credentials);
 diff --git a/dbus/dbus-sysdeps.h b/dbus/dbus-sysdeps.h
-index 7817e04..39cd26e 100644
+index e586946..5826b67 100644
 --- a/dbus/dbus-sysdeps.h
 +++ b/dbus/dbus-sysdeps.h
-@@ -117,6 +117,8 @@ typedef unsigned long dbus_gid_t;
+@@ -106,6 +106,8 @@ typedef unsigned long dbus_gid_t;
  /** an invalid GID used to represent an uninitialized dbus_gid_t field */
  #define DBUS_GID_UNSET ((dbus_gid_t) -1)
  
@@ -565,10 +548,10 @@ index 7817e04..39cd26e 100644
  #define DBUS_PID_FORMAT "%lu"
  /** an appropriate printf format for dbus_uid_t */
 diff --git a/dbus/dbus-transport.c b/dbus/dbus-transport.c
-index 53289ad..30ad5ff 100644
+index ecc3182..9d7073a 100644
 --- a/dbus/dbus-transport.c
 +++ b/dbus/dbus-transport.c
-@@ -1228,6 +1228,30 @@ _dbus_transport_get_unix_user (DBusTransport *transport,
+@@ -1332,6 +1332,29 @@ _dbus_transport_get_unix_user (DBusTransport *transport,
      return FALSE;
  }
  
@@ -595,15 +578,14 @@ index 53289ad..30ad5ff 100644
 +  }
 +}
 +
-+
  /**
   * See dbus_connection_get_unix_process_id().
   *
 diff --git a/dbus/dbus-transport.h b/dbus/dbus-transport.h
-index f2915f3..2253a4f 100644
+index 80fa24e..f6d19ed 100644
 --- a/dbus/dbus-transport.h
 +++ b/dbus/dbus-transport.h
-@@ -62,6 +62,8 @@ dbus_bool_t        _dbus_transport_get_socket_fd          (DBusTransport
+@@ -74,6 +74,8 @@ dbus_bool_t        _dbus_transport_get_socket_fd          (DBusTransport
                                                             int                        *fd_p);
  dbus_bool_t        _dbus_transport_get_unix_user          (DBusTransport              *transport,
                                                             unsigned long              *uid);

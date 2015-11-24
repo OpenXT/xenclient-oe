@@ -1,17 +1,18 @@
-diff -uNr dbus-1.2.28.orig/configure.in dbus-1.2.28/configure.in
---- dbus-1.2.28.orig/configure.in	2012-07-20 19:55:26.600404901 +0100
-+++ dbus-1.2.28/configure.in	2012-07-20 19:58:28.492543877 +0100
-@@ -80,6 +80,7 @@
+diff --git a/configure.ac b/configure.ac
+index 6380828..790cca0 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -156,6 +156,7 @@ AC_ARG_ENABLE(libaudit,AS_HELP_STRING([--enable-libaudit],[build audit daemon su
+ AC_ARG_ENABLE(inotify, AS_HELP_STRING([--enable-inotify],[build with inotify support (linux only)]),enable_inotify=$enableval,enable_inotify=auto)
  AC_ARG_ENABLE(kqueue, AS_HELP_STRING([--enable-kqueue],[build with kqueue support]),enable_kqueue=$enableval,enable_kqueue=auto)
  AC_ARG_ENABLE(console-owner-file, AS_HELP_STRING([--enable-console-owner-file],[enable console owner file]),enable_console_owner_file=$enableval,enable_console_owner_file=auto)
- AC_ARG_ENABLE(userdb-cache, AS_HELP_STRING([--enable-userdb-cache],[build with userdb-cache support]),enable_userdb_cache=$enableval,enable_userdb_cache=yes)
 +AC_ARG_ENABLE(v4v, AS_HELP_STRING([--enable-v4v],[build with v4v support]),enable_v4v=$enableval,enable_v4v=auto)
+ AC_ARG_ENABLE(launchd, AS_HELP_STRING([--enable-launchd],[build with launchd auto-launch support]),enable_launchd=$enableval,enable_launchd=auto)
+ AC_ARG_ENABLE(systemd, AS_HELP_STRING([--enable-systemd],[build with systemd at_console support]),enable_systemd=$enableval,enable_systemd=auto)
  
- AC_ARG_WITH(xml, AS_HELP_STRING([--with-xml=[libxml/expat]],[XML library to use (libxml may be named libxml2 on some systems)]))
- AC_ARG_WITH(init-scripts, AS_HELP_STRING([--with-init-scripts=[redhat]],[Style of init scripts to install]))
-@@ -922,6 +923,22 @@
-    AC_MSG_RESULT(no)
- fi
+@@ -1247,6 +1248,23 @@ AC_DEFINE_UNQUOTED([DBUS_DEFAULT_MESSAGE_UNIX_FDS],
+   [Default for dbus_connection_get_max_message_unix_fds()])
+ AC_SUBST([DEFAULT_MESSAGE_UNIX_FDS])
  
 +# v4v checks
 +if test x$enable_v4v = xno ; then
@@ -29,32 +30,34 @@ diff -uNr dbus-1.2.28.orig/configure.in dbus-1.2.28/configure.in
 +fi
 +
 +AM_CONDITIONAL(HAVE_V4V, test x$have_v4v = xyes)
- 
++
  if test -z "$with_dbus_default_reply_timeout" ; then
      DBUS_DEFAULT_REPLY_TIMEOUT=25000
-@@ -1534,6 +1551,7 @@
+ else
+@@ -1824,6 +1842,7 @@ echo "
+         Building X11 code:        ${have_x11}
          Building Doxygen docs:    ${enable_doxygen_docs}
          Building XML docs:        ${enable_xml_docs}
-         Building cache support:   ${enable_userdb_cache}
 +        Building v4v support:     ${enable_v4v}
-         Gettext libs (empty OK):  ${INTLLIBS}
-         Using XML parser:         ${with_xml}
+         Building launchd support: ${have_launchd}
          Init scripts style:       ${with_init_scripts}
-diff -uNr dbus-1.2.28.orig/dbus/dbus-sysdeps-unix.c dbus-1.2.28/dbus/dbus-sysdeps-unix.c
---- dbus-1.2.28.orig/dbus/dbus-sysdeps-unix.c	2011-06-10 23:29:57.000000000 +0100
-+++ dbus-1.2.28/dbus/dbus-sysdeps-unix.c	2012-07-20 19:55:45.196516891 +0100
-@@ -75,6 +75,10 @@
- #include <bsm/adt.h>
- #endif
+         Default reply timeout:    ${DBUS_DEFAULT_REPLY_TIMEOUT}
+diff --git a/dbus/dbus-sysdeps-unix.c b/dbus/dbus-sysdeps-unix.c
+index e81e52c..c608541 100644
+--- a/dbus/dbus-sysdeps-unix.c
++++ b/dbus/dbus-sysdeps-unix.c
+@@ -82,6 +82,10 @@
+ 
+ #include "sd-daemon.h"
  
 +#ifdef HAVE_V4V
 +#include <libv4v.h>
 +#endif
 +
- #ifndef O_BINARY
- #define O_BINARY 0
+ #if !DBUS_USE_SYNC
+ #include <pthread.h>
  #endif
-@@ -789,6 +793,10 @@
+@@ -1243,6 +1247,10 @@ _dbus_connect_tcp_socket_with_nonce (const char     *host,
      hints.ai_family = AF_INET;
    else if (!strcmp(family, "ipv6"))
      hints.ai_family = AF_INET6;
@@ -65,7 +68,7 @@ diff -uNr dbus-1.2.28.orig/dbus/dbus-sysdeps-unix.c dbus-1.2.28/dbus/dbus-sysdep
    else
      {
        dbus_set_error (error,
-@@ -813,6 +821,11 @@
+@@ -1266,6 +1274,11 @@ _dbus_connect_tcp_socket_with_nonce (const char     *host,
    tmp = ai;
    while (tmp)
      {
@@ -77,7 +80,7 @@ diff -uNr dbus-1.2.28.orig/dbus/dbus-sysdeps-unix.c dbus-1.2.28/dbus/dbus-sysdep
        if (!_dbus_open_socket (&fd, tmp->ai_family, SOCK_STREAM, 0, error))
          {
            freeaddrinfo(ai);
-@@ -892,6 +905,10 @@
+@@ -1361,6 +1374,10 @@ _dbus_listen_tcp_socket (const char     *host,
      hints.ai_family = AF_INET;
    else if (!strcmp(family, "ipv6"))
      hints.ai_family = AF_INET6;
@@ -88,7 +91,7 @@ diff -uNr dbus-1.2.28.orig/dbus/dbus-sysdeps-unix.c dbus-1.2.28/dbus/dbus-sysdep
    else
      {
        dbus_set_error (error,
-@@ -918,6 +935,12 @@
+@@ -1388,6 +1405,12 @@ _dbus_listen_tcp_socket (const char     *host,
    while (tmp)
      {
        int fd = -1, *newlisten_fd;
