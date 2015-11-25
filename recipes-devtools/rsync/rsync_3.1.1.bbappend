@@ -1,2 +1,3 @@
-PRINC = "1"
+PR .= "r1"
+
 EXTRA_OECONF += "--enable-xattr-support"
