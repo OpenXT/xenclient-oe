@@ -7,7 +7,7 @@ DEPENDS = "libx86 pciutils"
 
 PR = "r3"
 
-inherit autotools
+inherit autotools-brokensep
 
 SRC_URI = "${DEBIAN_MIRROR}/main/v/vbetool/vbetool_${PV}.orig.tar.gz"
 
