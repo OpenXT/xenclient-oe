@@ -2,9 +2,9 @@ SRC_URI[md5sum] = "552639142e163745f6bcd4f1f3816d8a"
 SRC_URI[sha256sum] = "7e79b03d65105541a5fdcc05087bee29ebc9e33149ac33d6563d0b20eddf79e0"
 DESCRIPTION = "Rotates, compresses, removes and mails system log files"
 HOMEPAGE = "http://packages.debian.org/unstable/admin/logrotate"
-RCONFLICTS = "logrotate-script"
+RCONFLICTS_${PN} = "logrotate-script"
 DEPENDS = "popt"
-RDEPENDS = ""
+RDEPENDS_${PN} = ""
 SECTION = "admin"
 LICENSE = "GPLv2"
 LIC_FILES_CHKSUM = "file://COPYING;md5=18810669f13b87348459e611d31ab760"
@@ -33,12 +33,12 @@ do_install () {
     install -m 0755 -d ${D}${sysconfdir}/logrotate.d
 }
 
-pkg_postinst () {
+pkg_postinst_${PN} () {
     # Add the logrotate line to /etc/crontab
     grep -q "${base_sbindir}/logrotate" $D${sysconfdir}/crontab || echo "*/5 * * * *   root ${base_sbindir}/logrotate ${sysconfdir}/logrotate.conf" >> $D${sysconfdir}/crontab
 }
 
-pkg_postrm() {
+pkg_postrm_${PN} () {
     # Remove the logrotate line from /etc/crontab
     grep -v ${base_sbindir}/logrotate ${sysconfdir}/crontab > ${sysconfdir}/crontab.no-${PF}
     mv ${sysconfdir}/crontab.no-${PF} ${sysconfdir}/crontab
