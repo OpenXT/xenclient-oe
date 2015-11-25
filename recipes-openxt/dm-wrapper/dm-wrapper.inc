@@ -5,12 +5,18 @@ DEPENDS = "xen xen-tools libv4v libdmbus libevent"
 
 PV = "0+git${SRCPV}"
 
-SRC_URI = "git://${OPENXT_GIT_MIRROR}/dm-wrapper.git;protocol=${OPENXT_GIT_PROTOCOL};branch=${OPENXT_BRANCH}"
+SRC_URI = "git://${OPENXT_GIT_MIRROR}/dm-wrapper.git;protocol=${OPENXT_GIT_PROTOCOL};branch=${OPENXT_BRANCH} \
+            file://fix-ac-init.patch \
+            file://bsd_sources-is-deprecated.patch \
+           "
 
 S = "${WORKDIR}/git"
 
 #EXTRA_OECONF += "--with-libxc=yes"
 EXTRA_OEMAKE += "LIBDIR=${STAGING_LIBDIR}"
 
-inherit autotools
-inherit xenclient
+inherit autotools pkgconfig xenclient
+
+do_configure_prepend(){
+     export VERSION="${VERSION}"
+}
