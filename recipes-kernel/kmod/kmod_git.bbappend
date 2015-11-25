@@ -1,3 +1,6 @@
-SRC_URI = "git://git.kernel.org/pub/scm/utils/kernel/kmod/kmod.git \
-           file://0001-man-disable-man-page-generation-because-we-don-t-hav.patch \
-"
+PR .= ".1"
+
+# We only want libkmod2 really...
+#EXTRA_OECONF := "${@oe_filter_out('--enable-tools', '${EXTRA_OECONF}', d)}"
+EXTRA_OECONF := "${@oe_filter_out('--enable-logging', '${EXTRA_OECONF}', d)}"
+EXTRA_OECONF += " --disable-logging --without-bashcompletiondir"
