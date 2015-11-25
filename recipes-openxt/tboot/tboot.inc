@@ -7,7 +7,7 @@ DEPENDS = "trousers"
 EXTRA_OEMAKE += "TARGET_ARCH=x86_32 CROSS_COMPILE=${TARGET_PREFIX}"
 
 do_compile() {
-	oe_runmake SUBDIRS:="tboot" LDFLAGS=""
+	oe_runmake SUBDIRS:="tboot" CC="${HOST_PREFIX}gcc ${TOOLCHAIN_OPTIONS}" CPP="${HOST_PREFIX}cpp ${TOOLCHAIN_OPTIONS}" LDFLAGS="" CFLAGS=""
 	oe_runmake -C ${S}/tb_polgen CFLAGS+="-std=c99"
 	oe_runmake -C ${S}/lcptools CFLAGS+="-std=c99"
 	oe_runmake CFLAGS+=" -std=c99 "
