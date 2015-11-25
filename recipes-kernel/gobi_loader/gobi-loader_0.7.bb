@@ -7,7 +7,7 @@ DEPENDS = ""
 
 PR = "r1"
 
-inherit autotools
+inherit autotools-brokensep
 
 SRC_URI = "http://www.codon.org.uk/~mjg59/gobi_loader/download/gobi_loader-0.7.tar.gz \
 		file://separate_firmware_directories.patch;patch=1 "
