@@ -11,7 +11,7 @@ SRC_URI = "http://www.mmonit.com/monit/dist/monit-${PV}.tar.gz\
 INITSCRIPT_NAME = "monit"
 INITSCRIPT_PARAMS = "start 99 5 . stop 00 0 1 6 ."
 
-inherit autotools update-rc.d
+inherit autotools-brokensep update-rc.d
 
 EXTRA_OECONF = "--without-ssl --without-pam libmonit_cv_setjmp_available=yes libmonit_cv_vsnprintf_c99_conformant=yes"
 
