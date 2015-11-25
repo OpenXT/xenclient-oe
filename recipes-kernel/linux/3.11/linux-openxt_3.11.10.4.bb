@@ -1,15 +1,10 @@
-inherit xenclient
+DESCRIPTION = "Linux kernel for OpenXT service VMs."
 
-require recipes-kernel/linux/linux.inc
+require recipes-kernel/linux/3.11/linux.inc
+require recipes-kernel/linux/linux-openxt.inc
 
-DEPENDS += "bc-native"
-
-LIC_FILES_CHKSUM = "file://COPYING;md5=d7810fab7487fb0aad327b76f1be7cd7"
-KERNEL_IMAGETYPE = "bzImage"
-
-PV = "3.11.10.4"
-
-SRC_URI = "http://mirror.openxt.org/linux-3.11.10.4.tar.gz;name=kernel \
+FILESEXTRAPATHS_prepend := "${THISDIR}/patches:${THISDIR}/defconfigs:"
+SRC_URI += "http://mirror.openxt.org/linux-3.11.10.4.tar.gz;name=kernel \
     file://bp-msix-passthru-fix-0e4ccb1505-v2.patch;patch=1 \
     file://xen-acpi-wmi.patch;patch=1 \
     file://bridge-carrier-follow-prio0.patch;patch=1 \
@@ -53,11 +48,16 @@ SRC_URI = "http://mirror.openxt.org/linux-3.11.10.4.tar.gz;name=kernel \
     file://usbback-cancel-urb-support.patch;patch=1 \
     file://blkback-3.18.13-backport.patch;patch=1 \
     file://backport-config-Enable-NEED_DMA_MAP_STATE-by-default-when-SWIOTLB-is-selected.patch;patch=1 \
-    file://defconfig"
+    file://pciback-restrictive-attr.patch;striplevel=1 \
+    file://0001-Backport-PCI-bus-and-slot-reset-functionality.patch;striplevel=1 \
+    file://0002-Add-thorough-reset-interface-to-pciback-s-sysfs.patch;striplevel=1 \
+    file://defconfig \
+    "
 
 SRC_URI[kernel.md5sum] = "de35143a3d9bc37c87a13c2d3760e522"
 SRC_URI[kernel.sha256sum] = "2aa4a14a022a7ad92db81888b0a4dde9b0d713c07da9d1e1e07c8152df0d1cf5"
 
-S = "${WORKDIR}/linux-3.11.10.4"
-
 LIC_FILES_CHKSUM = "file://COPYING;md5=d7810fab7487fb0aad327b76f1be7cd7"
+
+PR = "r2"
+
