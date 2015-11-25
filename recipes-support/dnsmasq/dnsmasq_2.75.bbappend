@@ -1,6 +1,6 @@
-PRINC = "1"
+PR .= ".1"
 
-FILESEXTRAPATHS := "${THISDIR}/${PN}"
+FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}-${PV}:"
 SRC_URI += " \
                     file://dnsmasq_dnsout_interface.patch;patch=1 \
 "
