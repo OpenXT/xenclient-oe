@@ -1,35 +1,44 @@
-DESCRIPTION = "WebKitGTK+ is the port of the portable web rendering engine WebKitK to the GTK+ platform."
+SUMMARY = "WebKit web rendering engine for the GTK+ platform"
 HOMEPAGE = "http://www.webkitgtk.org/"
 BUGTRACKER = "http://bugs.webkit.org/"
 
-LICENSE = "BSD-3-Clause & LGPLv2+"
+LICENSE = "BSD & LGPLv2+"
 LIC_FILES_CHKSUM = "file://Source/WebCore/rendering/RenderApplet.h;endline=22;md5=fb9694013ad71b78f8913af7a5959680 \
                     file://Source/WebKit/gtk/webkit/webkit.h;endline=21;md5=b4fbe9f4a944f1d071dba1d2c76b3351 \
-                    file://Source/JavaScriptCore/parser/Parser.h;endline=23;md5=2f3cff0ad0a9c486da5a376928973a90"
+                    file://Source/JavaScriptCore/parser/Parser.h;endline=23;md5=b57c8a2952a8d0e655988fa0ecb2bf7f"
 
-# DEPENDS = "zlib enchant gnome-keyring libsoup-2.4 curl icu libxml2 cairo libxslt libxt libidn gnutls gtk+ gstreamer gst-plugins-base flex-native gperf-native perl-native-runtime sqlite3"
-DEPENDS = "zlib enchant gnome-keyring libsoup-2.4 curl icu libxml2 cairo libxslt libxt libidn gnutls gtk+ flex-native gperf-native perl-native-runtime sqlite3"
-DEPENDS_darwin8 = "curl icu libxml2 cairo libxslt libidn gnutls gtk+ gstreamer flex-native gperf-native perl-native-runtime sqlite3"
+PR = "r1"
 
-SRCREV_FORMAT = "source"
+# Choice of language backends - icu has issues on Big Endian machines so use pango
+ICU_LIB = "icu"
+ICU_LIB_powerpc = "pango"
 
-PR = "r0"
+DEPENDS = "zlib enchant libsoup-2.4 curl libxml2 cairo libxslt libxt libidn gnutls \
+           gtk+ gstreamer gst-plugins-base flex-native gperf-native perl-native-runtime sqlite3 ${ICU_LIB}"
+DEPENDS += " ${@bb.utils.contains('DISTRO_FEATURES', 'opengl', 'virtual/libgl', '', d)}"
 
 SRC_URI = "\
-  http://webkitgtk.org/releases/webkit-1.6.1.tar.gz;name=webkit \
-  file://nodolt.patch;patch=1 \
-  file://enable_hybi_by_default.patch;patch=1 \
+  http://www.webkitgtk.org/releases/webkit-${PV}.tar.xz \
+  file://nodolt.patch \
+  file://no-gtkdoc.patch \
+  file://webgit-gtk_fix_build_with_automake_1.12.patch \
+  file://bison-2.6.patch \
+  file://obsolete_automake_macros.patch \
+  file://0001-Enable-mips64-build.patch \
+  file://aarch64.patch \
  "
-SRC_URI[webkit.sha256sum] = "05b09d851a04597d50fdca71ed8b09f5a0337d696b141a435255ae2095e140ad"
 
-S = "${WORKDIR}/webkit-${PV}"
+SRC_URI[md5sum] = "dcbf9d5e2e6391f857c29a57528b32a6"
+SRC_URI[sha256sum] = "ada02d636af61aed38f142d3cded662d141ce71264f624c4eb873621a74cc9e7"
 
-inherit autotools lib_package pkgconfig
-#inherit autotools lib_package
+# webkit-gtk can NOT be built on MIPS64 with n32 ABI
+COMPATIBLE_HOST_mips64 = "mips64.*-linux$"
+
+inherit autotools lib_package gtk-doc pkgconfig
+
+S = "${WORKDIR}/webkit-${PV}/"
 
 EXTRA_OECONF = "\
-                --enable-video=no \
-                --enable-webgl=no \
                 --enable-debug=no \
                 --enable-svg \
                 --enable-icon-database=yes \
@@ -37,8 +46,21 @@ EXTRA_OECONF = "\
                 --enable-image-resizer \
                 --enable-link-prefetch \
                 --with-gtk=2.0 \
+                --disable-geolocation \
+                ${@bb.utils.contains('DISTRO_FEATURES', 'opengl', '--enable-webgl', '--disable-webgl', d)} \
                 UNICODE_CFLAGS=-D_REENTRANT \
                "
+
+#default unicode backend icu breaks in cross-compile when target and host are different endian type
+EXTRA_OECONF_append_powerpc = " --with-unicode-backend=glib"
+
+CPPFLAGS_append_powerpc = " -I${STAGING_INCDIR}/pango-1.0 \
+                            -I${STAGING_LIBDIR}/glib-2.0/include \
+                            -I${STAGING_INCDIR}/glib-2.0"
+
+# ld can run out of memory linking libwebkitgtk!
+#
+LDFLAGS += "-Wl,--no-keep-memory"
 
 EXTRA_AUTORECONF = " -I Source/autotools "
 
@@ -63,14 +85,13 @@ CONFIGUREOPT_DEPTRACK = ""
 
 do_configure_append() {
 	# somethings wrong with icu, fix it up manually
-	for makefile in $(find ${S} -name "GNUmakefile") ; do
+	for makefile in $(find ${B} -name "GNUmakefile") ; do
 		sed -i s:-I/usr/include::g $makefile
 	done
-    ln -s GNUmakefile Makefile # OE does not like GNUMakefile name and if no 'normal' makefile found just ignores it
 }
 
-do_install_prepend() {
-	cp ${S}/Programs/.libs/jsc ${S}/Programs/jsc-1 || true
+do_install_append() {
+	rmdir ${D}${libexecdir}
 }
 
 PACKAGES =+ "${PN}-webinspector ${PN}launcher-dbg ${PN}launcher libjavascriptcore"
@@ -78,7 +99,7 @@ FILES_${PN}launcher = "${bindir}/GtkLauncher"
 FILES_${PN}launcher-dbg = "${bindir}/.debug/GtkLauncher"
 FILES_libjavascriptcore = "${libdir}/libjavascriptcoregtk-1.0.so.*"
 FILES_${PN}-webinspector = "${datadir}/webkitgtk-*/webinspector/"
-FILES_${PN} += "${datadir}/webkit-*/resources/error.html \
+FILES_${PN} += "${datadir}/webkitgtk-*/resources/error.html \
                 ${datadir}/webkitgtk-*/images \
                 ${datadir}/glib-2.0/schemas"
 
