@@ -15,7 +15,7 @@ S = "${WORKDIR}/git"
 # Makefile doesn't generate hash in libs.. todo: check that all is ok
 INSANE_SKIP_${PN} = "1"
 
-CFLAGS += "-DVHD_LOCKING -fPIC -pie"
+CFLAGS += "-DVHD_LOCKING -fPIC -pie -Wno-maybe-uninitialized"
 EXTRA_OEMAKE += "CROSS_COMPILE=${HOST_PREFIX}"
 
 inherit xenclient
