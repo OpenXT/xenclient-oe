@@ -1,0 +1,60 @@
+Subject: [PATCH] refpolicy: fix optional issue on sysadm module
+
+init and locallogin modules have a depend for sysadm module because
+they have called sysadm interfaces(sysadm_shell_domtrans). Since
+sysadm is not a core module, we could make the sysadm_shell_domtrans
+calls optionally by optional_policy.
+
+So, we could make the minimum policy without sysadm module.
+
+Upstream-Status: pending
+
+Signed-off-by: Xin Ouyang <Xin.Ouyang@windriver.com>
+---
+ policy/modules/system/init.te       | 14 ++++++++------
+ policy/modules/system/locallogin.te |  4 +++-
+ 2 files changed, 11 insertions(+), 7 deletions(-)
+
+diff --git a/policy/modules/system/init.te b/policy/modules/system/init.te
+index 4a88fa1..4548a7e 100644
+--- a/policy/modules/system/init.te
++++ b/policy/modules/system/init.te
+@@ -188,12 +188,14 @@ ifdef(`distro_redhat',`
+ 	fs_tmpfs_filetrans(init_t, initctl_t, fifo_file)
+ ')
+ 
+-tunable_policy(`init_upstart',`
+-	corecmd_shell_domtrans(init_t, initrc_t)
+-',`
+-	# Run the shell in the sysadm role for single-user mode.
+-	# causes problems with upstart
+-	sysadm_shell_domtrans(init_t)
++# Run the shell in the sysadm role for single-user mode.
++# causes problems with upstart
++optional_policy(`
++	tunable_policy(`init_upstart',`
++		corecmd_shell_domtrans(init_t, initrc_t)
++	',`
++		sysadm_shell_domtrans(init_t)
++	')
+ ')
+ 
+ optional_policy(`
+diff --git a/policy/modules/system/locallogin.te b/policy/modules/system/locallogin.te
+index f5a5de7..d942f05 100644
+--- a/policy/modules/system/locallogin.te
++++ b/policy/modules/system/locallogin.te
+@@ -239,7 +239,9 @@ userdom_use_unpriv_users_fds(sulogin_t)
+ userdom_search_user_home_dirs(sulogin_t)
+ userdom_use_user_ptys(sulogin_t)
+ 
+-sysadm_shell_domtrans(sulogin_t)
++optional_policy(`
++	sysadm_shell_domtrans(sulogin_t)
++')
+ 
+ # suse and debian do not use pam with sulogin...
+ ifdef(`distro_suse', `define(`sulogin_no_pam')')
+-- 
+1.7.11.7
+

@@ -1,0 +1,135 @@
+--- a/policy/modules/services/blktap.te	1969-12-31 19:00:00.000000000 -0500
++++ b/policy/modules/services/blktap.te	2015-01-05 16:03:12.793080030 -0500
+@@ -0,0 +1,132 @@
++#############################################################################
++#
++# Copyright (C) 2014 Citrix Systems, Inc.
++#
++# This program is free software; you can redistribute it and/or modify
++# it under the terms of the GNU General Public License as published by
++# the Free Software Foundation; either version 2 of the License, or
++# (at your option) any later version.
++#
++# This program is distributed in the hope that it will be useful,
++# but WITHOUT ANY WARRANTY; without even the implied warranty of
++# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++# GNU General Public License for more details.
++#
++# You should have received a copy of the GNU General Public License along
++# with this program; if not, write to the Free Software Foundation, Inc.,
++# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
++#
++#############################################################################
++
++policy_module(blktap, 0.1)
++
++########################################
++#
++# Declarations
++#
++
++type tapdisk_t;
++type tapdisk_exec_t;
++
++domain_type(tapdisk_t)
++files_type(tapdisk_exec_t)
++domain_entry_file(tapdisk_t, tapdisk_exec_t)
++role system_r types tapdisk_t;
++
++type tapctl_t;
++type tapctl_exec_t;
++
++application_domain(tapctl_t, tapctl_exec_t)
++role system_r types tapctl_t;
++
++type tapdisk_var_run_t;
++files_pid_file(tapdisk_var_run_t)
++files_pid_filetrans(tapctl_t, tapdisk_var_run_t, { dir })
++
++#######################################
++#
++# tapdisk(2) local policy
++#
++
++allow tapdisk_t self:capability { ipc_lock sys_resource sys_nice };
++allow tapdisk_t self:process { setrlimit setsched };
++
++# leaked file descriptor
++xen_dontaudit_rw_unix_stream_sockets(tapdisk_t)
++
++tapdisk_list_control_dir(tapdisk_t)
++
++files_search_mnt(tapdisk_t)
++files_search_pids(tapdisk_t)
++fs_search_tmpfs(tapdisk_t)
++manage_sock_files_pattern(tapdisk_t, tapdisk_var_run_t, tapdisk_var_run_t)
++dev_rw_xen(tapdisk_t)
++dev_read_sysfs(tapdisk_t)
++fs_read_anon_inodefs_files(tapdisk_t)
++miscfiles_read_localization(tapdisk_t)
++seutil_use_newrole_fds(tapdisk_t)
++storage_rw_blktap(tapdisk_t)
++userdom_use_user_ptys(tapdisk_t)
++xc_read_etc_files(tapdisk_t)
++xc_search_storage(tapdisk_t)
++xc_config_dir_search(tapdisk_t)
++xc_search_vhd_key_dirs(tapdisk_t)
++xc_read_vhd_key_files(tapdisk_t)
++xc_dontaudit_rw_v4v_chr(tapdisk_t)
++xc_read_sync_client_config_files(tapdisk_t)
++xc_getattr_sync_client_config_files(tapdisk_t)
++xc_read_all_disks(tapdisk_t)
++xc_write_all_disks(tapdisk_t)
++
++# consider dontaudit
++kernel_search_debugfs(tapdisk_t)
++logging_search_logs(tapdisk_t)
++logging_send_syslog_msg(tapdisk_t)
++
++#######################################
++#
++# tap-ctl local policy
++#
++
++allow tapctl_t self:fifo_file manage_fifo_file_perms;
++allow tapctl_t self:unix_dgram_socket create_socket_perms;
++allow tapctl_t tapdisk_var_run_t:dir manage_dir_perms;
++
++corecmd_search_bin(tapctl_t)
++dev_create_generic_dirs(tapctl_t)
++dev_search_sysfs(tapctl_t)
++dev_read_sysfs(tapctl_t)
++kernel_read_system_state(tapctl_t)
++logging_send_syslog_msg(tapctl_t)
++miscfiles_read_localization(tapctl_t)
++seutil_use_newrole_fds(tapctl_t)
++storage_manage_blktap(tapctl_t)
++storage_filetrans_blktap(tapctl_t)
++ifdef(`enable_mcs',`
++	storage_ranged_filetrans_blktap(tapctl_t, s0:c0)
++')
++ifdef(`enable_mls',`
++	storage_ranged_filetrans_blktap(tapctl_t, s0:c0)
++')
++tapdisk_domtrans(tapctl_t)
++tapdisk_rw_control_dir(tapctl_t)
++tapdisk_stream_connect(tapctl_t)
++userdom_use_user_ptys(tapctl_t)
++xc_read_etc_files(tapctl_t)
++xc_dontaudit_rw_v4v_chr(tapctl_t)
++xen_write_tmp(tapctl_t)
++xen_dontaudit_rw_unix_stream_sockets(tapctl_t)
++
++optional_policy(`
++	updatemgr_dontaudit_use_fd(tapctl_t)
++	updatemgr_dontaudit_rw_fifo_files(tapctl_t)
++	updatemgr_dontaudit_rw_stream_sockets(tapctl_t)
++')
++
++fs_getattr_xattr_fs(tapdisk_t)
++
++optional_policy(`
++	updatemgr_dontaudit_use_fd(tapdisk_t)
++	updatemgr_dontaudit_rw_fifo_files(tapdisk_t)
++	updatemgr_dontaudit_rw_stream_sockets(tapdisk_t)
++')
