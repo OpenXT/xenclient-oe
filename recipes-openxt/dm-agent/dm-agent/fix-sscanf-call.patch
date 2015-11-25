@@ -1,0 +1,30 @@
+fix-sscanf-call.patch: dm-agent can segfault depending on optimizations
+
+domid is actually a 16bit int where the format in buff specifies an unsigned 32-bit in. 
+When domid is filled it will spill over into whatever is next to it on the stack. Depending 
+on the optimization level this could be buff itself, resulting in a segmentation fault when 
+buff is freed.
+
+Bug: OXT-205
+
+diff --git a/src/domain.c b/src/domain.c
+index 3038210..5d34272 100644
+--- a/src/domain.c
++++ b/src/domain.c
+@@ -19,6 +19,7 @@
+ # include <stdio.h>
+ # include <stdlib.h>
+ # include <string.h>
++# include <inttypes.h>
+ # include "domain.h"
+ # include "dm-agent.h"
+ # include "util.h"
+@@ -118,7 +119,7 @@ void domains_watch (const char *path, void *priv)
+ 
+     (void) priv;
+ 
+-    res = asprintf (&buff, "%s/dms/%%u", dm_agent_get_path ());
++    res = asprintf (&buff, "%s/dms/%%"SCNu16, dm_agent_get_path ());
+     if (res == -1)
+         return;
+ 

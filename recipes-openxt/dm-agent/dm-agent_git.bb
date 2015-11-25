@@ -2,8 +2,6 @@ require dm-agent.inc
 
 SRCREV = "${AUTOREV}"
 
-SRC_URI += "file://dm-agent.initscript"
-
 inherit update-rc.d
 
 INITSCRIPT_NAME = "dm-agent"
