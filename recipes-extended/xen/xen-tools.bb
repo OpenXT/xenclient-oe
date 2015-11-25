@@ -1,6 +1,6 @@
 require xen.inc
 
-inherit pkgconfig update-rc.d
+inherit pkgconfig update-rc.d pythonnative
 
 SRC_URI += "file://xenstored.initscript \
 	    file://xenconsoled.initscript \
@@ -12,7 +12,7 @@ SRC_URI += "file://xenstored.initscript \
 DEPENDS += " gettext ncurses openssl python zlib seabios ipxe gmp lzo glib-2.0 iasl-native xz "
 DEPENDS += "util-linux"
 # lzo2 required by libxenguest.
-RDEPENDS += " lzo"
+RDEPENDS_${PN} += " lzo"
 
 PACKAGES = "${PN}-libxenstore ${PN}-libxenstore-dev ${PN}-libxenstore-dbg ${PN}-libxenstore-staticdev   \
             ${PN}-xenstore-utils ${PN}-xenstore-utils-dbg                                               \
@@ -87,18 +87,18 @@ do_compile() {
 }
 
 do_install() {
-        oe_runmake -C tools subdir-install-include
-        oe_runmake -C tools subdir-install-libxc
-        oe_runmake -C tools subdir-install-flask
-        oe_runmake -C tools subdir-install-xenstore
-        oe_runmake -C tools subdir-install-misc
-        oe_runmake -C tools subdir-install-hotplug
-        oe_runmake -C tools subdir-install-xentrace
-        oe_runmake -C tools subdir-install-xenmon
-        oe_runmake -C tools subdir-install-console
-        oe_runmake -C tools subdir-install-xenstat
-        oe_runmake -C tools subdir-install-hvm-info
-        oe_runmake -C tools subdir-install-xen-libhvm
+        oe_runmake DESTDIR=${D} -C tools subdir-install-include
+        oe_runmake DESTDIR=${D} -C tools subdir-install-libxc
+        oe_runmake DESTDIR=${D} -C tools subdir-install-flask
+        oe_runmake DESTDIR=${D} -C tools subdir-install-xenstore
+        oe_runmake DESTDIR=${D} -C tools subdir-install-misc
+        oe_runmake DESTDIR=${D} -C tools subdir-install-hotplug
+        oe_runmake DESTDIR=${D} -C tools subdir-install-xentrace
+        oe_runmake DESTDIR=${D} -C tools subdir-install-xenmon
+        oe_runmake DESTDIR=${D} -C tools subdir-install-console
+        oe_runmake DESTDIR=${D} -C tools subdir-install-xenstat
+        oe_runmake DESTDIR=${D} -C tools subdir-install-hvm-info
+        oe_runmake DESTDIR=${D} -C tools subdir-install-xen-libhvm
 
 # Should not be necessary anymore
         rm -rf ${D}/etc/udev

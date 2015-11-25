@@ -28,6 +28,8 @@ EXTRA_OEMAKE += "CONFIG_IOEMU=n"
 
 TARGET_CC_ARCH += "${LDFLAGS}"
 
+inherit pythonnative
+
 do_configure() {
 	DESTDIR=${D} ./configure --enable-seabios --disable-rombios --prefix=${prefix}
 }
@@ -40,5 +42,8 @@ do_compile() {
 do_install() {
         oe_runmake -C tools subdir-install-include
         oe_runmake -C tools subdir-install-firmware
+
+	# Remove files already provided by xen-tools
+	rm -rf ${D}/usr/include
 }
 
