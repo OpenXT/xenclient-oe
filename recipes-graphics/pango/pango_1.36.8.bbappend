@@ -1,4 +1,4 @@
-PRINC = "1"
+PR .= ".1"
 inherit qemu
 DEPENDS += "qemu-native"
 
