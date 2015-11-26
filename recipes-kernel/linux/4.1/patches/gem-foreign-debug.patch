@@ -1,0 +1,147 @@
+################################################################################
+SHORT DESCRIPTION: 
+################################################################################
+Debug printk to help debugging GEM foreign object.
+
+################################################################################
+LONG DESCRIPTION: 
+################################################################################
+Just debug prints to generate traces.
+
+################################################################################
+CHANGELOG 
+################################################################################
+Original Authors: Ross Philipson <philipsonr@ainfosec.com>
+Port to 3.18: Eric Chanudet <chanudete@ainfosec.com>
+
+################################################################################
+REMOVAL 
+################################################################################
+Can be removed.
+
+################################################################################
+UPSTREAM PLAN
+################################################################################
+None, this is OpenXT specific.
+
+################################################################################
+INTERNAL DEPENDENCIES 
+################################################################################
+None.
+
+################################################################################
+PATCHES 
+################################################################################
+Index: linux-4.1.6/drivers/gpu/drm/i915/i915_gem.c
+===================================================================
+--- linux-4.1.6.orig/drivers/gpu/drm/i915/i915_gem.c	2015-09-11 16:29:00.133233001 +0200
++++ linux-4.1.6/drivers/gpu/drm/i915/i915_gem.c	2015-09-11 16:29:01.579879923 +0200
+@@ -523,8 +523,10 @@
+ 	}
+ 
+ 	ret = i915_gem_object_get_pages(obj);
+-	if (ret)
++	if (ret) {
++		DRM_DEBUG_DRIVER("i915_gem_object_get_pages failed\n");
+ 		return ret;
++        }
+ 
+ 	i915_gem_object_pin_pages(obj);
+ 
+@@ -2129,6 +2131,7 @@
+ 	return 0;
+ 
+ err_pages:
++	DRM_DEBUG_DRIVER("shmem_read_mapping_page_gfp failed\n");
+ 	sg_mark_end(sg);
+ 	for_each_sg_page(st->sgl, &sg_iter, st->nents, 0)
+ 		page_cache_release(sg_page_iter_page(&sg_iter));
+@@ -3502,8 +3505,10 @@
+ 					       obj->cache_level,
+ 					       start, end,
+ 					       flags);
+-		if (ret == 0)
++		if (ret == 0) {
++			DRM_DEBUG_DRIVER("drm_mm_insert_* failed... retrying\n");
+ 			goto search_free;
++                }
+ 
+ 		goto err_free_vma;
+ 	}
+@@ -3513,8 +3518,10 @@
+ 	}
+ 
+ 	ret = i915_gem_gtt_prepare_object(obj);
+-	if (ret)
++	if (ret) {
++		DRM_DEBUG_DRIVER("i915_gem_gtt_prepare_object failed\n");
+ 		goto err_remove_node;
++	}
+ 
+ 	/*  allocate before insert / bind */
+ 	if (vma->vm->allocate_va_range) {
+@@ -3888,8 +3895,10 @@
+ 
+ 	if (pipelined != i915_gem_request_get_ring(obj->last_read_req)) {
+ 		ret = i915_gem_object_sync(obj, pipelined);
+-		if (ret)
++		if (ret) {
++			DRM_DEBUG_DRIVER("i915_gem_object_sync failed\n");
+ 			return ret;
++		}
+ 	}
+ 
+ 	/* Mark the pin_display early so that we account for the
+@@ -3919,8 +3928,10 @@
+ 	ret = i915_gem_object_ggtt_pin(obj, view, alignment,
+ 				       view->type == I915_GGTT_VIEW_NORMAL ?
+ 				       PIN_MAPPABLE : 0);
+-	if (ret)
++	if (ret) {
++		DRM_DEBUG_DRIVER("i915_gem_obj_ggtt_pin failed\n");
+ 		goto err_unpin_display;
++	}
+ 
+ 	i915_gem_object_flush_cpu_write_domain(obj);
+ 
+@@ -4162,8 +4173,10 @@
+ 		 */
+ 		vma = i915_gem_object_bind_to_vm(obj, vm, ggtt_view, alignment,
+ 						 flags);
+-		if (IS_ERR(vma))
++		if (IS_ERR(vma)) {
++			DRM_DEBUG_DRIVER("i915_gem_object_bind_to_vm failed\n");
+ 			return PTR_ERR(vma);
++		}
+ 	}
+ 
+ 	if (flags & PIN_GLOBAL && !(vma->bound & GLOBAL_BIND)) {
+Index: linux-4.1.6/drivers/gpu/drm/i915/i915_gem_foreign.c
+===================================================================
+--- linux-4.1.6.orig/drivers/gpu/drm/i915/i915_gem_foreign.c	2015-09-11 16:29:00.133233001 +0200
++++ linux-4.1.6/drivers/gpu/drm/i915/i915_gem_foreign.c	2015-09-11 16:29:01.579879923 +0200
+@@ -239,6 +239,7 @@
+ 	size_t i;
+ 	int rc;
+ 
++        DRM_DEBUG_DRIVER("%s()\n", __func__);
+ 	vmap->pvec = drm_malloc_ab(vmap->num_pages, sizeof (struct page *));
+ 	if (!vmap->pvec)
+ 		return -ENOMEM;
+@@ -291,6 +292,7 @@
+ 	struct i915_gem_foreign_object *vmap = to_foreign_object(obj);
+ 	/* int num_pages = obj->base.size >> PAGE_SHIFT; // Waaaaat? */
+ 
++        DRM_DEBUG_DRIVER("%s()\n", __func__);
+ 	sg_free_table(obj->pages);
+ 	kfree(obj->pages);
+ 	i915_gem_foreign_reset_p2m(vmap);
+@@ -346,6 +348,8 @@
+ 	int ret = -ENOMEM;
+ 	u32 handle;
+ 
++	DRM_DEBUG_DRIVER("Foreign init - mfns:%p num_pages:0x%x flags: 0x%x\n",
++			 args->mfns, args->num_pages, args->flags);
+ 	if ((args->num_pages * PAGE_SIZE) > dev_priv->gtt.base.total)
+ 		return -E2BIG;
+ 
