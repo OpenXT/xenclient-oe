@@ -11,8 +11,9 @@ SRC_URI = "git://${OPENXT_GIT_MIRROR}/surfman.git;protocol=${OPENXT_GIT_PROTOCOL
 
 S = "${WORKDIR}/git/plugins/drm/"
 
-PACKAGES = "${PN}-dev ${PN}-dbg ${PN}"
-FILES_${PN}-dev += " /usr/lib/surfman/*.a /usr/lib/surfman/*.la "
+PACKAGES = "${PN}-staticdev ${PN}-dev ${PN}-dbg ${PN}"
+FILES_${PN}-staticdev += " /usr/lib/surfman/*.a"
+FILES_${PN}-dev += " /usr/lib/surfman/*.la "
 FILES_${PN}-dbg += " /usr/lib/surfman/.debug/* "
 FILES_${PN} += " /usr/lib/surfman/* "
 
