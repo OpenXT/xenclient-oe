@@ -4,7 +4,7 @@ DESCRIPTION = "bash completion for human beings"
 LICENSE = "MIT"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=acbef28775875450fdedef37d178f5c4"
 DEPENDS = "ghc-native ghc-parsec"
-RDEPENDS += "glibc-gconv-utf-32 ghc-runtime-native"
+RDEPENDS_${PN} += "glibc-gconv-utf-32 ghc-runtime"
 
 # Ocaml stuff is built with the native compiler with "-m32".
 

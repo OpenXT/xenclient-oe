@@ -2,7 +2,7 @@ DESCRIPTION = "GTK switcher bar"
 LICENSE = "GPLv2"
 LIC_FILES_CHKSUM = "file://COPYING;md5=4641e94ec96f98fabc56ff9cc48be14b"
 DEPENDS = "xenclient-idl xenclient-rpcgen-native dbus libxcdbus libglade libnotify xen-tools"
-RDEPENDS = "notification-daemon"
+RDEPENDS_${PN} = "notification-daemon"
 
 PV = "0+git${SRCPV}"
 

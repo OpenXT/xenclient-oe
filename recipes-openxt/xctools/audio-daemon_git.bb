@@ -22,6 +22,6 @@ inherit xenclient
 
 do_install(){
         install -d ${D}/usr/lib/xen/bin
-        install -m 755 ${S}/src/audio-daemon ${D}/usr/lib/xen/bin/
+        install -m 755 ${B}/src/audio-daemon ${D}/usr/lib/xen/bin/
 	install -m 755 ${WORKDIR}/audio-daemon-start ${D}/usr/lib/xen/bin/
 }

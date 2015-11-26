@@ -20,5 +20,5 @@ inherit xenclient
 
 do_install(){
         install -d ${D}/usr/lib/xen/bin
-        install -m 755 ${S}/src/atapi_pt_helper ${D}/usr/lib/xen/bin/
+        install -m 755 ${B}/src/atapi_pt_helper ${D}/usr/lib/xen/bin/
 }
