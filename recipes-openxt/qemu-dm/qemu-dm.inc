@@ -46,6 +46,7 @@ SRC_URI += "file://0001-compile-time-stubdom-flag.patch \
             file://0032-bp-hub-net-queue-flush-fix-199ee608f0d08510b5c6c37f31a7fbff211d63c4.patch;striplevel=1 \
             file://0033-acpi-pm-feature.patch;striplevel=1 \
             file://0034-maintain-time-offset.patch;striplevel=1 \
+            file://0035-add-acpi-wakeup.patch;striplevel=1 \
             file://xsa-126-unmediated-pci-command-register-access-in-qemu.patch;patch=1 \
             file://xsa-128-potential-unintended-writes-to-host-msi-message-data-field-via-qemu.patch;patch=1 \
             file://xsa-129-pci-msi-mask-bits-inadvertently-exposed-to-guests.patch;patch=1 \
