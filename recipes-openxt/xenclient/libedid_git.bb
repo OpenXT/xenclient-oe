@@ -10,9 +10,7 @@ SRC_URI = "git://${OPENXT_GIT_MIRROR}/libedid.git;protocol=${OPENXT_GIT_PROTOCOL
 
 S = "${WORKDIR}/git"
 
-inherit autotools
-inherit pkgconfig
-inherit xenclient
+inherit autotools-brokensep pkgconfig xenclient
 
 FILES_${PN}-dev += "/usr/bin/libedid-config"
 
