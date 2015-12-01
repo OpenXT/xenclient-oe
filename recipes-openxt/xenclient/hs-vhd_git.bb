@@ -6,7 +6,7 @@ DESCRIPTION = "Haskell VHD tool"
 LICENSE = "BSD-3-Clause"
 LIC_FILES_CHKSUM = "file://LICENCE;md5=cc8224b3041a54c20bd7becce249bb02"
 DEPENDS = "ghc-native ghc-vhd"
-RDEPENDS += "glibc-gconv-utf-32 ghc-runtime-native"
+RDEPENDS_${PN} += "glibc-gconv-utf-32 ghc-runtime"
 
 SRC_URI = "git://github.com/jonathanknowles/hs-vhd;protocol=git;tag=0.2"
 
