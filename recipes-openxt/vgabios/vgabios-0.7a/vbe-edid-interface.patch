@@ -46,9 +46,11 @@ Depended on by VGABIOS: vbe-extensions.patch
 ################################################################################
 PATCHES
 ################################################################################
---- a/vbe.c
-+++ b/vbe.c
-@@ -241,6 +241,18 @@ dispi_set_id:
+Index: vgabios-0.7a/vbe.c
+===================================================================
+--- vgabios-0.7a.orig/vbe.c	2015-11-18 17:50:03.400927090 +0100
++++ vgabios-0.7a/vbe.c	2015-11-27 15:23:51.764553004 +0100
+@@ -241,6 +241,18 @@
    ret
  ASM_END
  
@@ -67,7 +69,7 @@ PATCHES
  static void dispi_set_xres(xres)
    Bit16u xres;
  {
-@@ -776,6 +788,30 @@ _size64:
+@@ -776,6 +788,30 @@
    ret
  ASM_END
  
@@ -98,7 +100,7 @@ PATCHES
  
  /** Function 00h - Return VBE Controller Information
   * 
-@@ -800,9 +836,13 @@ Bit16u *AX;Bit16u ES;Bit16u DI;
+@@ -800,9 +836,13 @@
          Bit16u            cur_ptr=34;
          Bit16u            size_64k;
          ModeInfoListItem  *cur_info=&mode_info_list;
@@ -112,7 +114,7 @@ PATCHES
  #ifdef DEBUG
          printf("VBE vbe_biosfn_return_vbe_info ES%x DI%x AX%x\n",ES,DI,status);
  #endif
-@@ -882,7 +922,8 @@ Bit16u *AX;Bit16u ES;Bit16u DI;
+@@ -882,7 +922,8 @@
          {
                  size_64k = size64(cur_info->info.XResolution, cur_info->info.YResolution, cur_info->info.BitsPerPixel);
  
@@ -122,7 +124,7 @@ PATCHES
                      (cur_info->info.BitsPerPixel <= dispi_get_max_bpp()) &&
                      (size_64k <= vbe_info_block.TotalMemory)) {
  #ifdef DEBUG
-@@ -928,6 +969,7 @@ Bit16u *AX;Bit16u CX; Bit16u ES;Bit16u D
+@@ -928,6 +969,7 @@
          Boolean           using_lfb;
          Bit16u            lfb_addr;
          ModeInfoBlockCompact   info;
@@ -130,7 +132,7 @@ PATCHES
  
  #ifdef DEBUG
          printf("VBE vbe_biosfn_return_mode_information ES%x DI%x CX%x\n",ES,DI,CX);
-@@ -952,7 +994,7 @@ Bit16u *AX;Bit16u CX; Bit16u ES;Bit16u D
+@@ -952,7 +994,7 @@
  #endif
                  memcpyb(ss, &info, 0xc000, &(cur_info->info), sizeof(ModeInfoBlockCompact));
                  size_64k = size64(info.XResolution, info.YResolution, info.BitsPerPixel);
@@ -139,7 +141,7 @@ PATCHES
                      (info.BitsPerPixel > max_bpp) ||
                      (size_64k > totalMemory))
                    info.ModeAttributes &= ~VBE_MODE_ATTRIBUTE_SUPPORTED;
-@@ -1490,4 +1532,205 @@ vbe_biosfn_return_protected_mode_interfa
+@@ -1490,4 +1532,202 @@
  _fail:
    mov ax, #0x014f
    ret
@@ -245,11 +247,10 @@ PATCHES
 +static void vbe_edid(edid, es, di, ds)
 +    Bit16u ds,es,di; Bit8u *edid;
 +{
-+    Bit8u       e[128];
-+    Bit8u       t;
++    Bit16u      ss = get_SS();
++    Bit8u       i;
 +    Bit8u       sum;
-+    Bit8u       i = 0;
-+    Bit16u      ss=get_SS();
++    Bit8u       t;
 +    Bit16u      hres;
 +    Bit16u      vres;
 +    Bit32u      pixclock;
@@ -257,37 +258,35 @@ PATCHES
 +    hres = dispi_edid_get_xres();
 +    vres = dispi_edid_get_yres();
 +
++    // Process pixclock from geometry.
 +    pixclock = hres + 24;
 +    pixclock *= vres + 3;
 +    pixclock *= 75;
 +    pixclock /= 10000;
 +
-+    for (i = 0; i < 128; i++)
-+        memcpyb(ss, e + i, ds, edid + i, 1);
++    // Copy ref EDID
++    memcpyb(es, di, ds, edid, 0x80);
 +
-+    t = pixclock & 0xff;
-+    memcpyb(ss, e + 0x36, ss, &t, 1);
-+    t = (pixclock >> 8) & 0xff;
-+    memcpyb(ss, e + 0x37, ss, &t, 1);
-+
++    // Change mode info with our hres/vres compatible definition.
++    memcpyb(es, di + 0x36, ss, &pixclock, 2);
 +    t = hres & 0xFF;
-+    memcpyb(ss, e + 0x38, ss, &t, 1);
++    memcpyb(es, di + 0x38, ss, &t, 1);
 +    t = ((hres >> 8) & 0xF) << 4;
-+    memcpyb(ss, e + 0x3A, ss, &t, 1);
++    memcpyb(es, di + 0x3A, ss, &t, 1);
 +    t = vres & 0xFF;
-+    memcpyb(ss, e + 0x3B, ss, &t, 1);
++    memcpyb(es, di + 0x3B, ss, &t, 1);
 +    t = ((vres >> 8) & 0xF) << 4;
-+    memcpyb(ss, e + 0x3D, ss, &t, 1);
++    memcpyb(es, di + 0x3D, ss, &t, 1);
 +
++    // Process EDID csum
 +    sum = 0;
-+    for (i = 0; i < 127; i++) {
-+        memcpyb(ss, &t, ss, e + i, 1);
++    for (i = 0; i < 0x80; i++) {
++        memcpyb(ss, &t, es, di + i, 1);
 +        sum += t;
 +    }
-+    sum = -sum;
-+    memcpyb(ss, e + 127, ss, &sum, 1);
-+
-+    memcpyb(es, di, ss, e, 128);
++    // Write EDID csum.
++    t = -sum;
++    memcpyb(es, di + 0x7F, ss, &t, 1);
 +}
 +
 +ASM_START
@@ -345,9 +344,11 @@ PATCHES
 +  ret
 +
  ASM_END
---- a/vbe.h
-+++ b/vbe.h
-@@ -310,6 +310,9 @@ typedef struct ModeInfoListItem
+Index: vgabios-0.7a/vbe.h
+===================================================================
+--- vgabios-0.7a.orig/vbe.h	2009-01-25 16:46:08.000000000 +0100
++++ vgabios-0.7a/vbe.h	2015-11-27 15:23:33.374765089 +0100
+@@ -310,6 +310,9 @@
    #define VBE_DISPI_LFB_ENABLED            0x40
    #define VBE_DISPI_NOCLEARMEM             0x80
  
@@ -357,9 +358,11 @@ PATCHES
    #define VBE_DISPI_LFB_PHYSICAL_ADDRESS   0xE0000000
  
  #endif
---- a/vgabios.c
-+++ b/vgabios.c
-@@ -389,9 +389,14 @@ int10_test_vbe_08:
+Index: vgabios-0.7a/vgabios.c
+===================================================================
+--- vgabios-0.7a.orig/vgabios.c	2011-10-15 16:07:21.000000000 +0200
++++ vgabios-0.7a/vgabios.c	2015-11-27 15:23:32.801438367 +0100
+@@ -389,9 +389,14 @@
    jmp   int10_end
  int10_test_vbe_0A:
    cmp   al, #0x0A
