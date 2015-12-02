@@ -4,7 +4,7 @@ DESCRIPTION = "xec - dbus call utility"
 LICENSE = "GPLv2"
 LIC_FILES_CHKSUM = "file://../COPYING;md5=4641e94ec96f98fabc56ff9cc48be14b"
 DEPENDS = "udbus udbus-intro ghc-hsyslog ghc-parsec ghc-text compleat libxchv4v"
-RDEPENDS_${PN} += "glibc-gconv-utf-32 ghc-runtime-native"
+RDEPENDS_${PN} += "glibc-gconv-utf-32 ghc-runtime"
 
 PV = "0+git${SRCPV}"
 
