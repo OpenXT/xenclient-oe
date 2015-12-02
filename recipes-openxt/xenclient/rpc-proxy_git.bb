@@ -4,7 +4,7 @@ DESCRIPTION = "XenClient RPC proxy"
 LICENSE = "GPLv2"
 LIC_FILES_CHKSUM = "file://../COPYING;md5=4641e94ec96f98fabc56ff9cc48be14b"
 DEPENDS += "libxchutils libxchwebsocket libxchv4v libxchxenstore xenclient-rpcgen-native xenclient-idl ghc-dbus-core ghc-json ghc-hsyslog ghc-network-bytestring libxch-rpc ghc-transformers ghc-parsec ghc-deepseq ghc-text ghc-mtl ghc-network ghc-monad-loops ghc-lifted-base ghc-monad-control libxchdb ghc-errors"
-RDEPENDS += "glibc-gconv-utf-32 ghc-runtime-native"
+RDEPENDS_${PN} += "glibc-gconv-utf-32 ghc-runtime"
 
 PV = "0+git${SRCPV}"
 
