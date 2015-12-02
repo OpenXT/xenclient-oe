@@ -10,6 +10,8 @@ SRC_URI = "git://${OPENXT_GIT_MIRROR}/surfman.git;protocol=${OPENXT_GIT_PROTOCOL
 
 S = "${WORKDIR}/git/plugins/sample"
 
+CFLAGS_append = " -Wno-unused-parameter "
+
 # Only compile this package to check that the sample plugin is still up to date
 
 RDEPENDS_${PN}-dev = ""
