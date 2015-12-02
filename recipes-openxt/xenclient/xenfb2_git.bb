@@ -15,7 +15,7 @@ SRC_URI = "git://${OPENXT_GIT_MIRROR}/xenfb2.git;protocol=${OPENXT_GIT_PROTOCOL}
 
 S = "${WORKDIR}/git/linux"
 
-inherit ${@"xenclient-simple-deb"if(bb.data.getVar("MACHINE",d,1)=="xenclient-nilfvm")else("null")}
+inherit ${@"xenclient-simple-deb"if(d.getVar("MACHINE",1)=="xenclient-nilfvm")else("null")}
 
 DEB_SUITE = "wheezy"
 DEB_ARCH = "i386"
