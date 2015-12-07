@@ -2,7 +2,7 @@ Index: refpolicy/policy/modules/services/xenpmd.te
 ===================================================================
 --- /dev/null
 +++ refpolicy/policy/modules/services/xenpmd.te
-@@ -0,0 +1,78 @@
+@@ -0,0 +1,112 @@
 +#############################################################################
 +#
 +# Copyright (C) 2014 Citrix Systems, Inc.
@@ -25,6 +25,17 @@ Index: refpolicy/policy/modules/services/xenpmd.te
 +
 +policy_module(xenpmd, 0.1)
 +
++
++########################################
++#
++# Requirements
++#
++
++require {
++  type bin_t;
++  type shell_exec_t;
++}
++
 +########################################
 +#
 +# Declarations
@@ -41,6 +52,16 @@ Index: refpolicy/policy/modules/services/xenpmd.te
 +type xenpmd_var_run_t;
 +files_pid_file(xenpmd_var_run_t)
 +files_pid_filetrans(xenpmd_t, xenpmd_var_run_t, file)
++
++type xenpmd_etc_t;
++files_config_file(xenpmd_etc_t)
++
++# create a sandboxed xenpmd_script_t domain for shell scripts
++type xenpmd_script_t;
++type xenpmd_script_exec_t;
++domain_type(xenpmd_script_t)
++domain_entry_file(xenpmd_script_t, shell_exec_t)
++domain_auto_trans(xenpmd_t, shell_exec_t, xenpmd_script_t)
 +
 +########################################
 +#
@@ -78,6 +99,19 @@ Index: refpolicy/policy/modules/services/xenpmd.te
 +allow xenpmd_t xenpmd_var_t:dir manage_dir_perms;
 +allow xenpmd_t xenpmd_var_t:file manage_file_perms;
 +allow xenpmd_t xenpmd_var_run_t:file manage_file_perms;
++allow xenpmd_t xenpmd_etc_t:dir list_dir_perms;
++allow xenpmd_t xenpmd_etc_t:file read_file_perms;
++
++# allow XCPMD to run shell scripts in a sandboxed type, xenpmd_script_t
++allow xenpmd_t bin_t:lnk_file read_file_perms;
++allow xenpmd_t bin_t:file read_file_perms;
++allow xenpmd_t shell_exec_t:file exec_file_perms;
++allow xenpmd_script_t xenpmd_t:process { sigchld };
++allow xenpmd_script_t xenpmd_script_exec_t:file exec_file_perms;
++
++# xenpmd_script_t permissions
++# currently, it can only run bin_t processes
++allow xenpmd_script_t bin_t:file exec_file_perms;
 +
 +# allow XCPMD to receive messages from xenmgr
 +xenpmd_dbus_chat(xend_t)
