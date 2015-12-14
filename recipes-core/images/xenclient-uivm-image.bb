@@ -133,20 +133,49 @@ IMAGE_INSTALL = "\
 #zap root password for release images
 ROOTFS_POSTPROCESS_COMMAND += '${@base_conditional("DISTRO_TYPE", "release", "zap_root_password; ", "",d)}'
 
-ROOTFS_POSTPROCESS_COMMAND += "echo 'x:5:respawn:/bin/su - root -c /usr/bin/startxfce4' >> ${IMAGE_ROOTFS}/etc/inittab;"
+post_rootfs_shell_commands() {
+	echo 'x:5:respawn:/bin/su - root -c /usr/bin/startxfce4' >> ${IMAGE_ROOTFS}/etc/inittab;
 
-# enable ctrlaltdel reboot because PV driver uses ctrl+alt+del to interpret reboot issued via xenstore
-ROOTFS_POSTPROCESS_COMMAND += "echo 'ca:12345:ctrlaltdel:/sbin/shutdown -t1 -a -r now' >> ${IMAGE_ROOTFS}/etc/inittab;"
+	# enable ctrlaltdel reboot because PV driver uses ctrl+alt+del to interpret reboot issued via xenstore
+	echo 'ca:12345:ctrlaltdel:/sbin/shutdown -t1 -a -r now' >> ${IMAGE_ROOTFS}/etc/inittab;
 
-ROOTFS_POSTPROCESS_COMMAND += "sed -i 's|root:x:0:0:root:/home/root:/bin/sh|root:x:0:0:root:/root:/bin/bash|' ${IMAGE_ROOTFS}/etc/passwd;"
+	sed -i 's|root:x:0:0:root:/root:/bin/sh|root:x:0:0:root:/root:/bin/bash|' ${IMAGE_ROOTFS}/etc/passwd;
 
-ROOTFS_POSTPROCESS_COMMAND += "echo '1.0.0.0 dom0' >> ${IMAGE_ROOTFS}/etc/hosts;"
+	echo '1.0.0.0 dom0' >> ${IMAGE_ROOTFS}/etc/hosts;
 
-ROOTFS_POSTPROCESS_COMMAND += "opkg-cl ${IPKG_ARGS} -force-depends \
-                                remove ${PACKAGE_REMOVE};"
+	opkg -f ${IPKGCONF_TARGET} -o ${IMAGE_ROOTFS} ${OPKG_ARGS} -force-depends remove ${PACKAGE_REMOVE}
 
-# readonly rootfs prevents sshd from creating dirs
-ROOTFS_POSTPROCESS_COMMAND += "mkdir ${IMAGE_ROOTFS}/root/.ssh;"
+	# readonly rootfs prevents sshd from creating dirs
+	mkdir ${IMAGE_ROOTFS}/root/.ssh;
+	
+	mkdir ${IMAGE_ROOTFS}/root/.cache;
+}
+
+remove_initscripts() {
+    # Remove unneeded initscripts
+    if [ -f ${IMAGE_ROOTFS}${sysconfdir}/init.d/finish.sh ]; then
+        rm -f ${IMAGE_ROOTFS}${sysconfdir}/init.d/finish.sh
+        update-rc.d -r ${IMAGE_ROOTFS} finish.sh remove
+    fi
+    if [ -f ${IMAGE_ROOTFS}${sysconfdir}/init.d/hostname.sh ]; then
+        rm -f ${IMAGE_ROOTFS}${sysconfdir}/init.d/hostname.sh
+        update-rc.d -r ${IMAGE_ROOTFS} hostname.sh remove
+    fi
+    if [ -f ${IMAGE_ROOTFS}${sysconfdir}/init.d/rmnologin.sh ]; then
+        rm -f ${IMAGE_ROOTFS}${sysconfdir}/init.d/rmnologin.sh
+        update-rc.d -r ${IMAGE_ROOTFS} rmnologin.sh remove
+    fi
+    if [ -f ${IMAGE_ROOTFS}${sysconfdir}/init.d/sshd ]; then
+        rm -f ${IMAGE_ROOTFS}${sysconfdir}/init.d/sshd
+        update-rc.d -r ${IMAGE_ROOTFS} sshd remove
+    fi
+    if [ -f ${IMAGE_ROOTFS}${sysconfdir}/init.d/urandom ]; then
+        rm -f ${IMAGE_ROOTFS}${sysconfdir}/init.d/urandom
+        update-rc.d -r ${IMAGE_ROOTFS} urandom remove
+    fi
+}
+
+ROOTFS_POSTPROCESS_COMMAND += " post_rootfs_shell_commands; remove_initscripts; "
 
 inherit image
 #inherit validate-package-versions
