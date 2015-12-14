@@ -4,7 +4,7 @@ DESCRIPTION = "Common X11 Keyboard layouts"
 LICENSE = "MIT"
 LIC_FILES_CHKSUM = "file://COPYING;md5=42fb5e87e0d45120809ed5866524834c"
 DEPENDS = "intltool-native xkbcomp-native"
-RDEPENDS = "xkbcomp"
+RDEPENDS_${PN} = "xkbcomp"
 PR = "r4"
 
 SRC_URI = "http://xlibs.freedesktop.org/xkbdesc/xkeyboard-config-${PV}.tar.bz2 \
