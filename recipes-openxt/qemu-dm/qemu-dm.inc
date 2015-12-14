@@ -14,6 +14,7 @@ DEPENDS = "xen-tools alsa-lib pciutils libpng blktap libv4v openssl zlib libcap-
 #            file://0014-audio-alsa-stub.patch;striplevel=1 \
 #            file://0026-openxtaudio.patch;striplevel=1 \
 #            file://0007-pci-reserve-igd-slot.patch;striplevel=1 \
+#
 
 # Leave this in it's own definition so that it can be replaced with a local
 # tarball (the QEMU download speed is terrible). If this is combined with the
