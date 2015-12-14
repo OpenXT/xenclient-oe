@@ -23,13 +23,15 @@ ONLINE_PACKAGE_MANAGEMENT = "none"
 
 inherit image
 
-ROOTFS_POSTPROCESS_COMMAND =+ " \
-    rm -rf ${IMAGE_ROOTFS}/dev; \
-    rm -rf ${IMAGE_ROOTFS}/etc; \
-    rm -rf ${IMAGE_ROOTFS}/usr; \
-    rm -rf ${IMAGE_ROOTFS}/Proprietary; \
-    rm -rf ${IMAGE_ROOTFS}/[Uu]nknown; \
-"
+post_rootfs_shell_commands() {
+	rm -rf ${IMAGE_ROOTFS}/dev;
+	rm -rf ${IMAGE_ROOTFS}/etc;
+	rm -rf ${IMAGE_ROOTFS}/usr;
+	rm -rf ${IMAGE_ROOTFS}/Proprietary;
+	rm -rf ${IMAGE_ROOTFS}/[Uu]nknown;
+}
+
+ROOTFS_POSTPROCESS_COMMANDS += " post_rootfs_shell_commands; "
 
 LICENSE = "GPLv2 & MIT"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/GPL-2.0;md5=801f80980d171dd6425610833a22dbe6      \
