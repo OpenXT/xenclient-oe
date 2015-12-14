@@ -16,6 +16,8 @@ inherit xenclient
 #inherit native
 inherit cross
 
+FILESEXTRAPATHS_prepend := "${THISDIR}/ocaml-cross:"
+
 S = "${WORKDIR}/git"
 
 RDEPENDS_${PN}-dev = ""
