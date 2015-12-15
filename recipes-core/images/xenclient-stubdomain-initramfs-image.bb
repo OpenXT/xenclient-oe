@@ -10,7 +10,7 @@ DEPENDS += "dialog"
  
 IMAGE_FSTYPES = "cpio.gz"
 IMAGE_INSTALL = " busybox bridge-utils initramfs-xenclient "
-IMAGE_INSTALL += " qemu-dm-stubdom dm-wrapper-stubdom v4v-module dm-agent-stubdom simple-poweroff rsyslog "
+IMAGE_INSTALL += " qemu-dm-stubdom v4v-module dm-agent-stubdom simple-poweroff rsyslog "
 IMAGE_LINGUAS = ""
 IMAGE_DEV_MANAGER = "busybox-mdev"
 IMAGE_BOOT = "${IMAGE_DEV_MANAGER}"
