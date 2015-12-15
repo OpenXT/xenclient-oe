@@ -30,3 +30,6 @@ qemu-dm_alt: qemu-dm_alt.c
 install: qemu-dm_alt
 	install -d -m 755 ${BINDIR}
 	install -m 755 qemu-dm_alt ${BINDIR}/qemu-dm_alt
+
+clean:
+	rm -f qemu-dm_alt ${BINDIR}/qemu-dm_alt
