@@ -40,6 +40,8 @@ SRC_URI += "https://www.kernel.org/pub/linux/kernel/v${PV_MAJOR}.x/linux-${PV}.t
     file://xenstore-no-read-vs-write-atomicity.patch;patch=1 \
     file://pciback-restrictive-attr.patch;patch=1 \
     file://thorough-reset-interface-to-pciback-s-sysfs.patch;patch=1 \
+    file://xsa-155-paravirtualized-drivers-incautious-about-shared-memory-contents.patch;patch=1 \
+    file://xsa-157-linux-pciback-missing-sanity-checks-leading-to-crash.patch;patch=1 \
     file://defconfig \
     "
 
