@@ -39,12 +39,20 @@ SRC_URI += "https://www.kernel.org/pub/linux/kernel/v${PV_MAJOR}.x/linux-${PV}.t
     file://hvc-kgdb-fix.patch;patch=1 \
     file://xenstore-no-read-vs-write-atomicity.patch;patch=1 \
     file://pciback-restrictive-attr.patch;patch=1 \
-    file://0002-Add-thorough-reset-interface-to-pciback-s-sysfs.patch;patch=1 \
+    file://thorough-reset-interface-to-pciback-s-sysfs.patch;patch=1 \
+    file://xsa-155-paravirtualized-drivers-incautious-about-shared-memory-contents.patch;patch=1 \
+    file://xsa-155-qsb-023-add-RING_COPY_RESPONSE.patch;patch=1 \
+    file://xsa-155-qsb-023-xen-netfront-copy-response-out-of-shared-buffer-befo.patch;patch=1 \
+    file://xsa-155-qsb-023-xen-netfront-do-not-use-data-already-exposed-to-back.patch;patch=1 \
+    file://xsa-155-qsb-023-xen-netfront-add-range-check-for-Tx-response-id.patch;patch=1 \
+    file://xsa-155-qsb-023-xen-blkfront-make-local-copy-of-response-before-usin.patch;patch=1 \
+    file://xsa-155-qsb-023-xen-blkfront-prepare-request-locally-only-then-put-i.patch;patch=1 \
+    file://xsa-157-linux-pciback-missing-sanity-checks-leading-to-crash.patch;patch=1 \
     file://defconfig \
     "
 
-SRC_URI[kernel.md5sum] = "30cfa07084f3ef3709b350ed5f7f01b0"
-SRC_URI[kernel.sha256sum] = "e05ea8886382e4a61945bb433d430d0e230cb6c0ce0c503303138d017350346a"
+SRC_URI[kernel.md5sum] = "cba99443d2d72f078c197b39e5fbf017"
+SRC_URI[kernel.sha256sum] = "a0e6807d299a30ac374d90fecb5473d6f741d29c477b2923d181dfd53a305e52"
 
 LIC_FILES_CHKSUM = "file://COPYING;md5=d7810fab7487fb0aad327b76f1be7cd7"
 

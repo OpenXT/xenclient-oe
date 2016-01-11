@@ -117,6 +117,11 @@ SRC_URI = "${XEN_SRC_URI};name=source \
     file://xsa-152-some-pmu-and-profiling-hypercalls-log-without-rate-limiting.patch;patch=1 \
     file://xsa-153-populate-on-demand-balloon-size-inaccuracy-can-crash-guests.patch;patch=1 \
     file://xsa-156-cpu-lockup-during-exception-delivery.patch;patch=1 \
+    file://xsa-155-paravirtualized-drivers-incautious-about-shared-memory-contents.patch;patch=1 \
+    file://xsa-159-XENMEM_exchange-error-handling-issues.patch;patch=1 \
+    file://xsa-160-libxl-leak-of-pv-kernel-and-initrd-on-error.patch;patch=1 \
+    file://xsa-165-information-leak-in-legacy-x86-FPU-XMM-initialization.patch;patch=1 \
+    file://xsa-166-ioreq-handling-possibly-susceptible-to-multiple-read-issue.patch;patch=1 \
 "
 
 SRC_URI[source.md5sum] := "${XEN_SRC_MD5SUM}"
