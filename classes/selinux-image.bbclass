@@ -1,4 +1,4 @@
-DEPENDS += "policycoreutils-native"
+DEPENDS += "policycoreutils-native attr-native"
 IMAGE_INSTALL += " \
     libselinux-bin \
     policycoreutils-loadpolicy \
@@ -36,12 +36,7 @@ selinux_set_labels () {
 
 	bbdebug 2 "searching for files and dirs w/o an SELinux context in rootfs: ${IMAGE_ROOTFS}"
 	find ${IMAGE_ROOTFS} 2> /dev/null | while read ITEM; do
-		if [ -d "${ITEM}" ]; then
-			SELABEL="$(ls -Zd "${ITEM}" | awk '{print $1}')"
-		else
-			SELABEL="$(ls -Z "${ITEM}" | awk '{print $1}')"
-		fi
-		if [ "xXx${SELABEL}" = "xXx?" ]; then
+	        if ! getfattr -h -n security.selinux ${ITEM} > /dev/null; then
 			bbwarn "no SELinux label on file: ${ITEM}"
 		fi
 	done
