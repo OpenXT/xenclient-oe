@@ -20,6 +20,7 @@ SRC_URI += " \
         file://${PACKAGE_ARCH}-init \
         file://usb-hid-no-autosleep.patch;patch=1 \
         file://disable-cdrom-locking-by-dom0.patch;patch=2 \
+        file://linux-4.4-headers-changes.patch;patch=1 \
         file://05-db.rules \
         "
 
