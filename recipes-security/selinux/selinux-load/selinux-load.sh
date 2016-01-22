@@ -27,5 +27,6 @@ if [ $? -eq 3 ]; then
 fi
 
 [ -x ${RESTORECON} ] && ${RESTORECON} -r /dev
+[ -f /boot/system/firstboot -a -x ${RESTORECON} ] && ${RESTORECON} -r /boot/system
 
 exec "$@"
