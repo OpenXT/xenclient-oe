@@ -18,7 +18,7 @@ IMAGE_BOOT = "${IMAGE_DEV_MANAGER}"
 PACKAGE_INSTALL_NO_DEPS = "1"
 
 # Remove any kernel-image that the kernel-module-* packages may have pulled in.
-PACKAGE_REMOVE = "kernel-image-* update-modules udev sysvinit opkg-cl"
+PACKAGE_REMOVE = "kernel-image-* udev sysvinit opkg-cl"
 
 ROOTFS_POSTPROCESS_COMMAND += "opkg-cl ${IPKG_ARGS} -force-depends \
                                 remove ${PACKAGE_REMOVE}; \
