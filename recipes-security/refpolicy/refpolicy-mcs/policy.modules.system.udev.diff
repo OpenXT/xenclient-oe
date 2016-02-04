@@ -1,0 +1,67 @@
+diff --git a/policy/modules/system/udev.fc b/policy/modules/system/udev.fc
+index 40928d8..9befa5c 100644
+--- a/policy/modules/system/udev.fc
++++ b/policy/modules/system/udev.fc
+@@ -2,6 +2,7 @@
+ /dev/\.udevdb	--	gen_context(system_u:object_r:udev_tbl_t,s0)
+ /dev/udev\.tbl	--	gen_context(system_u:object_r:udev_tbl_t,s0)
+ 
++/etc/init\.d/udev	--	gen_context(system_u:object_r:udevrc_exec_t,s0)
+ /etc/dev\.d/.+	--	gen_context(system_u:object_r:udev_helper_exec_t,s0)
+ 
+ /etc/hotplug\.d/default/udev.* -- gen_context(system_u:object_r:udev_helper_exec_t,s0)
+diff --git a/policy/modules/system/udev.te b/policy/modules/system/udev.te
+index 90e4ab3..2003fbf 100644
+--- a/policy/modules/system/udev.te
++++ b/policy/modules/system/udev.te
+@@ -14,6 +14,12 @@ domain_entry_file(udev_t, udev_helper_exec_t)
+ domain_interactive_fd(udev_t)
+ init_daemon_domain(udev_t, udev_exec_t)
+ 
++type udevrc_t;
++type udevrc_exec_t;
++init_script_domain(udevrc_t, udevrc_exec_t)
++udev_domtrans(udevrc_t)
++role system_r types udevrc_t;
++
+ type udev_etc_t alias etc_udev_t;
+ files_config_file(udev_etc_t)
+ 
+@@ -290,8 +296,37 @@ optional_policy(`
+ 	kernel_read_xen_state(udev_t)
+ 	xen_manage_log(udev_t)
+ 	xen_read_image_files(udev_t)
++	dev_manage_xen(udev_t)
++	xen_stream_connect_xenstore(udev_t)
+ ')
+ 
+ optional_policy(`
+ 	xserver_read_xdm_pid(udev_t)
+ ')
++
++fs_manage_tmpfs_chr_files(udev_t)
++fs_manage_tmpfs_files(udev_t)
++fs_manage_tmpfs_symlinks(udev_t)
++virt_search_dirs(udev_t)
++
++########################################
++#
++# Local policy for udevrc_t
++#
++
++mount_domtrans(udevrc_t)
++
++corecmd_exec_bin(udevrc_t)
++corecmd_exec_shell(udevrc_t)
++dev_search_sysfs(udevrc_t)
++files_read_etc_files(udevrc_t)
++initrc_rw_pid_chr_files(udevrc_t)
++kernel_read_system_state(udevrc_t)
++kernel_rw_hotplug_sysctls(udevrc_t)
++init_dontaudit_use_fds(udevrc_t)
++term_use_console(udevrc_t)
++dev_dontaudit_rw_generic_chr_files(udevrc_t)
++fs_search_tmpfs(udevrc_t)
++seutil_domtrans_setfiles(udevrc_t)
++
++allow udevrc_t self:fifo_file manage_fifo_file_perms;

@@ -9,18 +9,19 @@ PV = "0+git${SRCPV}"
 
 SRCREV = "${AUTOREV}"
 SRC_URI = "git://${OPENXT_GIT_MIRROR}/surfman.git;protocol=${OPENXT_GIT_PROTOCOL};branch=${OPENXT_BRANCH} \
+           file://gcc5-boolean-fix.patch \
            file://surfman.initscript \
            file://surfman.conf"
 
 EXTRA_OECONF += "--with-idldir=${STAGING_IDLDIR}"
 
+CFLAGS_append = " -Wno-unused-parameter "
+
 S = "${WORKDIR}/git/surfman"
 
 ASNEEDED = ""
 
-inherit autotools
-inherit xenclient
-inherit update-rc.d
+inherit autotools xenclient update-rc.d pkgconfig
 
 INITSCRIPT_NAME = "surfman"
 INITSCRIPT_PARAMS = "defaults 72"

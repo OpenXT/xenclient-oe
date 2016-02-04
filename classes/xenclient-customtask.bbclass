@@ -23,7 +23,7 @@ python do_force_rebuild() {
     from glob import glob
 
     # clean stamps...
-    task_whitelist = bb.data.getVar("FORCE_REBUILD_TASK_WHITELIST", d, True).split()
+    task_whitelist = d.getVar("FORCE_REBUILD_TASK_WHITELIST", True).split()
     stampglob = bb.data.expand('${STAMP}.*', d)
     for stamp in glob(stampglob):
         if stamp.find(".sigdata.") != -1:

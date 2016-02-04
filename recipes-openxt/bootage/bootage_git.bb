@@ -13,8 +13,7 @@ S = "${WORKDIR}/git"
 
 ASNEEDED = ""
 
-inherit autotools
-inherit xenclient
+inherit autotools-brokensep xenclient
 
 do_install_append() {
     install -d ${D}/etc

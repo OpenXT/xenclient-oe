@@ -2,4 +2,4 @@
 #
 # Set XENCLIENT_COLLECT_SRC_INFO to 1 to enable.
 
-inherit ${@"xenclient-image-src-info-real"if(bb.data.getVar("XENCLIENT_COLLECT_SRC_INFO",d,1)=="1")else("null")}
+inherit ${@"xenclient-image-src-info-real"if(d.getVar("XENCLIENT_COLLECT_SRC_INFO",1)=="1")else("null")}

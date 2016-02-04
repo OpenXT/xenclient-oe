@@ -15,13 +15,13 @@ export IMAGE_BASENAME = "xenclient-ndvm-image"
 
 ANGSTROM_EXTRA_INSTALL += ""
 
-DEPENDS = "task-base"
+DEPENDS = "packagegroup-base"
 IMAGE_INSTALL = "\
     ${ROOTFS_PKGMANAGE} \
     modules \
-    task-core-boot \
-    task-base \
-    task-xenclient-common \
+    packagegroup-core-boot \
+    packagegroup-base \
+    packagegroup-xenclient-common \
     util-linux-mount \
     util-linux-umount \
     busybox \
@@ -58,18 +58,33 @@ IMAGE_INSTALL = "\
 #zap root password for release images
 ROOTFS_POSTPROCESS_COMMAND += '${@base_conditional("DISTRO_TYPE", "release", "zap_root_password; ", "",d)}'
 
-ROOTFS_POSTPROCESS_COMMAND += "sed -i 's|root:x:0:0:root:/home/root:/bin/sh|root:x:0:0:root:/root:/bin/bash|' ${IMAGE_ROOTFS}/etc/passwd;"
+post_rootfs_shell_commands() {
+	sed -i 's|root:x:0:0:root:/root:/bin/sh|root:x:0:0:root:/root:/bin/bash|' ${IMAGE_ROOTFS}/etc/passwd;
 
-ROOTFS_POSTPROCESS_COMMAND += "echo '1.0.0.0 dom0' >> ${IMAGE_ROOTFS}/etc/hosts;"
+	echo '1.0.0.0 dom0' >> ${IMAGE_ROOTFS}/etc/hosts;
 
-# enable ctrlaltdel reboot because PV driver uses ctrl+alt+del to interpret reboot issued via xenstore
-ROOTFS_POSTPROCESS_COMMAND += "echo 'ca:12345:ctrlaltdel:/sbin/shutdown -t1 -a -r now' >> ${IMAGE_ROOTFS}/etc/inittab;"
+	# enable ctrlaltdel reboot because PV driver uses ctrl+alt+del to interpret reboot issued via xenstore
+	echo 'ca:12345:ctrlaltdel:/sbin/shutdown -t1 -a -r now' >> ${IMAGE_ROOTFS}/etc/inittab;
 
-# Move resolv.conf to /var/volatile/etc, as rootfs is readonly
-ROOTFS_POSTPROCESS_COMMAND += "rm -f ${IMAGE_ROOTFS}/etc/resolv.conf; ln -s /var/volatile/etc/resolv.conf ${IMAGE_ROOTFS}/etc/resolv.conf;"
+	# Move resolv.conf to /var/volatile/etc, as rootfs is readonly
+	rm -f ${IMAGE_ROOTFS}/etc/resolv.conf; ln -s /var/volatile/etc/resolv.conf ${IMAGE_ROOTFS}/etc/resolv.conf;
 
-ROOTFS_POSTPROCESS_COMMAND += "opkg-cl ${IPKG_ARGS} -force-depends \
-                                remove ${PACKAGE_REMOVE};"
+	opkg -f ${IPKGCONF_TARGET} -o ${IMAGE_ROOTFS} ${OPKG_ARGS} -force-depends remove ${PACKAGE_REMOVE};
+}
+
+remove_initscripts() {
+    # Remove unneeded initscripts
+    if [ -f ${IMAGE_ROOTFS}${sysconfdir}/init.d/urandom ]; then
+        rm -f ${IMAGE_ROOTFS}${sysconfdir}/init.d/urandom
+        update-rc.d -r ${IMAGE_ROOTFS} urandom remove
+    fi
+    if [ -f ${IMAGE_ROOTFS}${sysconfdir}/init.d/sshd ]; then
+        rm -f ${IMAGE_ROOTFS}${sysconfdir}/init.d/sshd
+        update-rc.d -r ${IMAGE_ROOTFS} sshd remove
+    fi
+}
+
+ROOTFS_POSTPROCESS_COMMAND += " post_rootfs_shell_commands; remove_initscripts; "
 
 inherit selinux-image
 #inherit validate-package-versions

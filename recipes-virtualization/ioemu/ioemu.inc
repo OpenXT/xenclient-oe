@@ -102,6 +102,7 @@ SRC_URI = "git://${OPENXT_GIT_MIRROR}/ioemu.git;protocol=${OPENXT_GIT_PROTOCOL};
     file://cd-lock-control-and-report.patch;patch=1 \
     file://vga-restrict-resolution.patch;patch=1 \
     file://qemu-ifup-stubdom \
+    file://fix-concatenation.patch \
 "
 
 S = "${WORKDIR}/git"
@@ -110,7 +111,7 @@ FILES_${PN}-dbg += "/usr/lib/xen/bin/.debug"
 FILES_${PN} += "/usr/lib/xen/bin /etc/xen /usr/share/xen/qemu"
 
 # hack, sneak --sysroot in CFLAGS and LDFLAGS as qemu build scripts do not deal to good with crosscompilation
-CFLAGS_prepend = "--sysroot=${STAGING_DIR_TARGET} "
+CFLAGS_prepend = "--sysroot=${STAGING_DIR_TARGET} -msse4.1"
 LDFLAGS_prepend = "--sysroot=${STAGING_DIR_TARGET} "
 
 # export some variable for IOEMU compilation
@@ -121,7 +122,7 @@ export RPCGEN_TEMPLATES = "${STAGING_DATADIR}/xc-rpcgen"
 
 do_configure() {
 	# fixme these extras should be a patch in configure
-        export CFLAGS="${CFLAGS} -msse4.1"
+        #export CFLAGS="${CFLAGS} -msse4.1"
         ./xen-setup --cross-prefix=${HOST_PREFIX} --extra-ldflags="${TARGET_LDFLAGS}"
 }
 

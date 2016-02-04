@@ -11,9 +11,6 @@ SRC_URI = "${SOURCEFORGE_MIRROR}/acpid2/acpid-${PV}.tar.xz \
            file://ac_actions \
           "
 
-PRINC = "1"
-FILESEXTRAPATHS := "${THISDIR}/${PN}"
-
 inherit autotools update-rc.d
 
 INITSCRIPT_NAME = "acpid"

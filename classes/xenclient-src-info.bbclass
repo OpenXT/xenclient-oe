@@ -52,7 +52,7 @@ python do_src_info() {
                                          "sha256": sha256}
 
     output_file = d.getVar("SRC_INFO_FILE", True)
-    bb.mkdirhier(os.path.dirname(output_file))
+    bb.utils.mkdirhier(os.path.dirname(output_file))
 
     with open(output_file, "w") as f:
         json.dump(info, f, indent=4, sort_keys=True)

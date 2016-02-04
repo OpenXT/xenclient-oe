@@ -2,7 +2,7 @@ SECTION = "devel"
 LICENSE = "QPL-1.0"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=524443efef4a3e092cca058d99996c88"
 
-PR .= "+xc1"
+PR = "r2"
 
 PV = "0+git${SRCPV}"
 
@@ -15,6 +15,8 @@ SRC_URI = "git://${OPENXT_GIT_MIRROR}/ocaml.git;protocol=${OPENXT_GIT_PROTOCOL};
 inherit xenclient
 #inherit native
 inherit cross
+
+FILESEXTRAPATHS_prepend := "${THISDIR}/ocaml-cross:"
 
 S = "${WORKDIR}/git"
 
@@ -31,7 +33,7 @@ do_configure() {
 	        	-bindir ${bindir} \
 			-libdir ${libdir}/ocaml \
 			-mandir ${datadir}/man \
-            -cc "${TARGET_PREFIX}gcc -m32" -mksharedlib "${TARGET_PREFIX}ld -shared" \
+            -cc "${TARGET_PREFIX}gcc -m32 --sysroot=${STAGING_DIR_TARGET}" -mksharedlib "${TARGET_PREFIX}ld -shared" \
 			-no-tk -as "${TARGET_PREFIX}as --32" -aspp "${TARGET_PREFIX}gcc -m32 -c"
 
 	sed -i'' -re 's/-lX11//' config/Makefile

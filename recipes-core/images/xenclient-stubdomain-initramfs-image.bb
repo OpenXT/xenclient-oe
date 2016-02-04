@@ -9,8 +9,8 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 DEPENDS += "dialog"
  
 IMAGE_FSTYPES = "cpio.gz"
-IMAGE_INSTALL = " busybox bridge-utils initramfs-xenclient "
-IMAGE_INSTALL += " qemu-dm-stubdom dm-wrapper-stubdom v4v-module dm-agent-stubdom simple-poweroff rsyslog "
+IMAGE_INSTALL = "busybox bridge-utils initramfs-xenclient"
+IMAGE_INSTALL += "qemu-dm-stubdom v4v-module dm-agent-stubdom simple-poweroff rsyslog"
 IMAGE_LINGUAS = ""
 IMAGE_DEV_MANAGER = "busybox-mdev"
 IMAGE_BOOT = "${IMAGE_DEV_MANAGER}"
@@ -20,12 +20,15 @@ PACKAGE_INSTALL_NO_DEPS = "1"
 # Remove any kernel-image that the kernel-module-* packages may have pulled in.
 PACKAGE_REMOVE = "kernel-image-* update-modules udev sysvinit opkg-cl"
 
-ROOTFS_POSTPROCESS_COMMAND += "opkg-cl ${IPKG_ARGS} -force-depends \
-                                remove ${PACKAGE_REMOVE}; \
-				rm -f ${IMAGE_ROOTFS}/sbin/udhcpc; \
-				rm -f ${IMAGE_ROOTFS}/sbin/ldconfig; \
-				rm -rvf ${IMAGE_ROOTFS}/usr/lib/opkg; \
-"
+post_rootfs_shell_commands() {
+	opkg -f ${IPKGCONF_TARGET} -o ${IMAGE_ROOTFS} ${OPKG_ARGS} -force-depends remove ${PACKAGE_REMOVE};
+
+	rm -f ${IMAGE_ROOTFS}/sbin/udhcpc;
+	rm -f ${IMAGE_ROOTFS}/sbin/ldconfig;
+	rm -rvf ${IMAGE_ROOTFS}/usr/lib/opkg;
+}
+
+ROOTFS_POSTPROCESS_COMMAND += " post_rootfs_shell_commands; "
 
 inherit image
 #inherit validate-package-versions

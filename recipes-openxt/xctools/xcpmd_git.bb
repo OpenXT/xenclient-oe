@@ -12,13 +12,15 @@ SRC_URI = "git://${OPENXT_GIT_MIRROR}/xctools.git;protocol=${OPENXT_GIT_PROTOCOL
 
 EXTRA_OECONF += "--with-idldir=${STAGING_IDLDIR}"
 
+CFLAGS_prepend += " -I${STAGING_INCDIR}/libnl3 "
+
+CFLAGS_append += " -Wno-unused-parameter -Wno-deprecated-declarations "
+
 S = "${WORKDIR}/git/xcpmd"
 
 ASNEEDED = ""
 
-inherit autotools
-inherit xenclient
-inherit update-rc.d
+inherit autotools xenclient update-rc.d pkgconfig
 
 INITSCRIPT_NAME = "xcpmd"
 INITSCRIPT_PARAMS = "defaults 60"

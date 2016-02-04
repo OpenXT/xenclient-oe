@@ -4,9 +4,14 @@
 
 COMPATIBLE_MACHINE = "(xenclient-dom0)"
 
+SRC_URI = "file://initramfs-tcsd.conf \
+           file://initramfs-passwd \
+           file://initramfs-group \
+           file://initramfs-nsswitch.conf \
+"
+
 IMAGE_FSTYPES = "cpio.gz"
 IMAGE_INSTALL = "busybox lvm2-static initramfs-xenclient"
-IMAGE_INSTALL += "xenclient-initramfs-tpm-config-files"
 IMAGE_INSTALL += "kernel-module-tpm"
 IMAGE_INSTALL += "kernel-module-tpm-tis"
 IMAGE_INSTALL += "tpm-tools-sa xenclient-initramfs-shared-libs"
@@ -31,9 +36,6 @@ PACKAGE_INSTALL_NO_DEPS = "1"
 # Remove any kernel-image that the kernel-module-* packages may have pulled in.
 PACKAGE_REMOVE = "kernel-image-* update-modules udev sysvinit opkg* mdev*"
 
-ROOTFS_POSTPROCESS_COMMAND += "opkg-cl ${IPKG_ARGS} -force-depends \
-                               remove ${PACKAGE_REMOVE}; "
-
 # Pull in required shared libraries. Having them in a package shared with dom0 causes
 # other packages to depend on it no matter what we put in its recipe...
 EXTRA_INITRAMFS_LIBS = "\
@@ -45,28 +47,42 @@ EXTRA_INITRAMFS_LIBS = "\
     usr/lib/libssl.so.1.0.0 \
     usr/lib/libtspi_sa.so.1"
 
-ROOTFS_POSTPROCESS_COMMAND += " \
-    install -d ${IMAGE_ROOTFS}/lib; \
-    for a in ${EXTRA_INITRAMFS_LIBS}; do \
-	install -m 0755 ${STAGING_DIR_HOST}/$a ${IMAGE_ROOTFS}/lib; \
-	${STRIP} ${IMAGE_ROOTFS}/lib/`basename $a`; \
-    done; "
+post_rootfs_shell_commands() {
+	opkg -f ${IPKGCONF_TARGET} -o ${IMAGE_ROOTFS} ${OPKG_ARGS} -force-depends remove ${PACKAGE_REMOVE};
+	install -d ${IMAGE_ROOTFS}/lib;
+	for a in ${EXTRA_INITRAMFS_LIBS}; do
+		install -m 0755 ${STAGING_DIR_HOST}/$a ${IMAGE_ROOTFS}/lib;
+		${STRIP} ${IMAGE_ROOTFS}/lib/`basename $a`;
+	done;
+}
 
-IMAGE_PREPROCESS_COMMAND += " \
-    rm -rvf ${IMAGE_ROOTFS}/usr/lib/opkg; \
-    rm -vf ${IMAGE_ROOTFS}/usr/bin/tpm_sealdata_sa; \
-    rm -vf ${IMAGE_ROOTFS}/usr/bin/tpm_unsealdata_sa; \
-    rm -vf ${IMAGE_ROOTFS}/etc/init.d/hwclock.sh; \
-    rm -vf ${IMAGE_ROOTFS}/etc/init.d/mdev; \
-    rm -vf ${IMAGE_ROOTFS}/etc/rcS.d/S06mdev; \
-    rm -vf ${IMAGE_ROOTFS}/etc/rcS.d/S98configure; \
-    rm -vf ${IMAGE_ROOTFS}/usr/bin/opkg-cl; \
-    rm -vf ${IMAGE_ROOTFS}/usr/lib/ipkg; \
-    rm -vrf ${IMAGE_ROOTFS}/var/lib; \
-    rm -vrf ${IMAGE_ROOTFS}/usr/share/opkg; \
-    rm -vrf ${IMAGE_ROOTFS}/etc/ipkg; \
-    rm -vrf ${IMAGE_ROOTFS}/etc/opkg; \
-"
+write_config_files() {
+	install -m 0600 ${WORKDIR}/initramfs-tcsd.conf ${IMAGE_ROOTFS}${sysconfdir}/tcsd.conf
+	install -m 0644 ${WORKDIR}/initramfs-passwd ${IMAGE_ROOTFS}${sysconfdir}/passwd
+	install -m 0644 ${WORKDIR}/initramfs-group ${IMAGE_ROOTFS}${sysconfdir}/group
+	install -m 0644 ${WORKDIR}/initramfs-nsswitch.conf ${IMAGE_ROOTFS}${sysconfdir}/nsswitch.conf
+}
+
+ROOTFS_POSTPROCESS_COMMAND += " post_rootfs_shell_commands; write_config_files; "
+
+strip_files () {
+	rm -rvf ${IMAGE_ROOTFS}/usr/lib/opkg;
+	rm -vf ${IMAGE_ROOTFS}/usr/bin/tpm_sealdata_sa;
+	rm -vf ${IMAGE_ROOTFS}/usr/bin/tpm_unsealdata_sa;
+	rm -vf ${IMAGE_ROOTFS}/etc/init.d/hwclock.sh;
+	rm -vf ${IMAGE_ROOTFS}/etc/init.d/mdev;
+	rm -vf ${IMAGE_ROOTFS}/etc/rcS.d/S06mdev;
+	rm -vf ${IMAGE_ROOTFS}/etc/rcS.d/S98configure;
+	rm -vf ${IMAGE_ROOTFS}/usr/bin/opkg-cl;
+	rm -vf ${IMAGE_ROOTFS}/usr/lib/ipkg;
+	rm -vrf ${IMAGE_ROOTFS}/var/lib;
+	rm -vrf ${IMAGE_ROOTFS}/usr/share/opkg;
+	rm -vrf ${IMAGE_ROOTFS}/etc/ipkg;
+	rm -vrf ${IMAGE_ROOTFS}/etc/opkg;
+}
+
+IMAGE_PREPROCESS_COMMAND += "strip_files; "
+
 inherit image
 #inherit validate-package-versions
 inherit xenclient-image-src-info
@@ -75,3 +91,9 @@ inherit xenclient-image-src-package
 LICENSE = "GPLv2 & MIT"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/GPL-2.0;md5=801f80980d171dd6425610833a22dbe6      \
                     file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302"
+
+python () {
+	# Ensure we run these usually noexec tasks
+	d.delVarFlag("do_fetch", "noexec")
+	d.delVarFlag("do_unpack", "noexec")
+}

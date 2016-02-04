@@ -1,6 +1,6 @@
 
 inherit xenclient
-inherit autotools pkgconfig lib_package
+inherit autotools-brokensep pkgconfig lib_package
 
 DEPENDS = "xen-tools"
 LICENSE = "GPLv2"

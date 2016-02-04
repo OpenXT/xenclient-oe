@@ -12,8 +12,5 @@ S = "${WORKDIR}/git/libdmbus"
 
 ASNEEDED = ""
 
-inherit autotools
-inherit pkgconfig
-inherit lib_package
-inherit xenclient
+inherit autotools-brokensep pkgconfig lib_package xenclient
 

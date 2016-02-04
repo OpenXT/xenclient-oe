@@ -4,7 +4,6 @@ include xenclient-image-common.inc
 IMAGE_FEATURES += "package-management"
 
 COMPATIBLE_MACHINE = "(xenclient-dom0)"
-IMAGE_INITSCRIPTS = "xenclient-dom0-initscripts"
 
 IMAGE_FSTYPES = "xc.ext3.gz"
 
@@ -19,15 +18,15 @@ ANGSTROM_EXTRA_INSTALL += " \
 export IMAGE_BASENAME = "xenclient-dom0-image"
 export STAGING_KERNEL_DIR
 
-DEPENDS = "task-base task-xenclient-dom0"
+DEPENDS = "packagegroup-base packagegroup-xenclient-dom0"
 IMAGE_INSTALL = "\
     ${ROOTFS_PKGMANAGE} \
-    ${IMAGE_INITSCRIPTS} \
+    initscripts \
     modules \
-    task-core-boot \
-    task-base \
-    task-xenclient-common \
-    task-xenclient-dom0 \
+    packagegroup-core-boot \
+    packagegroup-base \
+    packagegroup-xenclient-common \
+    packagegroup-xenclient-dom0 \
     v4v-module \
     xenclient-preload-hs-libs \
     ${ANGSTROM_EXTRA_INSTALL}"
@@ -37,68 +36,89 @@ IMAGE_INSTALL = "\
 #zap root password for release images
 ROOTFS_POSTPROCESS_COMMAND += '${@base_conditional("DISTRO_TYPE", "release", "zap_root_password; ", "",d)}'
 
-# zap root password in shadow
-ROOTFS_POSTPROCESS_COMMAND += "sed -i 's%^root:[^:]*:%root:*:%' ${IMAGE_ROOTFS}/etc/shadow;"
+post_rootfs_shell_commands() {
+	# zap root password in shadow
+	sed -i 's%^root:[^:]*:%root:*:%' ${IMAGE_ROOTFS}/etc/shadow;
 
-ROOTFS_POSTPROCESS_COMMAND += "sed -i 's|root:x:0:0:root:/home/root:/bin/sh|root:x:0:0:root:/root:/bin/bash|' ${IMAGE_ROOTFS}/etc/passwd;"
+	sed -i 's|root:x:0:0:root:/root:/bin/sh|root:x:0:0:root:/root:/bin/bash|' ${IMAGE_ROOTFS}/etc/passwd;
 
-ROOTFS_POSTPROCESS_COMMAND += " \
-    mkdir -p ${IMAGE_ROOTFS}/config/etc; \
-    mv ${IMAGE_ROOTFS}/etc/passwd ${IMAGE_ROOTFS}/config/etc; \
-    mv ${IMAGE_ROOTFS}/etc/shadow ${IMAGE_ROOTFS}/config/etc; \
-    ln -s ../config/etc/passwd ${IMAGE_ROOTFS}/etc/passwd; \
-    ln -s ../config/etc/shadow ${IMAGE_ROOTFS}/etc/shadow; \
-    ln -s ../config/etc/.pwd.lock ${IMAGE_ROOTFS}/etc/.pwd.lock; \
-    ln -s ../var/volatile/etc/asound ${IMAGE_ROOTFS}/etc/asound; \
-"
+	mkdir -p ${IMAGE_ROOTFS}/config/etc;
+	mv ${IMAGE_ROOTFS}/etc/passwd ${IMAGE_ROOTFS}/config/etc;
+	mv ${IMAGE_ROOTFS}/etc/shadow ${IMAGE_ROOTFS}/config/etc;
+	ln -s ../config/etc/passwd ${IMAGE_ROOTFS}/etc/passwd;
+	ln -s ../config/etc/shadow ${IMAGE_ROOTFS}/etc/shadow;
+	ln -s ../config/etc/.pwd.lock ${IMAGE_ROOTFS}/etc/.pwd.lock;
+	ln -s ../var/volatile/etc/asound ${IMAGE_ROOTFS}/etc/asound;
 
-ROOTFS_POSTPROCESS_COMMAND += "rm ${IMAGE_ROOTFS}/etc/hosts; ln -s /var/run/hosts ${IMAGE_ROOTFS}/etc/hosts;"
+	rm ${IMAGE_ROOTFS}/etc/hosts; ln -s /var/run/hosts ${IMAGE_ROOTFS}/etc/hosts;
+	ln -s /var/volatile/etc/resolv.conf ${IMAGE_ROOTFS}/etc/resolv.conf;
 
-ROOTFS_POSTPROCESS_COMMAND += "ln -s /var/volatile/etc/resolv.conf ${IMAGE_ROOTFS}/etc/resolv.conf;"
+	echo 'kernel.printk_ratelimit = 0' >> ${IMAGE_ROOTFS}/etc/sysctl.conf;
 
-ROOTFS_POSTPROCESS_COMMAND += "echo 'kernel.printk_ratelimit = 0' >> ${IMAGE_ROOTFS}/etc/sysctl.conf;"
+	# Add initramfs
+	cat ${DEPLOY_DIR_IMAGE}/xenclient-initramfs-image-xenclient-dom0.cpio.gz > ${IMAGE_ROOTFS}/boot/initramfs.gz ;
 
-# Add initramfs
-ROOTFS_POSTPROCESS_COMMAND += "cat ${DEPLOY_DIR_IMAGE}/xenclient-initramfs-image-xenclient-dom0.cpio.gz > ${IMAGE_ROOTFS}/boot/initramfs.gz ;" 
+	sed -i 's|1:2345:respawn:/sbin/getty 38400 tty1|#1:2345:respawn:/sbin/getty 38400 tty1|' ${IMAGE_ROOTFS}/etc/inittab ;
 
-ROOTFS_POSTPROCESS_COMMAND += "sed -i 's|1:2345:respawn:/sbin/getty 38400 tty1|#1:2345:respawn:/sbin/getty 38400 tty1|' ${IMAGE_ROOTFS}/etc/inittab ;" 
+	# Add dom0 console getty
+	echo '1:2345:respawn:/sbin/getty 38400 tty1' >> ${IMAGE_ROOTFS}/etc/inittab ;
 
-# Add dom0 console getty
-ROOTFS_POSTPROCESS_COMMAND += "echo '1:2345:respawn:/sbin/getty 38400 tty1' >> ${IMAGE_ROOTFS}/etc/inittab ;"
+	# Create mountpoint for /mnt/secure
+	mkdir -p ${IMAGE_ROOTFS}/mnt/secure ;
 
-# Create mountpoint for /mnt/secure
-ROOTFS_POSTPROCESS_COMMAND += "mkdir -p ${IMAGE_ROOTFS}/mnt/secure ;"
+	# Create mountpoint for /mnt/upgrade
+	mkdir -p ${IMAGE_ROOTFS}/mnt/upgrade ;
 
-# Create mountpoint for /mnt/upgrade
-ROOTFS_POSTPROCESS_COMMAND += "mkdir -p ${IMAGE_ROOTFS}/mnt/upgrade ;"
+	# Create mountpoint for boot/system
+	mkdir -p ${IMAGE_ROOTFS}/boot/system ;
 
-# Create mountpoint for boot/system
-ROOTFS_POSTPROCESS_COMMAND += "mkdir -p ${IMAGE_ROOTFS}/boot/system ;"
+	# Remove unwanted packages specified above
+	opkg -f ${IPKGCONF_TARGET} -o ${IMAGE_ROOTFS} ${OPKG_ARGS} -force-depends remove ${PACKAGE_REMOVE};
 
-# Remove unwanted packages specified above
-ROOTFS_POSTPROCESS_COMMAND += "opkg-cl ${IPKG_ARGS} -force-depends \
-                                remove ${PACKAGE_REMOVE};"
+	# Remove network modules except netfront
+	for x in `find ${IMAGE_ROOTFS}/lib/modules -name *.ko | grep drivers/net | grep -v xen-netfront`; do
+		pkg="kernel-module-`basename $x .ko | sed s/_/-/g`";
+		opkg ${IPKG_ARGS} -force-depends remove $pkg;
+	done;
 
-# Remove network modules except netfront
-ROOTFS_POSTPROCESS_COMMAND += "\
-  for x in `find ${IMAGE_ROOTFS}/lib/modules -name *.ko | grep drivers/net | grep -v xen-netfront`; do \
-    pkg="kernel-module-`basename $x .ko | sed s/_/-/g`"; \
-    opkg-cl ${IPKG_ARGS} -force-depends remove $pkg; \
-  done; \
-"
-
-
-# Write coredumps in /var/cores
-ROOTFS_POSTPROCESS_COMMAND += "echo 'kernel.core_pattern = /var/cores/%e-%t.%p.core' >> ${IMAGE_ROOTFS}/etc/sysctl.conf ;"
+	# Write coredumps in /var/cores
+	echo 'kernel.core_pattern = /var/cores/%e-%t.%p.core' >> ${IMAGE_ROOTFS}/etc/sysctl.conf ;
+}
 
 ### Stubdomain stuff - temporary
-STUBDOMAIN_DEPLOY_DIR_IMAGE = "${DEPLOY_DIR_IMAGE}"
+STUBDOMAIN_DEPLOY_DIR_IMAGE = "${DEPLOY_DIR}/images/xenclient-stubdomain"
 STUBDOMAIN_IMAGE = "${STUBDOMAIN_DEPLOY_DIR_IMAGE}/xenclient-stubdomain-initramfs-image-xenclient-stubdomain.cpio.gz"
-STUBDOMAIN_KERNEL = "${STUBDOMAIN_DEPLOY_DIR_IMAGE}/vmlinuz-xenclient-stubdomain.bin"
-ROOTFS_POSTPROCESS_COMMAND += "mkdir -p ${IMAGE_ROOTFS}/usr/lib/xen/boot ;"
-ROOTFS_POSTPROCESS_COMMAND += "cat ${STUBDOMAIN_IMAGE} > ${IMAGE_ROOTFS}/usr/lib/xen/boot/stubdomain-initramfs ;" 
-ROOTFS_POSTPROCESS_COMMAND += "cat ${STUBDOMAIN_KERNEL} > ${IMAGE_ROOTFS}/usr/lib/xen/boot/stubdomain-bzImage ;" 
-### End of stubdomain stuff
+STUBDOMAIN_KERNEL = "${STUBDOMAIN_DEPLOY_DIR_IMAGE}/bzImage-xenclient-stubdomain.bin"
+process_tmp_stubdomain_items() {
+	mkdir -p ${IMAGE_ROOTFS}/usr/lib/xen/boot ;
+	cat ${STUBDOMAIN_IMAGE} > ${IMAGE_ROOTFS}/usr/lib/xen/boot/stubdomain-initramfs ;
+	cat ${STUBDOMAIN_KERNEL} > ${IMAGE_ROOTFS}/usr/lib/xen/boot/stubdomain-bzImage ; 
+}
+
+# Get rid of unneeded initscripts
+remove_initscripts() {
+    if [ -f ${IMAGE_ROOTFS}${sysconfdir}/init.d/hostname.sh ]; then
+        rm -f ${IMAGE_ROOTFS}${sysconfdir}/init.d/hostname.sh
+        update-rc.d -r ${IMAGE_ROOTFS} hostname.sh remove
+    fi
+
+    if [ -f ${IMAGE_ROOTFS}${sysconfdir}/init.d/rmnologin.sh ]; then
+        rm -f ${IMAGE_ROOTFS}${sysconfdir}/init.d/rmnologin.sh
+        update-rc.d -r ${IMAGE_ROOTFS} rmnologin.sh remove
+    fi
+
+    if [ -f ${IMAGE_ROOTFS}${sysconfdir}/init.d/finish.sh ]; then
+        rm -f ${IMAGE_ROOTFS}${sysconfdir}/init.d/finish.sh
+        update-rc.d -r ${IMAGE_ROOTFS} finish.sh remove
+    fi
+
+    if [ -f ${IMAGE_ROOTFS}${sysconfdir}/init.d/mount-special ]; then
+        rm -f ${IMAGE_ROOTFS}${sysconfdir}/init.d/mount-special
+        update-rc.d -r ${IMAGE_ROOTFS} mount-special remove
+    fi
+}
+
+ROOTFS_POSTPROCESS_COMMAND += " post_rootfs_shell_commands; remove_initscripts; process_tmp_stubdomain_items; "
 
 inherit selinux-image
 #inherit validate-package-versions

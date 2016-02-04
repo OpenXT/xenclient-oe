@@ -1,6 +1,6 @@
-PRINC = "1"
+PR .= ".1"
 
-FILESEXTRAPATHS := "${THISDIR}/${PN}"
+FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
 
 SRC_URI += "file://remove_mtrr.patch"
 

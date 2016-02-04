@@ -7,9 +7,13 @@ INSANE_SKIP_${PN} = "dev-so"
 PV = "0+git${SRCPV}"
 
 SRCREV = "${AUTOREV}"
-SRC_URI = "git://${OPENXT_GIT_MIRROR}/surfman.git;protocol=${OPENXT_GIT_PROTOCOL};branch=${OPENXT_BRANCH}"
+SRC_URI = "git://${OPENXT_GIT_MIRROR}/surfman.git;protocol=${OPENXT_GIT_PROTOCOL};branch=${OPENXT_BRANCH} \
+           file://automake-foreign.patch \
+          "
 
 S = "${WORKDIR}/git/plugins/linuxfb"
+
+CFLAGS_append += " -Wno-unused-parameter "
 
 PACKAGES = "${PN}-dev ${PN}-dbg ${PN}"
 FILES_${PN}-dev += " /usr/lib/surfman/*.a /usr/lib/surfman/*.la "

@@ -19,7 +19,7 @@ do_install() {
 }
 
 sysroot_stage_all_append() {
-        sysroot_stage_dir "${D}/${sysconfdir}" "${SYSROOT_DESTDIR}/${sysconfdir}"
+    sysroot_stage_dir "${D}/${sysconfdir}" "${SYSROOT_DESTDIR}/${sysconfdir}"
 }
 
 

@@ -12,9 +12,6 @@ S = "${WORKDIR}/git"
 
 EXTRA_OEMAKE += "LIBDIR=${STAGING_LIBDIR}"
 
-inherit autotools
-inherit pkgconfig
-inherit lib_package
-inherit xenclient
+inherit autotools-brokensep pkgconfig lib_package xenclient
 
 PR = "r1"

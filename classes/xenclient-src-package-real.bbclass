@@ -37,28 +37,28 @@ do_src_package_archive[cleandirs] = "${SRC_PACKAGE_ROOT}"
 python() {
     # If do_apply_patchqueue exists, make sure it runs before
     # do_src_package_archive.
-    if bb.data.getVarFlag('do_apply_patchqueue', 'task', d):
-        deps = bb.data.getVarFlag('do_src_package_archive', 'deps', d)
+    if d.getVarFlag('do_apply_patchqueue', 'task', d):
+        deps = d.getVarFlag('do_src_package_archive', 'deps', d)
         deps.append('do_apply_patchqueue')
-        bb.data.setVarFlag('do_src_package_archive', 'deps', deps, d)
+        d.setVarFlag('do_src_package_archive', 'deps', deps, d)
 
     # run before do_populate_lic
-    if bb.data.getVarFlag('do_populate_lic', 'task', d):
-        deps = bb.data.getVarFlag('do_populate_lic', 'deps', d)
+    if d.getVarFlag('do_populate_lic', 'task', d):
+        deps = d.getVarFlag('do_populate_lic', 'deps', d)
         deps.append('do_src_package_archive')
-        bb.data.setVarFlag('do_populate_lic', 'deps', deps, d)
+        d.setVarFlag('do_populate_lic', 'deps', deps, d)
 }
 
 python do_src_package_archive() {
-    root = bb.data.getVar('SRC_PACKAGE_ROOT', d, 1)
-    unclean_file = bb.data.getVar('SRC_PACKAGE_UNCLEAN_FILE', d, 1)
-    excludes = bb.data.getVar('SRC_PACKAGE_EXCLUDES', d, 1)
-    licenses = bb.data.getVar('LICENSE', d, 1) or "unknown"
-    pn = bb.data.getVar('PN', d, 1)
-    pv = bb.data.getVar('PV', d, 1)
-    pr = bb.data.getVar('PR', d, 1)
-    s = bb.data.getVar('S', d, 1)
-    workdir = bb.data.getVar('WORKDIR', d, 1)
+    root = d.getVar('SRC_PACKAGE_ROOT', d, 1)
+    unclean_file = d.getVar('SRC_PACKAGE_UNCLEAN_FILE', d, 1)
+    excludes = d.getVar('SRC_PACKAGE_EXCLUDES', d, 1)
+    licenses = d.getVar('LICENSE', d, 1) or "unknown"
+    pn = d.getVar('PN', d, 1)
+    pv = d.getVar('PV', d, 1)
+    pr = d.getVar('PR', d, 1)
+    s = d.getVar('S', d, 1)
+    workdir = d.getVar('WORKDIR', d, 1)
 
     # This is to detect the case where this task is being rerun after another
     # task has written build output to the source directory. Raise an error
@@ -72,7 +72,7 @@ python do_src_package_archive() {
                                   "source directory, so take a copy of your "
                                   "changes first!" % (pn))
 
-    bb.mkdirhier(root)
+    bb.utils.mkdirhier(root)
     if 'work-shared' in s: 
         bb.note("xenclient-src-package-real: Skipping package '%s' as source "
                 "directory '%s' is located in work-shared" % (pn, s))
@@ -91,7 +91,7 @@ python do_src_package_archive() {
 
     for entry in entries:
         archivedir = os.path.abspath(os.path.join(root, entry, pn))
-        bb.mkdirhier(archivedir)
+        bb.utils.mkdirhier(archivedir)
 
         # For consistency with ipkg-build, don't include PE in the archive name.
         name = "%s_%s-%s" % (pn, pv, pr)
@@ -109,7 +109,7 @@ python do_src_package_archive() {
 
         # Workaround for packages which set S to WORKDIR.
         if os.path.abspath(s) == os.path.abspath(workdir):
-            excludelist.append(bb.data.getVar('SRC_PACKAGE_DIR', d, 1))
+            excludelist.append(d.getVar('SRC_PACKAGE_DIR', d, 1))
             excludelist.append('temp')
             # allow tar exit with 1 exit code (files changed) as stuff in temp directory could change
             # let's hope that any other thing hasn't
@@ -134,9 +134,9 @@ addtask src_package_unclean after do_src_package_archive before do_configure
 do_configure[vardepsexclude] += "do_src_package_unclean"
 
 python do_src_package_unclean() {
-    unclean_file = bb.data.getVar('SRC_PACKAGE_UNCLEAN_FILE', d, 1)
-    pn = bb.data.getVar('PN', d, 1)
-    s = bb.data.getVar('S', d, 1)
+    unclean_file = d.getVar('SRC_PACKAGE_UNCLEAN_FILE', d, 1)
+    pn = d.getVar('PN', d, 1)
+    s = d.getVar('S', d, 1)
 
     if not os.path.exists(s):
         bb.note("xenclient-src-package-real: Skipping package '%s' as source "
@@ -161,9 +161,9 @@ addtask do_src_package_write_setscene
 python do_src_package_write() {
     import re
 
-    root = bb.data.getVar('SRC_PACKAGE_ROOT', d, 1)
+    root = d.getVar('SRC_PACKAGE_ROOT', d, 1)
 
-    outdir = bb.data.getVar('SRCPKGWRITEDIRIPK', d, 1)
+    outdir = d.getVar('SRCPKGWRITEDIRIPK', d, 1)
     if not outdir:
         raise bb.build.FuncFailed("xenclient-src-package-real: "
                                   "DEPLOY_DIR_IPK not defined")
@@ -171,14 +171,14 @@ python do_src_package_write() {
     lf = bb.utils.lockfile(root + ".lock")
 
     basedir = os.path.join(os.path.dirname(root))
-    arch = bb.data.getVar('SRC_PACKAGE_ARCH', d, 1)
+    arch = d.getVar('SRC_PACKAGE_ARCH', d, 1)
     pkgoutdir = os.path.join(outdir, arch)
 
-    bb.mkdirhier(pkgoutdir)
+    bb.utils.mkdirhier(pkgoutdir)
     os.chdir(root)
 
     controldir = os.path.join(root, "CONTROL")
-    bb.mkdirhier(controldir)
+    bb.utils.mkdirhier(controldir)
     try:
         ctrlfile = file(os.path.join(controldir, "control"), 'w')
     except OSError:
@@ -186,10 +186,10 @@ python do_src_package_write() {
         raise bb.build.FuncFailed("xenclient-src-package-real: Unable to "
                                   "open control file for writing")
 
-    ctrlfile.write("Package: %s-src\n" % bb.data.getVar('PN', d, 1))
+    ctrlfile.write("Package: %s-src\n" % d.getVar('PN', d, 1))
 
     fields = []
-    pe = bb.data.getVar('PE', d, 1)
+    pe = d.getVar('PE', d, 1)
     if pe and int(pe) > 0:
         fields.append(["Version: %s:%s-%s\n", ['PE', 'PKGV', 'PKGR']])
     else:
@@ -206,13 +206,13 @@ python do_src_package_write() {
     def pullData(l, d):
         l2 = []
         for i in l:
-            l2.append(bb.data.getVar(i, d, 1))
+            l2.append(d.getVar(i, d, 1))
         return l2
 
     try:
         for (c, fs) in fields:
             for f in fs:
-                if bb.data.getVar(f, d) is None:
+                if d.getVar(f, d) is None:
                     raise KeyError(f)
             ctrlfile.write(c % tuple(pullData(fs, d)))
     except KeyError:
@@ -223,16 +223,16 @@ python do_src_package_write() {
         raise bb.build.FuncFailed("xenclient-src-package-real: Missing "
                                   "field for ipk generation: %s" % value)
 
-    src_uri = bb.data.getVar('SRC_URI', d, 1) or d.getVar('FILE', True)
+    src_uri = d.getVar('SRC_URI', d, 1) or d.getVar('FILE', True)
     src_uri = re.sub("\s+", " ", src_uri)
     ctrlfile.write("Source: %s\n" % " ".join(src_uri.split()))
     ctrlfile.close()
 
     os.chdir(basedir)
     ret = os.system("PATH='%s' %s %s %s" %
-                    (bb.data.getVar('PATH', d, 1),
-                     bb.data.getVar('OPKGBUILDCMD', d, 1),
-                     bb.data.getVar('SRC_PACKAGE_DIR', d, 1),
+                    (d.getVar('PATH', d, 1),
+                     d.getVar('OPKGBUILDCMD', d, 1),
+                     d.getVar('SRC_PACKAGE_DIR', d, 1),
                      pkgoutdir))
     if ret != 0:
         bb.utils.unlockfile(lf)

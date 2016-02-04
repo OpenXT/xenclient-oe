@@ -14,8 +14,8 @@ PACKAGES += "kernel-debian"
 FILES_kernel-debian = "/packages/*"
 
 def getClassFdir(bb, d):
-	filepath = bb.data.getVar('FILE',d,1)
-	idx = filepath.rfind('/recipes-kernel/')
+	filepath = d.getVar('FILE',1)
+	idx = filepath.rfind('/recipes/')
 	if idx == -1:
 		return ""
 	return filepath[:idx] + '/classes/xenclient-deb-kernel/'

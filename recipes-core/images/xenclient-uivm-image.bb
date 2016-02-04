@@ -18,16 +18,16 @@ XSERVER ?= "xserver-kdrive-fbdev"
 
 export IMAGE_BASENAME = "xenclient-uivm-image"
 
-DEPENDS = "task-base"
+DEPENDS = "packagegroup-base"
 IMAGE_INSTALL = "\
     ${ROOTFS_PKGMANAGE} \
     ${XSERVER} \
     modules \
-    task-xenclient-common \
-    task-xenclient-xfce-minimal \
+    packagegroup-xenclient-common \
+    packagegroup-xenclient-xfce-minimal \
     openssh \
-    task-core-boot \
-    task-base \
+    packagegroup-core-boot \
+    packagegroup-base \
     xenfb2 \
     kernel-modules \
     v4v-module \
@@ -43,11 +43,6 @@ IMAGE_INSTALL = "\
     network-manager-applet-locale-fr \
     network-manager-applet-locale-ja \
     network-manager-applet-locale-zh-cn \
-    gtk+-locale-de \
-    gtk+-locale-es \
-    gtk+-locale-fr \
-    gtk+-locale-ja \
-    gtk+-locale-zh-cn \
     gnome-keyring-locale-de \
     gnome-keyring-locale-es \
     gnome-keyring-locale-fr \
@@ -89,10 +84,18 @@ IMAGE_INSTALL = "\
     matchbox-keyboard-im \
     ${ANGSTROM_EXTRA_INSTALL}"
 
+# these cause a python dictionary changed size during iteration error
+#    gtk+-locale-de \
+#    gtk+-locale-es \
+#    gtk+-locale-fr \
+#    gtk+-locale-ja \
+#    gtk+-locale-zh-cn \
+#
+
 # OE upgrade - temporarly disabled:
 
 # angstrom-x11-base-depends \
-# task-xfce46-base \
+# packagegroup-xfce46-base \
 # angstrom-gnome-icon-theme-enable \
 # battery-applet-4-xfce4 \
 # battery-applet-4-xfce4-locale-de \
@@ -106,17 +109,18 @@ IMAGE_INSTALL = "\
 #
 
 
-#    angstrom-gpe-task-base \
+#    angstrom-gpe-packagegroup-base \
 #    ${SPLASH} \
+#
 
 #IMAGE_INSTALL = "\
 #    ${XSERVER} \
-#    task-base-extended \
+#    packagegroup-base-extended \
 #    coreutils \
 #    bash \
 #    angstrom-x11-base-depends \
-#    angstrom-gpe-task-base \
-#    angstrom-gpe-task-settings \
+#    angstrom-gpe-packagegroup-base \
+#    angstrom-gpe-packagegroup-settings \
 #    kernel-modules \
 #    hal \
 #    devilspie \
@@ -129,20 +133,49 @@ IMAGE_INSTALL = "\
 #zap root password for release images
 ROOTFS_POSTPROCESS_COMMAND += '${@base_conditional("DISTRO_TYPE", "release", "zap_root_password; ", "",d)}'
 
-ROOTFS_POSTPROCESS_COMMAND += "echo 'x:5:respawn:/bin/su - root -c /usr/bin/startxfce4' >> ${IMAGE_ROOTFS}/etc/inittab;"
+post_rootfs_shell_commands() {
+	echo 'x:5:respawn:/bin/su - root -c /usr/bin/startxfce4' >> ${IMAGE_ROOTFS}/etc/inittab;
 
-# enable ctrlaltdel reboot because PV driver uses ctrl+alt+del to interpret reboot issued via xenstore
-ROOTFS_POSTPROCESS_COMMAND += "echo 'ca:12345:ctrlaltdel:/sbin/shutdown -t1 -a -r now' >> ${IMAGE_ROOTFS}/etc/inittab;"
+	# enable ctrlaltdel reboot because PV driver uses ctrl+alt+del to interpret reboot issued via xenstore
+	echo 'ca:12345:ctrlaltdel:/sbin/shutdown -t1 -a -r now' >> ${IMAGE_ROOTFS}/etc/inittab;
 
-ROOTFS_POSTPROCESS_COMMAND += "sed -i 's|root:x:0:0:root:/home/root:/bin/sh|root:x:0:0:root:/root:/bin/bash|' ${IMAGE_ROOTFS}/etc/passwd;"
+	sed -i 's|root:x:0:0:root:/root:/bin/sh|root:x:0:0:root:/root:/bin/bash|' ${IMAGE_ROOTFS}/etc/passwd;
 
-ROOTFS_POSTPROCESS_COMMAND += "echo '1.0.0.0 dom0' >> ${IMAGE_ROOTFS}/etc/hosts;"
+	echo '1.0.0.0 dom0' >> ${IMAGE_ROOTFS}/etc/hosts;
 
-ROOTFS_POSTPROCESS_COMMAND += "opkg-cl ${IPKG_ARGS} -force-depends \
-                                remove ${PACKAGE_REMOVE};"
+	opkg -f ${IPKGCONF_TARGET} -o ${IMAGE_ROOTFS} ${OPKG_ARGS} -force-depends remove ${PACKAGE_REMOVE}
 
-# readonly rootfs prevents sshd from creating dirs
-ROOTFS_POSTPROCESS_COMMAND += "mkdir ${IMAGE_ROOTFS}/root/.ssh;"
+	# readonly rootfs prevents sshd from creating dirs
+	mkdir ${IMAGE_ROOTFS}/root/.ssh;
+	
+	mkdir ${IMAGE_ROOTFS}/root/.cache;
+}
+
+remove_initscripts() {
+    # Remove unneeded initscripts
+    if [ -f ${IMAGE_ROOTFS}${sysconfdir}/init.d/finish.sh ]; then
+        rm -f ${IMAGE_ROOTFS}${sysconfdir}/init.d/finish.sh
+        update-rc.d -r ${IMAGE_ROOTFS} finish.sh remove
+    fi
+    if [ -f ${IMAGE_ROOTFS}${sysconfdir}/init.d/hostname.sh ]; then
+        rm -f ${IMAGE_ROOTFS}${sysconfdir}/init.d/hostname.sh
+        update-rc.d -r ${IMAGE_ROOTFS} hostname.sh remove
+    fi
+    if [ -f ${IMAGE_ROOTFS}${sysconfdir}/init.d/rmnologin.sh ]; then
+        rm -f ${IMAGE_ROOTFS}${sysconfdir}/init.d/rmnologin.sh
+        update-rc.d -r ${IMAGE_ROOTFS} rmnologin.sh remove
+    fi
+    if [ -f ${IMAGE_ROOTFS}${sysconfdir}/init.d/sshd ]; then
+        rm -f ${IMAGE_ROOTFS}${sysconfdir}/init.d/sshd
+        update-rc.d -r ${IMAGE_ROOTFS} sshd remove
+    fi
+    if [ -f ${IMAGE_ROOTFS}${sysconfdir}/init.d/urandom ]; then
+        rm -f ${IMAGE_ROOTFS}${sysconfdir}/init.d/urandom
+        update-rc.d -r ${IMAGE_ROOTFS} urandom remove
+    fi
+}
+
+ROOTFS_POSTPROCESS_COMMAND += " post_rootfs_shell_commands; remove_initscripts; "
 
 inherit image
 #inherit validate-package-versions

@@ -1,0 +1,207 @@
+diff --git a/policy/modules/system/sysnetwork.fc b/policy/modules/system/sysnetwork.fc
+index fde8c7f..9ef0e3f 100644
+--- a/policy/modules/system/sysnetwork.fc
++++ b/policy/modules/system/sysnetwork.fc
+@@ -6,6 +6,11 @@
+ /sbin/ip\.iproute2	--	gen_context(system_u:object_r:ifconfig_exec_t,s0)
+ 
+ #
++# /config
++#
++/config/system/iproute2(/.*)?  --      gen_context(system_u:object_r:net_conf_t,s0)
++
++#
+ # /dev
+ #
+ ifdef(`distro_debian',`
+@@ -18,18 +23,24 @@ ifdef(`distro_debian',`
+ /etc/dhclient.*conf	--	gen_context(system_u:object_r:dhcp_etc_t,s0)
+ /etc/dhclient-script	--	gen_context(system_u:object_r:dhcp_etc_t,s0)
+ /etc/dhcpc.*			gen_context(system_u:object_r:dhcp_etc_t,s0)
++
++# could just rename udhcpc directory to /etc/dhcpc.d
++/etc/udhcpc.*                  gen_context(system_u:object_r:dhcp_etc_t,s0)
++/usr/share/udhcpc.*            gen_context(system_u:object_r:dhcp_etc_t,s0)
++
+ /etc/dhcpd\.conf	--	gen_context(system_u:object_r:dhcp_etc_t,s0)
+ /etc/dhcp/dhcpd\.conf	--	gen_context(system_u:object_r:dhcp_etc_t,s0)
+ /etc/ethers		--	gen_context(system_u:object_r:net_conf_t,s0)
+ /etc/hosts		--	gen_context(system_u:object_r:net_conf_t,s0)
+-/etc/hosts\.deny.*	--	gen_context(system_u:object_r:net_conf_t,s0)
++/etc/hosts		-l	gen_context(system_u:object_r:net_conf_t,s0)
+ /etc/denyhosts.*	--	gen_context(system_u:object_r:net_conf_t,s0)
+-/etc/resolv\.conf.*	--	gen_context(system_u:object_r:net_conf_t,s0)
++/etc/resolv\.conf.*		gen_context(system_u:object_r:net_conf_t,s0)
+ /var/run/resolv\.conf.*	--	gen_context(system_u:object_r:net_conf_t,s0)
+ /etc/yp\.conf.*		--	gen_context(system_u:object_r:net_conf_t,s0)
+ 
+ /etc/dhcp3(/.*)?		gen_context(system_u:object_r:dhcp_etc_t,s0)
+ /etc/dhcp3?/dhclient.*		gen_context(system_u:object_r:dhcp_etc_t,s0)
++/etc/iproute2(/.*)?	--	gen_context(system_u:object_r:net_conf_t,s0)
+ 
+ ifdef(`distro_redhat',`
+ /etc/sysconfig/network-scripts/.*resolv\.conf -- gen_context(system_u:object_r:net_conf_t,s0)
+@@ -43,6 +54,7 @@ ifdef(`distro_redhat',`
+ /sbin/dhclient.*	--	gen_context(system_u:object_r:dhcpc_exec_t,s0)
+ /sbin/dhcdbd		--	gen_context(system_u:object_r:dhcpc_exec_t,s0)
+ /sbin/dhcpcd		--	gen_context(system_u:object_r:dhcpc_exec_t,s0)
++/sbin/udhcpc		--	gen_context(system_u:object_r:dhcpc_exec_t,s0)
+ /sbin/ethtool		--	gen_context(system_u:object_r:ifconfig_exec_t,s0)
+ /usr/sbin/ethtool	--	gen_context(system_u:object_r:ifconfig_exec_t,s0)
+ /sbin/ifconfig		--	gen_context(system_u:object_r:ifconfig_exec_t,s0)
+@@ -58,6 +70,11 @@ ifdef(`distro_redhat',`
+ /sbin/tc		--	gen_context(system_u:object_r:ifconfig_exec_t,s0)
+ 
+ #
++# /tmp
++#
++/tmp/hosts		--	gen_context(system_u:object_r:net_conf_t,s0)
++
++#
+ # /usr
+ #
+ /usr/sbin/tc		--	gen_context(system_u:object_r:ifconfig_exec_t,s0)
+@@ -82,3 +99,4 @@ ifdef(`distro_debian',`
+ /var/run/network(/.*)?	gen_context(system_u:object_r:net_conf_t,s0)
+ ')
+ 
++/var/volatile/etc/resolv\.conf.*	--	gen_context(system_u:object_r:net_conf_t,s0)
+
+diff --git a/policy/modules/system/sysnetwork.if b/policy/modules/system/sysnetwork.if
+index 2cea692..9498749 100644
+--- a/policy/modules/system/sysnetwork.if
++++ b/policy/modules/system/sysnetwork.if
+@@ -347,17 +347,10 @@ interface(`sysnet_read_config',`
+ 
+ 	files_search_etc($1)
+ 	allow $1 net_conf_t:file read_file_perms;
++	allow $1 net_conf_t:lnk_file read_lnk_file_perms;
+ 
+-	ifdef(`distro_debian',`
+-		files_search_pids($1)
+-		allow $1 net_conf_t:dir list_dir_perms;
+-		read_files_pattern($1, net_conf_t, net_conf_t)
+-	')
+-
+-	ifdef(`distro_redhat',`
+-		allow $1 net_conf_t:dir list_dir_perms;
+-		read_files_pattern($1, net_conf_t, net_conf_t)
+-	')
++	allow $1 net_conf_t:dir list_dir_perms;
++	read_files_pattern($1, net_conf_t, net_conf_t)
+ ')
+ 
+ #######################################
+@@ -455,16 +448,10 @@ interface(`sysnet_manage_config',`
+ 		type net_conf_t;
+ 	')
+ 
++        allow $1 net_conf_t:lnk_file manage_lnk_file_perms;
+ 	allow $1 net_conf_t:file manage_file_perms;
+ 
+-	ifdef(`distro_debian',`
+-		files_search_pids($1)
+-		manage_files_pattern($1, net_conf_t, net_conf_t)
+-	')
+-
+-	ifdef(`distro_redhat',`
+-		manage_files_pattern($1, net_conf_t, net_conf_t)
+-	')
++	manage_files_pattern($1, net_conf_t, net_conf_t)
+ ')
+ 
+ #######################################
+@@ -649,6 +636,24 @@ interface(`sysnet_search_dhcp_state',`
+ 
+ ########################################
+ ## <summary>
++##	Dontaudit attemps to write to state dir.
++## </summary>
++## <param name="domain">
++##	<summary>
++##	Domain allowed access.
++##	</summary>
++## </param>
++#
++interface(`sysnet_dontaudit_write_dhcp_state',`
++	gen_require(`
++		type dhcp_state_t;
++	')
++
++	dontaudit $1 dhcp_state_t:dir write;
++')
++
++########################################
++## <summary>
+ ##	Create DHCP state data.
+ ## </summary>
+ ## <desc>
+diff --git a/policy/modules/system/sysnetwork.te b/policy/modules/system/sysnetwork.te
+index 8cc51b6..0640718 100644
+--- a/policy/modules/system/sysnetwork.te
++++ b/policy/modules/system/sysnetwork.te
+@@ -16,6 +16,7 @@ files_config_file(dhcp_etc_t)
+ # this is shared between dhcpc and dhcpd:
+ type dhcp_state_t;
+ files_type(dhcp_state_t)
++files_mountpoint(dhcp_state_t)
+ 
+ type dhcpc_t;
+ type dhcpc_exec_t;
+@@ -38,6 +39,7 @@ role system_r types ifconfig_t;
+ 
+ type net_conf_t alias resolv_conf_t;
+ files_type(net_conf_t)
++files_mountpoint(net_conf_t)
+ 
+ ifdef(`distro_debian',`
+ 	init_daemon_run_dir(net_conf_t, "network")
+@@ -113,6 +115,7 @@ corenet_udp_bind_all_unreserved_ports(dhcpc_t)
+ corenet_tcp_connect_all_ports(dhcpc_t)
+ corenet_sendrecv_dhcpd_client_packets(dhcpc_t)
+ corenet_sendrecv_all_server_packets(dhcpc_t)
++corenet_udp_bind_all_ports(dhcpc_t)
+ 
+ dev_read_sysfs(dhcpc_t)
+ # for SSP:
+@@ -123,6 +126,12 @@ domain_dontaudit_read_all_domains_state(dhcpc_t)
+ 
+ files_read_etc_files(dhcpc_t)
+ files_read_etc_runtime_files(dhcpc_t)
++# to allow reading of /var/run/resolv.conf ... should consider a better place
++#   for resolv.conf with a more descriptive type
++files_read_generic_pids(dhcpc_t)
++# to allow reading of NetworkManager configuration from
++#   /var/run/nm-dhclient-brbridged.conf
++networkmanager_read_pid_files(dhcpc_t)
+ files_read_usr_files(dhcpc_t)
+ files_search_home(dhcpc_t)
+ files_search_var_lib(dhcpc_t)
+@@ -191,14 +200,15 @@ optional_policy(`
+ 	')
+ ')
+ 
++# run ping in the dhcpc_t domain without domtrans (busybox ip)
+ # for the dhcp client to run ping to check IP addresses
+-optional_policy(`
++#optional_policy(`
+ 	netutils_run_ping(dhcpc_t, dhcpc_roles)
+ 	netutils_run(dhcpc_t, dhcpc_roles)
+-',`
+-	allow dhcpc_t self:capability setuid;
++#',`
++#	allow dhcpc_t self:capability setuid;
+ 	allow dhcpc_t self:rawip_socket create_socket_perms;
+-')
++#')
+ 
+ optional_policy(`
+ 	networkmanager_domtrans(dhcpc_t)
+@@ -321,6 +331,7 @@ miscfiles_read_localization(ifconfig_t)
+ modutils_domtrans_insmod(ifconfig_t)
+ 
+ seutil_use_runinit_fds(ifconfig_t)
++sysnet_read_config(ifconfig_t)
+ 
+ sysnet_dontaudit_rw_dhcpc_udp_sockets(ifconfig_t)
+ 

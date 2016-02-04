@@ -24,7 +24,7 @@ SRC_URI += " file://db-exists-dom0 \
 S = "${WORKDIR}/git/dbd"
 
 inherit xenclient
-inherit ${@"xenclient-simple-deb"if(bb.data.getVar("MACHINE",d,1)=="xenclient-nilfvm")else("null")}
+inherit ${@"xenclient-simple-deb"if(d.getVar("MACHINE",1)=="xenclient-nilfvm")else("null")}
 
 FILES_${PN} = " /usr/bin/db-cmd /usr/bin/db-ls /usr/bin/db-read /usr/bin/db-write /usr/bin/db-nodes /usr/bin/db-exists /usr/bin/db-rm /usr/bin/db-cat "
 FILES_${PN} += " /usr/bin/db-ls-dom0 /usr/bin/db-read-dom0 /usr/bin/db-write-dom0 /usr/bin/db-nodes-dom0 /usr/bin/db-exists-dom0 /usr/bin/db-rm-dom0 /usr/bin/db-cat-dom0 "
