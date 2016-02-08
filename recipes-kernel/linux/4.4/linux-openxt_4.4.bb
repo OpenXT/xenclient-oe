@@ -32,7 +32,6 @@ SRC_URI += "https://www.kernel.org/pub/linux/kernel/v${PV_MAJOR}.x/linux-${PV}.t
     file://konrad-microcode.patch;patch=1 \
     file://konrad-ioperm.patch;patch=1 \
     file://gem-foreign.patch;patch=1 \
-    file://gem-foreign-debug.patch;patch=1 \
     file://fbcon-do-not-drag-detect-primary-option.patch;patch=1 \
     file://usbback-base.patch;patch=1 \
     file://hvc-kgdb-fix.patch;patch=1 \

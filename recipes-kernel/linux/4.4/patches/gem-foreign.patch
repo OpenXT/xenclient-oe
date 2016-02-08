@@ -71,8 +71,23 @@ Index: linux-4.4/drivers/gpu/drm/i915/i915_dma.c
 Index: linux-4.4/drivers/gpu/drm/i915/i915_drv.h
 ===================================================================
 --- linux-4.4.orig/drivers/gpu/drm/i915/i915_drv.h	2016-01-11 00:01:32.000000000 +0100
-+++ linux-4.4/drivers/gpu/drm/i915/i915_drv.h	2016-02-05 13:41:24.221393537 +0100
-@@ -3217,6 +3217,8 @@
++++ linux-4.4/drivers/gpu/drm/i915/i915_drv.h	2016-02-08 15:19:09.551533312 +0100
+@@ -2164,6 +2164,14 @@
+ 			struct i915_mmu_object *mmu_object;
+ 			struct work_struct *work;
+ 		} userptr;
++
++                struct i915_gem_foreign {
++                        uint32_t flags;                 /* foreign region flags. */
++                        unsigned long *mfns;            /* mfns "rent" from the guest */
++                        size_t num_pages;               /* number of pages rented. */
++                        unsigned long *mfns_ovr;        /* dom0 mfns overriden, used for reset. */
++                        struct page **pvec;             /* vector of struct page backing the "rent" region. */
++                } foreign;
+ 	};
+ };
+ #define to_intel_bo(x) container_of(x, struct drm_i915_gem_object, base)
+@@ -3217,6 +3225,8 @@
  unsigned long i915_gem_shrink(struct drm_i915_private *dev_priv,
  			      unsigned long target,
  			      unsigned flags);
@@ -84,8 +99,8 @@ Index: linux-4.4/drivers/gpu/drm/i915/i915_drv.h
 Index: linux-4.4/drivers/gpu/drm/i915/i915_gem_foreign.c
 ===================================================================
 --- /dev/null	1970-01-01 00:00:00.000000000 +0000
-+++ linux-4.4/drivers/gpu/drm/i915/i915_gem_foreign.c	2016-02-05 13:40:52.208406062 +0100
-@@ -0,0 +1,396 @@
++++ linux-4.4/drivers/gpu/drm/i915/i915_gem_foreign.c	2016-02-08 17:09:13.483248153 +0100
+@@ -0,0 +1,412 @@
 +/*
 + * Copyright © 2013 Citrix Systems, Inc.
 + *
@@ -125,29 +140,13 @@ Index: linux-4.4/drivers/gpu/drm/i915/i915_gem_foreign.c
 +#include <xen/balloon.h>
 +#include <xen/interface/memory.h>
 +
-+struct i915_gem_foreign_object {
-+	struct drm_i915_gem_object gem;
-+	uint32_t flags;
-+	uint64_t *mfns;                 /* Foreign MFNs. */
-+	size_t num_pages;
-+	uint64_t *__mfns;               /* Local overriden MFNs. */
-+	struct page **pvec;             /* struct page mapping the foreign MFNs. */
-+};
-+
-+static inline struct i915_gem_foreign_object *
-+to_foreign_object(struct drm_i915_gem_object *obj)
-+{
-+	return container_of(obj, struct i915_gem_foreign_object, gem);
-+}
-+
 +static inline void
 +free_pages_hm(struct page **pages, size_t n)
 +{
 +	size_t i;
 +
-+	for (i = 0; i < n; ++i) {
++	for (i = 0; i < n; ++i)
 +		__free_pages(pages[i], 0);
-+	}
 +}
 +
 +static inline int
@@ -158,11 +157,12 @@ Index: linux-4.4/drivers/gpu/drm/i915/i915_gem_foreign.c
 +	for (i = 0; i < n; ++i) {
 +		pages[i] = alloc_page(GFP_HIGHUSER);
 +		if (!pages[i]) {
++			DRM_DEBUG("alloc_page() failed.\n");
 +			free_pages_hm(pages, i - 1);
 +			return -ENOMEM;
 +		}
 +	}
-+        return 0;
++	return 0;
 +}
 +
 +static inline void
@@ -178,7 +178,7 @@ Index: linux-4.4/drivers/gpu/drm/i915/i915_gem_foreign.c
 +}
 +
 +static int
-+foreign_set_p2m(unsigned long mfn, struct page *page, uint64_t *omfn)
++foreign_set_p2m(unsigned long mfn, struct page *page, unsigned long *omfn)
 +{
 +	unsigned long pfn;
 +	unsigned long uninitialized_var(address);
@@ -195,14 +195,17 @@ Index: linux-4.4/drivers/gpu/drm/i915/i915_gem_foreign.c
 +			return -EINVAL;
 +		}
 +	}
-+	if (likely(omfn != NULL)) {
++	if (likely(omfn != NULL))
 +		/* Store the original mfn index, for reset later. */
 +		*omfn = pfn_to_mfn(pfn);
-+	}
++
 +	/* Set the p2m. */
 +	if (unlikely(!set_phys_to_machine(pfn, FOREIGN_FRAME(mfn)))) {
++		DRM_DEBUG("set_phys_to_machine(%#lx, %#lx) failed.\n", pfn, mfn);
++		*omfn = 0UL;
 +		return -ENOMEM;
-+	}
++        }
++
 +	return 0;
 +}
 +
@@ -240,19 +243,19 @@ Index: linux-4.4/drivers/gpu/drm/i915/i915_gem_foreign.c
 +
 +
 +static inline int
-+i915_gem_foreign_alloc_pages(struct i915_gem_foreign_object *vmap)
++i915_gem_foreign_alloc_pages(struct i915_gem_foreign *fo)
 +{
 +	int rc = 0;
 +
-+	switch (vmap->flags) {
++	switch (fo->flags) {
 +		case 0:
-+			rc = alloc_pages_hm(vmap->pvec, vmap->num_pages);
++			rc = alloc_pages_hm(fo->pvec, fo->num_pages);
 +			break;
 +		case I915_FOREIGN_BALLOON_PAGES:
-+			rc = alloc_pages_xb(vmap->pvec, vmap->num_pages);
++			rc = alloc_pages_xb(fo->pvec, fo->num_pages);
 +			break;
 +		default:
-+			DRM_ERROR("Unknown flag %#x.\n", vmap->flags);
++			DRM_ERROR("Unknown flag %#x.\n", fo->flags);
 +			/* Rollback is done in alloc_pages helpers. */
 +			return -EINVAL;
 +	}
@@ -260,137 +263,163 @@ Index: linux-4.4/drivers/gpu/drm/i915/i915_gem_foreign.c
 +}
 +
 +static inline void
-+i915_gem_foreign_free_pages(struct i915_gem_foreign_object *vmap)
++i915_gem_foreign_free_pages(struct i915_gem_foreign *fo)
 +{
-+	switch (vmap->flags) {
++	switch (fo->flags) {
 +		case 0:
-+			free_pages_hm(vmap->pvec, vmap->num_pages);
++			free_pages_hm(fo->pvec, fo->num_pages);
 +			break;
 +		case I915_FOREIGN_BALLOON_PAGES:
-+			free_pages_xb(vmap->pvec, vmap->num_pages);
++			free_pages_xb(fo->pvec, fo->num_pages);
 +			break;
 +		default:
-+			DRM_ERROR("Unknown flag %#x.\n", vmap->flags);
++			DRM_ERROR("Unknown flag %#x.\n", fo->flags);
 +	}
 +}
 +
 +static inline void
-+__i915_gem_foreign_reset_p2m(struct i915_gem_foreign_object *vmap, size_t n)
++__i915_gem_foreign_reset_p2m(struct i915_gem_foreign *fo, size_t n)
 +{
 +	size_t i;
 +
-+	for (i = 0; i < n; ++i) {
-+		foreign_reset_p2m(vmap->pvec[i], vmap->__mfns[i]);
-+	}
++	for (i = 0; i < n; ++i)
++		foreign_reset_p2m(fo->pvec[i], fo->mfns_ovr[i]);
 +}
 +
 +static int
-+i915_gem_foreign_set_p2m(struct i915_gem_foreign_object *vmap)
++i915_gem_foreign_set_p2m(struct i915_gem_foreign *fo)
 +{
 +	size_t i;
-+	int rc;
++	int ret;
 +
-+	for (i = 0; i < vmap->num_pages; ++i) {
-+		rc = foreign_set_p2m(vmap->mfns[i], vmap->pvec[i],
-+				     &(vmap->__mfns[i]));
-+		if (rc) {
-+			DRM_ERROR("%s: failed (%d).\n", __func__, -rc);
-+			__i915_gem_foreign_reset_p2m(vmap, i - 1);
-+			return rc;
++	for (i = 0; i < fo->num_pages; ++i) {
++		ret = foreign_set_p2m(fo->mfns[i], fo->pvec[i],
++				     &(fo->mfns_ovr[i]));
++		if (ret) {
++			__i915_gem_foreign_reset_p2m(fo, i - 1);
++			return ret;
 +		}
 +	}
 +	return 0;
 +}
 +
 +static void
-+i915_gem_foreign_reset_p2m(struct i915_gem_foreign_object *vmap)
++i915_gem_foreign_reset_p2m(struct i915_gem_foreign *fo)
 +{
-+	__i915_gem_foreign_reset_p2m(vmap, vmap->num_pages);
++	__i915_gem_foreign_reset_p2m(fo, fo->num_pages);
++}
++
++
++#if IS_ENABLED(CONFIG_SWIOTLB)
++# define swiotlb_active() swiotlb_nr_tbl()
++#else
++# define swiotlb_active() 0
++#endif
++
++static int
++st_set_pages(struct sg_table **st, struct page **pvec, int num_pages)
++{
++	struct scatterlist *sg;
++	int ret, n;
++
++	*st = kmalloc(sizeof(**st), GFP_KERNEL);
++	if (*st == NULL)
++		return -ENOMEM;
++
++	if (!swiotlb_active()) {
++		DRM_ERROR("No swiotlb detected."
++			  "i915_gem_foreign is Xen specific,"
++			  "which should enforce swiotlb.\n");
++		return -ENOENT;
++	}
++
++	ret = sg_alloc_table(*st, num_pages, GFP_KERNEL);
++	if (ret)
++		goto err;
++
++	for_each_sg((*st)->sgl, sg, num_pages, n)
++		sg_set_page(sg, pvec[n], PAGE_SIZE, 0);
++
++	return 0;
++
++err:
++	kfree(*st);
++	*st = NULL;
++	return ret;
 +}
 +
 +static int
 +i915_gem_foreign_get_pages(struct drm_i915_gem_object *obj)
 +{
-+	struct i915_gem_foreign_object *vmap = to_foreign_object(obj);
-+	struct sg_table *st = NULL;
-+	struct scatterlist *sg = NULL;
-+	size_t i;
-+	int rc;
++	struct i915_gem_foreign *fo = &obj->foreign;
++	int ret;
 +
-+	vmap->pvec = drm_malloc_ab(vmap->num_pages, sizeof (struct page *));
-+	if (!vmap->pvec)
++	fo->pvec = drm_malloc_ab(fo->num_pages, sizeof (struct page *));
++	if (!fo->pvec)
 +		return -ENOMEM;
 +
-+	rc = i915_gem_foreign_alloc_pages(vmap);
-+	if (rc) {
++	ret = i915_gem_foreign_alloc_pages(fo);
++	if (ret) {
 +		DRM_ERROR("Failed to allocate pages.\n");
 +		goto fail_pages;
 +	}
 +	/* Set the p2m to the foreign pages. */
-+	rc = i915_gem_foreign_set_p2m(vmap);
-+	if (rc) {
++	ret = i915_gem_foreign_set_p2m(fo);
++	if (ret) {
 +		DRM_ERROR("Failed to set the p2m.\n");
 +		goto fail_p2m;
 +	}
 +
-+	/* Register the struct page in the p2m to back the GEM object. */
-+	st = kmalloc(sizeof (*st), GFP_KERNEL);
-+	if (!st) {
-+		rc = -ENOMEM;
++	ret = st_set_pages(&obj->pages, fo->pvec, fo->num_pages);
++	if (ret < 0) {
++		DRM_ERROR("GEM foreign object failed: Not enough memory.\n");
 +		goto fail_st;
 +	}
-+	if (sg_alloc_table(st, vmap->num_pages, GFP_KERNEL)) {
-+		rc = -ENOMEM;
-+		goto fail_sg;
-+	}
-+	for_each_sg(st->sgl, sg, vmap->num_pages, i) {
-+		sg_set_page(sg, vmap->pvec[i], PAGE_SIZE, 0);
-+	}
-+	obj->pages = st;
 +
-+	rc = i915_gem_gtt_prepare_object(obj);
-+	if (rc) {
++	ret = i915_gem_gtt_prepare_object(obj);
++	if (ret) {
 +		DRM_ERROR("Failed to prepare DMA mapping for object.\n");
 +		sg_free_table(obj->pages);
 +		obj->pages = NULL;
-+		goto fail_sg;
++		goto fail_st;
 +	}
 +
 +	return 0;
 +
-+fail_sg:
-+	kfree(st);
 +fail_st:
-+	i915_gem_foreign_reset_p2m(vmap);
-+	DRM_ERROR("GEM foreign object failed: Not enough memory.\n");
++	i915_gem_foreign_reset_p2m(fo);
 +fail_p2m:
-+	i915_gem_foreign_free_pages(vmap);
++	i915_gem_foreign_free_pages(fo);
 +fail_pages:
-+	drm_free_large(vmap->pvec);
++	drm_free_large(fo->pvec);
 +
-+	return rc;
++	return ret;
 +}
 +
 +static void
 +i915_gem_foreign_put_pages(struct drm_i915_gem_object *obj)
 +{
-+	struct i915_gem_foreign_object *vmap = to_foreign_object(obj);
-+
 +	i915_gem_gtt_finish_object(obj);
++
 +	sg_free_table(obj->pages);
 +	kfree(obj->pages);
-+	i915_gem_foreign_reset_p2m(vmap);
-+	i915_gem_foreign_free_pages(vmap);
-+	drm_free_large(vmap->pvec);
++
++	i915_gem_foreign_reset_p2m(&obj->foreign);
++	i915_gem_foreign_free_pages(&obj->foreign);
++
++	drm_free_large(obj->foreign.pvec);
 +}
 +
 +static void
 +i915_gem_foreign_release(struct drm_i915_gem_object *obj)
 +{
-+	struct i915_gem_foreign_object *vmap = to_foreign_object(obj);
++	/* obj->foreign.pages should be free'd already through the put_page()
++	 * callback. */
 +
-+	kfree(vmap->mfns);
-+	kfree(vmap->__mfns);
++	if (likely(obj->foreign.mfns_ovr != NULL))
++		kfree(obj->foreign.mfns_ovr);
++	if (likely(obj->foreign.mfns != NULL))
++		kfree(obj->foreign.mfns);
 +}
 +
 +static const struct drm_i915_gem_object_ops i915_gem_foreign_ops = {
@@ -399,87 +428,89 @@ Index: linux-4.4/drivers/gpu/drm/i915/i915_gem_foreign.c
 +	.release = i915_gem_foreign_release,
 +};
 +
++/*
++ * Helper to initialise struct i915_gem_foreign embedded in struct drm_i915_gem_object.
++ * Fields in that struct require dynamic allocation depending on ioctl() input, those
++ * will be kfree()'d in the release() callback.
++ */
 +static inline int
-+i915_gem_foreign_init(struct i915_gem_foreign_object *obj, size_t num_pages,
-+		      uint32_t flags)
++i915_gem_foreign_init(struct drm_i915_gem_object *obj,
++		      uint64_t *mfns, size_t num_pages, uint32_t flags)
 +{
-+	obj->__mfns = kcalloc(num_pages, sizeof (obj->__mfns[0]), GFP_KERNEL);
-+	if (!obj->__mfns) {
-+		return -ENOMEM;
-+	}
-+	obj->mfns = kcalloc(num_pages, sizeof (obj->mfns[0]), GFP_KERNEL);
-+	if (!obj->mfns) {
-+		kfree(obj->__mfns);
-+		return -ENOMEM;
-+	}
-+	obj->num_pages = num_pages;
-+	obj->flags = flags;
++	struct i915_gem_foreign *fo = &obj->foreign;
++	int i, ret = 0;
 +
-+	return 0;
++	fo->mfns_ovr = kcalloc(num_pages, sizeof (fo->mfns_ovr[0]), GFP_KERNEL);
++	if (!fo->mfns_ovr)
++		return -ENOMEM;
++
++	fo->mfns = kcalloc(num_pages, sizeof (fo->mfns[0]), GFP_KERNEL);
++	if (!fo->mfns) {
++		kfree(fo->mfns_ovr);
++		return -ENOMEM;
++	}
++	fo->num_pages = num_pages;
++	fo->flags = flags;
++
++	/* mfns are ok in an unsigned long, but userspace sends an array of uint64_t.
++	 * This is not a bottleneck, so we might as well re-arrange things to unsigned long
++	 * to keep the rest of the code sane. */
++	for (i = 0; i < num_pages; ++i)
++		fo->mfns[i] = (unsigned long)mfns[i];
++
++	return ret;
 +}
 +
-+/*
-+ * Creates a new mm object that wraps some user memory.
-+ */
 +int
 +i915_gem_foreign_ioctl(struct drm_device *dev, void *data,
 +			struct drm_file *file)
 +{
 +	struct drm_i915_private *dev_priv = dev->dev_private;
 +	struct drm_i915_gem_foreign *args = data;
-+	struct i915_gem_foreign_object *obj;
-+	uint32_t size;
-+	int ret = -ENOMEM;
++	struct drm_i915_gem_object *obj;
++	size_t size = args->num_pages * PAGE_SIZE;
++	uint64_t *mfns;
++	int ret = 0;
 +	u32 handle;
 +
-+	if ((args->num_pages * PAGE_SIZE) > dev_priv->gtt.base.total)
++	if (size > dev_priv->gtt.base.total)
 +		return -E2BIG;
 +
-+	/* Allocate the new object */
-+	obj = kzalloc(sizeof (*obj), GFP_KERNEL);
-+	if (!obj)
++	obj = i915_gem_object_alloc(dev);
++	if (obj == NULL)
 +		return -ENOMEM;
 +
-+	drm_gem_private_object_init(dev, &obj->gem.base,
-+				    args->num_pages * PAGE_SIZE);
++	drm_gem_private_object_init(dev, &obj->base, size);
++	i915_gem_object_init(obj, &i915_gem_foreign_ops);
++	obj->cache_level = I915_CACHE_LLC;
++	obj->base.write_domain = I915_GEM_DOMAIN_CPU;
++	obj->base.read_domains = I915_GEM_DOMAIN_CPU;
 +
-+	i915_gem_object_init(&obj->gem, &i915_gem_foreign_ops);
-+	obj->gem.cache_level = I915_CACHE_LLC;
-+        /* What about CACHE_L3_LLC? */
-+	//obj->gem.gtt_offset = 0;
-+
-+	ret = i915_gem_foreign_init(obj, args->num_pages, args->flags);
-+	if (ret)
-+		goto fail_foreign;
-+
-+	size = args->num_pages * sizeof (args->mfns[0]);
-+	if (copy_from_user(obj->mfns, args->mfns, size)) {
++	mfns = kcalloc(args->num_pages, sizeof (mfns[0]), GFP_TEMPORARY);
++	if (mfns == NULL)
++		ret = -ENOMEM;
++	if (copy_from_user(mfns, args->mfns, args->num_pages * sizeof (mfns[0])))
 +		ret = -EFAULT;
-+		goto fail_copy;
-+	}
 +
-+	ret = drm_gem_handle_create(file, &obj->gem.base, &handle);
++	if (ret == 0)
++		ret = i915_gem_foreign_init(obj, mfns, args->num_pages,
++					    args->flags);
++	/* Release the mfns temporary array. */
++	kfree(mfns);
++
++	if (ret == 0)
++		ret = drm_gem_handle_create(file, &obj->base, &handle);
 +	/*
-+	 * Drop reference from allocate - handle holds it now. If the
-+	 * previous call failed, this will drop the ref cound to 0
-+	 * freeing undoing everything above and cleaning up in the
-+	 * release function above.
++	 * Drop reference from allocate - handle holds it now.
++	 * If the previous call failed, this will drop the refcount to 0 and do
++	 * the cleanup in the release() callback.
 +         */
-+	drm_gem_object_unreference_unlocked(&obj->gem.base);
++	drm_gem_object_unreference_unlocked(&obj->base);
 +	if (ret)
-+		goto fail_handle;
++		return ret;
 +
 +	args->handle = handle;
 +	return 0;
-+
-+fail_handle:
-+	/* object_unreference is done anyway. */
-+fail_copy:
-+	i915_gem_foreign_release(&(obj->gem));
-+fail_foreign:
-+	kfree(obj);
-+
-+	return ret;
 +}
 +
 Index: linux-4.4/include/uapi/drm/i915_drm.h
