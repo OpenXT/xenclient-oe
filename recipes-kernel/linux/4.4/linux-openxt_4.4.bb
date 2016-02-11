@@ -38,6 +38,12 @@ SRC_URI += "https://www.kernel.org/pub/linux/kernel/v${PV_MAJOR}.x/linux-${PV}.t
     file://xenstore-no-read-vs-write-atomicity.patch;patch=1 \
     file://pciback-restrictive-attr.patch;patch=1 \
     file://thorough-reset-interface-to-pciback-s-sysfs.patch;patch=1 \
+    file://xsa-155-qsb-023-add-RING_COPY_RESPONSE.patch;patch=1 \
+    file://xsa-155-qsb-023-xen-blkfront-make-local-copy-of-response-before-usin.patch;patch=1 \
+    file://xsa-155-qsb-023-xen-blkfront-prepare-request-locally-only-then-put-i.patch;patch=1 \
+    file://xsa-155-qsb-023-xen-netfront-add-range-check-for-Tx-response-id.patch;patch=1 \
+    file://xsa-155-qsb-023-xen-netfront-copy-response-out-of-shared-buffer-befo.patch;patch=1 \
+    file://xsa-155-qsb-023-xen-netfront-do-not-use-data-already-exposed-to-back.patch;patch=1 \
     file://defconfig \
     "
 
