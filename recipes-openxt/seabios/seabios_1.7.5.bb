@@ -12,7 +12,8 @@ SRC_URI += "file://openxt-version.patch;patch=1                         \
             file://amd-gpu-support.patch;patch=1                        \
             file://only-boot-selected-devices.patch;patch=1             \
             file://gpu-pt-page-align-sections.patch;patch=1             \
-            file://gcc5.patch;patch=1 \
+            file://gcc5.patch;patch=1                                   \
+            file://avoid-iPXE-rom-init-when-not-required.patch;patch=1  \
             "
 
 SRC_URI += "file://defconfig"
