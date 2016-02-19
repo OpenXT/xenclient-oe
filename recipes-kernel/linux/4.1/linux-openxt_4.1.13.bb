@@ -11,7 +11,6 @@ FILESEXTRAPATHS_prepend := "${THISDIR}/patches:${THISDIR}/defconfigs:"
 SRC_URI += "https://www.kernel.org/pub/linux/kernel/v${PV_MAJOR}.x/linux-${PV}.tar.gz;name=kernel \
     file://bridge-carrier-follow-prio0.patch;patch=1 \
     file://privcmd-mmapnocache-ioctl.patch;patch=1 \
-    file://usb-mass-storage-no-autobind.patch;patch=1 \
     file://xenkbd-tablet-resolution.patch;patch=1 \
     file://acpi-video-delay-init.patch;patch=1 \
     file://skb-forward-copy-bridge-param.patch;patch=1 \
