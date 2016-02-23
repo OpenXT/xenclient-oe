@@ -176,7 +176,7 @@ tpm_setup() {
     insmod /lib/modules/$(uname -r)/kernel/drivers/char/tpm/tpm_tis.ko
     mknod /dev/tpm0 c 10 224
     echo -n "initramfs measuring $ROOT_DEVICE: "
-    s=$(xc-sha1sum $ROOT_DEVICE)
+    s=$(sha1sum $ROOT_DEVICE)
     echo $s
     echo -n $s | TCSD_LOG_OFF=yes tpm_extendpcr_sa -p 15
 }
