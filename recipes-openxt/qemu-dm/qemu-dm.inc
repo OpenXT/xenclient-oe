@@ -74,11 +74,13 @@ FILES_${PN} += "/usr/share/qemu/keymaps/en-us       \
                 /usr/share/qemu/keymaps/commons     \
                 /usr/share/qemu/keymaps/modifiers   \
                 "
+FILES_${PN}-dbg += "/usr/lib/.debug/* /usr/libexec/.debug/*"
 FILES_${PN}-extra-keymaps = "/usr/share/qemu/keymaps/*"
 FILES_${PN}-extra-roms = "/usr/share/qemu/*"
 INSANE_SKIP_${PN}-extra-roms = "arch"
+FILES_${PN}-utils = "/usr/libexec/*"
 
-PACKAGES += "${PN}-extra-keymaps ${PN}-extra-roms"
+PACKAGES += "${PN}-extra-keymaps ${PN}-extra-roms ${PN}-utils"
 
 CFLAGS_append = " -Wno-unused-parameter -Wno-unused-local-typedefs"
 
