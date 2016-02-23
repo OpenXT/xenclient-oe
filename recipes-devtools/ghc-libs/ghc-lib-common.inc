@@ -30,7 +30,7 @@ python() {
 
 
 FILES_${PN} = "/usr/lib/libH*.so"
-FILES_${PN}-dbg = "/usr/lib/ghc-local/*/.debug/"
+FILES_${PN}-dbg = "/usr/lib/ghc-local/*/.debug/ /usr/lib/.debug/* /usr/src/debug/*"
 FILES_${PN}-dev = "/usr/lib/ghc-local/"
 
 #do_stage() {
