@@ -11,3 +11,5 @@ PV = "0+git${SRCPV}"
 SRCREV = "${AUTOREV}"
 SRC_URI = "git://${OPENXT_GIT_MIRROR}/xclibs.git;protocol=${OPENXT_GIT_PROTOCOL};branch=${OPENXT_BRANCH}"
 S = "${WORKDIR}/git/udbus"
+
+FILES_${PN}-doc += "/usr/share/${PN}-0.2"
