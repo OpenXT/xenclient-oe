@@ -1,0 +1,59 @@
+###############################################################################
+SHORT DESCRIPTION
+###############################################################################
+Source: http://caml.inria.fr/mantis/view.php?id=5943
+
+###############################################################################
+LONG DESCRIPTION
+###############################################################################
+Link time paths should not be added to the RPATH (run-time-path) of the dynamic
+object built in most cases. With OE, it ends up having RPATH with build-machine
+absolute path (-L) in it, which is very wrong.
+
+This patch adds -elfmode option, to have the default ELF linker behaviour: not
+include the link-time search path to the RPATH.
+
+###############################################################################
+PATCHES
+###############################################################################
+Index: git/tools/ocamlmklib.mlp
+===================================================================
+--- git.orig/tools/ocamlmklib.mlp	2016-02-24 15:37:58.557488630 +0100
++++ git/tools/ocamlmklib.mlp	2016-02-24 15:40:52.268754425 +0100
+@@ -21,6 +21,7 @@
+ and caml_libs = ref []      (* -cclib to pass to ocamlc, ocamlopt *)
+ and caml_opts = ref []      (* -ccopt to pass to ocamlc, ocamlopt *)
+ and dynlink = ref supports_shared_libraries
++and elfmode = ref false     (* do not add C link lib path to run-time path *)
+ and failsafe = ref false    (* whether to fall back on static build only *)
+ and c_libs = ref []         (* libs to pass to mksharedlib and ocamlc -cclib *)
+ and c_opts = ref []      (* options to pass to mksharedlib and ocamlc -ccopt *)
+@@ -84,8 +85,9 @@
+       c_libs := s :: !c_libs
+     else if starts_with s "-L" then
+      (c_opts := s :: !c_opts;
+-      let l = chop_prefix s "-L" in
+-      if not (Filename.is_relative l) then rpath := l :: !rpath)
++      if not !elfmode then
++      (let l = chop_prefix s "-L" in
++       if not (Filename.is_relative l) then rpath := l :: !rpath))
+     else if s = "-ocamlc" then
+       ocamlc := next_arg ()
+     else if s = "-ocamlopt" then
+@@ -96,6 +98,8 @@
+       output_c := next_arg()
+     else if s = "-dllpath" || s = "-R" || s = "-rpath" then
+       rpath := next_arg() :: !rpath
++    else if s = "-elfmode" then
++      elfmode := true
+     else if starts_with s "-R" then
+       rpath := chop_prefix s "-R" :: !rpath
+     else if s = "-Wl,-rpath" then
+@@ -136,6 +140,7 @@
+   -ccopt <opt>   C option passed to ocamlc -a or ocamlopt -a only
+   -custom        disable dynamic loading
+   -dllpath <dir> Add <dir> to the run-time search path for DLLs
++  -elfmode       Do not add link-time search path to run-time path
+   -F<dir>        Specify a framework directory (MacOSX)
+   -framework <name>    Use framework <name> (MacOSX)
+   -help          Print this help message and exit
