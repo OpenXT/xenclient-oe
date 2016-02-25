@@ -7,15 +7,19 @@ PR="r1"
 
 DEPENDS="flex bison"
 
-SRC_URI="https://acpica.org/sites/acpica/files/acpica-unix-${PV}.tar.gz"
+SRC_URI="https://github.com/acpica/acpica/archive/R02_15_12.tar.gz"
 
-SRC_URI[md5sum] = "324c89e5bb9002e2711e0494290ceacc"
-SRC_URI[sha256sum] = "b2b497415f29ddbefe7be8b9429b62c1f1f6e1ec11456928e4e7da86578e5b8d"
+SRC_URI[md5sum] = "5f705791ea39da4c06e5d81fdc375b89"
+SRC_URI[sha256sum] = "13bbcf4371dc0946e4c179c9b2b4336d6e4cab2db81994deeb3bc06079d33fc2"
 
-S="${WORKDIR}/acpica-unix-${PV}/source/compiler"
+S="${WORKDIR}/acpica-R02_15_12/source/compiler"
 
 NATIVE_INSTALL_WORKS = "1"
 BBCLASSEXTEND = "native"
+
+do_configure() {
+	cp ../../generate/linux/Makefile.iasl Makefile
+}
 
 do_compile() {
 	CFLAGS="-Wno-error=redundant-decls" $MAKE
