@@ -172,10 +172,7 @@ SRC_URI += " \
     file://openxt_policy_modules_system_xc-installer.if.patch;patch=1 \
     file://openxt_policy_modules_system_xc-installer.te.patch;patch=1 \
     file://qemu1.4_wrapper_file_context.patch;striplevel=1 \
-    file://remove-neverallow-storage.patch \
-    file://remove-neverallow-authlogin.patch \
-    file://remove-neverallow-kernel-device.patch \
-    file://remove-neverallow-kernel-kernel.patch \
+    file://openxt_system_unconfined_readonly_neverallow_fixes.patch;patch=1 \
     "
     
 def get_poltype(f):
