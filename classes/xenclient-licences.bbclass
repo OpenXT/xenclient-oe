@@ -23,9 +23,9 @@ python do_licences() {
 
     split_re = re.compile(': ')
 
-    # Read package info from the /usr/lib/opkg/info directory within the image
+    # Read package info from the /var/lib/opkg/info directory within the image
 
-    info_dir = d.getVar('IMAGE_ROOTFS', d, 1) + '/usr/lib/opkg/info'
+    info_dir = d.getVar('IMAGE_ROOTFS', d, 1) + '/var/lib/opkg/info'
 
     packages = []
 
