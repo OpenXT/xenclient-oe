@@ -178,7 +178,7 @@ tpm_setup() {
     echo -n "initramfs measuring $ROOT_DEVICE: "
     s=$(sha1sum $ROOT_DEVICE)
     echo $s
-    echo -n $s | TCSD_LOG_OFF=yes tpm_extendpcr_sa -p 15
+    echo -n ${s:0:40} | TCSD_LOG_OFF=yes tpm_extendpcr_sa -p 15
 }
 
 
@@ -204,6 +204,7 @@ mount_root
 [ -n "$BOOT_DEVICE" ] && mount_boot
 
 maybe_break tpm
+
 [ -e /root/boot/system/tpm/enabled ] && {
     echo "Setting up TPM..."
     tpm_setup
