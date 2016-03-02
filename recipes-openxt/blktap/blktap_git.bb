@@ -3,7 +3,7 @@ LICENSE = "GPLv2"
 DEPENDS = "openssl xen-tools libaio util-linux libicbinn-resolved"
 LIC_FILES_CHKSUM="file://COPYING;md5=4641e94ec96f98fabc56ff9cc48be14b"
 
-RDEPENDS_${PN} += "glibc-gconv-utf-16"
+RDEPENDS_${PN} += "glibc-gconv-utf-16 bash"
 
 PV = "0+git${SRCPV}"
 
@@ -15,7 +15,7 @@ S = "${WORKDIR}/git"
 # Makefile doesn't generate hash in libs.. todo: check that all is ok
 INSANE_SKIP_${PN} = "1"
 
-CFLAGS += "-DVHD_LOCKING -fPIC -pie -Wno-maybe-uninitialized"
+CFLAGS += "-DVHD_LOCKING -Wno-maybe-uninitialized"
 EXTRA_OEMAKE += "CROSS_COMPILE=${HOST_PREFIX}"
 
 inherit xenclient
