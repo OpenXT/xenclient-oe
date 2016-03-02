@@ -4,7 +4,7 @@ SECTION = "kernel"
 # Notes:
 # Based on the OE one but with the new git repository
 
-LICENSE = "Intel"
+LICENSE = "Proprietary"
 
 LIC_FILES_CHKSUM = "file://LICENCE.iwlwifi_firmware;md5=3fd842911ea93c29cd32679aa23e1c88"
 

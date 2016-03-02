@@ -20,7 +20,7 @@ SRC_URI[bdw.md5sum] = "f40771addcb12c82b44c2ad53dbbe994"
 SRC_URI[bdw.sha256sum] = "3057efadd6bcf9ddf192c6aa027cc28e07ae6997a5c0037ef1fa09e8938893f0"
 
 PR="r3"
-LICENSE = "IntelSINIT"
+LICENSE = "Proprietary"
 LIC_FILES_CHKSUM = "file://GM45_GS45_PM45-SINIT_51/license.txt;md5=60d123634e0b94f8c425003389e64bda \
                     file://Q45_Q43-SINIT_51/license.txt;md5=60d123634e0b94f8c425003389e64bda \
                     file://Q35-SINIT_51/license.txt;md5=60d123634e0b94f8c425003389e64bda \
