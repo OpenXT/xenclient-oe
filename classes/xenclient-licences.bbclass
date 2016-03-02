@@ -34,7 +34,14 @@ python do_licences() {
 
         package = {}
 
+        # Supply an empty default value for optional field:
+        package['Homepage'] = ''
+
         for line in file:
+            if line and line[0] == ' ':
+                # Only take the first line of multi-line fields
+                continue
+
             key, value = split_re.split(line.rstrip(), 1)
             if key in fields:
                 package[key] = value
