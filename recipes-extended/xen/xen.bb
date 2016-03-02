@@ -2,6 +2,9 @@ require xen.inc
 
 PROVIDES = "xen"
 
+PACKAGES += "${PN}-efi"
+
+FILES_${PN}-efi = "/usr/lib64/efi/*"
 FILES_${PN}-dbg += "/boot/xen*syms*"
 FILES_${PN} += "/boot"
 

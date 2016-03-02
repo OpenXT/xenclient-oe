@@ -7,3 +7,9 @@ DESCRIPTION = "unit testing"
 LICENSE = "BSD-3-Clause"
 LIC_FILES_CHKSUM="file://LICENSE;md5=4d036bff24e7f9e1a7a9012fbe91bb35"
 GHC_PN = "HUnit"
+
+INSANE_SKIP_${PN}-dev = "already-stripped"
+
+FILES_${PN}-dev += " ${bindir}/*-tests"
+FILES_${PN}-doc += " ${datadir}/HUnit-${PV}/*"
+
