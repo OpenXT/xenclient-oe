@@ -197,9 +197,7 @@ POLICY_MLS_CATS = "256"
 
 S = "${WORKDIR}/refpolicy"
 
-FILES_${PN} += "/selinux ${sysconfdir}/selinux ${datadir}/selinux/*/*.bz2"
-
-EXTRA_OEMAKE += ' -j 1 BINDIR="${STAGING_BINDIR_NATIVE}" SETFILES=true '
+FILES_${PN} += "${sysconfdir}/selinux"
 
 # Just explicitly define the policy
 POL_TYPE = "xc_policy"
@@ -207,7 +205,6 @@ POL_TYPE = "xc_policy"
 #POL_TYPE = "${@get_poltype(conf_file)}"
 
 do_install_append() {
-        install -d ${D}/selinux
         install -d ${D}/etc/selinux
         install -m 644 ${WORKDIR}/config ${D}/etc/selinux/config
 }
