@@ -99,6 +99,7 @@ fi
 if [ -r ${INSTALL_CONF}/keyboard.conf ] ; then
     KEYBOARD="$(awk -F\' '/^KEYBOARD=/ { print $2 }' ${INSTALL_CONF}/keyboard.conf)"
     echo "KEYBOARD='${KEYBOARD}'" > /config/keyboard.conf
+    restore /config/keyboard.conf
  
     DEFER_KEYBOARD="$(awk -F\' '/^DEFER_KEYBOARD=/ { print $2 }' ${INSTALL_CONF}/keyboard.conf)"
     if [ "${DEFER_KEYBOARD}" = "true" ]; then
@@ -138,6 +139,7 @@ if [ -r ${INSTALL_CONF}/repo-cert.conf ] ; then
     if [ ! -r /config/repo-cert.conf ] ; then
         ALLOW_DEV_REPO_CERT="$(awk -F\' '/^ALLOW_DEV_REPO_CERT=/ { print $2 }' ${INSTALL_CONF}/repo-cert.conf)"
         echo "ALLOW_DEV_REPO_CERT='${ALLOW_DEV_REPO_CERT}'" > /config/repo-cert.conf
+        restore /config/repo-cert.conf
     fi
     mv -f ${INSTALL_CONF}/repo-cert.conf ${INSTALL_CONF}/repo-cert.conf.DONE
 fi
