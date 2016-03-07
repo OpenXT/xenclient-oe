@@ -23,9 +23,9 @@ python do_licences() {
 
     split_re = re.compile(': ')
 
-    # Read package info from the /usr/lib/opkg/info directory within the image
+    # Read package info from the /var/lib/opkg/info directory within the image
 
-    info_dir = d.getVar('IMAGE_ROOTFS', d, 1) + '/usr/lib/opkg/info'
+    info_dir = d.getVar('IMAGE_ROOTFS', d, 1) + '/var/lib/opkg/info'
 
     packages = []
 
@@ -34,7 +34,14 @@ python do_licences() {
 
         package = {}
 
+        # Supply an empty default value for optional field:
+        package['Homepage'] = ''
+
         for line in file:
+            if line and line[0] == ' ':
+                # Only take the first line of multi-line fields
+                continue
+
             key, value = split_re.split(line.rstrip(), 1)
             if key in fields:
                 package[key] = value

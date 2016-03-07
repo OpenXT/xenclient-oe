@@ -1,6 +1,7 @@
 # XenClient sysroot image
 
 include xenclient-image-common.inc
+IMAGE_FEATURES += "package-management"
 
 COMPATIBLE_MACHINE = "(xenclient-dom0)"
 
