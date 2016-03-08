@@ -8,7 +8,7 @@ DESCRIPTION = "Haskell is an advanced purely-functional programming language. An
 AUTHOR = "Adam Oliver <aikidokatech@users.noreply.github.com>"
 HOMEPAGE = "http://www.haskell.org/"
 SECTION = "devel"
-LICENSE = "Glascow"
+LICENSE = "GHCL"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=7cb08deb79c4385547f57d6bb2864e0f"
 
 FILESEXTRAPATHS_prepend := "${THISDIR}/ghc-${PV}:"
