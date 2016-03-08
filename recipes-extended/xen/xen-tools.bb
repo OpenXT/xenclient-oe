@@ -12,7 +12,7 @@ SRC_URI += "file://xenstored.initscript \
 DEPENDS += " gettext ncurses openssl python zlib seabios ipxe gmp lzo glib-2.0 iasl-native xz "
 DEPENDS += "util-linux"
 # lzo2 required by libxenguest.
-RDEPENDS_${PN} += " lzo"
+RDEPENDS_${PN} += " lzo bash"
 
 PACKAGES = "${PN}-libxenstore ${PN}-libxenstore-dev ${PN}-libxenstore-dbg ${PN}-libxenstore-staticdev   \
             ${PN}-xenstore-utils ${PN}-xenstore-utils-dbg                                               \
@@ -21,6 +21,7 @@ PACKAGES = "${PN}-libxenstore ${PN}-libxenstore-dev ${PN}-libxenstore-dbg ${PN}-
             ${PN}-xenctx                                                                                \
             ${PN}-xentrace                                                                              \
             ${PN}-xenpvnetboot                                                                          \
+            ${PN}-misc                                                                                  \
             ${PN} ${PN}-dbg ${PN}-doc ${PN}-dev ${PN}-staticdev                                         \
 "
 
@@ -40,7 +41,10 @@ FILES_${PN}-xenstore-utils = "${bindir}/xenstore-*"
 FILES_${PN}-xenstore-utils-dbg = "${bindir}/.debug/xenstore-*"
 RDEPENDS_${PN}-xenstore-utils += "${PN}-libxenstore"
 
-FILES_${PN}-xentrace = "${datadir}/xentrace"
+FILES_${PN}-xentrace = "${datadir}/xentrace \
+                        ${bindir}/xentrace* \
+                        "
+RDEPENDS_${PN}-xentrace += " python"
 
 FILES_${PN}-staticdev += "${libdir}/*.a"
 FILES_${PN}-dbg += "${libdir}*/*/*/.debug           \
@@ -48,6 +52,16 @@ FILES_${PN}-dbg += "${libdir}*/*/*/.debug           \
                     ${libdir}/*/.debug"
 
 FILES_${PN}-xenpvnetboot = "${libdir}/xen/bin/xenpvnetboot"
+RDEPENDS_${PN}-xenpvnetboot += " python"
+
+FILES_${PN}-misc = "${bindir}/xencons           \
+                    ${bindir}/xencov_split      \
+                    ${sbindir}/xsview           \
+                    ${sbindir}/xen-bugtool      \
+                    ${sbindir}/xen-ringwatch    \
+                    ${sbindir}/xen-python-path  \
+                    "
+RDEPENDS_${PN}-misc += " python perl"
 
 FILES_${PN} += "${datadir}/xen/qemu"
 RDEPENDS_${PN} += "${PN}-xenstore-utils"
@@ -67,6 +81,8 @@ EXTRA_OEMAKE += "DESTDIR=${D}"
 
 TARGET_CC_ARCH += "${LDFLAGS}"
 
+export PYTHONPATH="${bindir}/python"
+
 do_configure() {
 	DESTDIR=${D} ./configure --prefix=${prefix}
 }
@@ -74,7 +90,6 @@ do_configure() {
 do_compile() {
         oe_runmake -C tools subdir-all-include
         oe_runmake -C tools subdir-all-libxc
-        oe_runmake -C tools subdir-all-flask
         oe_runmake -C tools subdir-all-xenstore
         oe_runmake -C tools subdir-all-misc
         oe_runmake -C tools subdir-all-hotplug
@@ -89,7 +104,6 @@ do_compile() {
 do_install() {
         oe_runmake DESTDIR=${D} -C tools subdir-install-include
         oe_runmake DESTDIR=${D} -C tools subdir-install-libxc
-        oe_runmake DESTDIR=${D} -C tools subdir-install-flask
         oe_runmake DESTDIR=${D} -C tools subdir-install-xenstore
         oe_runmake DESTDIR=${D} -C tools subdir-install-misc
         oe_runmake DESTDIR=${D} -C tools subdir-install-hotplug
