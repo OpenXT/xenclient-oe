@@ -73,6 +73,9 @@ do_tweak_configuration() {
 
 addtask tweak_configuration after do_configure before do_compile
 
+# I know it hurts, but please be quiet.
+INSANE_SKIP_${PN} = "installed-vs-shipped"
+
 #do_install() {
 #    make install "DESTDIR=${D}"
 #}
