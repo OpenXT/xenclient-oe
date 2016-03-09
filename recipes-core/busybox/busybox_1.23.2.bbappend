@@ -8,6 +8,12 @@ SRC_URI += "\
   file://defconfig \
 "
 
+FILES_${PN}-syslog = ""
+ALTERNATIVE_${PN}-syslog = ""
+ALTERNATIVE_LINK_NAME[syslog-conf] = ""
+SYSTEMD_SERVICE_${PN}-syslog = ""
+CONFFILES_${PN}-syslog = ""
+
 do_configure_prepend () {
     if [ "${TARGET_ARCH}" = "avr32" ] ; then
         sed -i s:CONFIG_FEATURE_OSF_LABEL=y:CONFIG_FEATURE_OSF_LABEL=n: ${WORKDIR}/defconfig
