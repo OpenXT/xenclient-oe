@@ -5,8 +5,8 @@
 # BBCLASSEXTEND in a GHC recipe.
 
 SUMMARY = "ghc-native"
-DESCRIPTION = "GHC"
-LICENSE = "Glasgow"
+DESCRIPTION = "Haskell (GHC) native"
+LICENSE = "GHCL"
 
 LIC_FILES_CHKSUM = "file://LICENSE;md5=7cb08deb79c4385547f57d6bb2864e0f"
 
