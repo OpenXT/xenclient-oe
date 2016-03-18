@@ -9,8 +9,6 @@ SRC_URI = "git://${OPENXT_GIT_MIRROR}/gene3fs.git;protocol=${OPENXT_GIT_PROTOCOL
 
 S = "${WORKDIR}/git/libbudgetvhd"
 
-inherit autotools
-inherit pkgconfig
-inherit xenclient
+inherit autotools-brokensep pkgconfig xenclient
 
 BBCLASSEXTEND="native"

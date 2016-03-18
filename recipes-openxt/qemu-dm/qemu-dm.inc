@@ -14,6 +14,7 @@ DEPENDS = "xen-tools alsa-lib pciutils libpng blktap libv4v openssl zlib libcap-
 #            file://0014-audio-alsa-stub.patch;striplevel=1 \
 #            file://0026-openxtaudio.patch;striplevel=1 \
 #            file://0007-pci-reserve-igd-slot.patch;striplevel=1 \
+#
 
 # Leave this in it's own definition so that it can be replaced with a local
 # tarball (the QEMU download speed is terrible). If this is combined with the
@@ -66,19 +67,22 @@ SRC_URI[sha256sum] = "066297ed77408fb7588889c271a85cf3c259ad55c939315988e6062d77
 
 S = "${WORKDIR}/qemu-${PV}"
 
-inherit xenclient
-inherit autotools
+inherit xenclient autotools-brokensep
 
 # Include a minimal amount of blobs by default.
 FILES_${PN} += "/usr/share/qemu/keymaps/en-us       \
                 /usr/share/qemu/keymaps/commons     \
                 /usr/share/qemu/keymaps/modifiers   \
                 "
+FILES_${PN}-dbg += "/usr/lib/.debug/* /usr/libexec/.debug/*"
 FILES_${PN}-extra-keymaps = "/usr/share/qemu/keymaps/*"
 FILES_${PN}-extra-roms = "/usr/share/qemu/*"
 INSANE_SKIP_${PN}-extra-roms = "arch"
+FILES_${PN}-utils = "/usr/libexec/*"
 
-PACKAGES += "${PN}-extra-keymaps ${PN}-extra-roms"
+PACKAGES += "${PN}-extra-keymaps ${PN}-extra-roms ${PN}-utils"
+
+CFLAGS_append = " -Wno-unused-parameter -Wno-unused-local-typedefs"
 
 do_configure(){
     ${S}/configure ${EXTRA_OECONF} --enable-xen \
@@ -116,7 +120,7 @@ do_compile(){
 
 do_install(){
     # QEMU's build system conflicts with STRIP defined in OE.
-    DESTDIR=${D} oe_runmake STRIP='' install
+    oe_runmake DESTDIR=${D} STRIP='' install
 }
 
 INC_PR = "r16"

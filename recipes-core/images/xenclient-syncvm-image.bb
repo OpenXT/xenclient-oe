@@ -11,14 +11,14 @@ ANGSTROM_EXTRA_INSTALL += ""
 
 export IMAGE_BASENAME = "xenclient-syncvm-image"
 
-DEPENDS = "task-base"
+DEPENDS = "packagegroup-base"
 
 IMAGE_INSTALL = "\
     ${ROOTFS_PKGMANAGE} \
     modules \
-    task-core-boot \
-    task-base \
-    task-xenclient-common \
+    packagegroup-core-boot \
+    packagegroup-base \
+    packagegroup-xenclient-common \
     bootage \
     kernel-modules \
     v4v-module \
@@ -35,14 +35,25 @@ IMAGE_INSTALL = "\
 
 #IMAGE_PREPROCESS_COMMAND = "create_etc_timestamp"
 
-ROOTFS_POSTPROCESS_COMMAND += "\
-    echo 'ca:12345:ctrlaltdel:/sbin/shutdown -t1 -a -r now' >> ${IMAGE_ROOTFS}/etc/inittab; \
-    sed -i 's|root:x:0:0:root:/home/root:/bin/sh|root:x:0:0:root:/root:/bin/bash|' ${IMAGE_ROOTFS}/etc/passwd; \
-    echo '1.0.0.0 dom0' >> ${IMAGE_ROOTFS}/etc/hosts; \
-    rm -f ${IMAGE_ROOTFS}/etc/resolv.conf; \
-    ln -s /var/volatile/etc/resolv.conf ${IMAGE_ROOTFS}/etc/resolv.conf; \
-    rm -f ${IMAGE_ROOTFS}/etc/network/interfaces; \
-    ln -s /var/volatile/etc/network/interfaces ${IMAGE_ROOTFS}/etc/network/interfaces;"
+post_rootfs_shell_commands() {
+	echo 'ca:12345:ctrlaltdel:/sbin/shutdown -t1 -a -r now' >> ${IMAGE_ROOTFS}/etc/inittab;
+	sed -i 's|root:x:0:0:root:/root:/bin/sh|root:x:0:0:root:/root:/bin/bash|' ${IMAGE_ROOTFS}/etc/passwd;
+	echo '1.0.0.0 dom0' >> ${IMAGE_ROOTFS}/etc/hosts;
+	rm -f ${IMAGE_ROOTFS}/etc/resolv.conf;
+	ln -s /var/volatile/etc/resolv.conf ${IMAGE_ROOTFS}/etc/resolv.conf;
+	rm -f ${IMAGE_ROOTFS}/etc/network/interfaces;
+	ln -s /var/volatile/etc/network/interfaces ${IMAGE_ROOTFS}/etc/network/interfaces;
+}
+
+remove_initscripts() {
+    # Remove unneeded initscripts
+    if [ -f ${IMAGE_ROOTFS}${sysconfdir}/init.d/urandom ]; then
+        rm -f ${IMAGE_ROOTFS}${sysconfdir}/init.d/urandom
+        update-rc.d -r ${IMAGE_ROOTFS} urandom remove
+    fi
+}
+
+ROOTFS_POSTPROCESS_COMMAND += " post_rootfs_shell_commands; remove_initscripts; "
 
 inherit image
 #inherit validate-package-versions

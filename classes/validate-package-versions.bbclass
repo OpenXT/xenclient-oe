@@ -31,8 +31,8 @@ python do_validate_package_versions() {
     error = False
     error_descriptions = []
     pkg_versions = create_package_version_dict(d)
-    installed_packages_versions_file = bb.data.getVar("INSTALLED_PACKAGES_VERSIONS_FILE", d, True)
-    do_not_validate_package_version_for = bb.data.getVar("DO_NOT_VALIDATE_PACKAGE_VERSION_FOR", d, True).split()
+    installed_packages_versions_file = d.getVar("INSTALLED_PACKAGES_VERSIONS_FILE", True)
+    do_not_validate_package_version_for = d.getVar("DO_NOT_VALIDATE_PACKAGE_VERSION_FOR", True).split()
     with open(installed_packages_versions_file) as f:
         for line in f.xreadlines():
             (pkgname, installed_version) = line.split()

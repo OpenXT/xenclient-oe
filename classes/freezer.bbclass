@@ -28,7 +28,7 @@ def get_remote_repo_hash(url, tag, d):
 
 def rewrite_uri(uri, d):
     import re
-    xc_repo_prefix = bb.data.getVar("OPENXT_GIT_MIRROR", d, True)
+    xc_repo_prefix = d.getVar("OPENXT_GIT_MIRROR", True)
     if not uri.startswith(xc_repo_prefix):
         return uri
     (type_, host, path, user, pswd, parm) = bb.decodeurl(uri)
@@ -63,9 +63,9 @@ def read_dict(filename):
         
 
 def rewrite_uris(d):
-    repo_action_delay = bb.data.getVar("REPO_ACTION_DELAY", d, True)
+    repo_action_delay = d.getVar("REPO_ACTION_DELAY", True)
     rewriten_uris = []
-    src_uri = (bb.data.getVar("SRC_URI", d, True) or "").split()
+    src_uri = (d.getVar("SRC_URI", True) or "").split()
     changed = False
     for uri in src_uri:
         rewriten_uri = rewrite_uri(uri, d)
@@ -73,7 +73,7 @@ def rewrite_uris(d):
             changed = True
             time.sleep(float(repo_action_delay))
         rewriten_uris.append(rewriten_uri)
-    freezer_file = bb.data.getVar("FREEZER_URI_FILE", d, True)
+    freezer_file = d.getVar("FREEZER_URI_FILE", True)
     rewriten_uris_str = "\n".join(rewriten_uris)
     if changed:
         save_dict(freezer_file, {"src_uri": rewriten_uris_str})
@@ -98,8 +98,8 @@ def hash_local_url(url, d):
     return result
 
 def hash_locals(d):
-    freezer_locals_file = bb.data.getVar("FREEZER_LOCALS_FILE", d, True)
-    src_uri = (bb.data.getVar("SRC_URI", d, True) or "").split()
+    freezer_locals_file = d.getVar("FREEZER_LOCALS_FILE", True)
+    src_uri = (d.getVar("SRC_URI", True) or "").split()
     hashes = []
     for url in src_uri:
         if url.startswith("file://"):
@@ -110,8 +110,8 @@ def hash_locals(d):
 
 
 python do_freeze_uris() {
-    freezer_path = bb.data.getVar("FREEZER_PATH", d, True)
-    bb.mkdirhier(freezer_path)
+    freezer_path = d.getVar("FREEZER_PATH", True)
+    bb.utils.mkdirhier(freezer_path)
     rewrite_uris(d)
     hash_locals(d)
 }
@@ -127,16 +127,16 @@ do_freeze_uris[lockfiles] += "${FREEZER_LOCK}"
 LOCAL_HASHES = ""
 
 python() {
-    freezer_file = bb.data.getVar("FREEZER_URI_FILE", d, True)
+    freezer_file = d.getVar("FREEZER_URI_FILE", True)
     mydict = read_dict(freezer_file)
     if mydict:
         bb.debug(1, "freezer: dict found overwriting SRC_URI with: %s" % mydict["src_uri"])
-        bb.data.setVar("SRC_URI", mydict["src_uri"], d)
-    freezer_locals_file = bb.data.getVar("FREEZER_LOCALS_FILE", d, True)
+        d.setVar("SRC_URI", mydict["src_uri"])
+    freezer_locals_file = d.getVar("FREEZER_LOCALS_FILE", True)
     mydict = read_dict(freezer_locals_file)
     if mydict:
         bb.debug(1, "freezer: dict found overwriting LOCAL_HASHES with: %s" % mydict["local_hashes"])
-        bb.data.setVar("LOCAL_HASHES", mydict["local_hashes"], d)
+        d.setVar("LOCAL_HASHES", mydict["local_hashes"])
 }
 
 do_fetch[vardeps] += "LOCAL_HASHES"

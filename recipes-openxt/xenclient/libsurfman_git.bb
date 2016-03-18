@@ -15,7 +15,4 @@ EXTRA_OEMAKE += "LIBDIR=${STAGING_LIBDIR}"
 
 ASNEEDED = ""
 
-inherit autotools
-inherit pkgconfig
-inherit lib_package
-inherit xenclient
+inherit autotools-brokensep pkgconfig lib_package xenclient

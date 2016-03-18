@@ -2,6 +2,9 @@ require xen.inc
 
 PROVIDES = "xen"
 
+PACKAGES += "${PN}-efi"
+
+FILES_${PN}-efi = "/usr/lib64/efi/*"
 FILES_${PN}-dbg += "/boot/xen*syms*"
 FILES_${PN} += "/boot"
 
@@ -22,7 +25,7 @@ do_compile() {
 
 do_install() {
         install -d ${D}/boot
-        DESTDIR=${D} oe_runmake install-xen
+        oe_runmake DESTDIR=${D} install-xen
         ln -sf "`basename ${D}/boot/xen-*xc.gz`" ${D}/boot/xen-debug.gz
 }
 

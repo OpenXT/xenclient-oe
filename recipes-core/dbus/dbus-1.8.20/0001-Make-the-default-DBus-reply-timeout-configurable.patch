@@ -1,0 +1,48 @@
+diff --git a/configure.ac b/configure.ac
+index b3d1c41..304aedd 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -169,6 +169,7 @@ AC_ARG_WITH(console-owner-file, AS_HELP_STRING([--with-console-owner-file=[filen
+ AC_ARG_WITH(launchd-agent-dir, AS_HELP_STRING([--with-launchd-agent-dir=[dirname]],[directory to put the launchd agent (default: /Library/LaunchAgents)]))
+ AC_ARG_WITH(dbus_user, AS_HELP_STRING([--with-dbus-user=<user>],[User for running the DBUS daemon (messagebus)]))
+ AC_ARG_WITH(dbus_daemondir, AS_HELP_STRING([--with-dbus-daemondir=[dirname]],[Directory for installing the DBUS daemon]))
++AC_ARG_WITH(dbus_default_reply_timeout, AS_HELP_STRING([--with-dbus-default-reply-timeout=[milliseconds]],[Default reply timeout for DBus method calls]))
+ 
+ AC_ARG_ENABLE([embedded-tests],
+   AS_HELP_STRING([--enable-embedded-tests],
+@@ -1242,6 +1243,13 @@ if test x$with_valgrind != xno; then
+   AC_DEFINE([WITH_VALGRIND], [1], [Define to add Valgrind instrumentation])
+ fi
+ 
++if test -z "$with_dbus_default_reply_timeout" ; then
++    DBUS_DEFAULT_REPLY_TIMEOUT=25000
++else
++    DBUS_DEFAULT_REPLY_TIMEOUT=$with_dbus_default_reply_timeout
++fi
++AC_DEFINE_UNQUOTED(_DBUS_DEFAULT_TIMEOUT_VALUE,$DBUS_DEFAULT_REPLY_TIMEOUT,[default timeout value for dbus calls])
++
+ #### Set up final flags
+ LIBDBUS_LIBS="$THREAD_LIBS $NETWORK_libs"
+ AC_SUBST([LIBDBUS_LIBS])
+@@ -1814,6 +1822,7 @@ echo "
+         Building XML docs:        ${enable_xml_docs}
+         Building launchd support: ${have_launchd}
+         Init scripts style:       ${with_init_scripts}
++        Default reply timeout:    ${DBUS_DEFAULT_REPLY_TIMEOUT}
+         Abstract socket names:    ${ac_cv_have_abstract_sockets}
+         System bus socket:        ${DBUS_SYSTEM_SOCKET}
+         System bus address:       ${DBUS_SYSTEM_BUS_DEFAULT_ADDRESS}
+diff --git a/dbus/dbus-connection-internal.h b/dbus/dbus-connection-internal.h
+index 2897404..90f6eb0 100644
+--- a/dbus/dbus-connection-internal.h
++++ b/dbus/dbus-connection-internal.h
+@@ -41,9 +41,6 @@ typedef enum
+   DBUS_ITERATION_BLOCK      = 1 << 2  /**< Block if nothing to do. */
+ } DBusIterationFlags;
+ 
+-/** default timeout value when waiting for a message reply, 25 seconds */
+-#define _DBUS_DEFAULT_TIMEOUT_VALUE (25 * 1000)
+-
+ typedef void (* DBusPendingFdsChangeFunction) (void *data);
+ 
+ void              _dbus_connection_lock                        (DBusConnection     *connection);

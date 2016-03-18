@@ -1,2 +1,3 @@
-PRINC = "1"
-FILESEXTRAPATHS := "${THISDIR}/${PN}"
+PR .= ".1"
+
+FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"

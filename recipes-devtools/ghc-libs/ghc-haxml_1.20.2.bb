@@ -9,3 +9,8 @@ DESCRIPTION = "XML library for ghc"
 LICENSE = "LGPLv3 & GPLv3"
 LIC_FILES_CHKSUM = "file://COPYRIGHT;md5=b84b8bea272e7357c5c7fe6f255ba732"
 GHC_PN = "HaXml"
+
+INSANE_SKIP_${PN}-utils = "already-stripped"
+
+FILES_${PN}-utils += "${bindir}/*"
+

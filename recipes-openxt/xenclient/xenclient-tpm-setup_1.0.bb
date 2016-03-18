@@ -4,7 +4,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/GPL-2.0;md5=801f80980d171dd6425
 
 inherit xenclient
 
-RDEPENDS += "xenclient-tpm-scripts"
+RDEPENDS_${PN} += "xenclient-tpm-scripts"
 
 SRC_URI = "file://tpm-setup \
 	file://tpm-setup-squashfs \

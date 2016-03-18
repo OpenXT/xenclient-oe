@@ -1,16 +1,12 @@
-SRC_URI += "\
-    file://icedtea-ecj-fix-compil-gcc-4.7.patch;apply=no \
-    file://icedtea-ecj-fix-currency-data.patch;apply=no \
-"
-# Ask bitbake to use icedtea-native-1.8.11 to copy the patch
-FILESEXTRAPATHS := "${THISDIR}/${PN}:"
-
-export DISTRIBUTION_ECJ_PATCHES += " \
-    patches/icedtea-ecj-fix-compil-gcc-4.7.patch \
-    patches/icedtea-ecj-fix-currency-data.patch \
-"
-
-#Allow icedtea to build on 4.0+ host kernels.
-export DISABLE_HOTSPOT_OS_VERSION_CHECK = "1"
-
 PR .= ".1"
+
+FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
+
+SRC_URI += "file://support_linux_3.txt"
+
+do_replace_patches() {
+    #If you need to update an icedtea patch applied during do configure, just overwrite it here
+    cp -f ${WORKDIR}/support_linux_3.txt ${S}/patches/support_linux_3.patch
+}
+
+addtask replace_patches after do_patch before do_configure

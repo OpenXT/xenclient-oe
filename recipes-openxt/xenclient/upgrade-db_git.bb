@@ -4,7 +4,7 @@ DESCRIPTION = "XenClient DB upgrade utility"
 LICENSE = "GPLv2"
 LIC_FILES_CHKSUM="file://../COPYING;md5=4641e94ec96f98fabc56ff9cc48be14b"
 DEPENDS = "ghc-native ghc-text ghc-mtl ghc-network ghc-json"
-RDEPENDS += "glibc-gconv-utf-32 ghc-runtime-native"
+RDEPENDS_${PN} += "glibc-gconv-utf-32 ghc-runtime"
 
 # Ocaml stuff is built with the native compiler with "-m32".
 

@@ -18,7 +18,9 @@ inherit autotools
 inherit pkgconfig
 inherit xenclient
 
+CFLAGS_append += " -Wno-error=cpp "
+
 do_install(){
         install -d ${D}/usr/lib/xen/bin
-        install -m 755 ${S}/src/pci-dm-helper ${D}/usr/lib/xen/bin/
+        install -m 755 ${B}/src/pci-dm-helper ${D}/usr/lib/xen/bin/
 }

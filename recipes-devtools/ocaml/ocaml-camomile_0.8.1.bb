@@ -16,7 +16,18 @@ SRC_URI = "http://downloads.sourceforge.net/project/camomile/camomile/0.8.1/camo
 
 S = "${WORKDIR}/camomile-${PV}"
 
-RDEPENDS_${PN}-dev = ""
+FILES_${PN} = "${ocamllibdir}/camomile/*${SOLIBS}   \
+               /usr/share/camomile/charmaps/*       \
+               /usr/share/camomile/database/*       \
+               /usr/share/camomile/locales/*        \
+               /usr/share/camomile/mappings/*       \
+               "
+FILES_${PN}-dev = "${ocamllibdir}/camomile/*${SOLIBSDEV}    \
+                   ${ocamllibdir}/camomile/*.cm*            \
+                   ${ocamllibdir}/camomile/META             \
+                   "
+FILES_${PN}-staticdev = "${ocamllibdir}/camomile"
+FILES_${PN}-dbg = "${ocamllibdir}/camomile/.debug/*"
 
 do_configure() {
     ./configure --prefix=${prefix} --bindir=${bindir} --libdir=${libdir} --datadir=${datadir}

@@ -1,4 +1,4 @@
-PRINC = "4"
+PR .= ".1"
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 EXTRA_OECONF += " \
@@ -7,7 +7,7 @@ EXTRA_OECONF += " \
         --with-usb-ids-path=/usr/share/usb.ids \
         --with-pci-ids-path=/usr/share/pci.ids \
 "
-FILESEXTRAPATHS := "${THISDIR}/${PN}"
+FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
 
 inherit update-rc.d
 

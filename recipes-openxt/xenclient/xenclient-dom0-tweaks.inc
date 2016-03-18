@@ -20,9 +20,6 @@ SRC_URI = "file://enter-s3.sh \
 	   file://blacklist-nvidiafb.conf \
 	   file://r8168.conf \
 	   file://create-ndvm \
-	   file://i915modprobe.sh \
-	   file://i915.conf \
-	   file://drm_graphics_option.sh \
 	   file://status-report \
 	   file://status-tool \
 	   file://status-server \
@@ -50,8 +47,6 @@ do_install () {
 		${D}/etc/modprobe.d/blacklist-nvidiafb.conf
 	install -m 0644 ${WORKDIR}/r8168.conf \
 		${D}/etc/modprobe.d/r8168.conf
-	install -m 0644 ${WORKDIR}/i915.conf \
-		${D}/etc/modprobe.d/i915.conf
 
 	install -d ${D}/etc/init.d
 	install -m 0755 ${WORKDIR}/firstboot.initscript \
@@ -72,10 +67,6 @@ do_install () {
 		${D}/usr/share/xenclient/dom0_add_vif.sh
 	install -m 0755 ${WORKDIR}/firstboot.sh \
 		${D}/usr/share/xenclient/firstboot.sh
-	install -m 0755 ${WORKDIR}/i915modprobe.sh \
-		${D}/usr/share/xenclient/i915modprobe.sh
-	install -m 0755 ${WORKDIR}/drm_graphics_option.sh \
-		${D}/usr/share/xenclient/drm_graphics_option.sh
 
 	install -d ${D}/usr/bin
 	install -m 0755 ${WORKDIR}/create-ndvm \

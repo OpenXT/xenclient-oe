@@ -47,10 +47,10 @@ def prepare_proper_package_map(d):
 python do_image_sources_package_write() {
     import glob, re
 
-    pn = bb.data.getVar('PN', d, 1)
+    pn = d.getVar('PN', 1)
 
     depends = set()
-    package_list_file = bb.data.getVar("INSTALLED_PACKAGES_LIST", d, True)
+    package_list_file = d.getVar("INSTALLED_PACKAGES_LIST", True)
     with open(package_list_file) as fh:
         lines = fh.readlines()
     pkgmap = prepare_proper_package_map(d)
@@ -65,10 +65,10 @@ python do_image_sources_package_write() {
 
     # Create package which depends on source package for each of these recipes.
 
-    root = bb.data.getVar('IMAGE_SRC_PACKAGE_ROOT', d, 1)
-    bb.mkdirhier(root)
+    root = d.getVar('IMAGE_SRC_PACKAGE_ROOT', 1)
+    bb.utils.mkdirhier(root)
 
-    outdir = bb.data.getVar('DEPLOY_DIR_IPK', d, 1)
+    outdir = d.getVar('DEPLOY_DIR_IPK', 1)
     if not outdir:
         raise bb.build.FuncFailed("xenclient-image-src-package-real: " \
                                   "DEPLOY_DIR_IPK not defined")
@@ -76,14 +76,14 @@ python do_image_sources_package_write() {
     lf = bb.utils.lockfile(root + ".lock")
 
     basedir = os.path.join(os.path.dirname(root))
-    arch = bb.data.getVar('IMAGE_SRC_PACKAGE_ARCH', d, 1)
+    arch = d.getVar('IMAGE_SRC_PACKAGE_ARCH', 1)
     pkgoutdir = os.path.join(outdir, arch)
 
-    bb.mkdirhier(pkgoutdir)
+    bb.utils.mkdirhier(pkgoutdir)
     os.chdir(root)
 
     controldir = os.path.join(root, "CONTROL")
-    bb.mkdirhier(controldir)
+    bb.utils.mkdirhier(controldir)
     try:
         ctrlfile = file(os.path.join(controldir, "control"), 'w')
     except OSError:
@@ -94,7 +94,7 @@ python do_image_sources_package_write() {
     ctrlfile.write("Package: %s-sources\n" % pn)
 
     fields = []
-    pe = bb.data.getVar('PE', d, 1)
+    pe = d.getVar('PE', 1)
     if pe and int(pe) > 0:
         fields.append(["Version: %s:%s-%s\n", ['PE', 'PKGV', 'PKGR']])
     else:
@@ -111,13 +111,13 @@ python do_image_sources_package_write() {
     def pullData(l, d):
         l2 = []
         for i in l:
-            l2.append(bb.data.getVar(i, d, 1))
+            l2.append(d.getVar(i, 1))
         return l2
 
     try:
         for (c, fs) in fields:
             for f in fs:
-                if bb.data.getVar(f, d) is None:
+                if d.getVar(f) is None:
                     raise KeyError(f)
             ctrlfile.write(c % tuple(pullData(fs, d)))
     except KeyError:
@@ -132,16 +132,16 @@ python do_image_sources_package_write() {
     if depends:
         ctrlfile.write("Depends: %s\n" % ", ".join(sorted(depends)))
 
-    src_uri = bb.data.getVar('SRC_URI', d, 1) or d.getVar('FILE', True)
+    src_uri = d.getVar('SRC_URI', 1) or d.getVar('FILE', True)
     src_uri = re.sub("\s+", " ", src_uri)
     ctrlfile.write("Source: %s\n" % " ".join(src_uri.split()))
     ctrlfile.close()
 
     os.chdir(basedir)
     ret = os.system("PATH=\"%s\" %s %s %s" %
-                    (bb.data.getVar('PATH', d, 1),
-                     bb.data.getVar('OPKGBUILDCMD', d, 1),
-                     bb.data.getVar('IMAGE_SRC_PACKAGE_DIR', d, 1),
+                    (d.getVar('PATH', 1),
+                     d.getVar('OPKGBUILDCMD', 1),
+                     d.getVar('IMAGE_SRC_PACKAGE_DIR', 1),
                      pkgoutdir))
     if ret != 0:
         bb.utils.unlockfile(lf)

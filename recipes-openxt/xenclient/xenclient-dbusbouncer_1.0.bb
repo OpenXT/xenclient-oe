@@ -2,7 +2,7 @@ DESCRIPTION = "XenClient DBUS socket connections dom0-uivm"
 LICENSE = "GPLv2"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/GPL-2.0;md5=801f80980d171dd6425610833a22dbe6"
 DEPENDS = "libv4v"
-RDEPENDS += "xen-tools-libxenstore"
+RDEPENDS_${PN} += "xen-tools-libxenstore"
 
 DEPENDS_append_xenclient-nilfvm += " ${@deb_bootstrap_deps(d)} "
 
@@ -18,7 +18,7 @@ INITSCRIPT_PARAMS = "defaults 29"
 S = "${WORKDIR}"
 
 inherit update-rc.d xenclient
-inherit ${@"xenclient-simple-deb"if(bb.data.getVar("MACHINE",d,1)=="xenclient-nilfvm")else("null")}
+inherit ${@"xenclient-simple-deb"if(d.getVar("MACHINE",1)=="xenclient-nilfvm")else("null")}
 
 DEB_SUITE = "wheezy"
 DEB_ARCH = "i386"

@@ -1,9 +1,10 @@
-PRINC = "1"
+PR .= ".1"
+
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 # add SE Linux dependency, so selinux is detected and pam selinux module is build
 # unfortunately there is no way to enforce failure when libselinux is not present
-FILESEXTRAPATHS := "${THISDIR}/${PN}"
+FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
 DEPENDS = "libnl dbus dbus-glib udev wireless-tools gnutls util-linux ppp"
 RDEPENDS_${PN} += "libgudev wireless-tools dnsmasq iproute2 networkmanager-certs" 
 
@@ -18,6 +19,7 @@ SRC_URI += " \
             file://NetworkManager.conf \
             file://ac-wireless \
             file://01ppp \
+            file://remove-libgcrypt.patch \
 "
 
 EXTRA_OECONF += " \
@@ -26,6 +28,8 @@ EXTRA_OECONF += " \
                  --with-ck=no \
                  --enable-wimax=no \
 "
+
+CFLAGS_append += " -Wno-deprecated-declarations "
 
 do_install_append () {
         rm -f ${D}/etc/init.d/NetworkManager
@@ -54,6 +58,8 @@ SRC_URI_append_xenclient-ndvm += " \
             file://db_to_nm.awk \
             file://nm_to_db.awk \
 "
+
+B = "${S}"
 
 do_install_append_xenclient-ndvm() {
         install -m 0755 ${WORKDIR}/nm_sync.sh ${D}/usr/bin/nm_sync.sh

@@ -3,18 +3,20 @@ SRC_URI[sha256sum] = "27bb906cc06d29ead85ca95e7268401b914c2eac81663a7db0e241f117
 DEPENDS = "openssl"
 LICENSE = "CPL-1.0"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=3728dd9198d68b49f7f9ed1f3f50ba14"
-PR = "r2"
 
-RDEPENDS_${PN} += "tinylogin"
+PR = "r1"
 
 SRC_URI = "http://downloads.sourceforge.net/${PN}/${PN}-${PV}.tar.gz \
            file://trousers-no-groups-users.patch;patch=1 \
            file://trousers-tcsd-conf.patch;patch=1 \
            file://trousers-standalone.patch;patch=1 \
            file://trousers_compile_with_newer_gcc.patch;patch=1 \
+           file://gcc5.patch \
            file://trousers.initscript \
            file://45-trousers.rules \
 "
+
+CFLAGS_append = " -Wno-error=unused-parameter -Wno-error=strict-aliasing -std=gnu89"
 
 inherit xenclient update-rc.d useradd
 
@@ -34,18 +36,19 @@ pkg_postinst_${PN}() {
         install -o tss -g tss -m 600 $D/usr/share/trousers/system.data.auth $D/boot/system/tpm/system.data
 }
 
-inherit autotools
+inherit autotools-brokensep pkgconfig
 
 do_install_append() {
 	install -m 0755 -d ${D}${datadir}/trousers
-	install -m 0644 ${S}/dist/system.data.auth ${D}${datadir}/trousers/
-	install -m 0644 ${S}/dist/system.data.noauth ${D}${datadir}/trousers/
+	install -m 0644 ${B}/dist/system.data.auth ${D}${datadir}/trousers/
+	install -m 0644 ${B}/dist/system.data.noauth ${D}${datadir}/trousers/
         install -m 0755 -d ${D}/etc/init.d
         install -m 0755 ${WORKDIR}/trousers.initscript ${D}/etc/init.d/trousers
         install -m 0755 -d ${D}/etc/udev/rules.d
         install -m 0644 ${WORKDIR}/45-trousers.rules ${D}/etc/udev/rules.d
 }
 
+RPROVIDES_${PN} =+ "${PN}-data"
 PACKAGES =+ "${PN}-data"
 FILES_${PN}-data = "${datadir}/trousers/system.data.auth \
 	${datadir}/trousers/system.data.noauth \

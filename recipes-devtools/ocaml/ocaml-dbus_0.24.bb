@@ -1,4 +1,4 @@
-inherit findlib
+inherit findlib pkgconfig
 SRC_URI[md5sum] = "b769af9141a5c073056ed46ef76ba5be"
 SRC_URI[sha256sum] = "7c793987668e4236c63857469d2abe4a460e0b0954aa7d3262c6d9bb3c24bfdd"
 DESCRIPTION = "OCaml DBUS bindings"
@@ -18,15 +18,22 @@ SRC_URI = "http://projects.snarc.org/ocaml-dbus/download/ocaml_dbus-${PV}.tar.bz
 	   file://fix-multithread.patch;patch=1 \
 "
 
-RDEPENDS_${PN}-dev = ""
-
 PARALLEL_MAKE = ""
+
+FILES_${PN} = "${ocamllibdir}/dbus/*${SOLIBS} \
+               "
+FILES_${PN}-dev = "${ocamllibdir}/dbus/*${SOLIBSDEV}  \
+                   ${ocamllibdir}/dbus/*.cm*          \
+                   ${ocamllibdir}/dbus/META           \
+                  "
+FILES_${PN}-staticdev = "${ocamllibdir}/dbus/*.a"
+FILES_${PN}-dbg = "${ocamllibdir}/dbus/.debug/*"
 
 do_compile() {
 	oe_runmake \
-		OCAMLC="ocamlc -cc '${CC}'" \
-		OCAMLOPT="ocamlopt -cc '${CC}'" \
-		OCAMLMKLIB="ocamlmklib -L'${STAGING_DIR_TARGET}/lib' -L'${STAGING_DIR_TARGET}/usr/lib'"
+		OCAMLC="ocamlc -cc '${CC} -fPIC'" \
+		OCAMLOPT="ocamlopt -cc '${CC} -fPIC'" \
+		OCAMLMKLIB="ocamlmklib -elfmode -L'${STAGING_DIR_TARGET}/lib' -L'${STAGING_DIR_TARGET}/usr/lib'"
 
 }
 

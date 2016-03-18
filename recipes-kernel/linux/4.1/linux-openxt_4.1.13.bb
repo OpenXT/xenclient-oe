@@ -9,9 +9,9 @@ PV_MINOR = "${@"${PV}".split('.', 3)[1]}"
 
 FILESEXTRAPATHS_prepend := "${THISDIR}/patches:${THISDIR}/defconfigs:"
 SRC_URI += "https://www.kernel.org/pub/linux/kernel/v${PV_MAJOR}.x/linux-${PV}.tar.gz;name=kernel \
+    file://bp-dmi-scan-uuid-fix-endianess-for-smbios.patch;patch=1 \
     file://bridge-carrier-follow-prio0.patch;patch=1 \
     file://privcmd-mmapnocache-ioctl.patch;patch=1 \
-    file://usb-mass-storage-no-autobind.patch;patch=1 \
     file://xenkbd-tablet-resolution.patch;patch=1 \
     file://acpi-video-delay-init.patch;patch=1 \
     file://skb-forward-copy-bridge-param.patch;patch=1 \
@@ -33,7 +33,6 @@ SRC_URI += "https://www.kernel.org/pub/linux/kernel/v${PV_MAJOR}.x/linux-${PV}.t
     file://konrad-microcode.patch;patch=1 \
     file://konrad-ioperm.patch;patch=1 \
     file://gem-foreign.patch;patch=1 \
-    file://gem-foreign-debug.patch;patch=1 \
     file://fbcon-do-not-drag-detect-primary-option.patch;patch=1 \
     file://usbback-base.patch;patch=1 \
     file://hvc-kgdb-fix.patch;patch=1 \
@@ -41,6 +40,12 @@ SRC_URI += "https://www.kernel.org/pub/linux/kernel/v${PV_MAJOR}.x/linux-${PV}.t
     file://pciback-restrictive-attr.patch;patch=1 \
     file://thorough-reset-interface-to-pciback-s-sysfs.patch;patch=1 \
     file://xsa-155-paravirtualized-drivers-incautious-about-shared-memory-contents.patch;patch=1 \
+    file://xsa-155-qsb-023-add-RING_COPY_RESPONSE.patch;patch=1 \
+    file://xsa-155-qsb-023-xen-blkfront-make-local-copy-of-response-before-usin.patch;patch=1 \
+    file://xsa-155-qsb-023-xen-blkfront-prepare-request-locally-only-then-put-i.patch;patch=1 \
+    file://xsa-155-qsb-023-xen-netfront-add-range-check-for-Tx-response-id.patch;patch=1 \
+    file://xsa-155-qsb-023-xen-netfront-copy-response-out-of-shared-buffer-befo.patch;patch=1 \
+    file://xsa-155-qsb-023-xen-netfront-do-not-use-data-already-exposed-to-back.patch;patch=1 \
     file://xsa-157-linux-pciback-missing-sanity-checks-leading-to-crash.patch;patch=1 \
     file://defconfig \
     "

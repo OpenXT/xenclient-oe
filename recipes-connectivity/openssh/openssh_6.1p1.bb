@@ -1,6 +1,6 @@
 require recipes-connectivity/openssh/openssh6.inc
 DEPENDS += "libselinux"
-RDEPENDS += "libselinux"
+RDEPENDS_${PN} += "libselinux"
 PR = "${INC_PR}.4"
 LISENCE = "BSD"
 LIC_FILES_CHKSUM = "file://LICENCE;md5=e326045657e842541d3f35aada442507"
