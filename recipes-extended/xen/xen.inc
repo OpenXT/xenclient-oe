@@ -15,12 +15,9 @@ SRC_URI = "${XEN_SRC_URI};name=source \
     file://tapdisk_shutdown_recursion.patch;patch=1 \
     file://xen-allow-hvm.patch;patch=1 \
     file://blktap-resume-fix.patch;patch=1 \
-    file://blktap-retry-fix.patch;patch=1 \
     file://rmrr-validate-range.patch;patch=1 \
     file://xentrace-format-handle-zero-tsc.patch;patch=1 \
     file://iobitmap-on-all-vcpus.patch;patch=1 \
-    file://blktap-quieten-udevd.patch;patch=1 \
-    file://fix-write-clash.patch;patch=1 \
     file://fix-32bit-xsm-interface.patch;patch=1 \
     file://fix-pci-serial-hang.patch;patch=1 \
     file://xsm-add-corespersocket.patch;patch=1 \
@@ -28,7 +25,6 @@ SRC_URI = "${XEN_SRC_URI};name=source \
     file://add-percentages-to-xenpm.patch;patch=1 \
     file://stack_on_triple_fault.patch;patch=1 \
     file://hvmloader_print_e820.patch;patch=1 \
-    file://tapdisk_debug.patch;patch=1 \
     file://microcode-info.patch;patch=1 \
     file://add_system_time_timestamps.patch;patch=1 \
     file://local-ipxe.patch;patch=1 \
@@ -47,12 +43,6 @@ SRC_URI = "${XEN_SRC_URI};name=source \
     file://evtchn-do-not-set-pending-if-s3.patch;patch=1 \
     file://hvmloader-vga-command-io.patch;patch=1 \
     file://vbe-lfb-addr-matches-hvmloader.patch;patch=1 \
-    file://blktap2-vci.patch;patch=1 \
-    file://blktap2-multi-coalesce.patch;patch=1 \
-    file://libvhd-disable-static-batmaps.patch;patch=1 \
-    file://vhd-validate-size.patch;patch=1 \
-    file://vhd-util-allow-resize.patch;patch=1 \
-    file://tapdisk-increase-vhd-req-pool.patch;patch=1 \
     file://bios-uuid.patch;patch=1 \
     file://bios-signature.patch;patch=1 \
     file://crash_flag_hypercall.patch;patch=1 \
@@ -63,7 +53,6 @@ SRC_URI = "${XEN_SRC_URI};name=source \
     file://include-seabios.patch;patch=1 \
     file://xc-xt-hvm-get-time.patch;patch=1 \
     file://hvm-rtc-refresh-time.patch;patch=1 \
-    file://fix-race-between-udev-and-tapctl.patch;patch=1 \
     file://reboot-quirk-pci.patch;patch=1 \
     file://xenstored-instrumentation.patch;patch=1 \
     file://xc-xt-hvm-info.patch;patch=1 \
@@ -101,8 +90,6 @@ SRC_URI = "${XEN_SRC_URI};name=source \
     file://flask-persist-booleans.patch;patch=1 \
     file://cpufreq_gov_stop_avoid_panic.patch;patch=1 \
     file://fix-memcpy-in-x86-emulate.patch;patch=1 \
-    file://blktap-instrumentation.patch;patch=1 \
-    file://blktap-timeout.patch;patch=1 \
     file://stubdomain-msi-irq-access.patch;striplevel=1 \
     file://workaround-nehalem-igd-vtd.patch;patch=1 \
     file://xen-x86-Fix-up-rules-when-forcing-mno-sse.patch;patch=1 \

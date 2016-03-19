@@ -84,6 +84,8 @@ do_compile() {
         oe_runmake -C tools subdir-all-xenstat
         oe_runmake -C tools subdir-all-hvm-info
         oe_runmake -C tools subdir-all-xen-libhvm
+        oe_runmake -C tools subdir-all-libaio
+        oe_runmake -C tools subdir-all-blktap2
 }
 
 do_install() {
