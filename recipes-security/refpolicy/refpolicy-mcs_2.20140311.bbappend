@@ -171,6 +171,8 @@ SRC_URI += " \
     file://patches/dbusbouncer-interfaces.diff \
     file://patches/qemu1.4_wrapper_file_context.patch;striplevel=1 \
     file://patches/openxt_system_unconfined_readonly_neverallow_fixes.patch;patch=1 \
+    file://patches/upstream-enable-asound.state.lock-support.patch;patch=1 \
+    file://patches/upstream-allow-loadkeys-to-read-usr_t-files.patch;patch=1 \
     "
     
 def get_poltype(f):
