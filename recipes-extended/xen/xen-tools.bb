@@ -4,9 +4,6 @@ inherit pkgconfig update-rc.d pythonnative
 
 SRC_URI += "file://xenstored.initscript \
 	    file://xenconsoled.initscript \
-	    file://config.patch \
-	    file://disable-xen-root-check.patch \
-	    file://do-not-overwrite-cc-and-ld.patch \
 "
 
 DEPENDS += " gettext ncurses openssl python zlib seabios ipxe gmp lzo glib-2.0 iasl-native xz "

@@ -8,6 +8,9 @@ PV = "${XEN_VERSION}"
 DEPENDS = "glib-2.0"
 
 SRC_URI = "${XEN_SRC_URI};name=source \
+    file://config.patch \
+    file://do-not-overwrite-cc-and-ld.patch \
+    file://disable-xen-root-check.patch \
     file://bp-ept-update-aa9114edd97b292cd89b3616e3f2089471fd220.patch;patch=1 \
     file://fix-xenctrl-enum-defn.patch;patch=1 \
     file://xen-cpuidle-hang.patch;patch=1 \
@@ -55,6 +58,7 @@ SRC_URI = "${XEN_SRC_URI};name=source \
     file://hvm-rtc-refresh-time.patch;patch=1 \
     file://reboot-quirk-pci.patch;patch=1 \
     file://xenstored-instrumentation.patch;patch=1 \
+    file://acpi-pm-feature.patch \
     file://xc-xt-hvm-info.patch;patch=1 \
     file://xc-xt-xenconsoled-syslog.patch;patch=1 \
     file://xc-xt-ept-respect-cacheattr-pin.patch;patch=1 \
