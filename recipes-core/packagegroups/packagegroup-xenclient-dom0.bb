@@ -94,7 +94,6 @@ RDEPENDS_${PN} = " \
     audio-daemon \
     linux-firmware \
     libicbinn-server \
-    monit \
     screen \
     xenclient-pcrdiff \
     drm-surfman-plugin \
