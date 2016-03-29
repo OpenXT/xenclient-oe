@@ -49,6 +49,7 @@ do_install_append() {
 }
 
 RPROVIDES_${PN} =+ "${PN}-data"
+RDEPENDS_${PN} = "libgcc"
 PACKAGES =+ "${PN}-data"
 FILES_${PN}-data = "${datadir}/trousers/system.data.auth \
 	${datadir}/trousers/system.data.noauth \
