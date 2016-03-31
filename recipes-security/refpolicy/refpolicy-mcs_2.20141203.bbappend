@@ -4,6 +4,8 @@ PR .= ".1"
 
 SRC_URI += " \
     file://config \
+    file://policy/modules-upstream.conf \
+    file://policy/modules-openxt.conf \
     file://policy/modules/admin/apptool.fc \
     file://policy/modules/admin/apptool.if \
     file://policy/modules/admin/apptool.te \
@@ -98,8 +100,6 @@ SRC_URI += " \
     file://patches/Makefile.diff \
     file://patches/build.conf.diff \
     file://patches/virtual_domain_context.diff \
-    file://patches/policy.modules.conf.patch \
-    file://patches/policy.modules.conf_xt.diff \
     file://patches/policy.modules.contrib.alsa.diff \
     file://patches/policy.modules.contrib.brctl.diff \
     file://patches/policy.modules.contrib.dmidecode.diff \
@@ -204,6 +204,7 @@ POL_TYPE = "xc_policy"
 
 do_compile_prepend() {
         cp -r ${WORKDIR}/policy ${S}/
+        cat ${S}/policy/modules-upstream.conf ${S}/policy/modules-openxt.conf > ${S}/policy/modules.conf
 }
 
 do_install_append() {
