@@ -8,15 +8,14 @@ PV = "0+git${SRCPV}"
 
 SRCREV = "${AUTOREV}"
 SRC_URI = "git://${OPENXT_GIT_MIRROR}/surfman.git;protocol=${OPENXT_GIT_PROTOCOL};branch=${OPENXT_BRANCH} \
-           file://automake-foreign.patch \
           "
 
 S = "${WORKDIR}/git/plugins/linuxfb"
 
 CFLAGS_append += " -Wno-unused-parameter "
 
-PACKAGES = "${PN}-dev ${PN}-dbg ${PN}"
-FILES_${PN}-dev += " /usr/lib/surfman/*.a /usr/lib/surfman/*.la "
+FILES_${PN}-staticdev += " /usr/lib/surfman/*.a"
+FILES_${PN}-dev += " /usr/lib/surfman/*.la "
 FILES_${PN}-dbg += " /usr/lib/surfman/.debug/* "
 FILES_${PN} += " /usr/lib/surfman/* "
 
