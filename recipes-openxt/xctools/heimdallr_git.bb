@@ -1,7 +1,6 @@
 DESCRIPTION = "Application to fill pciback quirks"
-# Aurelien has not specified a license for this project so we
-# set it to CLOSED to keep bb happy.
-LICENSE = "CLOSED"
+LICENSE = "GPLv2"
+LIC_FILES_CHKSUM = "file://COPYING;md5=4641e94ec96f98fabc56ff9cc48be14b"
 DEPENDS = "json-c pciutils"
 
 SRC_URI = "git://github.com/achartier/heimdallr.git;protocol=git \
