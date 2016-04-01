@@ -83,7 +83,6 @@ RDEPENDS_${PN} = " \
     rpc-proxy \
     dbd \
     xenclient-language-sync \
-    pci-dm-helper \
     atapi-pt-helper \
     audio-helper \
     compleat \
