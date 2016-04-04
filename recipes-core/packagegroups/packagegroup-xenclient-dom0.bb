@@ -18,6 +18,7 @@ RDEPENDS_${PN} = " \
     grub \
     tboot \
     e2fsprogs-tune2fs \
+    e2fsprogs-resize2fs \
     kernel-modules \
     libv4v \
     libv4v-bin \
