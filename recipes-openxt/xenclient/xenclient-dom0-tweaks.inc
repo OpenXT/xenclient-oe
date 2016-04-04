@@ -22,7 +22,6 @@ SRC_URI = "file://enter-s3.sh \
 	   file://create-ndvm \
 	   file://status-report \
 	   file://status-tool \
-	   file://status-upload \
 	   file://null.iso \
 	   file://set_platform_username \
 	   file://USB_fakenames.conf \
@@ -98,8 +97,6 @@ do_install () {
 		${D}/usr/bin/status-report
 	install -m 0755 ${WORKDIR}/status-tool \
 		${D}/usr/bin/status-tool
-	install -m 0755 ${WORKDIR}/status-upload \
-		${D}/usr/bin/status-upload
 	install -m 0755 ${WORKDIR}/set_platform_username \
 		${D}/usr/bin/set_platform_username
 	install -m 0755 ${WORKDIR}/usb-state \
