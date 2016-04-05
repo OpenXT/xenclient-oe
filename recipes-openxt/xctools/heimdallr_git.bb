@@ -7,7 +7,7 @@ SRC_URI = "git://github.com/achartier/heimdallr.git;protocol=git \
            file://pci-quirks.json \
            file://fix-json-pkgconfig-name.patch \
            "
-SRCREV = "be536cc740314d4b035a549188cdd2310fd7e4bf"
+SRCREV = "16b0da1e69e92ef8c0834e8a377c13aea823cfa2"
 
 S = "${WORKDIR}/git"
 
