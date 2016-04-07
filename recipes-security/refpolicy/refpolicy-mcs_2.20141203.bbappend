@@ -202,10 +202,16 @@ POL_TYPE = "xc_policy"
 #conf_file = "${THISDIR}/${PN}-${PV}/config"
 #POL_TYPE = "${@get_poltype(conf_file)}"
 
-do_compile_prepend() {
+do_srctree_copy() {
         cp -r ${WORKDIR}/policy ${S}/
+}
+ 
+do_modules_copy() {
         cat ${S}/policy/modules-upstream.conf ${S}/policy/modules-openxt.conf > ${S}/policy/modules.conf
 }
+
+addtask do_srctree_copy after do_unpack before do_compile
+addtask do_modules_copy after do_srctree_copy before do_compile
 
 do_install_append() {
         install -d ${D}/etc/selinux
