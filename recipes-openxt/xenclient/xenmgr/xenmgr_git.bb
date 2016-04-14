@@ -14,8 +14,6 @@ SRC_URI = "git://${OPENXT_GIT_MIRROR}/manager.git;protocol=${OPENXT_GIT_PROTOCOL
 SRC_URI += "file://xenmgr_dbus.conf \
             file://xenstore-init-extra \
             file://xenmgr.initscript \
-            file://service-ndvm \
-            file://service-uivm \
 "
 
 S = "${WORKDIR}/git/xenmgr"
@@ -60,8 +58,5 @@ do_install() {
     install -m 0755 -d ${D}/usr/share/xenmgr-1.0/templates
     install -m 0755 -d ${D}/usr/share/xenmgr-1.0/templates/default
     install -m 0644 ${S}/../templates/default/* ${D}/usr/share/xenmgr-1.0/templates/default/
-    
-    install -m 0644 ${WORKDIR}/service-ndvm ${D}/usr/share/xenmgr-1.0/templates/default/
-    install -m 0644 ${WORKDIR}/service-uivm ${D}/usr/share/xenmgr-1.0/templates/default/
 }
 
