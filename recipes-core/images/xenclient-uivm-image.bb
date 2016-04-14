@@ -74,7 +74,6 @@ IMAGE_INSTALL = "\
     locale-base-zh-cn \
     mobile-broadband-provider-info \
     shutdown-screen \
-    fusechat \
     ttf-dejavu-sans \
     ttf-dejavu-sans-mono \
     uim \
