@@ -172,6 +172,9 @@ SRC_URI += " \
     file://patches/dbusbouncer-interfaces.diff \
     file://patches/qemu1.4_wrapper_file_context.patch;striplevel=1 \
     file://patches/openxt_system_unconfined_readonly_neverallow_fixes.patch;patch=1 \
+    file://patches/upstream-add-binder-security-class.patch;patch=1 \
+    file://patches/upstream-update-netlink-classes.patch;patch=1 \
+    file://patches/upstream-contrib-networkmanager.patch;patch=1 \
     "
     
 def get_poltype(f):
