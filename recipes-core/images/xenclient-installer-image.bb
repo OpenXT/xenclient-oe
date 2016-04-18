@@ -119,6 +119,7 @@ do_post_rootfs_items() {
 	cp -f ${IMAGE_ROOTFS}/boot/Xeon-E7-8800-4800-2800-SINIT-v1.1.bin ${DEPLOY_DIR_IMAGE}/xeone7.acm
 	cp -f ${IMAGE_ROOTFS}/boot/3rd_gen_i5_i7_SINIT_67.BIN ${DEPLOY_DIR_IMAGE}/ivb_snb.acm
 	cp -f ${IMAGE_ROOTFS}/boot/5th_gen_i5_i7_SINIT_79.BIN ${DEPLOY_DIR_IMAGE}/bdw.acm
+	cp -f ${IMAGE_ROOTFS}/boot/6th_gen_i5_i7_SINIT_71.BIN ${DEPLOY_DIR_IMAGE}/skl.acm
 }
 
 addtask post_rootfs_items after do_rootfs before do_build

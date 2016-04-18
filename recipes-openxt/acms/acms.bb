@@ -18,6 +18,8 @@ SRC_URI[hsw.md5sum] = "e1fbdd2b8c255d3ded6f33d14e30d498"
 SRC_URI[hsw.sha256sum] = "63ad2d0b8fdb4422e0f751c23472a0e9bfbc3c643959e21249c66336943b910b"
 SRC_URI[bdw.md5sum] = "f40771addcb12c82b44c2ad53dbbe994"
 SRC_URI[bdw.sha256sum] = "3057efadd6bcf9ddf192c6aa027cc28e07ae6997a5c0037ef1fa09e8938893f0"
+SRC_URI[skl.md5sum] = "b07b5fb355815655be14c84df84a69a5"
+SRC_URI[skl.sha256sum] = "9f7b17dfb87719dc7c789d7e319071a0fbcca5b547bfd8b2aa3bf253760e23c6"
 
 PR="r3"
 LICENSE = "Proprietary"
@@ -30,6 +32,7 @@ LIC_FILES_CHKSUM = "file://GM45_GS45_PM45-SINIT_51/license.txt;md5=60d123634e0b9
                     file://3rd_gen_i5_i7-SINIT_67/license.txt;md5=a879c484244808a2202d65166a2f3f72 \
                     file://4th_gen_i5_i7-SINIT_75/license.txt;md5=a879c484244808a2202d65166a2f3f72 \
                     file://5th_gen_i5_i7-SINIT_79/license.txt;md5=68248a22232ba4fd23010e9c65209406 \
+                    file://6th_gen_i5_i7-SINIT_71/license.txt;md5=1d626a5a455fd0bff690b866040198c2 \
 "
 
 SRC_URI = "${OPENXT_MIRROR}/GM45_GS45_PM45-SINIT_51.zip;name=gm45 \
@@ -42,6 +45,7 @@ SRC_URI = "${OPENXT_MIRROR}/GM45_GS45_PM45-SINIT_51.zip;name=gm45 \
            ${OPENXT_MIRROR}/3rd-gen-i5-i7-sinit-67.zip;name=ivb_snb \
            ${OPENXT_MIRROR}/4th-gen-i5-i7-sinit-75.zip;name=hsw \
            ${OPENXT_MIRROR}/5th_gen_i5_i7-SINIT_79.zip;name=bdw \
+           ${OPENXT_MIRROR}/6th_gen_i5_i7-SINIT_71.zip;name=skl \
 "
 
 FILES_${PN} = "/boot"
