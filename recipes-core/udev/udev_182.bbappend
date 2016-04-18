@@ -37,10 +37,3 @@ do_install_append () {
         install -d ${D}/etc/udev/rules.d
         install ${WORKDIR}/05-db.rules ${D}/etc/udev/rules.d
 }
-
-# HACK: to work-around that we need a patch for linux-4.4 kernel distro
-# and not for the older ones.
-python () {
-    if bb.utils.contains ('DISTRO', 'openxt-linux-4.4', True, False, d):
-        d.appendVar ('SRC_URI', 'file://linux-4.4-headers-changes.patch;patch=1')
-}
