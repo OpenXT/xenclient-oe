@@ -1,6 +1,7 @@
 #! /bin/sh
 #
 # Copyright (c) 2014 Citrix Systems, Inc.
+# Copyright (c) 2016 Daniel P. Smith, Apertus Solutions, LLC
 # 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -22,46 +23,28 @@
 #
 
 . /etc/init.d/functions
+. /usr/lib/openxt/key-functions
 
 CONFIG_LV=xenclient-config
 STORAGE_LV=xenclient-storage
 STORAGE_DEV=/dev/mapper/${STORAGE_LV}
 STORAGE_MNT=/storage
-CONFIG_UNLOCK=0
-MEASURED_BOOT=1
+
+SYS_TPM_DIR="/boot/system/tpm"
+
+# Trousers persistent storage
+PS_FILE_SRC=/usr/share/trousers/system.data.auth
+PS_DIR=${SYS_TPM_DIR}
+PS_FILE=${PS_DIR}/system.data
+TSS_USER="tss"
+
 BACK_TITLE="OpenXT Measured Launch Security"
 
-if [ -e /sys/class/misc/tpm0 ]; then
-    PCR_DEV="/sys/class/misc/tpm0/device/pcrs"
-else
-    PCR_DEV="/sys/class/tpm/tpm0/device/pcrs"
-fi
-
 PCRS_GOOD="/config/good.pcrs"
-PCRS_BAD="${STORAGE_MNT}/bad.pcrs"
+PCRS_BAD="${SYS_TPM_DIR}/bad.pcrs"
 
 export PATH=/usr/bin:/bin:/usr/sbin:/sbin
 export TERM=linux
-
-! [ -e /dev/mapper/config ] || exec /sbin/init
-
-[ -e /proc/mounts ] || mount -t proc proc /proc
-! grep -q sysfs /proc/filesystems ||
-  [ -e /sys/kernel ] ||
-    mount sysfs /sys -t sysfs
-
-grep -q "^none /dev devtmpfs" /proc/mounts ||
-  mount -t devtmpfs none /dev || {
-    echo "FATAL: Failed to mount /dev."
-    exit 1
-}
-
-[ -e /dev/null ] || mknod -m 0666 /dev/null c 1 3
-[ -e /dev/zero ] || mknod -m 0666 /dev/zero c 1 5
-[ -e /dev/urandom ] || mknod -m 666 /dev/urandom c 1 9
-[ -e /dev/console ] || mknod -m 0600 /dev/console c 5 1
-[ -e /dev/tty1 ] || mknod -m 600 /dev/tty1 c 4 1
-[ -e /dev/mem ] || mknod -m 640 /dev/mem c 1 1
 
 read_args() {
     [ -z "$CMDLINE" ] && CMDLINE=`cat /proc/cmdline`
@@ -75,7 +58,6 @@ read_args() {
         esac
     done
 }
-read_args
 
 # break to shell
 #   will be on on terminal if executed after load_modules, serial otherwise
@@ -112,7 +94,6 @@ dev_setup()
         rm -rf /dev/etc-lvm
     }
 }
-dev_setup
 
 is_launch_measured()
 {
@@ -122,48 +103,196 @@ is_launch_measured()
         return 1
 }
 
-recovery_password()
+poweroff()
 {
-        local tries=1
+    exec 0<&-
+    exec 1>&-
+    exec 2>&-
 
-        MEASURED_BOOT=0
-        while [ "${tries}" -le 3 ] ; do
+    if [ "$1" == "-r" ]; then
+        exec /sbin/reboot -f
+    else
+        exec /sbin/poweroff -f
+    fi
+}
 
-                # Redirection magic because our bash doesn't support |&
-                # redirection of stderr to the pipe without touching stdout
-                maybe_break "recovery-password"
-                dialog --stdout --colors --no-cancel --insecure \
---backtitle "${BACK_TITLE}" \
---passwordbox "
-     Please contact your system administrator
-     or enter the \Zbadministrative passphrase\ZB now
-     to authorize these changes.
+recovery()
+{
+    dialog --colors --backtitle "${BACK_TITLE}" --defaultno \
+        --yes-label "Continue" --no-label "Shutdown" --yesno "
+          \ZbSECURITY WARNING: TXT measured boot FAILED\ZB
 
-     This is ${tries} of 3 passphrase attempts allowed.
-                        " 13 60 | \
-                                openssl rsautl -decrypt \
-                                        -inkey /boot/system/config/recovery-private-key.conf \
-                                        -in /boot/system/config/recovery-disk-key.ssl \
-                                        -passin stdin 2>/dev/null | cryptsetup -q -d - luksOpen \
-                                        "/dev/mapper/${CONFIG_LV}" config >/dev/null 2>&1 \
-                               && \
-                               {
-                                   CONFIG_UNLOCK=1 && break
-                               }
-                tries=$((tries+1))
-        done
-        if [ "${tries}" -gt 3 ] ; then
-                dialog --stdout --colors \
-                       --backtitle "${BACK_TITLE}" \
-                       --infobox "
-                 \ZbERROR: Incorrect passphrase\ZB
+    \ZbThis could be because this system has been tampered with!\ZB
 
-The maximum number of passphrase attempts has been exceeded.
+    This may also occur if there is a BIOS incompatibility - please
+    see the documentation for how to provide a status-report.
 
-The system will now shutdown.
-                    " 0 0
-                poweroff -f 2>/dev/null
+    If you trust that this system has not been compromised, you may
+    enter the recovery passphrase to continue." 0 0
+
+    [ $? -ne 0 ] && poweroff
+
+    maybe_break "recovery-password"
+
+    recovery_unlock "/dev/mapper/${CONFIG_LV}" config && {
+        mount /dev/mapper/config /config
+        # To flag for rehash after recovery password is legacy approach
+        # and is not the best approach. The concept of a recovery shell
+        # needs to be added and then this can be removed.
+        touch /config/rehash-vms
+        return 0
+    }
+
+    dialog --stdout --colors --backtitle "${BACK_TITLE}" --infobox "
+                \ZbERROR: Incorrect passphrase\ZB
+
+    The maximum number of passphrase attempts has been exceeded.
+
+    The system will now shutdown.
+    " 0 0
+
+    poweroff
+    exit 1
+}
+
+fail_first_seal()
+{
+    dialog --stdout --colors --backtitle "${BACK_TITLE}" --infobox "
+                \ZbERROR: Initial seal failed\ZB
+
+    An error occured with ${1} that inhibited the initial seal.
+
+    The system will now shutdown.
+    " 0 0
+
+    poweroff
+    exit 1
+}
+
+seal()
+{
+    local tss_file=${1}
+
+    maybe_break "seal"
+    dialog --colors --backtitle "${BACK_TITLE}" --mixedgauge \
+        "  Sealing..." 0 0 20
+
+    local sealout=$(tpm_sealdata_sa -i /config/keys/config.key \
+        -o ${tss_file} -z $(cat /config/config.pcrs) 2>&1)
+    local sealerr=$?
+
+    if [ $sealerr -eq 0 ]; then
+        dialog --colors --backtitle "${BACK_TITLE}" --mixedgauge \
+            "  Sealing: Done" 0 0 100
+
+        # store PCR hints for recovery
+        #  do PCR quote
+        if [ "${PCR_DEV}" ]; then
+        [ -f "${PCRS_BAD}" ] && rm "${PCRS_BAD}"
+        cat "${PCR_DEV}/device/pcrs" > "${PCRS_GOOD}"
         fi
+
+        poweroff -r
+        exit 1
+    else
+        dialog --colors --backtitle "${BACK_TITLE}" --msgbox \
+            "Sealing Failed\n  Error code : $sealerr\n  Output : $sealout" 0 0
+        return 1
+    fi
+}
+
+reseal()
+{
+    dialog --colors  --backtitle "${BACK_TITLE}" --defaultno \
+        --yes-label "Reseal & Reboot" --no-label "Continue" --yesno "
+           \ZbReseal device?\ZB
+
+    Would you like to reseal the device
+    or continue without resealing?" 10 44
+
+    [ $? -eq 0 ] && seal "${1}"
+}
+
+# Unlock the config partition
+#    0 - successful
+#    1 - recovered for debug
+#    2 - recovered ml failed seal
+unlock_config()
+{
+    local lv_path="/dev/mapper/${CONFIG_LV}"
+    local lv_name="config"
+    local tss_path="${SYS_TPM_DIR}/config.tss"
+    local measured_flag="/config/tpm/measured-boot"
+
+    local sig=$(dd if="${lv_path}" bs=4 count=1 2>/dev/null)
+    case "$sig" in
+    LUKS)
+        if [ -e /boot/system/tpm/enabled ]; then
+            [ "$measured" != 0 ] && {
+                maybe_break "txt-fail"
+                recovery
+                [ -f ${measured_flag} ] && rm -f ${measured_flag}
+                return 1
+            }
+
+            # This will seal/reboot or fail/halt
+            if [ -e ${SYS_TPM_DIR}/setup ]; then
+                # create a small tmpfs to use for sealing, then remove
+                mount -t tmpfs -o defaults,size=10M tmpfs /tmp
+                platform_unlock "${lv_path}" "${lv_name}" || \
+                    fail_first_seal "unlocking"
+                clear_platform_key "$(gen_platform_key)" "${lv_path}" || \
+                    fail_first_seal "clearing the platform key"
+
+                mount /dev/mapper/config /config
+                rm ${SYS_TPM_DIR}/setup
+                seal ${tss_path} || fail_first_seal "sealing"
+
+                # Should not get here, but in case clean up mount and return
+                # failure.
+                umount /tmp
+                return 1
+            fi
+
+            encrypted_unlock "${lv_path}" "${lv_name}" "${tss_path}" && {
+                mount /dev/mapper/config /config
+                mkdir -p $(dirname ${measured_flag})
+                touch ${measured_flag}
+                return 0
+            }
+
+            maybe_break "measure-fail"
+
+            # store PCR hints for recovery
+            #  do PCR quote
+            [ -d "${PCR_DEV}" ] && cat "${PCR_DEV}/device/pcrs" > "${PCRS_BAD}"
+
+            recovery
+            [ -f ${measured_flag} ] && rm -f ${measured_flag}
+            reseal "${tss_path}"
+
+            return 2
+        else
+            platform_unlock "${lv_path}" "${lv_name}" || {
+                recovery
+                [ -f ${measured_flag} ] && rm -f ${measured_flag}
+                return 1
+            }
+            mount /dev/mapper/config /config
+            [ -f ${measured_flag} ] && rm -f ${measured_flag}
+            return 0
+        fi
+    ;;
+    *)
+        # We want to do this (for some sort of ref counting)
+        # but the lvm/dm versions used don't allow this (anymore).
+        # secs=$(dmsetup table "${CONFIG_LV}" | cut -f2 -d\ )
+        # echo 0 ${secs} linear "/dev/mapper/${CONFIG_LV}" 0 | dmsetup create config
+        # Instead make a symlink:
+        ln -fs xenclient-config /dev/mapper/config
+        return 0
+    ;;
+    esac
 }
 
 load_modules()
@@ -183,8 +312,8 @@ load_modules()
     # End of hacks
 
     exec 0<&-
-    exec 1<&-
-    exec 2<&-
+    exec 1>&-
+    exec 2>&-
 
     exec 0< /dev/tty1
     exec 1> /dev/tty1
@@ -203,6 +332,34 @@ unload_modules()
     rmmod fbcon >/dev/null 2>&1
 }
 
+#
+# Main
+#
+! [ -e /dev/mapper/config ] || exec /sbin/init
+
+[ -e /proc/mounts ] || mount -t proc proc /proc
+! grep -q sysfs /proc/filesystems ||
+  [ -e /sys/kernel ] ||
+    mount sysfs /sys -t sysfs
+
+grep -q "^none /dev devtmpfs" /proc/mounts ||
+  mount -t devtmpfs none /dev || {
+    echo "FATAL: Failed to mount /dev."
+    exit 1
+}
+
+[ -e /dev/null ] || mknod -m 0666 /dev/null c 1 3
+[ -e /dev/zero ] || mknod -m 0666 /dev/zero c 1 5
+[ -e /dev/urandom ] || mknod -m 666 /dev/urandom c 1 9
+[ -e /dev/console ] || mknod -m 0600 /dev/console c 5 1
+[ -e /dev/tty1 ] || mknod -m 600 /dev/tty1 c 4 1
+[ -e /dev/mem ] || mknod -m 640 /dev/mem c 1 1
+
+PCR_DEV=$(find /sys/class -name tpm0)
+
+read_args
+dev_setup
+
 mount "${STORAGE_DEV}" "${STORAGE_MNT}"
 restore_firstboot -r ${STORAGE_MNT}
 
@@ -210,170 +367,22 @@ is_launch_measured
 measured=$?
 
 # Copy trousers data file to /boot/system.
-PS_FILE_SRC=/usr/share/trousers/system.data.auth
-PS_DIR=/boot/system/tpm
-PS_FILE=${PS_DIR}/system.data
-TSS_USER="tss"
 if [ ! -s ${PS_FILE} ]; then
     install -m 700 -o ${TSS_USER} -g ${TSS_USER} -d ${PS_DIR}
     restore ${PS_DIR}
     install -m 600 -o ${TSS_USER} -g ${TSS_USER} ${PS_FILE_SRC} ${PS_FILE}
 fi
 
-sig=$(dd if="/dev/mapper/${CONFIG_LV}" bs=4 count=1 2>/dev/null)
-case "$sig" in
-LUKS)
-       keycmd="get-config-key"
-       slot=0
+load_modules
 
-       [ -e /boot/system/tpm/enabled ] && {
-	    keycmd="tpm_unsealdata_sa -i /boot/system/tpm/config.tss"
-	    slot=1
+# Attempt to unlock config, ignore return code but in future may be used
+# for setting up a recovery shell
+unlock_config
 
-            [ -e /boot/system/tpm/setup ] && {
-                MEASURED_BOOT=0
-                # use smbios key and create tss on first tpm enabled boot
-                keycmd="get-config-key"
-                slot=0
-                rm /boot/system/tpm/setup
-                [ "${measured}" -eq 0 ] && tpm_update_tss=yes
-            }
-
-            if [ "$measured" != 0 ] ; then
-                {
-                    # TBOOT
-                    # Measured boot failed
-                    MEASURED_BOOT=0
-
-                    load_modules
-                    maybe_break "txt-fail"
-                    dialog --colors \
---backtitle "${BACK_TITLE}" \
---defaultno --yes-label "Continue" --no-label "Shutdown" --yesno \
-                        "
-   \ZbSECURITY WARNING: TXT measured boot FAILED\ZB
-
-\ZbThis could be because this system has been tampered with!\ZB
-
-This may also occur if there is a BIOS incompatibility - please
-see the documentation for how to provide a status-report.
-
-If you trust that this system has not been compromised, you may
-enter the recovery passphrase to continue.
-                        " 0 0
-                    OPT=$?
-                    [ "$OPT" != 0 ] && poweroff -f 2> /dev/null
-                    recovery_password
-                }
-            fi
-        }
-        eval $keycmd | cryptsetup -q -d - -S $slot luksOpen \
-            "/dev/mapper/${CONFIG_LV}" config >/dev/null 2>&1 || \
-            {
-                if [ "${measured}" -eq 0 ] ; then
-
-                    # TBOOT
-                    # measured mode but the config has changed
-                    MEASURED_BOOT=0
-
-                    load_modules
-                    maybe_break "measure-fail"
-                    dialog --colors \
---backtitle "${BACK_TITLE}" \
---defaultno --yes-label "Continue" --no-label "Shutdown" --yesno \
-                        "
-  \ZbSECURITY WARNING: Unauthorized system modification detected!\ZB
-
-  If you trust that this system has not been compromised
-  you may enter the \Zbadministrative passphrase\ZB to continue.
-                        " 0 0
-                    OPT=$?
-                    # store PCR hints for recovery
-                    #  do PCR quote
-                    [ -f "${PCR_DEV}" ] && cat "${PCR_DEV}" > "${PCRS_BAD}"
-                    [ "$OPT" != 0 ] && poweroff -f 2>/dev/null
-                    [ "${CONFIG_UNLOCK}" -eq 0 ] && recovery_password
-
-                    # Offer the possibility to reseal
-                    dialog --colors \
---backtitle "${BACK_TITLE}" \
---defaultno --yes-label "Reseal & Reboot" --no-label "Continue" --yesno "
-            \ZbReseal device?\ZB
-
-  Would you like to reseal the device
-  or continue without resealing?
-                    " 10 44
-                    OPT=$?
-                    [ "$OPT" == 0 ] && tpm_update_tss=yes
-                fi
-            }
-        ;;
-*)
-	# We want to do this (for some sort of ref counting)
-	# but the lvm/dm versions used don't allow this (anymore).
-	# secs=$(dmsetup table "${CONFIG_LV}" | cut -f2 -d\ )
-	# echo 0 ${secs} linear "/dev/mapper/${CONFIG_LV}" 0 | dmsetup create config
-	# Instead make a symlink:
-	ln -fs xenclient-config /dev/mapper/config
-	;;
-esac
-
-mount /dev/mapper/config /config
 restore_firstboot -r /config
-if [ "${CONFIG_UNLOCK}" -eq 1 ]; then
-    touch /config/rehash-vms
-fi
 
-[ -n "$tpm_update_tss" ] && \
-{
-        MEASURED_BOOT=0
-        load_modules
-        maybe_break "reseal"
-        dialog --colors \
-               --backtitle "${BACK_TITLE}" \
-               --mixedgauge "  Resealing..." 0 0 20
-        SEALOUT=`tpm_sealdata_sa -i /config/keys/config.key \
-                  -o /boot/system/tpm/config.tss -z $(cat /config/config.pcrs) 2>&1`
-        SEALERR=$?
-        if [ $SEALERR -eq 0 ]; then
-                dialog --colors \
-                       --backtitle "${BACK_TITLE}" \
---mixedgauge "  Resealing: Done" 0 0 100
-                # store PCR hints for recovery
-                #  do PCR quote
-                if [ "${PCR_DEV}" ]; then
-                    [ -f "${PCRS_BAD}" ] && rm "${PCRS_BAD}"
-                    cat "${PCR_DEV}" > "${PCRS_GOOD}"
-                fi
-
-		reboot -f 2> /dev/null
-        else
-                dialog --colors \
-                       --backtitle "${BACK_TITLE}" \
---msgbox "  Resealing Failed
-   Error code : $SEALERR
-   Output : $SEALOUT" 0 0
-        fi
-}
-
-
-[ -e /boot/system/tpm/clear-config-key ] && {
-    # disable smbios key using tpm key to confirm it works
-    tpm_unsealdata_sa -i /boot/system/tpm/config.tss | cryptsetup -q -d - \
-      -S 1 luksKillSlot /dev/mapper/xenclient-config 0 &&
-    rm /boot/system/tpm/clear-config-key
-}
-
-if [ $MEASURED_BOOT -eq 1 ]; then
-	mkdir -p /config/tpm
-	touch /config/tpm/measured-boot
-else
-	rm -f /config/tpm/measured-boot
-fi
-
-dd if=/dev/urandom bs=20 count=1 2>/dev/null | TCSD_LOG_OFF=yes tpm_extendpcr_sa -p 15
+echo -n "MEASUREDLAUNCHCLOSED" | TCSD_LOG_OFF=yes tpm_extendpcr_sa -p 15
 
 unload_modules
 
 exec /sbin/init
-
