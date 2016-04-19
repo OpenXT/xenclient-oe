@@ -11,6 +11,7 @@ PR = "r1"
 S="${WORKDIR}/tboot-1.8.3"
 
 SRC_URI = "http://downloads.sourceforge.net/tboot/tboot-1.8.3.tar.gz \
+           file://0001-Add-a-PCR-calculator-to-predict-measurements.patch \
            file://tboot-build-fixes.patch \
            file://tboot-adjust-grub2-modules.patch \
            file://tboot-fix-skip-cmdline-arg-CVE-2014-5118.patch \
@@ -25,8 +26,10 @@ ASNEEDED = ""
 
 do_compile_append() {
 	oe_runmake -C ${S}/lcptools-v2 CFLAGS+="-std=c99"
+	oe_runmake -C ${S}/pcr-calc CFLAGS+="-std=c99"
 }
 
 do_install_append() {
 	oe_runmake -C ${S}/lcptools-v2 install DISTDIR=${D}
+	oe_runmake -C ${S}/pcr-calc install DISTDIR=${D}
 }
