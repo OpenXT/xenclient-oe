@@ -25,13 +25,6 @@ else
     . ${TPM_FUNCS}
 fi
 
-RECOVERY_PUBLIC_KEY=/boot/system/config/recovery-public-key.conf
-TPM_OWNER_PASSWD_SSL=/boot/system/config/tpm-owner-passwd.ssl
-if [ ! -r "${RECOVERY_PUBLIC_KEY}" ]; then
-    echo "No recovery key set."
-    echo "Cannot configure Measured Launch."
-    exit 1
-fi
 
 SR_MSG="Please collect a status report and report this bug."
 
@@ -131,45 +124,28 @@ mle_success || {
     exit 1
 }
 
-echo "Taking ownership of the TPM.  Move mouse to increase entropy."
-tpm_configure_gen_passwd "${RECOVERY_PUBLIC_KEY}" "${TPM_OWNER_PASSWD_SSL}"  "${TPM_EK}"
+echo "Taking ownership of the TPM."
+setup_keystore
+own_key=$(get_own_key)
+plat_key=$(get_platform_key)
+
+tpm_take_ownership ${own_key} ${TPM_EK}
 if [ $? -ne 0 ]; then
     echo "Attempt to configure TPM failed."
     echo "${SR_MSG}"
     [ -f "${TPM_OWNER_PASSWD_SSL}" ] && rm "${TPM_OWNER_PASSWD_SSL}"
+    close_keystore
     exit 1
 fi
 
-[ -e /config/keys/config.key ] || {
-  cryptsetup luksDump /dev/xenclient/config | {
-    ! grep -q '^Key Slot 7: DISABLED$' || {
-      echo System recovery password was not set during install.
-      while true
-      do
-        echo -n Enter new system recovery password:\ 
-        read -s pass1 </dev/tty
-        echo
-        echo -n Verify system recovery password:\ 
-        read -s pass2 </dev/tty
-        echo
-        [ "$pass1" != "$pass2" ] || break
-        echo Entered passwords do not match!
-      done
-      echo "$pass1" >/mnt/secure/system-password
-      get-config-key | cryptsetup -q -d - -S 7 \
-        -i 100 luksAddKey /dev/xenclient/config \
-          /mnt/secure/system-password >/dev/null 2>&1 || {
-          echo TPM setup couldn\'t set system recovery password
-        }
-      rm -f /mnt/secure/system-password
-    }
-    echo "Generating cryptographic key.  Move mouse to increase entropy."
-    configure_measured_launch || {
-        echo TPM setup failed -- please retry...
-        exit 1
-    }
-  }
-}
+configure_measured_launch "" ${plat_key} /dev/xenclient/config
+if [ $? -ne 0 ]; then
+    echo TPM setup failed -- please retry...
+    close_keystore
+    exit 1
+fi
+
+close_keystore
 
 [ -x /sbin/restorecon ] && /sbin/restorecon -r /boot/system/tpm
 
