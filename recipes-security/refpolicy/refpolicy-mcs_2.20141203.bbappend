@@ -42,9 +42,9 @@ SRC_URI += " \
     file://policy/modules/services/blktap.fc \
     file://policy/modules/services/blktap.if \
     file://policy/modules/services/blktap.te \
-    file://policy/modules/services/ctxusb.fc \
-    file://policy/modules/services/ctxusb.if \
-    file://policy/modules/services/ctxusb.te \
+    file://policy/modules/services/vusb.fc \
+    file://policy/modules/services/vusb.if \
+    file://policy/modules/services/vusb.te \
     file://policy/modules/services/dbd.fc \
     file://policy/modules/services/dbd.if \
     file://policy/modules/services/dbd.te \
@@ -168,7 +168,7 @@ SRC_URI += " \
     file://patches/xc-installer-interfaces.diff \
     file://patches/xec-interfaces.diff \
     file://patches/xsmutils-interfaces.diff \
-    file://patches/ctxusb-interfaces.diff \
+    file://patches/vusb-interfaces.diff \
     file://patches/dbusbouncer-interfaces.diff \
     file://patches/qemu1.4_wrapper_file_context.patch;striplevel=1 \
     file://patches/openxt_system_unconfined_readonly_neverallow_fixes.patch;patch=1 \
