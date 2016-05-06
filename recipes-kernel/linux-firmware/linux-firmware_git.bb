@@ -31,7 +31,7 @@ do_install() {
 
 	# Broadcom NetXtreme II firmware
 	install -d ${D}/lib/firmware/bnx2/
-	cp bnx2/bnx2-mips-09-6.2.1b.fw ${D}/lib/firmware/bnx2
+	cp bnx2/*.fw ${D}/lib/firmware/bnx2
 }
 
 FILES_${PN} = "/lib/firmware/"
