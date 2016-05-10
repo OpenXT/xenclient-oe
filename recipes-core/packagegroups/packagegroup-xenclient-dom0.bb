@@ -91,7 +91,6 @@ RDEPENDS_${PN} = " \
     apptool \
     dmidecode \
     netcat \
-    audio-daemon \
     linux-firmware-iwlwifi-135-6 \
     linux-firmware-iwlwifi-3160-7 \
     linux-firmware-iwlwifi-3160-8 \
