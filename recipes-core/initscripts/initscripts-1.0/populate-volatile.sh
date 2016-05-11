@@ -19,10 +19,6 @@ DIRNAME=`dirname $0`
 ROOT_DIR=`echo $DIRNAME | sed -ne 's:/etc/.*::p'`
 
 [ -e ${ROOT_DIR}/etc/default/rcS ] && . ${ROOT_DIR}/etc/default/rcS
-# When running populate-volatile.sh at rootfs time, disable cache.
-[ -n "$ROOT_DIR" ] && VOLATILE_ENABLE_CACHE=no
-# If rootfs is read-only, disable cache.
-[ "$ROOTFS_READ_ONLY" = "yes" ] && VOLATILE_ENABLE_CACHE=no
 
 CFGDIR="${ROOT_DIR}/etc/default/volatiles"
 TMPROOT="${ROOT_DIR}/tmp"
@@ -37,8 +33,6 @@ create_file() {
 	[ -x ${RESTORECON} ] && ${RESTORECON} \"$1\" >/dev/null 2>/dev/null;
 	chown ${TUSER}.${TGROUP} $1 || echo \"Failed to set owner -${TUSER}- for -$1-.\" >/dev/tty0 2>&1;
 	chmod ${TMODE} $1 || echo \"Failed to set mode -${TMODE}- for -$1-.\" >/dev/tty0 2>&1 "
-
-	test "$VOLATILE_ENABLE_CACHE" = yes && echo "$EXEC" >> /etc/volatile.cache.build
 
 	[ -e "$1" ] && {
 		[ "${VERBOSE}" != "no" ] && echo "Target already exists. Skipping."
@@ -62,7 +56,6 @@ mk_dir() {
 	chown ${TUSER}.${TGROUP} $1 || echo \"Failed to set owner -${TUSER}- for -$1-.\" >/dev/tty0 2>&1;
 	chmod ${TMODE} $1 || echo \"Failed to set mode -${TMODE}- for -$1-.\" >/dev/tty0 2>&1 "
 
-	test "$VOLATILE_ENABLE_CACHE" = yes && echo "$EXEC" >> /etc/volatile.cache.build
 	[ -e "$1" ] && {
 		[ "${VERBOSE}" != "no" ] && echo "Target already exists. Skipping."
 	} || {
@@ -89,8 +82,6 @@ link_file() {
 		ln -sf \"$1\" \"$2\";
 	fi
         [ -x ${RESTORECON} ] && ${RESTORECON} \"$2\" >/dev/null 2>/dev/null;"
-
-	test "$VOLATILE_ENABLE_CACHE" = yes && echo "	$EXEC" >> /etc/volatile.cache.build
 
 	if [ -z "$ROOT_DIR" ]; then
 		eval $EXEC &
@@ -211,17 +202,9 @@ do
 done
 exec 9>&-
 
-if test -e ${ROOT_DIR}/etc/volatile.cache -a "$VOLATILE_ENABLE_CACHE" = "yes" -a "x$1" != "xupdate" -a "x$clearcache" = "x0"
-then
-	sh ${ROOT_DIR}/etc/volatile.cache
-else
-	rm -f ${ROOT_DIR}/etc/volatile.cache ${ROOT_DIR}/etc/volatile.cache.build
-	for file in `ls -1 "${CFGDIR}" | sort`; do
-		apply_cfgfile "${CFGDIR}/${file}"
-	done
-
-	[ -e ${ROOT_DIR}/etc/volatile.cache.build ] && sync && mv ${ROOT_DIR}/etc/volatile.cache.build ${ROOT_DIR}/etc/volatile.cache
-fi
+for file in `ls -1 "${CFGDIR}" | sort`; do
+	apply_cfgfile "${CFGDIR}/${file}"
+done
 
 if [ -z "${ROOT_DIR}" ] && [ -f /etc/ld.so.cache ] && [ ! -f /var/run/ld.so.cache ]
 then
