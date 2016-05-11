@@ -15,10 +15,8 @@ RDEPENDS_${PN} = "\
     gcc \
     gdb \
     git \
-    icbinn-fuse \
     ltrace \
     make \
-    nfs-utils \
     powertop \
     quilt \
     screen \
