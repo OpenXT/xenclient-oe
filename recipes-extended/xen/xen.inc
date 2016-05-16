@@ -116,6 +116,11 @@ SRC_URI = "${XEN_SRC_URI};name=source \
     file://xsa-160-libxl-leak-of-pv-kernel-and-initrd-on-error.patch;patch=1 \
     file://xsa-165-information-leak-in-legacy-x86-FPU-XMM-initialization.patch;patch=1 \
     file://xsa-166-ioreq-handling-possibly-susceptible-to-multiple-read-issue.patch;patch=1 \
+    file://xsa-167-pv-superpage-functionality-missing-sanity-checks.patch;patch=1 \
+    file://xsa-168-intercept-issue-with-invlpg-on-non-canonical-address.patch;patch=1 \
+    file://xsa-169-unintentional-logging-upon-guest-changing-callback-method.patch;patch=1 \
+    file://xsa-170-guest-user-mode-may-crash-guest-with-non-canonical-rip.patch;patch=1 \
+    file://xsa-173-x86-shadow-pagetables-address-width-overflow.patch;patch=1 \
 "
 
 SRC_URI[source.md5sum] := "${XEN_SRC_MD5SUM}"

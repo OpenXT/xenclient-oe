@@ -60,6 +60,7 @@ SRC_URI += "file://0001-compile-time-stubdom-flag.patch \
             file://xsa-140-qemu-leak-of-uninitialized-heap-memory-in-rtl8139-device-model.patch;patch=1 \
             file://xsa-155-paravirtualized-drivers-incautious-about-shared-memory-contents.patch;patch=1 \
             file://xsa-162-heap-buffer-overflow-vulnerability-in-pcnet-emulator.patch;patch=1 \
+            file://xsa-179-banked-access-to-vga-memory-uses-inconsistent-bounds-checks.patch;patch=1 \
             "
 
 SRC_URI[md5sum] = "78f13b774814b6b7ebcaf4f9b9204318"
