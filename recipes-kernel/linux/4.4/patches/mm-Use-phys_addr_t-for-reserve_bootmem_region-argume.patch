@@ -1,0 +1,52 @@
+From 1588a8b3983f63f8e690b91e99fe631902e38805 Mon Sep 17 00:00:00 2001
+From: Stefan Bader <stefan.bader@canonical.com>
+Date: Tue, 10 May 2016 19:05:16 +0200
+Subject: [PATCH] mm: Use phys_addr_t for reserve_bootmem_region arguments
+
+Since 92923ca the reserved bit is set on reserved memblock regions.
+However start and end address are passed as unsigned long. This is
+only 32bit on i386, so it can end up marking the wrong pages reserved
+for ranges at 4GB and above.
+
+This was observed on a 32bit Xen dom0 which was booted with initial
+memory set to a value below 4G but allowing to balloon in memory
+(dom0_mem=1024M for example). This would define a reserved bootmem
+region for the additional memory (for example on a 8GB system there was
+a reverved region covering the 4GB-8GB range). But since the addresses
+were passed on as unsigned long, this was actually marking all pages
+from 0 to 4GB as reserved.
+
+Fixes: 92923ca "mm: meminit: only set page reserved in the memblock region"
+Signed-off-by: Stefan Bader <stefan.bader@canonical.com>
+Cc: <stable@kernel.org> # 4.2+
+---
+ include/linux/mm.h | 2 +-
+ mm/page_alloc.c    | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+Index: linux-4.4.10/include/linux/mm.h
+===================================================================
+--- linux-4.4.10.orig/include/linux/mm.h
++++ linux-4.4.10/include/linux/mm.h
+@@ -1696,7 +1696,7 @@ extern void free_highmem_page(struct pag
+ extern void adjust_managed_page_count(struct page *page, long count);
+ extern void mem_init_print_info(const char *str);
+ 
+-extern void reserve_bootmem_region(unsigned long start, unsigned long end);
++extern void reserve_bootmem_region(phys_addr_t start, phys_addr_t end);
+ 
+ /* Free the reserved page into the buddy system, so it gets managed. */
+ static inline void __free_reserved_page(struct page *page)
+Index: linux-4.4.10/mm/page_alloc.c
+===================================================================
+--- linux-4.4.10.orig/mm/page_alloc.c
++++ linux-4.4.10/mm/page_alloc.c
+@@ -951,7 +951,7 @@ static inline void init_reserved_page(un
+  * marks the pages PageReserved. The remaining valid pages are later
+  * sent to the buddy page allocator.
+  */
+-void __meminit reserve_bootmem_region(unsigned long start, unsigned long end)
++void __meminit reserve_bootmem_region(phys_addr_t start, phys_addr_t end)
+ {
+ 	unsigned long start_pfn = PFN_DOWN(start);
+ 	unsigned long end_pfn = PFN_UP(end);
