@@ -63,6 +63,7 @@ SRC_URI += "file://0001-compile-time-stubdom-flag.patch \
             file://vbe-bochs-dispi-return-correct-mem-size-with-qxl.patch;patch=1 \
             file://cve-2014-3615-vbe-rework-sanity-checks.patch;patch=1 \
             file://xsa-179-banked-access-to-vga-memory-uses-inconsistent-bounds-checks.patch;patch=1 \
+            file://vga-add-sr_vbe-register-set.patch;patch=1 \
             "
 
 SRC_URI[md5sum] = "78f13b774814b6b7ebcaf4f9b9204318"
