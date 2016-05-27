@@ -16,7 +16,6 @@ Patches: xsa179-qemuu-4.3-0001-vga-fix-banked-access-bounds-checking-CVE-2016-37
          xsa179-qemuu-4.3-0003-vga-factor-out-vga-register-setup.patch
          xsa179-qemuu-4.3-0004-vga-update-vga-register-setup-on-vbe-changes.patch
          xsa179-qemuu-4.3-0005-vga-make-sure-vga-register-setup-for-vbe-stays-intac.patch
-
 Qemu VGA module allows banked access to video memory using the window at
 0xa00000 and it supports different access modes with different address
 calculations.  But an attacker can easily change access modes after setting the
@@ -26,15 +25,10 @@ Qemu VGA module allows guest to edit certain registers in 'vbe' and 'vga'
 modes. ie. guest could set certain 'VGA' registers while in 'VBE' mode.  This
 is CVE-2016-3712.
 
-################################################################################
-PATCHES 
-################################################################################
-
-
 Index: qemu-1.4.0/hw/vga.c
 ===================================================================
---- qemu-1.4.0.orig/hw/vga.c	2016-05-10 15:56:36.753372298 +0200
-+++ qemu-1.4.0/hw/vga.c	2016-05-10 16:01:08.457308490 +0200
+--- qemu-1.4.0.orig/hw/vga.c	2016-05-27 18:25:02.364279319 +0200
++++ qemu-1.4.0/hw/vga.c	2016-05-27 18:25:33.550626367 +0200
 @@ -173,6 +173,13 @@
  static void vga_screen_dump(void *opaque, const char *filename, bool cswitch,
                              Error **errp);
@@ -86,8 +80,17 @@ Index: qemu-1.4.0/hw/vga.c
  
          switch(s->cr_index) {
          case VGA_CRTC_H_TOTAL:
-@@ -586,6 +598,49 @@
+@@ -598,7 +610,7 @@
+     uint16_t *r = s->vbe_regs;
+     uint32_t bits, linelength, maxy, offset;
+ 
+-    if (!(r[VBE_DISPI_INDEX_ENABLE] & VBE_DISPI_ENABLED)) {
++    if (!vbe_enabled(s)) {
+         /* vbe is turned off -- nothing to do */
+         return;
      }
+@@ -673,6 +685,49 @@
+     s->vbe_start_addr  = offset / 4;
  }
  
 +/* we initialize the VGA graphic mode */
@@ -136,8 +139,11 @@ Index: qemu-1.4.0/hw/vga.c
  static uint32_t vbe_ioport_read_index(void *opaque, uint32_t addr)
  {
      VGACommonState *s = opaque;
-@@ -697,20 +752,13 @@
-             }
+@@ -773,13 +828,10 @@
+         case VBE_DISPI_INDEX_Y_OFFSET:
+             s->vbe_regs[s->vbe_index] = val;
+             vbe_fixup_regs(s);
++            vbe_update_vgaregs(s);
              break;
          case VBE_DISPI_INDEX_BANK:
 -            if (s->vbe_regs[VBE_DISPI_INDEX_BPP] == 4) {
@@ -149,22 +155,19 @@ Index: qemu-1.4.0/hw/vga.c
              s->vbe_regs[s->vbe_index] = val;
              s->bank_offset = (val << 16);
              vga_update_memory_access(s);
-             break;
+@@ -787,53 +839,19 @@
          case VBE_DISPI_INDEX_ENABLE:
--            if ((val & VBE_DISPI_ENABLED) &&
--                !(s->vbe_regs[VBE_DISPI_INDEX_ENABLE] & VBE_DISPI_ENABLED)) {
+             if ((val & VBE_DISPI_ENABLED) &&
+                 !(s->vbe_regs[VBE_DISPI_INDEX_ENABLE] & VBE_DISPI_ENABLED)) {
 -                int h, shift_control;
--
-+            if ((val & VBE_DISPI_ENABLED) && !vbe_enabled(s)) {
-                 s->vbe_regs[VBE_DISPI_INDEX_VIRT_WIDTH] =
-                     s->vbe_regs[VBE_DISPI_INDEX_XRES];
-                 s->vbe_regs[VBE_DISPI_INDEX_VIRT_HEIGHT] =
-@@ -727,45 +775,13 @@
-                 }
-                 s->vbe_start_addr = 0;
  
+                 s->vbe_regs[VBE_DISPI_INDEX_VIRT_WIDTH] = 0;
+                 s->vbe_regs[VBE_DISPI_INDEX_X_OFFSET] = 0;
+                 s->vbe_regs[VBE_DISPI_INDEX_Y_OFFSET] = 0;
+                 s->vbe_regs[VBE_DISPI_INDEX_ENABLE] |= VBE_DISPI_ENABLED;
+                 vbe_fixup_regs(s);
 +                vbe_update_vgaregs(s);
-+
+ 
                  /* clear the screen (should be done in BIOS) */
                  if (!(val & VBE_DISPI_NOCLEARMEM)) {
                      memset(s->vram_ptr, 0,
@@ -207,15 +210,7 @@ Index: qemu-1.4.0/hw/vga.c
              } else {
                  /* XXX: the bios should do that */
                  s->bank_offset = 0;
-@@ -806,6 +822,7 @@
-                 else
-                     s->vbe_start_addr += x * ((s->vbe_regs[VBE_DISPI_INDEX_BPP] + 7) >> 3);
-                 s->vbe_start_addr >>= 2;
-+                vbe_update_vgaregs(s);
-             }
-             break;
-         default:
-@@ -856,13 +873,21 @@
+@@ -890,13 +908,21 @@
  
      if (s->sr[VGA_SEQ_MEMORY_MODE] & VGA_SR04_CHN_4M) {
          /* chain 4 mode : simplest access */
@@ -238,7 +233,7 @@ Index: qemu-1.4.0/hw/vga.c
          s->latch = ((uint32_t *)s->vram_ptr)[addr];
  
          if (!(s->gr[VGA_GFX_MODE] & 0x08)) {
-@@ -919,6 +944,7 @@
+@@ -953,6 +979,7 @@
          plane = addr & 3;
          mask = (1 << plane);
          if (s->sr[VGA_SEQ_PLANE_WRITE] & mask) {
@@ -246,7 +241,7 @@ Index: qemu-1.4.0/hw/vga.c
              s->vram_ptr[addr] = val;
  #ifdef DEBUG_VGA_MEM
              printf("vga: chain4: [0x" TARGET_FMT_plx "]\n", addr);
-@@ -932,6 +958,9 @@
+@@ -966,6 +993,9 @@
          mask = (1 << plane);
          if (s->sr[VGA_SEQ_PLANE_WRITE] & mask) {
              addr = ((addr & ~1) << 1) | plane;
@@ -256,7 +251,7 @@ Index: qemu-1.4.0/hw/vga.c
              s->vram_ptr[addr] = val;
  #ifdef DEBUG_VGA_MEM
              printf("vga: odd/even: [0x" TARGET_FMT_plx "]\n", addr);
-@@ -1005,6 +1034,9 @@
+@@ -1039,6 +1069,9 @@
          mask = s->sr[VGA_SEQ_PLANE_WRITE];
          s->plane_updated |= mask; /* only used to detect font change */
          write_mask = mask16[mask];
@@ -266,7 +261,7 @@ Index: qemu-1.4.0/hw/vga.c
          ((uint32_t *)s->vram_ptr)[addr] =
              (((uint32_t *)s->vram_ptr)[addr] & ~write_mask) |
              (val & write_mask);
-@@ -1168,7 +1200,7 @@
+@@ -1202,7 +1235,7 @@
  {
      uint32_t start_addr, line_offset, line_compare;
  
@@ -275,7 +270,7 @@ Index: qemu-1.4.0/hw/vga.c
          line_offset = s->vbe_line_offset;
          start_addr = s->vbe_start_addr;
          line_compare = 65535;
-@@ -1618,7 +1650,7 @@
+@@ -1652,7 +1685,7 @@
  {
      int ret;
  
@@ -284,7 +279,7 @@ Index: qemu-1.4.0/hw/vga.c
          ret = s->vbe_regs[VBE_DISPI_INDEX_BPP];
      } else {
          ret = 0;
-@@ -1630,7 +1662,7 @@
+@@ -1664,7 +1697,7 @@
  {
      int width, height;
  
