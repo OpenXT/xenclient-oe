@@ -47,6 +47,8 @@ IMAGE_INSTALL = "\
     linux-firmware-iwlwifi-7260-7 \
     linux-firmware-iwlwifi-7260-8 \
     linux-firmware-iwlwifi-7260-9 \
+    linux-firmware-iwlwifi-7260-12 \
+    linux-firmware-iwlwifi-7260-13 \
     linux-firmware-iwlwifi-7265-8 \
     linux-firmware-iwlwifi-7265-9 \
     linux-firmware-bnx2 \
