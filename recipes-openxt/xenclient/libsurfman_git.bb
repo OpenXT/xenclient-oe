@@ -10,7 +10,6 @@ SRC_URI = "git://${OPENXT_GIT_MIRROR}/surfman.git;protocol=${OPENXT_GIT_PROTOCOL
 
 S = "${WORKDIR}/git/libsurfman"
 
-EXTRA_OECONF += "--with-libxc=yes"
 EXTRA_OEMAKE += "LIBDIR=${STAGING_LIBDIR}"
 
 ASNEEDED = ""
