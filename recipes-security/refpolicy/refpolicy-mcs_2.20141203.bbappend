@@ -1,6 +1,6 @@
 FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}-${PV}:"
 
-PR .= ".1"
+PR .= ".2"
 
 SRC_URI += " \
     file://config \
