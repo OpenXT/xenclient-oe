@@ -2,7 +2,7 @@ SRC_URI[md5sum] = "ab675f5856a35f6aa0cd6ab057443ead"
 SRC_URI[sha256sum] = "4aa1036e9ec468aa7ab38095969d363941c815dd1ba6fabcd593d16baef1b859"
 DESCRIPTION = "Rsyslog logging daemon"
 DEPENDS = "zlib"
-LICENSE = "GPLv3&LGPLv3"
+LICENSE = "GPLv3 & LGPLv3"
 LIC_FILES_CHKSUM = "file://COPYING;md5=51d9635e646fb75e1b74c074f788e973  \
                     file://COPYING.LESSER;md5=cb7903f1e5c39ae838209e130dca270a"
 PACKAGE_ARCH = "${MACHINE_ARCH}"

@@ -2,7 +2,7 @@ require recipes-connectivity/openssh/openssh6.inc
 DEPENDS += "libselinux"
 RDEPENDS_${PN} += "libselinux"
 PR = "${INC_PR}.4"
-LISENCE = "BSD"
+LICENSE = "BSD"
 LIC_FILES_CHKSUM = "file://LICENCE;md5=e326045657e842541d3f35aada442507"
 
 SRC_URI = "ftp://ftp.openbsd.org/pub/OpenBSD/OpenSSH/portable/openssh-${PV}.tar.gz \
@@ -27,7 +27,9 @@ SRC_URI[sha256sum] = "d1c157f6c0852e90c191cc7c9018a583b51e3db4035489cb262639d337
 EXTRA_OECONF += "--with-selinux"
 
 FILES_${PN}-ssh += " /usr/bin/sshv4v /etc/ssh/sshd_config_v4v "
+RDEPENDS_${PN}-ssh += " bash"
 FILES_${PN}-scp += " /usr/bin/scpv4v "
+RDEPENDS_${PN}-scp += " bash"
 
 do_install_append() {
 	install -m 0755 -d ${D}/usr/bin
