@@ -51,8 +51,8 @@ PATCHES
 ################################################################################
 Index: qemu-1.4.0/hw/vga.c
 ===================================================================
---- qemu-1.4.0.orig/hw/vga.c	2016-06-02 22:52:33.653820366 +0200
-+++ qemu-1.4.0/hw/vga.c	2016-06-02 22:55:26.725265035 +0200
+--- qemu-1.4.0.orig/hw/vga.c	2016-06-02 23:09:52.689152199 +0200
++++ qemu-1.4.0/hw/vga.c	2016-06-02 23:30:45.058849147 +0200
 @@ -32,6 +32,10 @@
  #include "xen.h"
  #include "trace.h"
@@ -64,19 +64,48 @@ Index: qemu-1.4.0/hw/vga.c
  //#define DEBUG_VGA
  //#define DEBUG_VGA_MEM
  //#define DEBUG_VGA_REG
-@@ -645,7 +649,10 @@
+@@ -599,6 +603,28 @@
+     }
+ }
+ 
++static inline bool vbe_ext_index_emu(unsigned int index)
++{
++    return (index >= VBE_DISPI_EXT_INDEX_START &&
++            index < (VBE_DISPI_EXT_INDEX_START + VBE_DISPI_EXT_INDEX_NB));
++}
++
++static inline uint16_t vbe_ext_emu_read(VGACommonState *s, unsigned int index)
++{
++    assert(s != NULL);
++    assert(vbe_ext_index_emu(index));
++
++    return s->vbe_ext_regs[index - VBE_DISPI_EXT_INDEX_START];
++}
++
++static inline void vbe_ext_emu_write(VGACommonState *s,
++                                     unsigned int index, uint16_t val)
++{
++    assert(s != NULL);
++    assert(vbe_ext_index_emu(index));
++    s->vbe_ext_regs[index - VBE_DISPI_EXT_INDEX_START] = val;
++}
++
+ /*
+  * Sanity check vbe register writes.
+  *
+@@ -650,7 +676,10 @@
      }
  
      /* check height */
 -    linelength = r[VBE_DISPI_INDEX_VIRT_WIDTH] * bits / 8;
-+    if (s->vbe_ext_regs[VBE_DISPI_EXT_INDEX_STRIDE - VBE_DISPI_EXT_INDEX_START])
-+        linelength = s->vbe_ext_regs[VBE_DISPI_EXT_INDEX_STRIDE - VBE_DISPI_EXT_INDEX_START];
++    if (vbe_ext_emu_read(s, VBE_DISPI_EXT_INDEX_STRIDE))
++        linelength = vbe_ext_emu_read(s, VBE_DISPI_EXT_INDEX_STRIDE);
 +    else
 +        linelength = r[VBE_DISPI_INDEX_VIRT_WIDTH] * bits / 8;
      maxy = s->vbe_size / linelength;
      if (r[VBE_DISPI_INDEX_YRES] == 0) {
          r[VBE_DISPI_INDEX_YRES] = 1;
-@@ -761,6 +768,30 @@
+@@ -766,6 +795,30 @@
          val = s->vbe_size / (64 * 1024);
      } else {
          val = 0;
@@ -107,16 +136,15 @@ Index: qemu-1.4.0/hw/vga.c
      }
  #ifdef DEBUG_BOCHS_VBE
      printf("VBE: read index=0x%x val=0x%x\n", s->vbe_index, val);
-@@ -835,6 +866,16 @@
+@@ -840,6 +893,15 @@
          default:
              break;
          }
-+    } else if ((s->vbe_index >= VBE_DISPI_EXT_INDEX_START) &&
-+        (s->vbe_index < VBE_DISPI_EXT_INDEX_START + VBE_DISPI_EXT_INDEX_NB)) {
++    } else if (vbe_ext_index_emu(s->vbe_index)) {
++        vbe_ext_emu_write(s, s->vbe_index, val);
 +        switch (s->vbe_index) {
 +            case VBE_DISPI_EXT_INDEX_STRIDE:
 +                s->vbe_line_offset = val;
-+                s->vbe_ext_regs[VBE_DISPI_EXT_INDEX_STRIDE - VBE_DISPI_EXT_INDEX_START] = val;
 +                break;
 +            default:
 +                break;
@@ -126,8 +154,8 @@ Index: qemu-1.4.0/hw/vga.c
  
 Index: qemu-1.4.0/hw/xen.h
 ===================================================================
---- qemu-1.4.0.orig/hw/xen.h	2016-06-02 22:52:33.863818075 +0200
-+++ qemu-1.4.0/hw/xen.h	2016-06-02 22:52:37.393779552 +0200
+--- qemu-1.4.0.orig/hw/xen.h	2016-06-02 23:09:53.259145984 +0200
++++ qemu-1.4.0/hw/xen.h	2016-06-02 23:30:10.189228135 +0200
 @@ -69,5 +69,7 @@
  };
  
@@ -138,8 +166,8 @@ Index: qemu-1.4.0/hw/xen.h
  #endif /* QEMU_HW_XEN_H */
 Index: qemu-1.4.0/hw/xen_backend.c
 ===================================================================
---- qemu-1.4.0.orig/hw/xen_backend.c	2016-06-02 22:52:34.030482923 +0200
-+++ qemu-1.4.0/hw/xen_backend.c	2016-06-02 22:52:37.463778787 +0200
+--- qemu-1.4.0.orig/hw/xen_backend.c	2016-06-02 23:09:53.259145984 +0200
++++ qemu-1.4.0/hw/xen_backend.c	2016-06-02 23:30:06.155938638 +0200
 @@ -924,3 +924,37 @@
  
      return xenstore_write_int(dompath, "power-state", type);
@@ -180,8 +208,8 @@ Index: qemu-1.4.0/hw/xen_backend.c
 +
 Index: qemu-1.4.0/include/ui/console.h
 ===================================================================
---- qemu-1.4.0.orig/include/ui/console.h	2016-06-02 22:52:34.200481068 +0200
-+++ qemu-1.4.0/include/ui/console.h	2016-06-02 22:52:37.530444727 +0200
+--- qemu-1.4.0.orig/include/ui/console.h	2016-06-02 23:09:53.195813341 +0200
++++ qemu-1.4.0/include/ui/console.h	2016-06-02 23:30:10.082562629 +0200
 @@ -167,6 +167,9 @@
      void (*dpy_mouse_set)(struct DisplayState *s, int x, int y, int on);
      void (*dpy_cursor_define)(struct DisplayState *s, QEMUCursor *cursor);
@@ -223,8 +251,8 @@ Index: qemu-1.4.0/include/ui/console.h
      return pixman_image_get_stride(ds->surface->image);
 Index: qemu-1.4.0/hw/vga_int.h
 ===================================================================
---- qemu-1.4.0.orig/hw/vga_int.h	2016-06-02 22:52:34.403812183 +0200
-+++ qemu-1.4.0/hw/vga_int.h	2016-06-02 22:52:37.630443635 +0200
+--- qemu-1.4.0.orig/hw/vga_int.h	2016-06-02 23:09:52.689152199 +0200
++++ qemu-1.4.0/hw/vga_int.h	2016-06-02 23:30:11.042552195 +0200
 @@ -45,9 +45,18 @@
  #define VBE_DISPI_INDEX_VIRT_HEIGHT     0x7
  #define VBE_DISPI_INDEX_X_OFFSET        0x8
@@ -245,7 +273,7 @@ Index: qemu-1.4.0/hw/vga_int.h
  #define VBE_DISPI_ID0                   0xB0C0
  #define VBE_DISPI_ID1                   0xB0C1
  #define VBE_DISPI_ID2                   0xB0C2
-@@ -128,6 +137,7 @@
+@@ -129,6 +138,7 @@
      /* bochs vbe state */
      uint16_t vbe_index;
      uint16_t vbe_regs[VBE_DISPI_INDEX_NB];
@@ -255,8 +283,8 @@ Index: qemu-1.4.0/hw/vga_int.h
      uint32_t vbe_bank_mask;
 Index: qemu-1.4.0/hw/vga-pci.c
 ===================================================================
---- qemu-1.4.0.orig/hw/vga-pci.c	2016-06-02 22:52:34.553810545 +0200
-+++ qemu-1.4.0/hw/vga-pci.c	2016-06-02 22:52:37.690442981 +0200
+--- qemu-1.4.0.orig/hw/vga-pci.c	2013-02-16 00:05:35.000000000 +0100
++++ qemu-1.4.0/hw/vga-pci.c	2016-06-02 23:09:53.475810288 +0200
 @@ -196,6 +196,8 @@
      k->vendor_id = PCI_VENDOR_ID_QEMU;
      k->device_id = PCI_DEVICE_ID_QEMU_VGA;
