@@ -59,6 +59,7 @@ write_config_files() {
 	install -m 0644 ${WORKDIR}/initramfs-passwd ${IMAGE_ROOTFS}${sysconfdir}/passwd
 	install -m 0644 ${WORKDIR}/initramfs-group ${IMAGE_ROOTFS}${sysconfdir}/group
 	install -m 0644 ${WORKDIR}/initramfs-nsswitch.conf ${IMAGE_ROOTFS}${sysconfdir}/nsswitch.conf
+	chown tss:tss ${IMAGE_ROOTFS}${sysconfdir}/tcsd.conf
 }
 
 ROOTFS_POSTPROCESS_COMMAND += " post_rootfs_shell_commands; write_config_files; "
