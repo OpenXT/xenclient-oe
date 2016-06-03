@@ -20,8 +20,4 @@
 # Only used if boot-sentinel is set in the VM configuration
 xenstore-write booted 1
 
-if ! test -e /etc/.configured; then
-	> /etc/.configured
-fi
-
 exit 0
