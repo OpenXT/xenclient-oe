@@ -9,7 +9,7 @@ IMAGE_FSTYPES = "xc.ext3.vhd.gz"
 
 BAD_RECOMMENDATIONS += "avahi-daemon avahi-autoipd"
 # The above seems to be broken and we *really* don't want avahi!
-PACKAGE_REMOVE = "avahi-daemon avahi-autoipd"
+PACKAGE_REMOVE = "avahi-daemon avahi-autoipd busybox-hwclock"
 
 ANGSTROM_EXTRA_INSTALL += " \
 			  " 
