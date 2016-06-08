@@ -7,14 +7,24 @@ RDEPENDS_${PN}_xenclient-ndvm += " db-tools"
 
 DEPENDS_append_xenclient-nilfvm += " ${@deb_bootstrap_deps(d)} "
 
-inherit autotools-brokensep findlib xenclient
+inherit autotools-brokensep findlib xenclient update-rc.d
 inherit ${@"xenclient-simple-deb"if(d.getVar("MACHINE",1)=="xenclient-nilfvm")else("null")}
 
-PACKAGES += "${PN}-libs-dbg ${PN}-libs-staticdev ${PN}-libs-dev ${PN}-libs"
+PACKAGES = "${PN}-xenstored \
+            ${PN}-dbg ${PN}-doc ${PN}-locale ${PN}-dev ${PN}-staticdev ${PN} \
+            ${PN}-libs-dbg ${PN}-libs-staticdev ${PN}-libs-dev ${PN}-libs \
+            "
+INITSCRIPT_PACKAGES = "${PN}-xenstored"
+
+FILES_${PN}-xenstored = "${sysconfdir}/init.d/xenstored ${bindir}/xenstored"
+INITSCRIPT_NAME_${PN}-xenstored = "xenstored"
+INITSCRIPT_PARAMS_${PN}-xenstored = "defaults 05"
+
 FILES_${PN}-libs-dbg = "${ocamllibdir}/*/.debug/*"
 FILES_${PN}-libs-dev = "${ocamllibdir}/*/*.so"
 FILES_${PN}-libs-staticdev = "${ocamllibdir}/*/*.a"
 FILES_${PN}-libs = "${ocamllibdir}/*"
+
 
 DEB_SUITE = "wheezy"
 DEB_ARCH = "i386"
@@ -34,7 +44,9 @@ PV = "0+git${SRCPV}"
 
 SRCREV = "${AUTOREV}"
 SRC_URI = "git://${OPENXT_GIT_MIRROR}/toolstack.git;protocol=${OPENXT_GIT_PROTOCOL};branch=${OPENXT_BRANCH}	\
-           file://vif"
+           file://vif \
+           file://xenstored.initscript \
+           "
 
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 S = "${WORKDIR}/git"
@@ -61,8 +73,13 @@ do_compile_xenclient-nilfvm() {
 do_install() {
         make DESTDIR=${D} V=1 install
         rm -f ${D}/etc/xen/scripts/vif
+
         install -d ${D}/etc/xen/scripts
         install -m 0755 ${WORKDIR}/vif ${D}/etc/xen/scripts/vif
+
+        install -d ${D}${sysconfdir}/init.d
+        install -m 0755 ${WORKDIR}/xenstored.initscript ${D}${sysconfdir}/init.d/xenstored
+
         # install ocaml libraries required by other packages
         mkdir -p "${D}${ocamllibdir}"
         for ocaml_lib in ${OCAML_INSTALL_LIBS}
