@@ -49,8 +49,10 @@ Depended on by QEMU: surfman-dcl.patch.
 ################################################################################
 PATCHES
 ################################################################################
---- a/hw/vga.c
-+++ b/hw/vga.c
+Index: qemu-1.4.0/hw/vga.c
+===================================================================
+--- qemu-1.4.0.orig/hw/vga.c	2016-06-02 23:09:52.689152199 +0200
++++ qemu-1.4.0/hw/vga.c	2016-06-02 23:30:45.058849147 +0200
 @@ -32,6 +32,10 @@
  #include "xen.h"
  #include "trace.h"
@@ -62,8 +64,49 @@ PATCHES
  //#define DEBUG_VGA
  //#define DEBUG_VGA_MEM
  //#define DEBUG_VGA_REG
-@@ -619,6 +623,30 @@ uint32_t vbe_ioport_read_data(void *opaq
-         val = s->vram_size / (64 * 1024);
+@@ -599,6 +603,28 @@
+     }
+ }
+ 
++static inline bool vbe_ext_index_emu(unsigned int index)
++{
++    return (index >= VBE_DISPI_EXT_INDEX_START &&
++            index < (VBE_DISPI_EXT_INDEX_START + VBE_DISPI_EXT_INDEX_NB));
++}
++
++static inline uint16_t vbe_ext_emu_read(VGACommonState *s, unsigned int index)
++{
++    assert(s != NULL);
++    assert(vbe_ext_index_emu(index));
++
++    return s->vbe_ext_regs[index - VBE_DISPI_EXT_INDEX_START];
++}
++
++static inline void vbe_ext_emu_write(VGACommonState *s,
++                                     unsigned int index, uint16_t val)
++{
++    assert(s != NULL);
++    assert(vbe_ext_index_emu(index));
++    s->vbe_ext_regs[index - VBE_DISPI_EXT_INDEX_START] = val;
++}
++
+ /*
+  * Sanity check vbe register writes.
+  *
+@@ -650,7 +676,10 @@
+     }
+ 
+     /* check height */
+-    linelength = r[VBE_DISPI_INDEX_VIRT_WIDTH] * bits / 8;
++    if (vbe_ext_emu_read(s, VBE_DISPI_EXT_INDEX_STRIDE))
++        linelength = vbe_ext_emu_read(s, VBE_DISPI_EXT_INDEX_STRIDE);
++    else
++        linelength = r[VBE_DISPI_INDEX_VIRT_WIDTH] * bits / 8;
+     maxy = s->vbe_size / linelength;
+     if (r[VBE_DISPI_INDEX_YRES] == 0) {
+         r[VBE_DISPI_INDEX_YRES] = 1;
+@@ -766,6 +795,30 @@
+         val = s->vbe_size / (64 * 1024);
      } else {
          val = 0;
 +        if (!(s->vbe_regs[VBE_DISPI_INDEX_ENABLE] & VBE_DISPI_GETCAPS)) {
@@ -93,35 +136,15 @@ PATCHES
      }
  #ifdef DEBUG_BOCHS_VBE
      printf("VBE: read index=0x%x val=0x%x\n", s->vbe_index, val);
-@@ -690,11 +718,13 @@ void vbe_ioport_write_data(void *opaque,
-                 s->vbe_regs[VBE_DISPI_INDEX_X_OFFSET] = 0;
-                 s->vbe_regs[VBE_DISPI_INDEX_Y_OFFSET] = 0;
- 
--                if (s->vbe_regs[VBE_DISPI_INDEX_BPP] == 4)
--                    s->vbe_line_offset = s->vbe_regs[VBE_DISPI_INDEX_XRES] >> 1;
--                else
--                    s->vbe_line_offset = s->vbe_regs[VBE_DISPI_INDEX_XRES] *
--                        ((s->vbe_regs[VBE_DISPI_INDEX_BPP] + 7) >> 3);
-+                if (!s->vbe_ext_regs[VBE_DISPI_EXT_INDEX_STRIDE - VBE_DISPI_EXT_INDEX_START]) {
-+                    if (s->vbe_regs[VBE_DISPI_INDEX_BPP] == 4)
-+                        s->vbe_line_offset = s->vbe_regs[VBE_DISPI_INDEX_XRES] >> 1;
-+                    else
-+                        s->vbe_line_offset = s->vbe_regs[VBE_DISPI_INDEX_XRES] *
-+                            ((s->vbe_regs[VBE_DISPI_INDEX_BPP] + 7) >> 3);
-+                }
-                 s->vbe_start_addr = 0;
- 
-                 /* clear the screen (should be done in BIOS) */
-@@ -781,6 +811,16 @@ void vbe_ioport_write_data(void *opaque,
+@@ -840,6 +893,15 @@
          default:
              break;
          }
-+    } else if ((s->vbe_index >= VBE_DISPI_EXT_INDEX_START) &&
-+        (s->vbe_index < VBE_DISPI_EXT_INDEX_START + VBE_DISPI_EXT_INDEX_NB)) {
++    } else if (vbe_ext_index_emu(s->vbe_index)) {
++        vbe_ext_emu_write(s, s->vbe_index, val);
 +        switch (s->vbe_index) {
 +            case VBE_DISPI_EXT_INDEX_STRIDE:
 +                s->vbe_line_offset = val;
-+                s->vbe_ext_regs[VBE_DISPI_EXT_INDEX_STRIDE - VBE_DISPI_EXT_INDEX_START] = val;
 +                break;
 +            default:
 +                break;
@@ -129,9 +152,11 @@ PATCHES
      }
  }
  
---- a/hw/xen.h
-+++ b/hw/xen.h
-@@ -81,5 +81,7 @@ enum xenstore_pm_type {
+Index: qemu-1.4.0/hw/xen.h
+===================================================================
+--- qemu-1.4.0.orig/hw/xen.h	2016-06-02 23:09:53.259145984 +0200
++++ qemu-1.4.0/hw/xen.h	2016-06-02 23:30:10.189228135 +0200
+@@ -69,5 +69,7 @@
  };
  
  int xenstore_update_power(enum xenstore_pm_type const type);
@@ -139,9 +164,11 @@ PATCHES
 +bool xenstore_is_legacy_res_only(void);
  
  #endif /* QEMU_HW_XEN_H */
---- a/hw/xen_backend.c
-+++ b/hw/xen_backend.c
-@@ -933,3 +933,37 @@ int xenstore_update_power(enum xenstore_
+Index: qemu-1.4.0/hw/xen_backend.c
+===================================================================
+--- qemu-1.4.0.orig/hw/xen_backend.c	2016-06-02 23:09:53.259145984 +0200
++++ qemu-1.4.0/hw/xen_backend.c	2016-06-02 23:30:06.155938638 +0200
+@@ -924,3 +924,37 @@
  
      return xenstore_write_int(dompath, "power-state", type);
  }
@@ -179,9 +206,11 @@ PATCHES
 +    return !!val;
 +}
 +
---- a/include/ui/console.h
-+++ b/include/ui/console.h
-@@ -167,6 +167,9 @@ struct DisplayChangeListener {
+Index: qemu-1.4.0/include/ui/console.h
+===================================================================
+--- qemu-1.4.0.orig/include/ui/console.h	2016-06-02 23:09:53.195813341 +0200
++++ qemu-1.4.0/include/ui/console.h	2016-06-02 23:30:10.082562629 +0200
+@@ -167,6 +167,9 @@
      void (*dpy_mouse_set)(struct DisplayState *s, int x, int y, int on);
      void (*dpy_cursor_define)(struct DisplayState *s, QEMUCursor *cursor);
  
@@ -191,7 +220,7 @@ PATCHES
      QLIST_ENTRY(DisplayChangeListener) next;
  };
  
-@@ -350,6 +353,28 @@ static inline bool dpy_cursor_define_sup
+@@ -350,6 +353,28 @@
      return false;
  }
  
@@ -220,8 +249,10 @@ PATCHES
  static inline int ds_get_linesize(DisplayState *ds)
  {
      return pixman_image_get_stride(ds->surface->image);
---- a/hw/vga_int.h
-+++ b/hw/vga_int.h
+Index: qemu-1.4.0/hw/vga_int.h
+===================================================================
+--- qemu-1.4.0.orig/hw/vga_int.h	2016-06-02 23:09:52.689152199 +0200
++++ qemu-1.4.0/hw/vga_int.h	2016-06-02 23:30:11.042552195 +0200
 @@ -45,9 +45,18 @@
  #define VBE_DISPI_INDEX_VIRT_HEIGHT     0x7
  #define VBE_DISPI_INDEX_X_OFFSET        0x8
@@ -242,7 +273,7 @@ PATCHES
  #define VBE_DISPI_ID0                   0xB0C0
  #define VBE_DISPI_ID1                   0xB0C1
  #define VBE_DISPI_ID2                   0xB0C2
-@@ -127,6 +136,7 @@ typedef struct VGACommonState {
+@@ -129,6 +138,7 @@
      /* bochs vbe state */
      uint16_t vbe_index;
      uint16_t vbe_regs[VBE_DISPI_INDEX_NB];
@@ -250,9 +281,11 @@ PATCHES
      uint32_t vbe_start_addr;
      uint32_t vbe_line_offset;
      uint32_t vbe_bank_mask;
---- a/hw/vga-pci.c
-+++ b/hw/vga-pci.c
-@@ -196,6 +196,8 @@ static void vga_class_init(ObjectClass *
+Index: qemu-1.4.0/hw/vga-pci.c
+===================================================================
+--- qemu-1.4.0.orig/hw/vga-pci.c	2013-02-16 00:05:35.000000000 +0100
++++ qemu-1.4.0/hw/vga-pci.c	2016-06-02 23:09:53.475810288 +0200
+@@ -196,6 +196,8 @@
      k->vendor_id = PCI_VENDOR_ID_QEMU;
      k->device_id = PCI_DEVICE_ID_QEMU_VGA;
      k->class_id = PCI_CLASS_DISPLAY_VGA;

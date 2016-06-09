@@ -22,7 +22,23 @@ DEPENDS = "xen-tools alsa-lib pciutils libpng blktap libv4v openssl zlib libcap-
 SRC_URI = "http://wiki.qemu-project.org/download/qemu-${PV}.tar.bz2"
 
 # QEMU Patch Queue
-SRC_URI += "file://0001-compile-time-stubdom-flag.patch \
+SRC_URI += "file://xsa-126-unmediated-pci-command-register-access-in-qemu.patch;patch=1 \
+            file://xsa-128-potential-unintended-writes-to-host-msi-message-data-field-via-qemu.patch;patch=1 \
+            file://xsa-129-pci-msi-mask-bits-inadvertently-exposed-to-guests.patch;patch=1 \
+            file://xsa-130-guest-triggerable-qemu-msi-x-pass-through-error-messages.patch;patch=1 \
+            file://xsa-131-unmediated-pci-register-access-in-qemu.patch;patch=1 \
+            file://xsa-133-privilege-escalation-via-emulated-floppy-disk-drive.patch;patch=1 \
+            file://xsa-135-heap-overflow-in-qemu-pcnet-controller.patch;patch=1 \
+            file://xsa-138-qemu-heap-overflow-flaw-while-processing-certain-atapi-commands.patch;patch=1 \
+            file://xsa-139-use-after-free-in-qemu-xen-block-unplug-protocol.patch;patch=1 \
+            file://xsa-140-qemu-leak-of-uninitialized-heap-memory-in-rtl8139-device-model.patch;patch=1 \
+            file://xsa-155-paravirtualized-drivers-incautious-about-shared-memory-contents.patch;patch=1 \
+            file://xsa-162-heap-buffer-overflow-vulnerability-in-pcnet-emulator.patch;patch=1 \
+            file://vbe-make-bochs-dispi-interface-return-the-correct-me.patch;patch=1 \
+            file://cve-2014-3615-vbe-rework-sanity-checks.patch;patch=1 \
+            file://xsa-179-banked-access-to-vga-memory-uses-inconsistent-bounds-checks.patch;patch=1 \
+            file://vga-add-sr_vbe-register-set.patch;patch=1 \
+            file://0001-compile-time-stubdom-flag.patch \
             file://0001-generic-xenstore-extensions.patch \
             file://0001-readonly-ide.patch;striplevel=1 \
             file://0003-hvm-param-dm-domain.patch;striplevel=1 \
@@ -48,22 +64,6 @@ SRC_URI += "file://0001-compile-time-stubdom-flag.patch \
             file://0033-acpi-pm-feature.patch;striplevel=1 \
             file://0034-maintain-time-offset.patch;striplevel=1 \
             file://0035-add-acpi-wakeup.patch;striplevel=1 \
-            file://xsa-126-unmediated-pci-command-register-access-in-qemu.patch;patch=1 \
-            file://xsa-128-potential-unintended-writes-to-host-msi-message-data-field-via-qemu.patch;patch=1 \
-            file://xsa-129-pci-msi-mask-bits-inadvertently-exposed-to-guests.patch;patch=1 \
-            file://xsa-130-guest-triggerable-qemu-msi-x-pass-through-error-messages.patch;patch=1 \
-            file://xsa-131-unmediated-pci-register-access-in-qemu.patch;patch=1 \
-            file://xsa-133-privilege-escalation-via-emulated-floppy-disk-drive.patch;patch=1 \
-            file://xsa-135-heap-overflow-in-qemu-pcnet-controller.patch;patch=1 \
-            file://xsa-138-qemu-heap-overflow-flaw-while-processing-certain-atapi-commands.patch;patch=1 \
-            file://xsa-139-use-after-free-in-qemu-xen-block-unplug-protocol.patch;patch=1 \
-            file://xsa-140-qemu-leak-of-uninitialized-heap-memory-in-rtl8139-device-model.patch;patch=1 \
-            file://xsa-155-paravirtualized-drivers-incautious-about-shared-memory-contents.patch;patch=1 \
-            file://xsa-162-heap-buffer-overflow-vulnerability-in-pcnet-emulator.patch;patch=1 \
-            file://vbe-bochs-dispi-return-correct-mem-size-with-qxl.patch;patch=1 \
-            file://cve-2014-3615-vbe-rework-sanity-checks.patch;patch=1 \
-            file://xsa-179-banked-access-to-vga-memory-uses-inconsistent-bounds-checks.patch;patch=1 \
-            file://vga-add-sr_vbe-register-set.patch;patch=1 \
             "
 
 SRC_URI[md5sum] = "78f13b774814b6b7ebcaf4f9b9204318"
