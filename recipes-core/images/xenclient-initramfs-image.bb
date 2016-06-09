@@ -56,7 +56,7 @@ post_rootfs_shell_commands() {
 }
 
 write_config_files() {
-	install -m 0600 ${WORKDIR}/initramfs-tcsd.conf ${IMAGE_ROOTFS}${sysconfdir}/tcsd.conf
+	install -m 0600 -o tss -g tss ${WORKDIR}/initramfs-tcsd.conf ${IMAGE_ROOTFS}${sysconfdir}/tcsd.conf
 	install -m 0644 ${WORKDIR}/initramfs-passwd ${IMAGE_ROOTFS}${sysconfdir}/passwd
 	install -m 0644 ${WORKDIR}/initramfs-group ${IMAGE_ROOTFS}${sysconfdir}/group
 	install -m 0644 ${WORKDIR}/initramfs-nsswitch.conf ${IMAGE_ROOTFS}${sysconfdir}/nsswitch.conf
