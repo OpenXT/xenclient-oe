@@ -71,7 +71,7 @@ test -x /etc/init.d/hwclock.sh && /etc/init.d/hwclock.sh start
 if test -e /etc/timestamp
 then
 	SYSTEMDATE=`date "+%Y%m%d"`
-	TIMESTAMP=`cat /etc/timestamp | awk '{ print substr($0,9,4) substr($0,1,4);}'`
+	TIMESTAMP=`cat /etc/timestamp | awk '{ print substr($0,1,8);}'`
         NEEDUPDATE=`expr \( $TIMESTAMP \> $SYSTEMDATE \)`                                                 
         if [ $NEEDUPDATE -eq 1 ]; then 
 		date `cat /etc/timestamp`

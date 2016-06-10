@@ -64,21 +64,6 @@ then
 	mv /etc/motd.tmp /etc/motd
 fi
 
-# Set the system clock from hardware clock
-# If the timestamp is 1 day or more recent than the current time,
-# use the timestamp instead.
-test -x /etc/init.d/hwclock.sh && /etc/init.d/hwclock.sh start
-if test -e /etc/timestamp
-then
-	SYSTEMDATE=`date "+%Y%m%d"`
-	TIMESTAMP=`cat /etc/timestamp | awk '{ print substr($0,9,4) substr($0,1,4);}'`
-        NEEDUPDATE=`expr \( $TIMESTAMP \> $SYSTEMDATE \)`                                                 
-        if [ $NEEDUPDATE -eq 1 ]; then 
-		date `cat /etc/timestamp`
-		/etc/init.d/hwclock.sh stop
-	fi
-fi
-
 [ -f /etc/hostname ] && hostname -F /etc/hostname
 
 : exit 0
