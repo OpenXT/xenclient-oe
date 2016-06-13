@@ -31,6 +31,7 @@ RDEPENDS_${PN} = " \
     xcpmd \
     vbetool-xc \
     xenclient-toolstack \
+    xenclient-toolstack-xenstored \
     xenclient-input-daemon \
     xenclient-dom0-tweaks \
     xenclient-splash-images \
@@ -75,7 +76,6 @@ RDEPENDS_${PN} = " \
     xenclient-udev-force-discreet-net-to-eth0 \
     xenclient-nwd \
     wget \
-    xen-tools-xenstored \
     xen-tools-xenconsoled \
     xenclient-repo-certs \
     gobi-loader \
