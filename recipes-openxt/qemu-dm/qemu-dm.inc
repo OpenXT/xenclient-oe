@@ -86,7 +86,7 @@ FILES_${PN}-utils = "/usr/libexec/*"
 
 PACKAGES += "${PN}-extra-keymaps ${PN}-extra-roms ${PN}-utils"
 
-CFLAGS_append = " -Wno-unused-parameter -Wno-unused-local-typedefs"
+CFLAGS_append = " -Wno-unused-parameter -Wno-unused-local-typedefs --param ssp-buffer-size=4 -ftrapv -D_FORTIFY_SOURCE=2"
 
 do_configure(){
     ${S}/configure ${EXTRA_OECONF} --enable-xen \
@@ -98,7 +98,6 @@ do_configure(){
                 --without-system-pixman \
                 --disable-sdl \
                 --disable-vnc \
-                --disable-pie \
                 --disable-docs \
                 --disable-strip \
                 --disable-virtfs \
@@ -110,6 +109,7 @@ do_configure(){
                 --disable-kvm \
                 --disable-tools \
                 --disable-guest-base \
+                --enable-pie \
                 --enable-werror \
                 --enable-surfman \
                 --enable-atapi-pt \
