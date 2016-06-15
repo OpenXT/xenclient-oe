@@ -50,7 +50,6 @@ RDEPENDS_${PN} = " \
     tpm-tools \
     tpm-tools-sa \
     xenclient-tpm-setup \
-    squashfs-tools \
     pciutils-ids \
     acms \
     read-edid \
