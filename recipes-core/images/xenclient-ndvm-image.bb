@@ -7,7 +7,7 @@ COMPATIBLE_MACHINE = "(xenclient-ndvm)"
 
 IMAGE_FSTYPES = "xc.ext3.vhd.gz"
 
-BAD_RECOMMENDATIONS += "avahi-daemon avahi-autoipd"
+BAD_RECOMMENDATIONS += "avahi-daemon avahi-autoipd ca-certificates"
 # The above seems to be broken and we *really* don't want avahi!
 PACKAGE_REMOVE = "avahi-daemon avahi-autoipd hicolor-icon-theme"
 

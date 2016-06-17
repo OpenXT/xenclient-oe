@@ -26,6 +26,8 @@ ANGSTROM_EXTRA_INSTALL += ""
 
 export IMAGE_BASENAME = "xenclient-installer-image"
 
+BAD_RECOMMENDATIONS += "ca-certificates"
+
 DEPENDS = "packagegroup-base packagegroup-xenclient-installer"
 
 IMAGE_INSTALL = "\
