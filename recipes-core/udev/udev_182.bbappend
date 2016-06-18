@@ -11,8 +11,7 @@ FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
 
 inherit update-rc.d
 
-INITSCRIPT_NAME = "udev"
-INITSCRIPT_PARAMS = "start 03 S ."
+INITSCRIPT_PARAMS_udev += "start 04 5 ."
 
 DEPENDS += " libselinux "
 
