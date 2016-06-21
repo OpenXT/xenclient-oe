@@ -11,8 +11,9 @@ PACKAGES =+ "${PN}-whence-license ${PN}-bnx2 \
              ${PN}-iwlwifi \
              ${PN}-iwlwifi-7260-12 ${PN}-iwlwifi-7260-13 \
              ${PN}-iwlwifi-8000c \
-             ${PN}-iwlwifi-misc \
             "
+# note that ${PN}-iwlwifi-misc is added to PACKAGES in do_package_prepend below.
+
 LICENSE_${PN}-bnx2 = "WHENCE"
 LICENSE_${PN}-whence-license = "WHENCE"
 LICENSE_${PN}-iwlwifi = "Firmware-iwlwifi_firmware"
@@ -50,6 +51,14 @@ LICENSE_${PN} += "& WHENCE \
 "
 
 LICENSE_${PN}-license += "/lib/firmware/WHENCE"
+
+# The iwlwifi-misc package needs to be carefully inserted into the PACKAGES
+# variable at the correct position: prior to the final linux-firmware package.
+python do_package_prepend() {
+    packages = d.getVar("PACKAGES", d, 1)
+    index = packages.rfind('linux-firmware')
+    d.setVar("PACKAGES", packages[0:index] + 'linux-firmware-iwlwifi-misc ' + packages[index:])
+}
 
 # Make linux-firmware depend on all of the split-out packages.
 # Make linux-firmware-iwlwifi depend on all of the split-out iwlwifi packages.
