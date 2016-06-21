@@ -9,7 +9,8 @@ IMAGE_FSTYPES = "xc.ext3.gz"
 
 # No thanks, we provide our own xorg.conf with the hacked Intel driver
 # And we don't need Avahi
-BAD_RECOMMENDATIONS += "xserver-xorg avahi-daemon avahi-autoipd"
+# Nor a collection of questionable CA certificates
+BAD_RECOMMENDATIONS += "xserver-xorg avahi-daemon avahi-autoipd ca-certificates"
 # The above seems to be broken and we *really* don't want avahi!
 PACKAGE_REMOVE = "avahi-daemon avahi-autoipd"
 
