@@ -15,7 +15,6 @@ SRC_URI = "file://enter-s3.sh \
 	   file://unifont.pf2 \
 	   file://firstboot.sh \
 	   file://firstboot.initscript \
-	   file://complete-boot.sh \
 	   file://dom0_add_vif.sh \
 	   file://blacklist-nvidiafb.conf \
 	   file://r8168.conf \
@@ -61,8 +60,6 @@ do_install () {
 		${D}/usr/share/xenclient/install-bootloader-images
 	install -m 0755 ${WORKDIR}/xenstore-init \
 		${D}/usr/share/xenclient/xenstore-init
-	install -m 0755 ${WORKDIR}/complete-boot.sh \
-		${D}/usr/share/xenclient/complete-boot.sh
 	install -m 0755 ${WORKDIR}/dom0_add_vif.sh \
 		${D}/usr/share/xenclient/dom0_add_vif.sh
 	install -m 0755 ${WORKDIR}/firstboot.sh \
