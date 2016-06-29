@@ -86,45 +86,38 @@ FILES_${PN}-utils = "/usr/libexec/*"
 
 PACKAGES += "${PN}-extra-keymaps ${PN}-extra-roms ${PN}-utils"
 
-CFLAGS_append = " -Wno-unused-parameter -Wno-unused-local-typedefs"
+EXTRA_OECONF += " \
+    --enable-xen \
+    --target-list=i386-softmmu \
+    --without-system-pixman \
+    --disable-sdl \
+    --disable-vnc \
+    --disable-docs \
+    --disable-strip \
+    --disable-virtfs \
+    --disable-bluez \
+    --disable-guest-agent \
+    --disable-curses \
+    --disable-slirp \
+    --disable-curl \
+    --disable-kvm \
+    --disable-tools \
+    --disable-guest-base \
+    --enable-pie \
+    --enable-werror \
+    --enable-surfman \
+    --enable-atapi-pt \
+    --enable-atapi-pt-v4v \
+    --enable-readonly-ide \
+    --enable-debug \
+"
 
 do_configure(){
-    ${S}/configure ${EXTRA_OECONF} --enable-xen \
-                --target-list=i386-softmmu \
-                --prefix=${prefix} \
-                --sysconfdir=${sysconfdir} \
-                --extra-cflags="-I${STAGING_INCDIR}" \
-                --extra-ldflags="-L${STAGING_LIBDIR}" \
-                --without-system-pixman \
-                --disable-sdl \
-                --disable-vnc \
-                --disable-pie \
-                --disable-docs \
-                --disable-strip \
-                --disable-virtfs \
-                --disable-bluez \
-                --disable-guest-agent \
-                --disable-curses \
-                --disable-slirp \
-                --disable-curl \
-                --disable-kvm \
-                --disable-tools \
-                --disable-guest-base \
-                --enable-werror \
-                --enable-surfman \
-                --enable-atapi-pt \
-                --enable-atapi-pt-v4v \
-                --enable-readonly-ide \
-                --enable-debug
+    ${S}/configure --prefix=${prefix} --sysconfdir=${sysconfdir} ${EXTRA_OECONF}
 }
 
-do_compile(){
-    DESTDIR=${D} oe_runmake AUTOCONF_HOST='--host=`arch`'
-}
+EXTRA_OEMAKE += "AUTOCONF_HOST='--host=`arch`' DESTDIR=${D} STRIP=''"
 
-do_install(){
-    # QEMU's build system conflicts with STRIP defined in OE.
-    oe_runmake DESTDIR=${D} STRIP='' install
-}
+CFLAGS_append = " -Wno-unused-parameter -Wno-unused-local-typedefs --param ssp-buffer-size=4 -ftrapv -D_FORTIFY_SOURCE=2"
 
 INC_PR = "r16"
