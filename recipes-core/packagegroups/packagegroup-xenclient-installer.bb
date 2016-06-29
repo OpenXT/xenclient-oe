@@ -38,7 +38,6 @@ RDEPENDS_${PN} = " \
     syslinux-isolinux \
     syslinux-mboot \
     syslinux-pxelinux \
-    squashfs-tools \
     ethtool \
     rsyslog \
     xenclient-udev-force-discreet-net-to-eth0 \
