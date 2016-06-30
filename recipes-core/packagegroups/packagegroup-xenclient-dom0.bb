@@ -90,8 +90,6 @@ RDEPENDS_${PN} = " \
     apptool \
     dmidecode \
     netcat \
-    linux-firmware-iwlwifi \
-    linux-firmware-bnx2 \
     libicbinn-server \
     screen \
     xenclient-pcrdiff \
