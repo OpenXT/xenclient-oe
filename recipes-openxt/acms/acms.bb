@@ -1,3 +1,8 @@
+DESCRIPTION = "Authenticated Code Modules for SINIT"
+HOMEPAGE = "https://software.intel.com/en-us/articles/intel-trusted-execution-technology"
+BUGTRACKER = "https://software.intel.com/en-us/forums/intel-trusted-execution-technology-intel-txt"
+SECTION = "bootloaders"
+
 SRC_URI[gm45.md5sum] = "330c774e71fe390d7ab649d5e2b1d504"
 SRC_URI[gm45.sha256sum] = "2b7c9f76c68b48ea537e8b120a8ecd477f8f7a53eaa656a60435111200be4e6a"
 SRC_URI[q45.md5sum] = "4af698f82ff70f5f25c99968b47e679e"
@@ -22,7 +27,7 @@ SRC_URI[skl.md5sum] = "b07b5fb355815655be14c84df84a69a5"
 SRC_URI[skl.sha256sum] = "9f7b17dfb87719dc7c789d7e319071a0fbcca5b547bfd8b2aa3bf253760e23c6"
 
 PR="r3"
-LICENSE = "Proprietary"
+LICENSE = "Intel-ACMs"
 LIC_FILES_CHKSUM = "file://GM45_GS45_PM45-SINIT_51/license.txt;md5=60d123634e0b94f8c425003389e64bda \
                     file://Q45_Q43-SINIT_51/license.txt;md5=60d123634e0b94f8c425003389e64bda \
                     file://Q35-SINIT_51/license.txt;md5=60d123634e0b94f8c425003389e64bda \
@@ -58,4 +63,8 @@ do_install() {
         do
                 install -m 644 "$i" ${D}/boot
         done
+
+        # After inspection of the licenses of the individual ACM files,
+        # the most recent Skylake license is sufficient to cover all:
+        install -m 444 6th_gen_i5_i7-SINIT_71/license.txt ${D}/boot/license-SINIT-ACMs.txt
 }
