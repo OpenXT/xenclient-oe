@@ -67,6 +67,9 @@ post_rootfs_shell_commands() {
 	# enable ctrlaltdel reboot because PV driver uses ctrl+alt+del to interpret reboot issued via xenstore
 	echo 'ca:12345:ctrlaltdel:/sbin/shutdown -t1 -a -r now' >> ${IMAGE_ROOTFS}/etc/inittab;
 
+	# NDVM doesn't have a /dev/tty1, disable the login shell on it
+	sed -i 's/[^#].*getty.*tty1$/#&/' ${IMAGE_ROOTFS}/etc/inittab ;
+
 	# Move resolv.conf to /var/volatile/etc, as rootfs is readonly
 	rm -f ${IMAGE_ROOTFS}/etc/resolv.conf; ln -s /var/volatile/etc/resolv.conf ${IMAGE_ROOTFS}/etc/resolv.conf;
 
