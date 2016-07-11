@@ -98,11 +98,6 @@ process_tmp_stubdomain_items() {
 
 # Get rid of unneeded initscripts
 remove_initscripts() {
-    if [ -f ${IMAGE_ROOTFS}${sysconfdir}/init.d/hostname.sh ]; then
-        rm -f ${IMAGE_ROOTFS}${sysconfdir}/init.d/hostname.sh
-        update-rc.d -r ${IMAGE_ROOTFS} hostname.sh remove
-    fi
-
     if [ -f ${IMAGE_ROOTFS}${sysconfdir}/init.d/rmnologin.sh ]; then
         rm -f ${IMAGE_ROOTFS}${sysconfdir}/init.d/rmnologin.sh
         update-rc.d -r ${IMAGE_ROOTFS} rmnologin.sh remove
