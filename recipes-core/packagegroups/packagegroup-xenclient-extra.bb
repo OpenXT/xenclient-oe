@@ -26,4 +26,5 @@ RDEPENDS_${PN} = "\
     vim \
     xenclient-devscripts \
     xenclient-rpcgen \
+    lsof \
 "
