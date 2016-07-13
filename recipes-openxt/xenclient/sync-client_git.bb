@@ -2,9 +2,6 @@ DESCRIPTION = "XenClient Synchronizer client"
 LICENSE = "GPLv2"
 LIC_FILES_CHKSUM = "file://COPYING;md5=4641e94ec96f98fabc56ff9cc48be14b"
 
-# FIXME: Add sync-client-daemon to bootage.conf when adding this package
-# to xenclient-dom0-image recipe.
-
 # FIXME: xen-tools-xenstore-utils can be removed when xenmgr supports disks
 # with icbinn paths.
 

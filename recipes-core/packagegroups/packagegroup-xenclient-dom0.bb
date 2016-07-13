@@ -65,7 +65,6 @@ RDEPENDS_${PN} = " \
     selinux-load \
     ustr \
     ethtool \
-    bootage \
     microcode-ctl \
     intel-microcode \
     rsyslog \
