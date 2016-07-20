@@ -6,7 +6,7 @@ DEPENDS += "cryptodev-linux"
 
 CFLAG += "-DHAVE_CRYPTODEV -DUSE_CRYPTODEV_DIGESTS"
 
-LIC_FILES_CHKSUM = "file://LICENSE;md5=f9a8f968107345e0b75aa8c2ecaa7ec8"
+LIC_FILES_CHKSUM = "file://LICENSE;md5=27ffa5d74bb5a337056c14b2ef93fbf6"
 
 export DIRS = "crypto ssl apps engines"
 export OE_LDFLAGS="${LDFLAGS}"
@@ -15,7 +15,6 @@ SRC_URI += "file://configure-targets.patch \
             file://shared-libs.patch \
             file://oe-ldflags.patch \
             file://engines-install-in-libdir-ssl.patch \
-            file://openssl-fix-link.patch \
             file://debian/version-script.patch \
             file://debian/pic.patch \
             file://debian/c_rehash-compat.patch \
@@ -37,8 +36,8 @@ SRC_URI += "file://configure-targets.patch \
             file://run-ptest \
            "
 
-SRC_URI[md5sum] = "d143d1555d842a069cb7cc34ba745a06"
-SRC_URI[sha256sum] = "095f0b7b09116c0c5526422088058dc7e6e000aa14d22acca6a4e2babcdfef74"
+SRC_URI[md5sum] = "9837746fcf8a6727d46d22ca35953da1"
+SRC_URI[sha256sum] = "4a6ee491a2fdb22e519c76fdc2a628bb3cec12762cd456861d207996c8a07088"
 
 PACKAGES =+ " \
 	${PN}-engines \
