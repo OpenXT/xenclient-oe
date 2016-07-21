@@ -5,7 +5,7 @@ DESCRIPTION = "Intel microcode"
 # but the package does not contain the license so we set this to CLOSED to make bb happy. 
 LICENSE = "CLOSED"
 
-SRC_URI = " http://downloadmirror.intel.com/19342/eng/microcode-${PV}.tgz "
+SRC_URI = " http://downloadmirror.intel.com/26156/eng/microcode-${PV}.tgz "
 
 do_install() {
         install -d ${D}/etc
