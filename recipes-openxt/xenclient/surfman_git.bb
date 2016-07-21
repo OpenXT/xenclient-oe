@@ -12,8 +12,6 @@ SRC_URI = "git://${OPENXT_GIT_MIRROR}/surfman.git;protocol=${OPENXT_GIT_PROTOCOL
            file://surfman.initscript \
            file://surfman.conf"
 
-EXTRA_OECONF += "--with-idldir=${STAGING_IDLDIR}"
-
 CFLAGS_append = " -Wno-unused-parameter "
 
 S = "${WORKDIR}/git/surfman"
