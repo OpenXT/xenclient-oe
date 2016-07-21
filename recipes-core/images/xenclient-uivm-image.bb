@@ -60,7 +60,6 @@ IMAGE_INSTALL = "\
     setxkbmap \
     resized \
     xenclient-keymap-sync \
-    bootage \
     libx11-locale \
     rsyslog \
     glibc-gconv-libjis \

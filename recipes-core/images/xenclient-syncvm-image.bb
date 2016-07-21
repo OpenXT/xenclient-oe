@@ -19,7 +19,6 @@ IMAGE_INSTALL = "\
     packagegroup-core-boot \
     packagegroup-base \
     packagegroup-xenclient-common \
-    bootage \
     kernel-modules \
     v4v-module \
     libv4v \
