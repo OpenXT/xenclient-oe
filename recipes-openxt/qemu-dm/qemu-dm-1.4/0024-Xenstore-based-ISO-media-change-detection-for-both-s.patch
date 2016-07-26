@@ -56,9 +56,9 @@ Signed-off-by: Jed Lejosne <lejosnej@ainfosec.com>
 
 Index: qemu-1.4.0/Makefile.target
 ===================================================================
---- qemu-1.4.0.orig/Makefile.target	2015-08-17 16:00:15.154513605 -0400
-+++ qemu-1.4.0/Makefile.target	2015-08-17 16:00:21.158511902 -0400
-@@ -122,6 +122,7 @@
+--- qemu-1.4.0.orig/Makefile.target
++++ qemu-1.4.0/Makefile.target
+@@ -122,6 +122,7 @@ LIBS+=-lz
  # xen support
  obj-$(CONFIG_XEN) += xen-all.o xen-mapcache.o
  obj-$(CONFIG_XEN) += xen-dmbus.o
@@ -68,8 +68,8 @@ Index: qemu-1.4.0/Makefile.target
  # Hardware support
 Index: qemu-1.4.0/blockdev.c
 ===================================================================
---- qemu-1.4.0.orig/blockdev.c	2015-08-17 16:00:15.166516374 -0400
-+++ qemu-1.4.0/blockdev.c	2015-08-17 16:00:21.158511902 -0400
+--- qemu-1.4.0.orig/blockdev.c
++++ qemu-1.4.0/blockdev.c
 @@ -20,6 +20,7 @@
  #include "qmp-commands.h"
  #include "trace.h"
@@ -78,7 +78,7 @@ Index: qemu-1.4.0/blockdev.c
  
  static QTAILQ_HEAD(drivelist, DriveInfo) drives = QTAILQ_HEAD_INITIALIZER(drives);
  
-@@ -657,6 +658,12 @@
+@@ -657,6 +658,12 @@ DriveInfo *drive_init(QemuOpts *opts, Bl
          goto err;
      }
  
@@ -93,9 +93,9 @@ Index: qemu-1.4.0/blockdev.c
      return dinfo;
 Index: qemu-1.4.0/configure
 ===================================================================
---- qemu-1.4.0.orig/configure	2015-08-17 16:00:15.182517508 -0400
-+++ qemu-1.4.0/configure	2015-08-17 16:00:21.162011661 -0400
-@@ -232,6 +232,7 @@
+--- qemu-1.4.0.orig/configure
++++ qemu-1.4.0/configure
+@@ -232,6 +232,7 @@ virtio_blk_data_plane=""
  stubdom="no"
  atapipt="no"
  atapiptv4v="no"
@@ -103,7 +103,7 @@ Index: qemu-1.4.0/configure
  xenpt_hide_msix="yes"
  
  # parse CC options first
-@@ -912,6 +913,10 @@
+@@ -912,6 +913,10 @@ for opt do
    ;;
    --disable-atapi-pt-v4v) atapiptv4v="no"
    ;;
@@ -114,7 +114,7 @@ Index: qemu-1.4.0/configure
    --disable-glusterfs) glusterfs="no"
    ;;
    --enable-glusterfs) glusterfs="yes"
-@@ -3415,6 +3420,7 @@
+@@ -3415,6 +3420,7 @@ echo "gcov enabled      $gcov"
  echo "OpenXT Stubdomain support   $stubdom"
  echo "ATAPI PT support  $atapipt"
  echo "ATAPI PT V4V support  $atapiptv4v"
@@ -122,7 +122,7 @@ Index: qemu-1.4.0/configure
  
  if test "$sdl_too_old" = "yes"; then
  echo "-> Your SDL version is too old - please upgrade to have SDL support"
-@@ -3781,6 +3787,10 @@
+@@ -3781,6 +3787,10 @@ if test "$atapiptv4v" = "yes" ; then
    echo "CONFIG_ATAPI_PT_V4V=y" >> $config_host_mak
  fi
  
@@ -135,8 +135,8 @@ Index: qemu-1.4.0/configure
  fi
 Index: qemu-1.4.0/xen-all.c
 ===================================================================
---- qemu-1.4.0.orig/xen-all.c	2015-08-17 16:00:15.194517376 -0400
-+++ qemu-1.4.0/xen-all.c	2015-08-17 16:00:21.162011661 -0400
+--- qemu-1.4.0.orig/xen-all.c
++++ qemu-1.4.0/xen-all.c
 @@ -26,6 +26,11 @@
  #include <xen/hvm/params.h>
  #include <xen/hvm/e820.h>
@@ -149,7 +149,7 @@ Index: qemu-1.4.0/xen-all.c
  //#define DEBUG_XEN
  
  #ifdef DEBUG_XEN
-@@ -1197,6 +1202,11 @@
+@@ -1197,6 +1202,11 @@ int xen_hvm_init(void)
      xen_be_register("qdisk", &xen_blkdev_ops);
  #endif
  
@@ -163,9 +163,9 @@ Index: qemu-1.4.0/xen-all.c
      return 0;
 Index: qemu-1.4.0/xen-changeiso.c
 ===================================================================
---- /dev/null	1970-01-01 00:00:00.000000000 +0000
-+++ qemu-1.4.0/xen-changeiso.c	2015-08-17 16:00:21.162011661 -0400
-@@ -0,0 +1,229 @@
+--- /dev/null
++++ qemu-1.4.0/xen-changeiso.c
+@@ -0,0 +1,253 @@
 +#include "xen-changeiso.h"
 +
 +static QTAILQ_HEAD(IsoNodeHead, IsoNode) iso_list = QTAILQ_HEAD_INITIALIZER(iso_list);
@@ -189,22 +189,39 @@ Index: qemu-1.4.0/xen-changeiso.c
 +    }
 +}
 +
++// This is the xenstore watch callback.
++// What we want to do here is pretty different wether we're in a stubdom or not.
++// In the non-stubdom case, we're just watching the xenstore key "params",
++//   which contains the path to the current iso. An empty value means eject.
++// In the stubdom case, we also watch the "params" key, but it can only contain
++//   one of two values: "/dev/xvdc" or "". "" (empty value) means eject.
++//   When the iso changes in dom0, param will switch from "/dev/xvdc" to "" and
++//   back to "/dev/xvdc". We want to reinsert the CD on that last event, but only
++//   once the stubdom is successfully connected to it (state == 4).
++//   So we don't only watch params but also state.
 +static void xenstore_update_iso(void *opaque)
 +{
 +#ifdef CONFIG_STUBDOM
 +    char *state = NULL;
-+#else
-+    char *newFile = NULL;
 +#endif
++    char *newFile = NULL;
 +    struct IsoNode *node = opaque;
 +    size_t len;
 +    char path[XEN_BUFSIZE];
++    Error *err = NULL;
 +
 +    if(!xenstore || !node)
 +        return;
 +
 +    if(!node->first_watch) {
 +        memset(path, 0x00, XEN_BUFSIZE);
++
++        // Read the new params, eject if params == ""
++        snprintf(path, XEN_BUFSIZE, "%s/params", node->xen_vbd_id);
++        newFile = xs_read(xenstore, XBT_NULL, path, &len);
++
++        if (newFile != NULL && *newFile == '\0')
++            qmp_eject(bdrv_get_device_name(node->drive->bdrv), true, true, &err);
 +
 +#ifdef CONFIG_STUBDOM
 +        snprintf(path, XEN_BUFSIZE, "%s/state", node->xen_vbd_id);
@@ -213,19 +230,15 @@ Index: qemu-1.4.0/xen-changeiso.c
 +        if (!state)
 +            return;
 +#else
-+        snprintf(path, XEN_BUFSIZE, "%s/params", node->xen_vbd_id);
-+
-+        newFile = xs_read(xenstore, XBT_NULL, path, &len);
-+
 +        // Switch out the file path to the iso, so change gets made
 +        // when the node->timer fires.
 +        if (newFile) {
 +            g_free(node->iso_file);
 +            node->iso_file = NULL;
 +            node->iso_file = g_strdup(newFile);
-+            free(newFile);
 +
 +            if (!node->iso_file) {
++                free(newFile);
 +                return;
 +            }
 +        }
@@ -236,7 +249,9 @@ Index: qemu-1.4.0/xen-changeiso.c
 +        // the disk
 +        if (!strcmp(state, BLKFRONT_READY_STATE)) {
 +#endif
-+            qemu_mod_timer(node->timer, qemu_get_clock_ms(rt_clock) + 1000);
++            // If newFile is "", we already ejected.
++            if (newFile && *newFile != '\0')
++                qemu_mod_timer(node->timer, qemu_get_clock_ms(rt_clock) + 1000);
 +#ifdef CONFIG_STUBDOM
 +        }
 +
@@ -245,7 +260,10 @@ Index: qemu-1.4.0/xen-changeiso.c
 +            state = NULL;
 +        }
 +#endif
-+
++        if(newFile) {
++            free(newFile);
++            newFile = NULL;
++        }
 +    } else {
 +        node->first_watch = false;
 +    }
@@ -362,9 +380,15 @@ Index: qemu-1.4.0/xen-changeiso.c
 +                }
 +            }
 +
-+            if (!xenstore_add_watch(be, "params", xenstore_update_iso, (void *) node)) {
++            if (xenstore_add_watch(be, "params", xenstore_update_iso, (void *) node) != 0) {
 +                fprintf(stderr, "[OXT-ISO] Failed to install xenstore watch on path: %s/params", be);
 +            }
++
++#ifdef CONFIG_STUBDOM
++            if (xenstore_add_watch(be, "state", xenstore_update_iso, (void *) node) != 0) {
++                fprintf(stderr, "[OXT-ISO] Failed to install xenstore watch on path: %s/state", be);
++            }
++#endif
 +
 +            if (be) {
 +                free(be);
@@ -397,9 +421,9 @@ Index: qemu-1.4.0/xen-changeiso.c
 +}
 Index: qemu-1.4.0/xen-changeiso.h
 ===================================================================
---- /dev/null	1970-01-01 00:00:00.000000000 +0000
-+++ qemu-1.4.0/xen-changeiso.h	2015-08-17 16:00:21.162011661 -0400
-@@ -0,0 +1,30 @@
+--- /dev/null
++++ qemu-1.4.0/xen-changeiso.h
+@@ -0,0 +1,31 @@
 +#ifndef XEN_CHANGEISO__H
 +#define XEN_CHANGEISO__H
 +
@@ -412,6 +436,7 @@ Index: qemu-1.4.0/xen-changeiso.h
 +#include "sysemu/blockdev.h"
 +#include "qemu/timer.h"
 +#include "hw/xen_backend.h"
++#include "qmp-commands.h"
 +
 +#define BLKFRONT_READY_STATE "4"
 +#define STUBDOMID(x) (x+1)
