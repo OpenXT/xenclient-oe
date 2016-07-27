@@ -122,6 +122,7 @@ SRC_URI = "${XEN_SRC_URI};name=source \
     file://xsa-170-guest-user-mode-may-crash-guest-with-non-canonical-rip.patch;patch=1 \
     file://xsa-173-x86-shadow-pagetables-address-width-overflow.patch;patch=1 \
     file://xen-fix-xsave.patch \
+    file://openxt-xen-xsmv4vuse.patch \
 "
 
 SRC_URI[source.md5sum] := "${XEN_SRC_MD5SUM}"
