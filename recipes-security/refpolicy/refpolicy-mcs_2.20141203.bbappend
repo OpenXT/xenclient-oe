@@ -175,6 +175,7 @@ SRC_URI += " \
     file://patches/upstream-add-binder-security-class.patch;patch=1 \
     file://patches/upstream-update-netlink-classes.patch;patch=1 \
     file://patches/upstream-contrib-networkmanager.patch;patch=1 \
+    file://patches/openxt-sysadm-lsusb.patch;patch=1 \
     "
     
 def get_poltype(f):
