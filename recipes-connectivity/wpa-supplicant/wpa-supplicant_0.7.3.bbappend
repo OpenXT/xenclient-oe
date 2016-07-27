@@ -11,6 +11,14 @@ PR .= ".1"
 SRC_URI += " \
             file://dbus-scan-results.patch;patch=1 \
             file://libnl3_2.patch \
+            file://2014-1-0001-Add-os_exec-helper-to-run-external-programs.patch \
+            file://2014-1-0002-wpa_cli-Use-os_exec-for-action-script-execution.patch \
+            file://2015-2-0001-WPS-Fix-HTTP-chunked-transfer-encoding-parser.patch \
+            file://2015-3-0001-AP-WMM-Fix-integer-underflow-in-WMM-Action-frame-par.patch \
+            file://2015-5-0001-NFC-Fix-payload-length-validation-in-NDEF-record-par.patch \
+            file://2016-1-0001-WPS-Reject-a-Credential-with-invalid-passphrase.patch \
+            file://2016-1-0002-Reject-psk-parameter-set-with-invalid-passphrase-cha.patch \
+            file://2016-1-0003-Remove-newlines-from-wpa_supplicant-config-network-o.patch \
 "
 
 S = "${WORKDIR}/wpa_supplicant-${PV}"
