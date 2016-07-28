@@ -176,6 +176,7 @@ SRC_URI += " \
     file://patches/upstream-update-netlink-classes.patch;patch=1 \
     file://patches/upstream-contrib-networkmanager.patch;patch=1 \
     file://patches/openxt-sysadm-lsusb.patch;patch=1 \
+    file://patches/openxt-dbus-deny-send-unconfined.patch;patch=1 \
     "
     
 def get_poltype(f):
