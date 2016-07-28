@@ -44,6 +44,18 @@ SRC_URI += "https://www.kernel.org/pub/linux/kernel/v${PV_MAJOR}.x/linux-${PV}.t
     file://xsa-155-qsb-023-xen-netfront-add-range-check-for-Tx-response-id.patch;patch=1 \
     file://xsa-155-qsb-023-xen-netfront-copy-response-out-of-shared-buffer-befo.patch;patch=1 \
     file://xsa-155-qsb-023-xen-netfront-do-not-use-data-already-exposed-to-back.patch;patch=1 \
+    file://cve-2016-0758-KEYS-Fix-ASN.1-indefinite-length-object-parsing.patch;patch=1 \
+    file://cve-2016-3135-netfilter-x_tables-check-for-size-overflow.patch;patch=1 \
+    file://cve-2016-3672-x86-mm-32-Enable-full-randomization-on-i386-and-X86_.patch;patch=1 \
+    file://cve-2016-3951-cdc_ncm-do-not-call-usbnet_link_change-from-cdc_ncm_.patch;patch=1 \
+    file://cve-2016-4482-usbfs-fix-potential-infoleak-in-devio.patch;patch=1 \
+    file://cve-2016-4568-media-videobuf2-v4l2-Verify-planes-array-in-buffer-d.patch;patch=1 \
+    file://cve-2016-4569-ALSA-timer-Fix-leak-in-SNDRV_TIMER_IOCTL_PARAMS.patch;patch=1 \
+    file://cve-2016-4578-1-ALSA-timer-Fix-leak-in-events-via-snd_timer_user_cca.patch;patch=1 \
+    file://cve-2016-4578-2-ALSA-timer-Fix-leak-in-events-via-snd_timer_user_tin.patch;patch=1 \
+    file://cve-2016-4794-1-percpu-fix-synchronization-between-chunk-map_extend_.patch;patch=1 \
+    file://cve-2016-4794-2-percpu-fix-synchronization-between-synchronous-map-e.patch;patch=1 \
+    file://cve-2016-5244-rds-fix-an-infoleak-in-rds_inc_info_copy.patch;patch=1 \
     file://defconfig \
     "
 
