@@ -165,7 +165,7 @@ Index: qemu-1.4.0/xen-changeiso.c
 ===================================================================
 --- /dev/null
 +++ qemu-1.4.0/xen-changeiso.c
-@@ -0,0 +1,253 @@
+@@ -0,0 +1,261 @@
 +#include "xen-changeiso.h"
 +
 +static QTAILQ_HEAD(IsoNodeHead, IsoNode) iso_list = QTAILQ_HEAD_INITIALIZER(iso_list);
@@ -248,11 +248,18 @@ Index: qemu-1.4.0/xen-changeiso.c
 +        // Wait for blkfront<->blkback to get ready before changing
 +        // the disk
 +        if (!strcmp(state, BLKFRONT_READY_STATE)) {
++            if (node->just_started) {
++                // blkfront just finished setting up /dev/xvdc
++                // doing an eject and re-insert at this point upsets seabios
++                // let's do nothing
++                node->just_started = false;
++            } else {
 +#endif
-+            // If newFile is "", we already ejected.
-+            if (newFile && *newFile != '\0')
-+                qemu_mod_timer(node->timer, qemu_get_clock_ms(rt_clock) + 1000);
++                // If newFile is "", we already ejected.
++                if (newFile && *newFile != '\0')
++                    qemu_mod_timer(node->timer, qemu_get_clock_ms(rt_clock) + 1000);
 +#ifdef CONFIG_STUBDOM
++            }
 +        }
 +
 +        if(state) {
@@ -297,6 +304,7 @@ Index: qemu-1.4.0/xen-changeiso.c
 +    node->drive = dinfo;
 +    node->xen_vbd_id = NULL;
 +    node->frontend_state = NULL;
++    node->just_started = true;
 +    node->first_watch = true;
 +    node->timer = qemu_new_timer_ms(rt_clock, update_iso_cb, node);
 +
@@ -423,7 +431,7 @@ Index: qemu-1.4.0/xen-changeiso.h
 ===================================================================
 --- /dev/null
 +++ qemu-1.4.0/xen-changeiso.h
-@@ -0,0 +1,31 @@
+@@ -0,0 +1,32 @@
 +#ifndef XEN_CHANGEISO__H
 +#define XEN_CHANGEISO__H
 +
@@ -446,6 +454,7 @@ Index: qemu-1.4.0/xen-changeiso.h
 +    char *iso_file;
 +    char *xen_vbd_id;
 +    char *frontend_state;
++    bool just_started;
 +    bool first_watch;
 +    QEMUTimer *timer;
 +    QTAILQ_ENTRY(IsoNode) next;
