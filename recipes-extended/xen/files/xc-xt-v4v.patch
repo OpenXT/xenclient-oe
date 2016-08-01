@@ -135,10 +135,10 @@ index e22a41b..7ad5db0 100644
      int port;
 diff --git xen-4.3.4.orig/xen/common/v4v.c xen-4.3.4/xen/common/v4v.c
 new file mode 100644
-index 0000000..aaa8cba
+index 0000000..4db65fc
 --- /dev/null
 +++ xen-4.3.4/xen/common/v4v.c
-@@ -0,0 +1,1977 @@
+@@ -0,0 +1,1973 @@
 +/******************************************************************************
 + * v4v.c
 + * 
@@ -1478,16 +1478,16 @@ index 0000000..aaa8cba
 +#endif
 +
 +
-+      read_lock (&d->v4v->lock);
++      write_lock (&d->v4v->lock);
 +      ring_info = v4v_ring_find_info (d, &ring.id);
 +
 +      if (!ring_info)
 +        {
-+          read_unlock (&d->v4v->lock);
 +          ring_info = v4v_xmalloc (struct v4v_ring_info);
 +          if (!ring_info)
 +            {
 +              ret = -ENOMEM;
++              write_unlock (&d->v4v->lock);
 +              break;
 +            }
 +          need_to_insert++;
@@ -1504,7 +1504,7 @@ index 0000000..aaa8cba
 +          v4v_ring_remove_mfns(ring_info);
 +      }
 +
-+      spin_lock (&ring_info->lock);
++      /* Since we hold W(L2), no need to take L3 here */
 +      ring_info->id = ring.id;
 +      ring_info->len = ring.len;
 +      ring_info->tx_ptr = ring.tx_ptr;
@@ -1512,21 +1512,17 @@ index 0000000..aaa8cba
 +      if (ring_info->mfns)
 +        xfree (ring_info->mfns);
 +      ret = v4v_find_ring_mfns (d, ring_info, pfn_list_hnd);
-+      spin_unlock (&ring_info->lock);
 +      if (ret)
-+        break;
-+
-+      if (!need_to_insert)
 +        {
-+          read_unlock (&d->v4v->lock);
++          write_unlock (&d->v4v->lock);
++          break;
 +        }
-+      else
++      if (need_to_insert)
 +        {
 +          uint16_t hash = v4v_hash_fn (&ring.id);
-+          write_lock (&d->v4v->lock);
 +          hlist_add_head (&ring_info->node, &d->v4v->ring_hash[hash]);
-+          write_unlock (&d->v4v->lock);
 +        }
++      write_unlock (&d->v4v->lock);
 +    }
 +  while (1 == 0);
 +
