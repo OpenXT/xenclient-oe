@@ -15,7 +15,6 @@ do_configure() {
 }
 
 do_compile() {
-        oe_runmake -C tools subdir-all-libaio
         oe_runmake -C tools subdir-all-blktap2
 }
 
