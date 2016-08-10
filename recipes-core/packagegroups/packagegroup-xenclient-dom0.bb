@@ -66,8 +66,6 @@ RDEPENDS_${PN} = " \
     ustr \
     ethtool \
     bootage \
-    microcode-ctl \
-    intel-microcode \
     rsyslog \
     logrotate \
     qemu-wrappers \
