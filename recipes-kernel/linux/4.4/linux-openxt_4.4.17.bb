@@ -8,7 +8,7 @@ PV_MAJOR = "${@"${PV}".split('.', 3)[0]}"
 PV_MINOR = "${@"${PV}".split('.', 3)[1]}"
 
 FILESEXTRAPATHS_prepend := "${THISDIR}/patches:${THISDIR}/defconfigs:"
-SRC_URI += "https://www.kernel.org/pub/linux/kernel/v${PV_MAJOR}.x/linux-${PV}.tar.gz;name=kernel \
+SRC_URI += "https://www.kernel.org/pub/linux/kernel/v${PV_MAJOR}.x/linux-${PV}.tar.xz;name=kernel \
     file://bridge-carrier-follow-prio0.patch;patch=1 \
     file://privcmd-mmapnocache-ioctl.patch;patch=1 \
     file://xenkbd-tablet-resolution.patch;patch=1 \
@@ -50,15 +50,12 @@ SRC_URI += "https://www.kernel.org/pub/linux/kernel/v${PV_MAJOR}.x/linux-${PV}.t
     file://cve-2016-3951-cdc_ncm-do-not-call-usbnet_link_change-from-cdc_ncm_.patch \
     file://cve-2016-4482-usbfs-fix-potential-infoleak-in-devio.patch \
     file://cve-2016-4568-media-videobuf2-v4l2-Verify-planes-array-in-buffer-d.patch \
-    file://cve-2016-4569-ALSA-timer-Fix-leak-in-SNDRV_TIMER_IOCTL_PARAMS.patch \
-    file://cve-2016-4578-1-ALSA-timer-Fix-leak-in-events-via-snd_timer_user_cca.patch \
-    file://cve-2016-4578-2-ALSA-timer-Fix-leak-in-events-via-snd_timer_user_tin.patch \
     file://cve-2016-5244-rds-fix-an-infoleak-in-rds_inc_info_copy.patch \
     file://defconfig \
     "
 
-SRC_URI[kernel.md5sum] = "3252f673da6a77de161da3bfafb022a3"
-SRC_URI[kernel.sha256sum] = "b48d1160e3c181138f6ae9efe433e204ac3da821939780c1b115b02fc3c92dda"
+SRC_URI[kernel.md5sum] = "687c2d9063dfdc6b27a21d33f2f419ba"
+SRC_URI[kernel.sha256sum] = "159451471c0df6bde8043b85dfacafa58e65c4a0cabb1157e83916326cd04f81"
 
 LIC_FILES_CHKSUM = "file://COPYING;md5=d7810fab7487fb0aad327b76f1be7cd7"
 
