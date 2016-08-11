@@ -54,6 +54,7 @@ SRC_URI += "https://www.kernel.org/pub/linux/kernel/v${PV_MAJOR}.x/linux-${PV}.t
     file://cve-2016-4578-1-ALSA-timer-Fix-leak-in-events-via-snd_timer_user_cca.patch \
     file://cve-2016-4578-2-ALSA-timer-Fix-leak-in-events-via-snd_timer_user_tin.patch \
     file://cve-2016-5244-rds-fix-an-infoleak-in-rds_inc_info_copy.patch \
+    file://cve-2016-5696-tcp-make-challenge-acks-less-predictable.patch \
     file://defconfig \
     "
 
