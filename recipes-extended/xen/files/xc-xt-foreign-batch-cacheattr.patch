@@ -1,0 +1,101 @@
+Index: xen-4.6.1/tools/include/xen-sys/Linux/privcmd.h
+===================================================================
+--- xen-4.6.1.orig/tools/include/xen-sys/Linux/privcmd.h
++++ xen-4.6.1/tools/include/xen-sys/Linux/privcmd.h
+@@ -75,6 +75,11 @@ typedef struct privcmd_mmapbatch_v2 {
+ 	int __user *err;  /* array of error codes */
+ } privcmd_mmapbatch_v2_t;
+ 
++typedef struct privcmd_mmapcacheattr {
++       __u64 addr;
++       int type;
++} privcmd_mmapcacheattr_t;
++
+ /*
+  * @cmd: IOCTL_PRIVCMD_HYPERCALL
+  * @arg: &privcmd_hypercall_t
+@@ -88,5 +93,7 @@ typedef struct privcmd_mmapbatch_v2 {
+ 	_IOC(_IOC_NONE, 'P', 3, sizeof(privcmd_mmapbatch_t))
+ #define IOCTL_PRIVCMD_MMAPBATCH_V2				\
+ 	_IOC(_IOC_NONE, 'P', 4, sizeof(privcmd_mmapbatch_v2_t))
++#define IOCTL_PRIVCMD_MMAPCACHEATTR                             \
++	_IOC(_IOC_NONE, 'P', 200, sizeof(privcmd_mmapcacheattr_t))
+ 
+ #endif /* __LINUX_PUBLIC_PRIVCMD_H__ */
+Index: xen-4.6.1/tools/libxc/include/xenctrl.h
+===================================================================
+--- xen-4.6.1.orig/tools/libxc/include/xenctrl.h
++++ xen-4.6.1/tools/libxc/include/xenctrl.h
+@@ -1523,6 +1523,19 @@ void *xc_map_foreign_batch(xc_interface
+ void *xc_map_foreign_bulk(xc_interface *xch, uint32_t dom, int prot,
+                           const xen_pfn_t *arr, int *err, unsigned int num);
+ 
++enum {
++    XC_MAP_CACHEATTR_UC = XEN_DOMCTL_MEM_CACHEATTR_UC,
++    XC_MAP_CACHEATTR_WC = XEN_DOMCTL_MEM_CACHEATTR_WC,
++    XC_MAP_CACHEATTR_WT = XEN_DOMCTL_MEM_CACHEATTR_WT,
++    XC_MAP_CACHEATTR_WP = XEN_DOMCTL_MEM_CACHEATTR_WP,
++    XC_MAP_CACHEATTR_WB = XEN_DOMCTL_MEM_CACHEATTR_WB,
++    XC_MAP_CACHEATTR_UCM = XEN_DOMCTL_MEM_CACHEATTR_UCM
++};
++
++void *xc_map_foreign_batch_cacheattr(xc_interface *xch, uint32_t dom, int prot,
++                                     xen_pfn_t *arr, int num,
++                                     int cache_type);
++
+ /**
+  * Translates a virtual address in the context of a given domain and
+  * vcpu returning the GFN containing the address (that is, an MFN for 
+Index: xen-4.6.1/tools/libxc/xc_foreign_memory.c
+===================================================================
+--- xen-4.6.1.orig/tools/libxc/xc_foreign_memory.c
++++ xen-4.6.1/tools/libxc/xc_foreign_memory.c
+@@ -120,6 +120,48 @@ void *xc_map_foreign_bulk_compat(xc_inte
+     return ret;
+ }
+ 
++void *xc_map_foreign_batch_cacheattr(xc_interface *xch, uint32_t dom, int prot,
++                                     xen_pfn_t *arr, int num, int cache_type)
++{
++    int fd = xch->ops_handle;
++    privcmd_mmapbatch_t batch;
++    privcmd_mmapcacheattr_t cacheattr;
++    void *addr;
++    addr = mmap(NULL, num * PAGE_SIZE, prot, MAP_SHARED, fd, 0);
++    if ( addr == MAP_FAILED ) {
++        perror("xc_map_foreign_batch: mmap failed");
++        return NULL;
++    }
++
++    cacheattr.addr = (unsigned long)addr;
++    cacheattr.type = cache_type;
++
++    if ( ioctl(fd, IOCTL_PRIVCMD_MMAPCACHEATTR, &cacheattr) ) {
++        int saved_errno = errno;
++        perror("xc_map_foreign_batch_cacheattr: failed to set cache attributes");
++        (void)munmap(addr, num*PAGE_SIZE);
++        errno = saved_errno;
++        return NULL;
++    }
++
++    batch.num=num;
++    batch.dom=dom;
++    batch.addr=(unsigned long)addr;
++    batch.arr=arr;
++
++    if ( ioctl(fd, IOCTL_PRIVCMD_MMAPBATCH, &batch) < 0 )
++    {
++        int saved_errno = errno;
++        perror("xc_map_foreign_batch_cacheattr: ioctl failed");
++        (void)munmap(addr, num*PAGE_SIZE);
++        errno = saved_errno;
++        return NULL;
++    }
++    return addr;
++
++}
++
++
+ /*
+  * Local variables:
+  * mode: C

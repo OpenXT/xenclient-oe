@@ -1,0 +1,100 @@
+diff --git a/tools/firmware/hvmloader/acpi/qemu_utils.c b/tools/firmware/hvmloader/acpi/qemu_utils.c
+index f12e7bd..24094ba 100644
+--- a/tools/firmware/hvmloader/acpi/qemu_utils.c
++++ b/tools/firmware/hvmloader/acpi/qemu_utils.c
+@@ -10,6 +10,7 @@ void set_checksum(void *table, uint32_t checksum_offset, uint32_t length);
+ #define QEMU_CFG_SIGNATURE              0x00
+ #define QEMU_ARCH_LOCAL			0x8000
+ #define QEMU_CFG_ACPI_TABLES            (QEMU_ARCH_LOCAL + 0)
++#define QEMU_CFG_BIOS_SIG               (QEMU_ARCH_LOCAL + 5)
+ 
+ static int qemu_cfg_present;
+ 
+@@ -100,3 +101,22 @@ get_external_tables(void *buf)
+ 
+     return total_len;
+ }
++
++/* Fetch BIOS signature data passed by QEMU if any */
++int get_bios_signature(void *buf, int maxlen)
++{
++    uint8_t len = 0;
++
++    qemu_cfg_port_probe();
++
++    if (qemu_cfg_present) {
++        qemu_cfg_read_entry(&len, QEMU_CFG_BIOS_SIG, sizeof(len));
++
++        if (len > maxlen)
++            len = maxlen;
++
++        qemu_cfg_read(buf, len);
++    }
++
++    return len;
++}
+diff --git a/tools/firmware/hvmloader/acpi/qemu_utils.h b/tools/firmware/hvmloader/acpi/qemu_utils.h
+index 068fa69..0e4bf18 100644
+--- a/tools/firmware/hvmloader/acpi/qemu_utils.h
++++ b/tools/firmware/hvmloader/acpi/qemu_utils.h
+@@ -5,5 +5,6 @@ uint16_t qemu_cfg_acpi_additional_tables(void);
+ uint16_t qemu_cfg_next_acpi_table_len(void);
+ void* qemu_cfg_next_acpi_table_load(void *addr, uint16_t len);
+ int get_external_tables(void *buf);
++int get_bios_signature(void *buf, int maxlen);
+ 
+ #endif
+diff --git a/tools/firmware/hvmloader/rombios.c b/tools/firmware/hvmloader/rombios.c
+index 83741c6..50f3168 100644
+--- a/tools/firmware/hvmloader/rombios.c
++++ b/tools/firmware/hvmloader/rombios.c
+@@ -26,6 +26,7 @@
+ 
+ #include "smbios_types.h"
+ #include "acpi/acpi2_0.h"
++#include "acpi/qemu_utils.h"
+ #include "pci_regs.h"
+ #include "util.h"
+ #include "hypercall.h"
+@@ -140,7 +141,7 @@ static void rombios_load(const struct bios_config *config)
+ }
+ 
+ /*
+- * find_mp_table_start - searchs through BIOS memory for '___HVMMP' signature
++ * find_mp_table_start - searches through BIOS memory for '___HVMMP' signature
+  *
+  * The '___HVMMP' signature is created by the ROMBIOS and designates a chunk
+  * of space inside the ROMBIOS that is safe for us to write our MP table info
+@@ -185,6 +186,21 @@ static void rombios_acpi_build_tables(void)
+     acpi_build_tables(&config, ACPI_PHYSICAL_ADDRESS);
+ }
+ 
++/* Write required BIOS signature to BIOS text segment */
++static void *update_bios_signature(void *location)
++{
++    char bios_sig[256];
++    int len = get_bios_signature(bios_sig, sizeof(bios_sig));
++
++    if (len > 0) {
++        memcpy(location, bios_sig, len);
++
++        location = (char *)location + len;
++    }
++
++    return location;
++}
++
+ static void rombios_create_mp_tables(void)
+ {
+     /* Find the 'safe' place in ROMBIOS for the MP tables. */
+@@ -196,6 +212,10 @@ static void rombios_create_mp_tables(void)
+         return;
+     }
+ 
++    /* Add any required BIOS signature */
++    table = update_bios_signature(table);
++
++    /* Add MP tables */
+     create_mp_tables(table);
+ 
+     reset_bios_checksum();

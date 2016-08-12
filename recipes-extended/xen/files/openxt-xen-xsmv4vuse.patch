@@ -1,0 +1,141 @@
+Index: xen-4.6.1/xen/common/v4v.c
+===================================================================
+--- xen-4.6.1.orig/xen/common/v4v.c
++++ xen-4.6.1/xen/common/v4v.c
+@@ -1749,7 +1749,7 @@ v4v_send (struct domain *src_d, v4v_addr
+     }
+ 
+   /* XSM: verify if src is allowed to send to dst */
+-  if (xsm_v4v_send(src_d, dst_d) != 0)
++  if (xsm_v4v_send(XSM_HOOK, src_d, dst_d) != 0)
+     {
+       printk(KERN_ERR "V4V: XSM REJECTED %i -> %i\n",
+              src_addr->domain, dst_addr->domain);
+@@ -1860,7 +1860,7 @@ v4v_sendv (struct domain *src_d, v4v_add
+     }
+ 
+   /* XSM: verify if src is allowed to send to dst */
+-  if (xsm_v4v_send(src_d, dst_d) != 0)
++  if (xsm_v4v_send(XSM_HOOK, src_d, dst_d) != 0)
+     {
+       printk(KERN_ERR "V4V: XSM REJECTED %i -> %i\n",
+              src_addr->domain, dst_addr->domain);
+@@ -1940,7 +1940,11 @@ do_v4v_op (int cmd, XEN_GUEST_HANDLE (vo
+            XEN_GUEST_HANDLE (void) arg3, uint32_t arg4, uint32_t arg5)
+ {
+   struct domain *d = current->domain;
+-  long rc = -EFAULT;
++  long rc;
++
++  rc = xsm_v4v_use(XSM_HOOK, d);
++  if (rc)
++      return rc;
+ 
+ #ifdef V4V_DEBUG
+ 
+@@ -1951,6 +1955,8 @@ do_v4v_op (int cmd, XEN_GUEST_HANDLE (vo
+ #endif
+ 
+   domain_lock (d);
++
++  rc = -EFAULT;
+   switch (cmd)
+     {
+     case V4VOP_register_ring:
+Index: xen-4.6.1/xen/include/xsm/dummy.h
+===================================================================
+--- xen-4.6.1.orig/xen/include/xsm/dummy.h
++++ xen-4.6.1/xen/include/xsm/dummy.h
+@@ -726,9 +726,16 @@ static XSM_INLINE int xsm_pmu_op (XSM_DE
+     }
+ }
+ 
+-static XSM_INLINE int xsm_v4v_send(struct domain *d, struct domain *t)
++static XSM_INLINE int xsm_v4v_send(XSM_DEFAULT_ARG struct domain *d, struct domain *t)
+ {
+-    return 0;
++    XSM_ASSERT_ACTION(XSM_HOOK);
++    return xsm_default_action(action, d, t);
++}
++
++static XSM_INLINE int xsm_v4v_use(XSM_DEFAULT_ARG struct domain *d)
++{
++    XSM_ASSERT_ACTION(XSM_HOOK);
++    return xsm_default_action(action, d, d);
+ }
+ 
+ #endif /* CONFIG_X86 */
+Index: xen-4.6.1/xen/include/xsm/xsm.h
+===================================================================
+--- xen-4.6.1.orig/xen/include/xsm/xsm.h
++++ xen-4.6.1/xen/include/xsm/xsm.h
+@@ -193,6 +193,7 @@ struct xsm_operations {
+     int (*pmu_op) (struct domain *d, unsigned int op);
+ #endif
+     int (*v4v_send) (struct domain *dom1, struct domain *dom2);
++    int (*v4v_use) (struct domain *d);
+ };
+ 
+ #ifdef XSM_ENABLE
+@@ -734,11 +735,16 @@ static inline int xsm_pmu_op (xsm_defaul
+     return xsm_ops->pmu_op(d, op);
+ }
+ 
+-static inline int xsm_v4v_send(struct domain *d1, struct domain *d2)
++static inline int xsm_v4v_send(xsm_default_t def, struct domain *d1, struct domain *d2)
+ {
+     return xsm_ops->v4v_send(d1,d2);
+ }
+ 
++static inline int xsm_v4v_use(xsm_default_t def, struct domain *d)
++{
++    return xsm_ops->v4v_use(d);
++}
++
+ #endif /* CONFIG_X86 */
+ 
+ #endif /* XSM_NO_WRAPPERS */
+Index: xen-4.6.1/xen/xsm/dummy.c
+===================================================================
+--- xen-4.6.1.orig/xen/xsm/dummy.c
++++ xen-4.6.1/xen/xsm/dummy.c
+@@ -164,4 +164,5 @@ void xsm_fixup_ops (struct xsm_operation
+ #endif
+     set_to_dummy_if_null(ops, memory_translate);
+     set_to_dummy_if_null(ops, v4v_send);
++    set_to_dummy_if_null(ops, v4v_use);
+ }
+Index: xen-4.6.1/xen/xsm/flask/hooks.c
+===================================================================
+--- xen-4.6.1.orig/xen/xsm/flask/hooks.c
++++ xen-4.6.1/xen/xsm/flask/hooks.c
+@@ -1626,6 +1626,11 @@ static int flask_v4v_send(struct domain
+     return domain_has_perm(dom1, dom2, SECCLASS_V4V, V4V__SEND);
+ }
+ 
++static int flask_v4v_use(struct domain *d)
++{
++    return current_has_perm(d, SECCLASS_V4V, V4V__USE);
++}
++
+ long do_flask_op(XEN_GUEST_HANDLE_PARAM(xsm_op_t) u_flask_op);
+ int compat_flask_op(XEN_GUEST_HANDLE_PARAM(xsm_op_t) u_flask_op);
+ 
+@@ -1765,6 +1770,7 @@ static struct xsm_operations flask_ops =
+     .pmu_op = flask_pmu_op,
+ #endif
+     .v4v_send = flask_v4v_send,
++    .v4v_use = flask_v4v_use,
+ };
+ 
+ static __init void flask_init(void)
+Index: xen-4.6.1/xen/xsm/flask/policy/access_vectors
+===================================================================
+--- xen-4.6.1.orig/xen/xsm/flask/policy/access_vectors
++++ xen-4.6.1/xen/xsm/flask/policy/access_vectors
+@@ -499,4 +499,5 @@ class security
+ class v4v
+ {
+     send
++    use
+ }

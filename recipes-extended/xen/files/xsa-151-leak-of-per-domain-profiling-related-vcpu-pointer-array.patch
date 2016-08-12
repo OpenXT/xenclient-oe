@@ -1,0 +1,46 @@
+################################################################################
+SHORT DESCRIPTION: 
+################################################################################
+XSA-151 (http://xenbits.xen.org/xsa/advisory-151.html)
+xenoprof: free domain's vcpu array
+
+################################################################################
+LONG DESCRIPTION: 
+################################################################################
+Source: http://xenbits.xen.org/xsa/advisory-151.html
+Patches: xsa151.patch
+
+A domain's xenoprofile state contains an array of per-vcpu
+information, which is allocated once in the lifetime of a domain in
+response to that domain using the XENOPROF_get_buffer hypercall on
+itself or by a domain with the privilege to profile a target domain
+using the XENOPROF_set_passive hypercall.
+
+This array is leaked on domain teardown.  This memory leak could --
+over time -- exhaust the host's memory.
+################################################################################
+CHANGELOG 
+################################################################################
+Added in OpenXT, Xen 4.3.4 patch-queue: Eric Chanudet <chanudete@ainfosec.com>
+
+################################################################################
+PATCHES 
+################################################################################
+--- a/xen/common/xenoprof.c
++++ b/xen/common/xenoprof.c
+@@ -239,6 +239,7 @@ static int alloc_xenoprof_struct(
+     d->xenoprof->rawbuf = alloc_xenheap_pages(get_order_from_pages(npages), 0);
+     if ( d->xenoprof->rawbuf == NULL )
+     {
++        xfree(d->xenoprof->vcpu);
+         xfree(d->xenoprof);
+         d->xenoprof = NULL;
+         return -ENOMEM;
+@@ -286,6 +287,7 @@ void free_xenoprof_pages(struct domain *
+         free_xenheap_pages(x->rawbuf, order);
+     }
+ 
++    xfree(x->vcpu);
+     xfree(x);
+     d->xenoprof = NULL;
+ }

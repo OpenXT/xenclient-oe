@@ -1,0 +1,124 @@
+Index: xen-4.6.1/xen/arch/x86/mm.c
+===================================================================
+--- xen-4.6.1.orig/xen/arch/x86/mm.c
++++ xen-4.6.1/xen/arch/x86/mm.c
+@@ -4633,12 +4633,18 @@ int xenmem_add_to_physmap_one(
+     unsigned long prev_mfn, mfn = 0, old_gpfn;
+     int rc;
+     p2m_type_t p2mt;
++    int unmap_shinfo = 0;
++    xen_pfn_t gpfn_new = gpfn;
+ 
+     switch ( space )
+     {
+         case XENMAPSPACE_shared_info:
+             if ( idx == 0 )
+                 mfn = virt_to_mfn(d->shared_info);
++            /* unmap shared info page if guest passed INVALID_MFN */
++            if ( gpfn_new == (hvm_guest_x86_mode(current) == 8
++                              ? INVALID_MFN : INVALID_MFN >> 32) )
++                unmap_shinfo = 1;
+             break;
+         case XENMAPSPACE_grant_table:
+             write_lock(&d->grant_table->lock);
+@@ -4694,24 +4700,37 @@ int xenmem_add_to_physmap_one(
+     {
+         if ( page )
+             put_page(page);
++
++        if ( unmap_shinfo )
++        {
++            if ( d->prev_mfn_shinfo  != INVALID_MFN &&
++                d->prev_gpfn_shinfo != INVALID_MFN )
++            {
++                gpfn_new = d->prev_gpfn_shinfo;
++                mfn = d->prev_mfn_shinfo;
++            }
++            else
++                printk("unmapping of shared info requested while not mapped\n");
++        }
++
+         if ( space == XENMAPSPACE_gmfn || space == XENMAPSPACE_gmfn_range )
+             put_gfn(d, gfn);
+         return -EINVAL;
+     }
+ 
+     /* Remove previously mapped page if it was present. */
+-    prev_mfn = mfn_x(get_gfn(d, gpfn, &p2mt));
++    prev_mfn = mfn_x(get_gfn(d, gpfn_new, &p2mt));
+     if ( mfn_valid(prev_mfn) )
+     {
+         if ( is_xen_heap_mfn(prev_mfn) )
+             /* Xen heap frames are simply unhooked from this phys slot. */
+-            guest_physmap_remove_page(d, gpfn, prev_mfn, PAGE_ORDER_4K);
+-        else
++            guest_physmap_remove_page(d, gpfn_new, prev_mfn, PAGE_ORDER_4K);
++        else if ( space != XENMAPSPACE_shared_info )
+             /* Normal domain memory is freed, to avoid leaking memory. */
+-            guest_remove_page(d, gpfn);
++            guest_remove_page(d, gpfn_new);
+     }
+     /* In the XENMAPSPACE_gmfn case we still hold a ref on the old page. */
+-    put_gfn(d, gpfn);
++    put_gfn(d, gpfn_new);
+ 
+     /* Unmap from old location, if any. */
+     old_gpfn = get_gpfn_from_mfn(mfn);
+@@ -4722,12 +4741,27 @@ int xenmem_add_to_physmap_one(
+         guest_physmap_remove_page(d, old_gpfn, mfn, PAGE_ORDER_4K);
+ 
+     /* Map at new location. */
+-    rc = guest_physmap_add_page(d, gpfn, mfn, PAGE_ORDER_4K);
++    rc = guest_physmap_add_page(d, gpfn_new, mfn, PAGE_ORDER_4K);
+ 
+     /* In the XENMAPSPACE_gmfn, we took a ref of the gfn at the top */
+     if ( space == XENMAPSPACE_gmfn || space == XENMAPSPACE_gmfn_range )
+         put_gfn(d, gfn);
+ 
++    if ( space == XENMAPSPACE_shared_info )
++    {
++        /* save the shared info mapping to restore, if we are not unmapping */
++        if (!unmap_shinfo)
++        {
++            d->prev_mfn_shinfo = prev_mfn;
++            d->prev_gpfn_shinfo = gpfn_new;
++        }
++        else
++        {
++            d->prev_mfn_shinfo = INVALID_MFN;
++            d->prev_gpfn_shinfo = INVALID_MFN;
++        }
++    }
++
+     if ( page )
+         put_page(page);
+ 
+Index: xen-4.6.1/xen/common/domain.c
+===================================================================
+--- xen-4.6.1.orig/xen/common/domain.c
++++ xen-4.6.1/xen/common/domain.c
+@@ -392,6 +392,9 @@ struct domain *domain_create(domid_t dom
+         spin_unlock(&domlist_update_lock);
+     }
+ 
++    d->prev_mfn_shinfo = INVALID_MFN;
++    d->prev_gpfn_shinfo = INVALID_MFN;
++
+     return d;
+ 
+  fail:
+Index: xen-4.6.1/xen/include/xen/sched.h
+===================================================================
+--- xen-4.6.1.orig/xen/include/xen/sched.h
++++ xen-4.6.1/xen/include/xen/sched.h
+@@ -470,6 +470,10 @@ struct domain
+     /*v4v*/
+     rwlock_t v4v_lock;
+     struct v4v_domain	*v4v;
++
++    unsigned long prev_mfn_shinfo;
++    unsigned long prev_gpfn_shinfo;
++
+ };
+ 
+ struct domain_setup_info

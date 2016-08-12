@@ -1,0 +1,185 @@
+diff --git a/tools/libxc/xc_domain.c b/tools/libxc/xc_domain.c
+index d98e68b..5e9df18 100644
+--- a/tools/libxc/xc_domain.c
++++ b/tools/libxc/xc_domain.c
+@@ -1120,6 +1120,27 @@ int xc_get_hvm_param(xc_interface *handle, domid_t dom, int param, unsigned long
+     return rc;
+ }
+ 
++int xc_set_hvm_pio(xc_interface *handle, domid_t dom, uint32_t port, unsigned long value)
++{
++    DECLARE_HYPERCALL;
++    DECLARE_HYPERCALL_BUFFER(xen_hvm_param_t, arg);
++    int rc;
++
++    arg = xc_hypercall_buffer_alloc(handle, arg, sizeof(*arg));
++    if ( arg == NULL )
++        return -1;
++
++    hypercall.op     = __HYPERVISOR_hvm_op;
++    hypercall.arg[0] = HVMOP_set_pio;
++    hypercall.arg[1] = HYPERCALL_BUFFER_AS_ARG(arg);
++    arg->domid = dom;
++    arg->index = port;
++    arg->value = value;
++    rc = do_xen_hypercall(handle, &hypercall);
++    xc_hypercall_buffer_free(handle, arg);
++    return rc;
++}
++
+ int xc_domain_setdebugging(xc_interface *xch,
+                            uint32_t domid,
+                            unsigned int enable)
+diff --git a/tools/libxc/xenctrl.h b/tools/libxc/xenctrl.h
+index f6d6e1c..ab13b18 100644
+--- a/tools/libxc/xenctrl.h
++++ b/tools/libxc/xenctrl.h
+@@ -1653,6 +1653,8 @@ void xc_clear_last_error(xc_interface *xch);
+ int xc_set_hvm_param(xc_interface *handle, domid_t dom, int param, unsigned long value);
+ int xc_get_hvm_param(xc_interface *handle, domid_t dom, int param, unsigned long *value);
+ 
++int xc_set_hvm_pio(xc_interface *handle, domid_t dom, uint32_t port, unsigned long value);
++
+ /* HVM guest pass-through */
+ int xc_assign_device(xc_interface *xch,
+                      uint32_t domid,
+diff --git a/xen/arch/x86/hvm/hvm.c b/xen/arch/x86/hvm/hvm.c
+index 3571916..0c26917 100644
+--- a/xen/arch/x86/hvm/hvm.c
++++ b/xen/arch/x86/hvm/hvm.c
+@@ -3716,6 +3716,29 @@ long do_hvm_op(unsigned long op, XEN_GUEST_HANDLE(void) arg)
+ 
+     switch ( op )
+     {
++    case HVMOP_set_pio:
++    {
++       struct xen_hvm_param a;
++       struct domain *d;
++
++       if ( copy_from_guest(&a, arg, 1) )
++            return -EFAULT;
++        if ( a.domid == DOMID_SELF )
++            d = rcu_lock_current_domain();
++        else if ( is_hardware_domain(current->domain) )
++            d = rcu_lock_domain_by_id(a.domid);
++        else
++            return -EPERM;
++        if ( d == NULL )
++            return -ESRCH;
++        if ( !is_hvm_domain(d) ) {
++            rc = -EINVAL;
++        } else {
++            rc = pm_pio_set(d, a.index, a.value);
++        }
++        rcu_unlock_domain(d);
++        break;
++    }
+     case HVMOP_set_param:
+     case HVMOP_get_param:
+     {
+diff --git a/xen/arch/x86/hvm/pmtimer.c b/xen/arch/x86/hvm/pmtimer.c
+index 01ae31d..7197ff6 100644
+--- a/xen/arch/x86/hvm/pmtimer.c
++++ b/xen/arch/x86/hvm/pmtimer.c
+@@ -37,15 +37,22 @@
+ #define GBL_STS    (1 << 5)
+ #define PWRBTN_STS (1 << 8)
+ #define SLPBTN_STS (1 << 9)
++#define PWRBTNOR_STS    (1 << 11)
++#define RSM_STS         (1 << 15)
+ 
+ /* The same in PM1a_EN */
+ #define TMR_EN     (1 << 0)
+ #define GBL_EN     (1 << 5)
+ #define PWRBTN_EN  (1 << 8)
+ #define SLPBTN_EN  (1 << 9)
++#define PWRBTNOR_EN (1<<11)
+ 
+ /* Mask of bits in PM1a_STS that can generate an SCI. */
+-#define SCI_MASK (TMR_STS|PWRBTN_STS|SLPBTN_STS|GBL_STS) 
++/*
++ *  Enable SCI on sleep button status, to activate a running guest's
++ * sleep button handler
++ */
++#define SCI_MASK (TMR_STS|PWRBTNOR_STS|SLPBTN_STS|PWRBTN_STS|GBL_STS) 
+ 
+ /* SCI IRQ number (must match SCI_INT number in ACPI FADT in hvmloader) */
+ #define SCI_IRQ 9
+@@ -140,6 +147,53 @@ static void pmt_timer_callback(void *opaque)
+     spin_unlock(&s->lock);
+ }
+ 
++/**
++ * Emulate piix4 PM hardware status bits
++ *
++ * @param d
++ * @param port   io port address
++ * @param val    mask of bits to set
++ *
++ * @return success = 0, fail l.t. 0 (follow covention in
++ *         hvm.c:do_hvm_op)
++ */
++int pm_pio_set(struct domain *d, uint32_t port, uint32_t val)
++{
++    PMTState *s = &d->arch.hvm_domain.pl_time.vpmt;
++    int status = 0;
++
++    spin_lock(&s->lock);
++
++    switch ( port )
++    {
++        /*
++         *  PM1a_STS register bits are set only by hardware, cleared on write
++         *  here, we are the hardware. Note that WinXP doesn't clear the
++         *  resume (i.e., wakeup) bit as it comes out of standby. We
++         *  we need to clear it on sleep or power button events so that
++         *  they work properly immediately following resume from standby.
++         */
++    case PM1a_STS_ADDR_V0:
++    case PM1a_STS_ADDR_V1:
++        s->pm.pm1a_sts |= val;
++        if( val & (PWRBTNOR_STS | SLPBTN_STS| PWRBTN_STS))
++        {
++            s->pm.pm1a_sts &= ~RSM_STS;
++        }
++         /* Fix up the SCI state to match the new register state */
++        pmt_update_sci(s);
++       break;
++    default:
++        gdprintk(XENLOG_WARNING,
++                 "Bad ACPI PM register set: %x at %x\n",
++                 val, port);
++        status = -EINVAL;
++        break;
++    }
++    spin_unlock(&s->lock);
++    return(status);
++}
++
+ /* Handle port I/O to the PM1a_STS and PM1a_EN registers */
+ static int handle_evt_io(
+     int dir, uint32_t port, uint32_t bytes, uint32_t *val)
+diff --git a/xen/include/asm-x86/hvm/vpt.h b/xen/include/asm-x86/hvm/vpt.h
+index 951c26c..e84197e 100644
+--- a/xen/include/asm-x86/hvm/vpt.h
++++ b/xen/include/asm-x86/hvm/vpt.h
+@@ -191,4 +191,6 @@ void hpet_init(struct vcpu *v);
+ void hpet_deinit(struct domain *d);
+ void hpet_reset(struct domain *d);
+ 
++int pm_pio_set(struct domain *d, uint32_t port, uint32_t val);
++
+ #endif /* __ASM_X86_HVM_VPT_H__ */
+diff --git a/xen/include/public/hvm/hvm_op.h b/xen/include/public/hvm/hvm_op.h
+index a9aab4b..e16e44e 100644
+--- a/xen/include/public/hvm/hvm_op.h
++++ b/xen/include/public/hvm/hvm_op.h
+@@ -129,6 +129,8 @@ struct xen_hvm_set_mem_type {
+ typedef struct xen_hvm_set_mem_type xen_hvm_set_mem_type_t;
+ DEFINE_XEN_GUEST_HANDLE(xen_hvm_set_mem_type_t);
+ 
++#define HVMOP_set_pio          255
++
+ #endif /* defined(__XEN__) || defined(__XEN_TOOLS__) */
+ 
+ /* Hint from PV drivers for pagetable destruction. */

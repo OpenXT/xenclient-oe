@@ -1,0 +1,40 @@
+diff --git a/tools/misc/xenpm.c b/tools/misc/xenpm.c
+index 72a147a..c860325 100644
+--- a/tools/misc/xenpm.c
++++ b/tools/misc/xenpm.c
+@@ -81,17 +81,24 @@ void help_func(int argc, char *argv[])
+ static void print_cxstat(int cpuid, struct xc_cx_stat *cxstat)
+ {
+     int i;
++    uint64_t total_res = 0;
++    float percent;
+ 
+     printf("cpu id               : %d\n", cpuid);
+     printf("total C-states       : %d\n", cxstat->nr);
+     printf("idle time(ms)        : %"PRIu64"\n",
+            cxstat->idle_time/1000000UL);
+     for ( i = 0; i < cxstat->nr; i++ )
++        total_res += cxstat->residencies[i]/1000000UL;
++
++    for ( i = 0; i < cxstat->nr; i++ )
+     {
+         printf("C%-20d: transition [%20"PRIu64"]\n",
+                i, cxstat->triggers[i]);
+-        printf("                       residency  [%20"PRIu64" ms]\n",
+-               cxstat->residencies[i]/1000000UL);
++	percent = 100 * ((float)(cxstat->residencies[i]/1000000UL))/(float)total_res;
++	printf("                       residency  [%020"PRIu64" ms, %5.2f%%]\n",
++               cxstat->residencies[i]/1000000UL, percent);
++
+     }
+     printf("pc2                  : [%20"PRIu64" ms]\n"
+            "pc3                  : [%20"PRIu64" ms]\n"
+@@ -1148,7 +1155,7 @@ void get_max_cstate_func(int argc, char *argv[])
+         exit(-1);
+     }
+ 
+-    rc = xc_get_cpuidle_max_cstate(xc_fd, &value);
++    rc = xc_get_cpuidle_max_cstate(xc_handle, &value);
+     if (rc)
+ 	    printf("failed to read current max_cstate\n");
+     else
