@@ -12,7 +12,7 @@ RDEPENDS_${PN} = " \
     openssh-sshd-tcp-init \
     util-linux-mount \
     util-linux-umount \
-    blktap \
+    xen-blktap \
     dialog \
     e2fsprogs \
     e2fsprogs-e2fsck \
