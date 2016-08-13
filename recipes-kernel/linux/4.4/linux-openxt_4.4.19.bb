@@ -29,7 +29,6 @@ SRC_URI += "https://www.kernel.org/pub/linux/kernel/v${PV_MAJOR}.x/linux-${PV}.t
     file://netback-skip-frontend-wait-during-shutdown.patch;patch=1 \
     file://xenbus-move-otherend-watches-on-relocate.patch;patch=1 \
     file://netfront-support-backend-relocate.patch;patch=1 \
-    file://konrad-microcode.patch;patch=1 \
     file://konrad-ioperm.patch;patch=1 \
     file://gem-foreign.patch;patch=1 \
     file://fbcon-do-not-drag-detect-primary-option.patch;patch=1 \
