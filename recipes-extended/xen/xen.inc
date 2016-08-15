@@ -22,21 +22,21 @@ SRC_URI = "${XEN_SRC_URI};name=source \
     file://hvm-rtc.patch;patch=1 \
     file://hvm-rtc-refresh-time.patch;patch=1 \
     file://acpi-pm-feature.patch \
-    file://xc-xt-hvm-info.patch \
-    file://xc-xt-xenconsoled-syslog.patch;patch=1 \
-    file://xc-xt-tboot-shutdown-disable-irqs.patch;patch=1 \
-    file://xc-xt-Dell-980-txt-shutdown-acpi-access-width.patch;patch=1 \
-    file://xc-xt-parse-video-from-mbi.patch;patch=1 \
-    file://xc-xt-cpuid.patch;patch=1 \
-    file://xc-xt-xen-translate.patch;patch=1 \
-    file://xc-xt-local-pxe-rom.patch;patch=1 \
-    file://xc-xt-v4v.patch;patch=1 \
-    file://xc-xt-v4v-viptables.patch;patch=1 \
-    file://xc-xt-unmap-shared-info.patch;patch=1 \
-    file://xc-xt-foreign-batch-cacheattr.patch;patch=1 \
-    file://xc-xt-allow-pat-cacheattrs-for-all-domains.patch;patch=1 \
-    file://xc-xt-opt-disable-vmcs-shadowing.patch;patch=1 \
-    file://xc-xt-hvmloader-legacy-seabios-optionroms.patch;patch=1 \
+    file://hvm-info.patch \
+    file://xenconsoled-syslog.patch;patch=1 \
+    file://tboot-shutdown-disable-irqs.patch;patch=1 \
+    file://Dell-980-txt-shutdown-acpi-access-width.patch;patch=1 \
+    file://parse-video-from-mbi.patch;patch=1 \
+    file://hvm-cpuid-multicore.patch;patch=1 \
+    file://xen-translate.patch;patch=1 \
+    file://local-pxe-rom.patch;patch=1 \
+    file://v4v.patch;patch=1 \
+    file://v4v-viptables.patch;patch=1 \
+    file://unmap-shared-info.patch;patch=1 \
+    file://foreign-batch-cacheattr.patch;patch=1 \
+    file://allow-pat-cacheattrs-for-all-domains.patch;patch=1 \
+    file://opt-disable-vmcs-shadowing.patch;patch=1 \
+    file://hvmloader-legacy-seabios-optionroms.patch;patch=1 \
     file://blktap2-miscellaneous-oxt-fixes.patch \
     file://blktap2-libvhd-atomic-write-helpers.patch \
     file://blktap2-vhd-marker-flag.patch \
