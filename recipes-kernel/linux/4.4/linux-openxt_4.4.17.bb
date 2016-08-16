@@ -51,6 +51,7 @@ SRC_URI += "https://www.kernel.org/pub/linux/kernel/v${PV_MAJOR}.x/linux-${PV}.t
     file://cve-2016-4482-usbfs-fix-potential-infoleak-in-devio.patch \
     file://cve-2016-4568-media-videobuf2-v4l2-Verify-planes-array-in-buffer-d.patch \
     file://cve-2016-5244-rds-fix-an-infoleak-in-rds_inc_info_copy.patch \
+    file://xenstore-from-pv-guest.patch \
     file://defconfig \
     "
 
