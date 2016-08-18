@@ -60,7 +60,7 @@ RDEPENDS_${PN} = " \
     secure-vm \
     xenclient-sec-scripts \
     pmtools \
-    blktap \
+    xen-blktap \
     svirt-interpose \
     selinux-load \
     ustr \

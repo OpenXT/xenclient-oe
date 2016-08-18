@@ -1,8 +1,8 @@
-Index: xen-4.3.4/tools/console/daemon/io.c
+Index: xen-4.6.1/tools/console/daemon/io.c
 ===================================================================
---- xen-4.3.4.orig/tools/console/daemon/io.c
-+++ xen-4.3.4/tools/console/daemon/io.c
-@@ -52,9 +52,11 @@
+--- xen-4.6.1.orig/tools/console/daemon/io.c
++++ xen-4.6.1/tools/console/daemon/io.c
+@@ -55,9 +55,11 @@
  #define MAX_STRLEN(x) ((sizeof(x) * CHAR_BIT + CHAR_BIT-1) / 10 * 3 + 2)
  
  /* How many events are allowed in each time period */
@@ -15,7 +15,7 @@ Index: xen-4.3.4/tools/console/daemon/io.c
  
  extern int log_reload;
  extern int log_guest;
-@@ -79,13 +81,14 @@ static unsigned int nr_fds;
+@@ -82,13 +84,14 @@ static unsigned int nr_fds;
  struct buffer {
  	char *data;
  	size_t consumed;
@@ -32,7 +32,7 @@ Index: xen-4.3.4/tools/console/daemon/io.c
  	int master_fd;
  	int master_pollfd_idx;
  	int slave_fd;
-@@ -93,6 +96,7 @@ struct domain {
+@@ -96,6 +99,7 @@ struct domain {
  	bool is_dead;
  	unsigned last_seen;
  	struct buffer buffer;
@@ -40,7 +40,7 @@ Index: xen-4.3.4/tools/console/daemon/io.c
  	struct domain *next;
  	char *conspath;
  	int ring_ref;
-@@ -153,6 +157,28 @@ static int write_with_timestamp(int fd,
+@@ -156,6 +160,28 @@ static int write_with_timestamp(int fd,
  	return 0;
  }
  
@@ -69,7 +69,7 @@ Index: xen-4.3.4/tools/console/daemon/io.c
  static void buffer_append(struct domain *dom)
  {
  	struct buffer *buffer = &dom->buffer;
-@@ -167,7 +193,7 @@ static void buffer_append(struct domain
+@@ -170,7 +196,7 @@ static void buffer_append(struct domain
  	if ((size == 0) || (size > sizeof(intf->out)))
  		return;
  
@@ -78,7 +78,7 @@ Index: xen-4.3.4/tools/console/daemon/io.c
  		buffer->capacity += (size + 1024);
  		buffer->data = realloc(buffer->data, buffer->capacity);
  		if (buffer->data == NULL) {
-@@ -176,9 +202,11 @@ static void buffer_append(struct domain
+@@ -179,9 +205,11 @@ static void buffer_append(struct domain
  		}
  	}
  
@@ -93,7 +93,7 @@ Index: xen-4.3.4/tools/console/daemon/io.c
  
  	xen_mb();
  	intf->out_cons = cons;
-@@ -205,6 +233,8 @@ static void buffer_append(struct domain
+@@ -208,6 +236,8 @@ static void buffer_append(struct domain
  			dolog(LOG_ERR, "Write to log failed "
  			      "on domain %d: %d (%s)\n",
  			      dom->domid, errno, strerror(errno));
@@ -102,7 +102,7 @@ Index: xen-4.3.4/tools/console/daemon/io.c
  	}
  
  	if (discard_overflowed_data && buffer->max_capacity &&
-@@ -264,7 +294,12 @@ static int create_hv_log(void)
+@@ -267,7 +297,12 @@ static int create_hv_log(void)
  {
  	char logfile[PATH_MAX];
  	int fd;
@@ -116,7 +116,7 @@ Index: xen-4.3.4/tools/console/daemon/io.c
  	logfile[PATH_MAX-1] = '\0';
  
  	fd = open(logfile, O_WRONLY|O_CREAT|O_APPEND, 0644);
-@@ -285,35 +320,58 @@ static int create_hv_log(void)
+@@ -288,35 +323,58 @@ static int create_hv_log(void)
  	return fd;
  }
  
@@ -192,7 +192,7 @@ Index: xen-4.3.4/tools/console/daemon/io.c
  	if (fd == -1)
  		dolog(LOG_ERR, "Failed to open log %s: %d (%s)",
  		      logfile, errno, strerror(errno));
-@@ -471,6 +529,12 @@ static int domain_create_tty(struct doma
+@@ -474,6 +532,12 @@ static int domain_create_tty(struct doma
  	if (fcntl(dom->master_fd, F_SETFL, O_NONBLOCK) == -1)
  		goto out;
  
@@ -205,7 +205,7 @@ Index: xen-4.3.4/tools/console/daemon/io.c
  	return 1;
  out:
  	domain_close_tty(dom);
-@@ -681,6 +745,7 @@ static struct domain *create_domain(int
+@@ -684,6 +748,7 @@ static struct domain *create_domain(int
  	dom->ring_ref = -1;
  	dom->local_port = -1;
  	dom->remote_port = -1;
@@ -213,7 +213,7 @@ Index: xen-4.3.4/tools/console/daemon/io.c
  
  	if (!watch_domain(dom, true))
  		goto out;
-@@ -734,9 +799,17 @@ static void cleanup_domain(struct domain
+@@ -737,9 +802,17 @@ static void cleanup_domain(struct domain
  	free(d->buffer.data);
  	d->buffer.data = NULL;
  
@@ -231,31 +231,62 @@ Index: xen-4.3.4/tools/console/daemon/io.c
  	remove_domain(d);
  }
  
-@@ -905,7 +978,10 @@ static void handle_xs(void)
+@@ -908,7 +981,10 @@ static void handle_xs(void)
  
- static void handle_hv_logs(xc_evtchn *xce_handle)
+ static void handle_hv_logs(xc_evtchn *xce_handle, bool force)
  {
--	char buffer[1024*16];
+-	static char buffer[1024*16];
 +	char buffer[1024*16 + 1];
 +	static char lbuf[1024*16 + 1];
 +	static int loff = 0;
 +	int i = 0;
  	char *bufptr = buffer;
- 	unsigned int size = sizeof(buffer);
+ 	unsigned int size;
  	static uint32_t index = 0;
-@@ -915,6 +991,7 @@ static void handle_hv_logs(xc_evtchn *xc
+@@ -917,25 +993,44 @@ static void handle_hv_logs(xc_evtchn *xc
+ 	if (!force && ((port = xc_evtchn_pending(xce_handle)) == -1))
  		return;
  
- 	if (xc_readconsolering(xc, bufptr, &size, 0, 1, &index) == 0 && size > 0) {
-+	    if (log_hv_fd != -1) {
- 		int logret;
- 		if (log_time_hv)
- 			logret = write_with_timestamp(log_hv_fd, buffer, size,
-@@ -925,6 +1002,24 @@ static void handle_hv_logs(xc_evtchn *xc
- 		if (logret < 0)
- 			dolog(LOG_ERR, "Failed to write hypervisor log: "
- 				       "%d (%s)", errno, strerror(errno));
-+            } else {
+-	do
+-	{
+-		int logret;
+-
+-		size = sizeof(buffer);
+-		if (xc_readconsolering(xc, bufptr, &size, 0, 1, &index) != 0 ||
+-		    size == 0)
+-			break;
+-
+-		if (log_time_hv)
+-			logret = write_with_timestamp(log_hv_fd, buffer, size,
+-						      &log_time_hv_needts);
+-		else
+-			logret = write_all(log_hv_fd, buffer, size);
+-
+-		if (logret < 0)
+-			dolog(LOG_ERR, "Failed to write hypervisor log: "
+-				       "%d (%s)", errno, strerror(errno));
+-	} while (size == sizeof(buffer));
++	if (log_hv_fd != -1) {
++		do
++		{
++			int logret;
++
++			size = sizeof(buffer);
++			if (xc_readconsolering(xc, bufptr, &size, 0, 1, &index) != 0 ||
++		    	    size == 0)
++				break;
++
++			if (log_time_hv)
++				logret = write_with_timestamp(log_hv_fd, buffer, size,
++							      &log_time_hv_needts);
++			else
++				logret = write_all(log_hv_fd, buffer, size);
++
++			if (logret < 0)
++				dolog(LOG_ERR, "Failed to write hypervisor log: "
++				      "%d (%s)", errno, strerror(errno));
++		} while (size == sizeof(buffer));
++	} else {
 +		while (i < size) {
 +			while ((i < size) &&
 +			       (buffer[i] != '\n') && (buffer[i] != '\r')) {
@@ -272,11 +303,11 @@ Index: xen-4.3.4/tools/console/daemon/io.c
 +				loff = 0;
 +			}
 +		}
-+	    }
- 	}
++        }
  
- 	(void)xc_evtchn_unmask(xce_handle, port);
-@@ -1005,8 +1100,6 @@ void handle_io(void)
+ 	if (port != -1)
+ 		(void)xc_evtchn_unmask(xce_handle, port);
+@@ -1016,8 +1111,6 @@ void handle_io(void)
  			goto out;
  		}
  		log_hv_fd = create_hv_log();
@@ -285,20 +316,19 @@ Index: xen-4.3.4/tools/console/daemon/io.c
  		log_hv_evtchn = xc_evtchn_bind_virq(xce_handle, VIRQ_CON_RING);
  		if (log_hv_evtchn == -1) {
  			dolog(LOG_ERR, "Failed to bind to VIRQ_CON_RING: "
-Index: xen-4.3.4/tools/console/daemon/main.c
+Index: xen-4.6.1/tools/console/daemon/main.c
 ===================================================================
---- xen-4.3.4.orig/tools/console/daemon/main.c
-+++ xen-4.3.4/tools/console/daemon/main.c
-@@ -26,6 +26,8 @@
+--- xen-4.6.1.orig/tools/console/daemon/main.c
++++ xen-4.6.1/tools/console/daemon/main.c
+@@ -25,6 +25,7 @@
  #include <string.h>
  #include <signal.h>
  #include <sys/types.h>
 +#include <sys/time.h>
-+#include <sys/resource.h>
+ #include <sys/resource.h>
  
  #include "xenctrl.h"
- 
-@@ -55,6 +57,20 @@ static void version(char *name)
+@@ -55,6 +56,20 @@ static void version(char *name)
  	printf("Xen Console Daemon 3.0\n");
  }
  
@@ -316,10 +346,10 @@ Index: xen-4.3.4/tools/console/daemon/main.c
 +	}
 +}
 +
- int main(int argc, char **argv)
+ static void increase_fd_limit(void)
  {
- 	const char *sopts = "hVvit:o:";
-@@ -78,6 +94,8 @@ int main(int argc, char **argv)
+ 	/*
+@@ -113,6 +128,8 @@ int main(int argc, char **argv)
  	int opt_ind = 0;
  	char *pidfile = NULL;
  
@@ -328,7 +358,7 @@ Index: xen-4.3.4/tools/console/daemon/main.c
  	while ((ch = getopt_long(argc, argv, sopts, lopts, &opt_ind)) != -1) {
  		switch (ch) {
  		case 'h':
-@@ -140,10 +158,6 @@ int main(int argc, char **argv)
+@@ -175,10 +192,6 @@ int main(int argc, char **argv)
  		}
  	}
  
@@ -339,11 +369,11 @@ Index: xen-4.3.4/tools/console/daemon/main.c
  	if (geteuid() != 0) {
  		fprintf(stderr, "%s requires root to run.\n", argv[0]);
  		exit(EPERM);
-@@ -152,7 +166,6 @@ int main(int argc, char **argv)
+@@ -187,7 +200,6 @@ int main(int argc, char **argv)
  	signal(SIGHUP, handle_hup);
  
  	openlog("xenconsoled", syslog_option, LOG_DAEMON);
 -	setlogmask(syslog_mask);
  
- 	if (!is_interactive) {
- 		daemonize(pidfile ? pidfile : "/var/run/xenconsoled.pid");
+ 	increase_fd_limit();
+ 

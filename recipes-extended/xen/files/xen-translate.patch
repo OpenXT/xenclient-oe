@@ -1,8 +1,31 @@
-diff --git a/tools/libxc/xc_domain.c b/tools/libxc/xc_domain.c
-index 4858c13..37a29c3 100644
---- a/tools/libxc/xc_domain.c
-+++ b/tools/libxc/xc_domain.c
-@@ -1610,6 +1610,68 @@ int xc_domain_set_machine_address_size(xc_interface *xch,
+Index: xen-4.6.1/tools/libxc/include/xenctrl.h
+===================================================================
+--- xen-4.6.1.orig/tools/libxc/include/xenctrl.h
++++ xen-4.6.1/tools/libxc/include/xenctrl.h
+@@ -2845,6 +2845,18 @@ int xc_psr_cat_get_l3_info(xc_interface
+                            uint32_t *cos_max, uint32_t *cbm_len);
+ #endif
+ 
++int xc_domain_memory_translate_gpfn_list(xc_interface *xch,
++                                         uint32_t domid,
++                                         unsigned long nr_gpfns,
++                                         xen_pfn_t *gpfn_list,
++                                         xen_pfn_t *mfn_list);
++
++int xc_domain_memory_release_mfn_list(xc_interface *xch,
++                                      uint32_t domid,
++                                      unsigned long nr_mfns,
++                                      xen_pfn_t *mfn_list);
++
++
+ #endif /* XENCTRL_H */
+ 
+ /*
+Index: xen-4.6.1/tools/libxc/xc_domain.c
+===================================================================
+--- xen-4.6.1.orig/tools/libxc/xc_domain.c
++++ xen-4.6.1/tools/libxc/xc_domain.c
+@@ -2344,6 +2344,68 @@ int xc_domain_set_machine_address_size(x
      return do_domctl(xch, &domctl);
  }
  
@@ -71,49 +94,31 @@ index 4858c13..37a29c3 100644
  
  int xc_domain_get_machine_address_size(xc_interface *xch, uint32_t domid)
  {
-diff --git a/tools/libxc/xenctrl.h b/tools/libxc/xenctrl.h
-index a817d96..7652380 100644
---- a/tools/libxc/xenctrl.h
-+++ b/tools/libxc/xenctrl.h
-@@ -2335,4 +2335,16 @@ int xc_compression_uncompress_page(xc_interface *xch, char *compbuf,
- 				   unsigned long compbuf_size,
- 				   unsigned long *compbuf_pos, char *dest);
- 
-+int xc_domain_memory_translate_gpfn_list(xc_interface *xch,
-+                                         uint32_t domid,
-+                                         unsigned long nr_gpfns,
-+                                         xen_pfn_t *gpfn_list,
-+                                         xen_pfn_t *mfn_list);
-+
-+int xc_domain_memory_release_mfn_list(xc_interface *xch,
-+                                      uint32_t domid,
-+                                      unsigned long nr_mfns,
-+                                      xen_pfn_t *mfn_list);
-+
-+
- #endif /* XENCTRL_H */
-diff --git a/xen/common/compat/memory.c b/xen/common/compat/memory.c
-index ba7e6eb..610d9c1 100644
---- a/xen/common/compat/memory.c
-+++ b/xen/common/compat/memory.c
-@@ -27,10 +27,14 @@ int compat_memory_op(unsigned int cmd, XEN_GUEST_HANDLE_PARAM(void) compat)
-             struct xen_memory_reservation *rsrv;
-             struct xen_memory_exchange *xchg;
+Index: xen-4.6.1/xen/common/compat/memory.c
+===================================================================
+--- xen-4.6.1.orig/xen/common/compat/memory.c
++++ xen-4.6.1/xen/common/compat/memory.c
+@@ -70,6 +70,8 @@ int compat_memory_op(unsigned int cmd, X
+             struct xen_add_to_physmap_batch *atpb;
              struct xen_remove_from_physmap *xrfp;
+             struct xen_vnuma_topology_info *vnuma;
 +            struct xen_translate_gpfn_list *xlat;
 +            struct xen_release_mfn_list *xrel;
          } nat;
          union {
              struct compat_memory_reservation rsrv;
-             struct compat_memory_exchange xchg;
+@@ -77,6 +79,8 @@ int compat_memory_op(unsigned int cmd, X
+             struct compat_add_to_physmap atp;
+             struct compat_add_to_physmap_batch atpb;
+             struct compat_vnuma_topology_info vnuma;
 +            struct compat_translate_gpfn_list xlat;
 +            struct compat_release_mfn_list xrel;
          } cmp;
  
          set_xen_guest_handle(nat.hnd, COMPAT_ARG_XLAT_VIRT_BASE);
-@@ -199,6 +203,92 @@ int compat_memory_op(unsigned int cmd, XEN_GUEST_HANDLE_PARAM(void) compat)
-             break;
+@@ -368,6 +372,92 @@ int compat_memory_op(unsigned int cmd, X
          }
+ #endif
  
 +        case XENMEM_translate_gpfn_list:
 +            if ( copy_from_guest(&cmp.xlat, compat, 1) )
@@ -204,8 +209,8 @@ index ba7e6eb..610d9c1 100644
          default:
              return compat_arch_memory_op(cmd, compat);
          }
-@@ -315,6 +405,48 @@ int compat_memory_op(unsigned int cmd, XEN_GUEST_HANDLE_PARAM(void) compat)
-         case XENMEM_remove_from_physmap:
+@@ -511,6 +601,48 @@ int compat_memory_op(unsigned int cmd, X
+                 rc = -EFAULT;
              break;
  
 +        case XENMEM_translate_gpfn_list:
@@ -253,11 +258,11 @@ index ba7e6eb..610d9c1 100644
          default:
              domain_crash(current->domain);
              split = 0;
-diff --git a/xen/common/memory.c b/xen/common/memory.c
-index 06a0d0a..d855fa2 100644
---- a/xen/common/memory.c
-+++ b/xen/common/memory.c
-@@ -279,6 +279,162 @@ static void decrease_reservation(struct memop_args *a)
+Index: xen-4.6.1/xen/common/memory.c
+===================================================================
+--- xen-4.6.1.orig/xen/common/memory.c
++++ xen-4.6.1/xen/common/memory.c
+@@ -367,6 +367,162 @@ static void decrease_reservation(struct
      a->nr_done = i;
  }
  
@@ -420,18 +425,17 @@ index 06a0d0a..d855fa2 100644
  static long memory_exchange(XEN_GUEST_HANDLE_PARAM(xen_memory_exchange_t) arg)
  {
      struct xen_memory_exchange exch;
-@@ -547,7 +703,7 @@ long do_memory_op(unsigned long cmd, XEN_GUEST_HANDLE_PARAM(void) arg)
-     struct domain *d;
-     long rc;
-     unsigned int address_bits;
--    unsigned long start_extent;
-+    unsigned long start_extent, progress;
-     struct xen_memory_reservation reservation;
+@@ -836,6 +992,7 @@ long do_memory_op(unsigned long cmd, XEN
      struct memop_args args;
      domid_t domid;
-@@ -737,6 +893,27 @@ long do_memory_op(unsigned long cmd, XEN_GUEST_HANDLE_PARAM(void) arg)
+     unsigned long start_extent = cmd >> MEMOP_EXTENT_SHIFT;
++    unsigned long progress;
+     int op = cmd & MEMOP_CMD_MASK;
  
-         break;
+     switch ( op )
+@@ -1271,6 +1428,27 @@ long do_memory_op(unsigned long cmd, XEN
+     }
+ #endif
  
 +    case XENMEM_translate_gpfn_list:
 +        progress = cmd >> MEMOP_EXTENT_SHIFT;
@@ -455,13 +459,13 @@ index 06a0d0a..d855fa2 100644
 +        break;
 +
      default:
-         rc = arch_memory_op(op, arg);
+         rc = arch_memory_op(cmd, arg);
          break;
-diff --git a/xen/include/asm-x86/mm.h b/xen/include/asm-x86/mm.h
-index 213fc9c..0753c71 100644
---- a/xen/include/asm-x86/mm.h
-+++ b/xen/include/asm-x86/mm.h
-@@ -198,9 +198,13 @@ struct page_info
+Index: xen-4.6.1/xen/include/asm-x86/mm.h
+===================================================================
+--- xen-4.6.1.orig/xen/include/asm-x86/mm.h
++++ xen-4.6.1/xen/include/asm-x86/mm.h
+@@ -202,9 +202,13 @@ struct page_info
  #define PGT_locked        PG_mask(1, 9)
  
   /* Count of uses of this frame as its current type. */
@@ -476,11 +480,11 @@ index 213fc9c..0753c71 100644
   /* Cleared when the owning guest 'frees' this page. */
  #define _PGC_allocated    PG_shift(1)
  #define PGC_allocated     PG_mask(1, 1)
-diff --git a/xen/include/public/memory.h b/xen/include/public/memory.h
-index 7a26dee..2e81089 100644
---- a/xen/include/public/memory.h
-+++ b/xen/include/public/memory.h
-@@ -279,8 +279,30 @@ struct xen_remove_from_physmap {
+Index: xen-4.6.1/xen/include/public/memory.h
+===================================================================
+--- xen-4.6.1.orig/xen/include/public/memory.h
++++ xen-4.6.1/xen/include/public/memory.h
+@@ -297,8 +297,30 @@ struct xen_remove_from_physmap {
  typedef struct xen_remove_from_physmap xen_remove_from_physmap_t;
  DEFINE_XEN_GUEST_HANDLE(xen_remove_from_physmap_t);
  
@@ -513,9 +517,9 @@ index 7a26dee..2e81089 100644
  
  /*
   * Returns the pseudo-physical memory map as it was when the domain
-@@ -461,6 +483,26 @@ DEFINE_XEN_GUEST_HANDLE(xen_mem_sharing_op_t);
+@@ -610,6 +632,26 @@ DEFINE_XEN_GUEST_HANDLE(xen_vnuma_topolo
  
- #endif /* defined(__XEN__) || defined(__XEN_TOOLS__) */
+ /* Next available subop number is 28 */
  
 +/*
 + * Decrement the ref count of a list of mfns (previously incremented with
@@ -540,24 +544,24 @@ index 7a26dee..2e81089 100644
  #endif /* __XEN_PUBLIC_MEMORY_H__ */
  
  /*
-diff --git a/xen/include/xlat.lst b/xen/include/xlat.lst
-index d832110..3447c17 100644
---- a/xen/include/xlat.lst
-+++ b/xen/include/xlat.lst
-@@ -60,6 +60,8 @@
- !	memory_map			memory.h
+Index: xen-4.6.1/xen/include/xlat.lst
+===================================================================
+--- xen-4.6.1.orig/xen/include/xlat.lst
++++ xen-4.6.1/xen/include/xlat.lst
+@@ -67,6 +67,8 @@
  !	memory_reservation		memory.h
+ ?	mem_access_op			memory.h
  !	pod_target			memory.h
 +!	translate_gpfn_list		memory.h
 +!	release_mfn_list		memory.h
  !	remove_from_physmap		memory.h
- ?	physdev_eoi			physdev.h
- ?	physdev_get_free_pirq		physdev.h
-diff --git a/xen/include/xsm/dummy.h b/xen/include/xsm/dummy.h
-index 026c211..3f3d1c3 100644
---- a/xen/include/xsm/dummy.h
-+++ b/xen/include/xsm/dummy.h
-@@ -229,6 +229,12 @@ static XSM_INLINE int xsm_memory_stat_reservation(XSM_DEFAULT_ARG struct domain
+ !	reserved_device_memory_map	memory.h
+ ?	vmemrange			memory.h
+Index: xen-4.6.1/xen/include/xsm/dummy.h
+===================================================================
+--- xen-4.6.1.orig/xen/include/xsm/dummy.h
++++ xen-4.6.1/xen/include/xsm/dummy.h
+@@ -206,6 +206,12 @@ static XSM_INLINE int xsm_memory_stat_re
      return xsm_default_action(action, d1, d2);
  }
  
@@ -570,19 +574,19 @@ index 026c211..3f3d1c3 100644
  static XSM_INLINE int xsm_console_io(XSM_DEFAULT_ARG struct domain *d, int cmd)
  {
      XSM_ASSERT_ACTION(XSM_OTHER);
-diff --git a/xen/include/xsm/xsm.h b/xen/include/xsm/xsm.h
-index 1939453..7ab80f8 100644
---- a/xen/include/xsm/xsm.h
-+++ b/xen/include/xsm/xsm.h
-@@ -93,6 +93,7 @@ struct xsm_operations {
-     int (*add_to_physmap) (struct domain *d1, struct domain *d2);
+Index: xen-4.6.1/xen/include/xsm/xsm.h
+===================================================================
+--- xen-4.6.1.orig/xen/include/xsm/xsm.h
++++ xen-4.6.1/xen/include/xsm/xsm.h
+@@ -94,6 +94,7 @@ struct xsm_operations {
      int (*remove_from_physmap) (struct domain *d1, struct domain *d2);
+     int (*map_gmfn_foreign) (struct domain *d, struct domain *t);
      int (*claim_pages) (struct domain *d);
 +    int (*memory_translate) (struct domain *d);
  
      int (*console_io) (struct domain *d, int cmd);
  
-@@ -359,6 +360,11 @@ static inline int xsm_claim_pages(xsm_default_t def, struct domain *d)
+@@ -391,6 +392,11 @@ static inline int xsm_claim_pages(xsm_de
      return xsm_ops->claim_pages(d);
  }
  
@@ -594,13 +598,13 @@ index 1939453..7ab80f8 100644
  static inline int xsm_console_io (xsm_default_t def, struct domain *d, int cmd)
  {
      return xsm_ops->console_io(d, cmd);
-diff --git a/xen/xsm/dummy.c b/xen/xsm/dummy.c
-index 31e4f73..bc2e28e 100644
---- a/xen/xsm/dummy.c
-+++ b/xen/xsm/dummy.c
-@@ -134,4 +134,5 @@ void xsm_fixup_ops (struct xsm_operations *ops)
- #ifdef CONFIG_ARM
-     set_to_dummy_if_null(ops, map_gmfn_foreign);
+Index: xen-4.6.1/xen/xsm/dummy.c
+===================================================================
+--- xen-4.6.1.orig/xen/xsm/dummy.c
++++ xen-4.6.1/xen/xsm/dummy.c
+@@ -162,4 +162,5 @@ void xsm_fixup_ops (struct xsm_operation
+     set_to_dummy_if_null(ops, ioport_mapping);
+     set_to_dummy_if_null(ops, pmu_op);
  #endif
 +    set_to_dummy_if_null(ops, memory_translate);
  }

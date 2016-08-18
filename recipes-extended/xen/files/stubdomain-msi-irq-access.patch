@@ -1,10 +1,13 @@
---- a/xen/arch/x86/physdev.c
-+++ b/xen/arch/x86/physdev.c
-@@ -141,8 +144,18 @@ int physdev_map_pirq(domid_t domid, int
- 
-     case MAP_PIRQ_TYPE_MSI:
+Index: xen-4.6.1/xen/arch/x86/physdev.c
+===================================================================
+--- xen-4.6.1.orig/xen/arch/x86/physdev.c
++++ xen-4.6.1/xen/arch/x86/physdev.c
+@@ -144,9 +144,41 @@ int physdev_map_pirq(domid_t domid, int
+         if ( !msi->table_base )
+             msi->entry_nr = 1;
          irq = *index;
 -        if ( irq == -1 )
+-    case MAP_PIRQ_TYPE_MULTI_MSI:
 +        if ( irq == -1 ) {
              irq = create_irq(NUMA_NO_NODE);
 +            /* Allow stubdomain to deal with this IRQ. */
@@ -17,24 +20,55 @@
 +
 +            }
 +        }
++
++        if ( irq < nr_irqs_gsi || irq >= nr_irqs )
++        {
++            dprintk(XENLOG_G_ERR, "dom%d: can't create irq for msi!\n",
++                    d->domain_id);
++            ret = -EINVAL;
++            goto free_domain;
++        }
++
++        msi->irq = irq;
++        map_data = msi;
++        break;
++    case MAP_PIRQ_TYPE_MULTI_MSI:
++        irq = create_irq(NUMA_NO_NODE);
++        /* Allow stubdomain to deal with this IRQ. */
++        if ( d == current->domain->target )
++        {
++            ret = irq_permit_access(current->domain, irq);
++            if ( ret )
++                printk(XENLOG_G_ERR "Could not grant stubdom%u access to IRQ%d (error %d)\n",
++                       current->domain->domain_id, irq, ret);
++
++        }
  
          if ( irq < nr_irqs_gsi || irq >= nr_irqs )
          {
-@@ -211,7 +229,13 @@ int physdev_map_pirq(domid_t domid, int
-     spin_unlock(&d->event_lock);
-     spin_unlock(&pcidevs_lock);
-     if ( (ret != 0) && (type == MAP_PIRQ_TYPE_MSI) && (*index == -1) )
-+    {
-+        if ( (d == current->domain->target) &&
-+             irq_deny_access(current->domain, irq) )
-+            printk(XENLOG_G_ERR "dom%d: could not revoke access to IRQ%d.\n",
-+                   d->domain_id, irq );
-         destroy_irq(irq);
-+    }
+@@ -243,8 +275,20 @@ int physdev_map_pirq(domid_t domid, int
+         {
+         case MAP_PIRQ_TYPE_MSI:
+             if ( *index == -1 )
+-        case MAP_PIRQ_TYPE_MULTI_MSI:
++            {
++                if ( (d == current->domain->target) &&
++                     irq_deny_access(current->domain, irq) )
++                    printk(XENLOG_G_ERR "dom%d: could not revoke access to IRQ%d.\n",
++                           d->domain_id, irq );
+                 destroy_irq(irq);
++            }
++            break;
++        case MAP_PIRQ_TYPE_MULTI_MSI:
++            destroy_irq(irq);
++            if ( (d == current->domain->target) &&
++                  irq_deny_access(current->domain, irq) )
++                printk(XENLOG_G_ERR "dom%d: could not revoke access to IRQ%d.\n",
++                       d->domain_id, irq );
+             break;
+         }
   free_domain:
-     rcu_unlock_domain(d);
-     return ret;
-@@ -242,6 +266,18 @@ int physdev_unmap_pirq(domid_t domid, in
+@@ -277,6 +321,18 @@ int physdev_unmap_pirq(domid_t domid, in
  
      spin_lock(&pcidevs_lock);
      spin_lock(&d->event_lock);
@@ -53,4 +87,3 @@
      ret = unmap_domain_pirq(d, pirq);
      spin_unlock(&d->event_lock);
      spin_unlock(&pcidevs_lock);
-

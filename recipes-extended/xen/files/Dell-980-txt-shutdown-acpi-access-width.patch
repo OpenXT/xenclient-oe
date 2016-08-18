@@ -1,0 +1,31 @@
+#    OK, I've found the problem.
+#     
+#    The PM1a_CNT block on the Dell looks like:
+#    [0ACh 0172  12]           PM1A Control Block : <Generic Address Structure>
+#    [0ACh 0172   1]                     Space ID : 01 (SystemIO)
+#    [0ADh 0173   1]                    Bit Width : 10
+#    [0AEh 0174   1]                   Bit Offset : 00
+#    [0AFh 0175   1]         Encoded Access Width : 01 (Byte Access:8)
+#    [0B0h 0176   8]                      Address : 0000000000000804
+#     
+#    The access width is 1 (byte).  However, doing a single byte out causes the hang.  So Dell's ACPI table is incorrect.
+#     
+#    The reason this works for Xen w/o tboot is that Xen ignores the access width and always does a 16 bit outw--which works.  But according to one of our ACPI maintainers, the code really should respect the access width value.
+#     
+#    If I run Linux w/ tboot it appears that Linux is changing the access width value to 0 and that defaults to 16 bits--which works.
+
+Index: xen-4.6.1/xen/arch/x86/acpi/power.c
+===================================================================
+--- xen-4.6.1.orig/xen/arch/x86/acpi/power.c
++++ xen-4.6.1/xen/arch/x86/acpi/power.c
+@@ -326,8 +326,10 @@ static void tboot_sleep(u8 sleep_state)
+     /* sizes are not same (due to packing) so copy each one */
+     TB_COPY_GAS(g_tboot_shared->acpi_sinfo.pm1a_cnt_blk,
+                 acpi_sinfo.pm1a_cnt_blk);
++    g_tboot_shared->acpi_sinfo.pm1a_cnt_blk.access_width = 2;
+     TB_COPY_GAS(g_tboot_shared->acpi_sinfo.pm1b_cnt_blk,
+                 acpi_sinfo.pm1b_cnt_blk);
++    g_tboot_shared->acpi_sinfo.pm1b_cnt_blk.access_width = 2;
+     TB_COPY_GAS(g_tboot_shared->acpi_sinfo.pm1a_evt_blk,
+                 acpi_sinfo.pm1a_evt_blk);
+     TB_COPY_GAS(g_tboot_shared->acpi_sinfo.pm1b_evt_blk,

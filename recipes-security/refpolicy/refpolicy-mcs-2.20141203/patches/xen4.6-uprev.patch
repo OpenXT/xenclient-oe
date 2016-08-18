@@ -1,0 +1,83 @@
+Index: refpolicy/policy/modules/contrib/networkmanager.te
+===================================================================
+--- refpolicy.orig/policy/modules/contrib/networkmanager.te
++++ refpolicy/policy/modules/contrib/networkmanager.te
+@@ -103,6 +103,8 @@ kernel_rw_net_sysctls(NetworkManager_t)
+ kernel_read_crypto_sysctls(NetworkManager_t)
+ 
+ fs_dontaudit_manage_xenfs_files(NetworkManager_t)
++# xen 4.6 uprev
++dev_dontaudit_manage_xen(NetworkManager_t)
+ 
+ corenet_all_recvfrom_unlabeled(NetworkManager_t)
+ corenet_all_recvfrom_netlabel(NetworkManager_t)
+Index: refpolicy/policy/modules/kernel/devices.fc
+===================================================================
+--- refpolicy.orig/policy/modules/kernel/devices.fc
++++ refpolicy/policy/modules/kernel/devices.fc
+@@ -184,6 +184,7 @@ ifdef(`distro_suse', `
+ /dev/xen/evtchn		-c	gen_context(system_u:object_r:xen_device_t,s0)
+ /dev/xen/gntdev		-c	gen_context(system_u:object_r:xen_device_t,s0)
+ /dev/xen/gntalloc	-c	gen_context(system_u:object_r:xen_device_t,s0)
++/dev/xen/xenbus		-c	gen_context(system_u:object_r:xen_device_t,s0)
+ 
+ ifdef(`distro_debian',`
+ # this is a static /dev dir "backup mount"
+Index: refpolicy/policy/modules/kernel/devices.if
+===================================================================
+--- refpolicy.orig/policy/modules/kernel/devices.if
++++ refpolicy/policy/modules/kernel/devices.if
+@@ -5089,6 +5089,27 @@ interface(`dev_getattr_xen',`
+ 
+ ########################################
+ ## <summary>
++##	Do not audit attempts to create,
++##	read, write /dev/xen devices nodes.
++## </summary>
++## <param name="domain">
++##	<summary>
++##	Domain to not audit.
++##	</summary>
++## </param>
++#
++interface(`dev_dontaudit_manage_xen',`
++	gen_require(`
++		type xen_device_t;
++	')
++
++	dontaudit $1 xen_device_t:blk_file manage_blk_file_perms;
++	dontaudit $1 xen_device_t:chr_file manage_chr_file_perms;
++	dontaudit $1 xen_device_t:lnk_file manage_lnk_file_perms;
++')
++
++########################################
++## <summary>
+ ##      Unconfined readonly access to devices.
+ ## </summary>
+ ## <param name="domain">
+Index: refpolicy/policy/modules/services/network-daemon.te
+===================================================================
+--- refpolicy.orig/policy/modules/services/network-daemon.te
++++ refpolicy/policy/modules/services/network-daemon.te
+@@ -124,6 +124,8 @@ allow network_slave_t self:capability da
+ kernel_read_xen_state(network_slave_t)
+ kernel_write_xen_state(network_slave_t)
+ fs_rw_xenfs_files(network_slave_t)
++# xen 4.6 uses /dev/xen/xenbus
++dev_rw_xen(network_slave_t)
+ 
+ sysnet_manage_config(network_slave_t)
+ read_fifo_files_pattern(network_slave_t, network_slave_t, network_slave_t)
+Index: refpolicy/policy/modules/services/dbusbouncer.te
+===================================================================
+--- refpolicy.orig/policy/modules/services/dbusbouncer.te
++++ refpolicy/policy/modules/services/dbusbouncer.te
+@@ -48,6 +48,8 @@ vusbd_dbus_chat(dbusbouncer_t)
+ updatemgr_dbus_chat(dbusbouncer_t)
+ logging_send_syslog_msg(dbusbouncer_t)
+ fs_rw_xenfs_files(dbusbouncer_t)
++# xen 4.6 uses /dev/xen/xenbus
++dev_rw_xen(dbusbouncer_t)
+ 
+ xc_files_rw_v4v_chr(dbusbouncer_t)
+ 

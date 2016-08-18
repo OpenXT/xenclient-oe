@@ -1,39 +1,41 @@
-diff --git a/tools/firmware/Makefile b/tools/firmware/Makefile
-index 9e5cbc0..86c3b96 100644
---- a/tools/firmware/Makefile
-+++ b/tools/firmware/Makefile
-@@ -7,7 +7,7 @@ INST_DIR := $(DESTDIR)$(XENFIRMWAREDIR)
- 
- SUBDIRS-y :=
- SUBDIRS-$(CONFIG_OVMF) += ovmf
+Index: xen-4.6.1/tools/firmware/Makefile
+===================================================================
+--- xen-4.6.1.orig/tools/firmware/Makefile
++++ xen-4.6.1/tools/firmware/Makefile
+@@ -10,7 +10,7 @@ ifeq ($(OVMF_PATH),)
+ SUBDIRS-$(CONFIG_OVMF) += ovmf-dir
+ endif
+ ifeq ($(SEABIOS_PATH),)
 -SUBDIRS-$(CONFIG_SEABIOS) += seabios-dir
 +#SUBDIRS-$(CONFIG_SEABIOS) += seabios-dir
+ endif
  SUBDIRS-$(CONFIG_ROMBIOS) += rombios
  SUBDIRS-$(CONFIG_ROMBIOS) += vgabios
- #SUBDIRS-$(CONFIG_ROMBIOS) += etherboot
-diff --git a/tools/firmware/hvmloader/Makefile b/tools/firmware/hvmloader/Makefile
-index f8e1bd7..0a710c9 100644
---- a/tools/firmware/hvmloader/Makefile
-+++ b/tools/firmware/hvmloader/Makefile
-@@ -73,9 +73,11 @@ ROMS += $(ROMBIOS_ROM) $(STDVGA_ROM) $(CIRRUSVGA_ROM) $(ETHERBOOT_ROMS)
+Index: xen-4.6.1/tools/firmware/hvmloader/Makefile
+===================================================================
+--- xen-4.6.1.orig/tools/firmware/hvmloader/Makefile
++++ xen-4.6.1/tools/firmware/hvmloader/Makefile
+@@ -83,10 +83,12 @@ ROMS += $(ROMBIOS_ROM) $(STDVGA_ROM) $(C
  endif
  
  ifeq ($(CONFIG_SEABIOS),y)
 -OBJS += seabios.o
 +OBJS += seabios.o optionroms.o
  CFLAGS += -DENABLE_SEABIOS
-+ifeq ($(SEABIOS_ROM),)
- SEABIOS_ROM := $(SEABIOS_DIR)/out/bios.bin
-+endif
- ROMS += $(SEABIOS_ROM)
+ ifeq ($(SEABIOS_PATH),)
+-	SEABIOS_ROM := $(SEABIOS_DIR)/out/bios.bin
++	ifeq ($(SEABIOS_ROM),)
++		SEABIOS_ROM := $(SEABIOS_DIR)/out/bios.bin
++	endif
  else
- OBJS += seabios.o
-diff --git a/tools/firmware/hvmloader/mkhex b/tools/firmware/hvmloader/mkhex
-index cb21257..d62d11d 100755
---- a/tools/firmware/hvmloader/mkhex
-+++ b/tools/firmware/hvmloader/mkhex
-@@ -20,7 +20,7 @@
- # Place - Suite 330, Boston, MA 02111-1307 USA.
+ 	SEABIOS_ROM := $(SEABIOS_PATH)
+ endif
+Index: xen-4.6.1/tools/firmware/hvmloader/mkhex
+===================================================================
+--- xen-4.6.1.orig/tools/firmware/hvmloader/mkhex
++++ xen-4.6.1/tools/firmware/hvmloader/mkhex
+@@ -19,7 +19,7 @@
+ # this program; If not, see <http://www.gnu.org/licenses/>.
  #
  
 -echo "unsigned $1[] = {"
@@ -41,11 +43,11 @@ index cb21257..d62d11d 100755
  shift
  od -v -t x $@ | sed 's/^[0-9]*  */0x/' | sed 's/  */, 0x/g' | sed 's/$/,/' | sed 's/0x,//' | sed 's/^[0-9]*,//'
  echo "};"
-diff --git a/tools/firmware/hvmloader/seabios.c b/tools/firmware/hvmloader/seabios.c
-index f17e67b..dc298ea 100644
---- a/tools/firmware/hvmloader/seabios.c
-+++ b/tools/firmware/hvmloader/seabios.c
-@@ -27,10 +27,21 @@
+Index: xen-4.6.1/tools/firmware/hvmloader/seabios.c
+===================================================================
+--- xen-4.6.1.orig/tools/firmware/hvmloader/seabios.c
++++ xen-4.6.1/tools/firmware/hvmloader/seabios.c
+@@ -26,10 +26,21 @@
  
  #include "smbios_types.h"
  #include "acpi/acpi2_0.h"
@@ -67,9 +69,9 @@ index f17e67b..dc298ea 100644
  extern unsigned char dsdt_anycpu_qemu_xen[];
  extern int dsdt_anycpu_qemu_xen_len;
  
-@@ -135,6 +146,70 @@ static void seabios_setup_e820(void)
- 
- //BUILD_BUG_ON(sizeof(seabios) > (0x00100000U - SEABIOS_PHYSICAL_ADDRESS));
+@@ -132,6 +143,70 @@ static void seabios_setup_e820(void)
+     dump_e820_table(e820, info->e820_nr);
+ }
  
 +static void seabios_load_roms(void)
 +{
@@ -138,9 +140,9 @@ index f17e67b..dc298ea 100644
  struct bios_config seabios_config = {
      .name = "SeaBIOS",
  
-@@ -143,7 +218,7 @@ struct bios_config seabios_config = {
+@@ -140,7 +215,7 @@ struct bios_config seabios_config = {
  
-     .bios_address = SEABIOS_PHYSICAL_ADDRESS,
+     .bios_address = 0x100000 - sizeof(seabios),
  
 -    .load_roms = NULL,
 +    .load_roms = seabios_load_roms,

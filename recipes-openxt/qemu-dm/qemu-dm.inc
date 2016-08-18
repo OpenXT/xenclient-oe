@@ -1,7 +1,7 @@
 LICENSE = "GPLv2"
 LIC_FILES_CHKSUM = "file://COPYING;md5=441c28d2cf86e15a37fa47e15a72fbac  \
                     file://COPYING.LIB;md5=79ffa0ec772fa86740948cb7327a0cc7"
-DEPENDS = "xen-tools alsa-lib pciutils libpng blktap libv4v openssl zlib libcap-ng libdmbus"
+DEPENDS = "xen-tools alsa-lib pciutils libpng xen-blktap libv4v openssl zlib libcap-ng libdmbus"
 
 # These patches were removed until further stabilization occurs. ioreq will likely not
 # return until a move to Xen 4.5 occurs. Pulling ioreq requires an additional patch

@@ -25,20 +25,20 @@ execution. VM entry failure, however, is fatal to the guest.
 ################################################################################
 PATCHES 
 ################################################################################
-Index: xen-4.3.4/xen/arch/x86/hvm/vmx/vmx.c
+Index: xen-4.6.1/xen/arch/x86/hvm/vmx/vmx.c
 ===================================================================
---- xen-4.3.4.orig/xen/arch/x86/hvm/vmx/vmx.c	2016-04-12 11:04:40.188477971 +0200
-+++ xen-4.3.4/xen/arch/x86/hvm/vmx/vmx.c	2016-05-10 11:35:50.362812559 +0200
-@@ -2484,7 +2484,7 @@
- 
+--- xen-4.6.1.orig/xen/arch/x86/hvm/vmx/vmx.c
++++ xen-4.6.1/xen/arch/x86/hvm/vmx/vmx.c
+@@ -2899,7 +2899,7 @@ static int vmx_handle_apic_write(void)
  void vmx_vmexit_handler(struct cpu_user_regs *regs)
  {
--    unsigned int exit_reason, idtv_info, intr_info = 0, vector = 0;
-+    unsigned int exit_reason, idtv_info, intr_info = 0, vector = 0, mode;
-     unsigned long exit_qualification, inst_len = 0;
+     unsigned long exit_qualification, exit_reason, idtv_info, intr_info = 0;
+-    unsigned int vector = 0;
++    unsigned int mode, vector = 0;
      struct vcpu *v = current;
  
-@@ -3005,6 +3005,40 @@
+     __vmread(GUEST_RIP,    &regs->rip);
+@@ -3488,6 +3488,41 @@ void vmx_vmexit_handler(struct cpu_user_
  out:
      if ( nestedhvm_vcpu_in_guestmode(v) )
          nvmx_idtv_handling();
@@ -64,7 +64,8 @@ Index: xen-4.3.4/xen/arch/x86/hvm/vmx/vmx.c
 +        vmx_get_segment_register(v, x86_seg_ss, &ss);
 +        if ( ss.attr.fields.dpl )
 +        {
-+            if ( !(__vmread(VM_ENTRY_INTR_INFO) & INTR_INFO_VALID_MASK) )
++            __vmread(VM_ENTRY_INTR_INFO, &intr_info);
++            if ( !(intr_info & INTR_INFO_VALID_MASK) )
 +                hvm_inject_hw_exception(TRAP_gp_fault, 0);
 +            /* Need to fix rIP nevertheless. */
 +            if ( mode == 8 )
@@ -78,4 +79,4 @@ Index: xen-4.3.4/xen/arch/x86/hvm/vmx/vmx.c
 +    }
  }
  
- void vmx_vmenter_helper(void)
+ void vmx_vmenter_helper(const struct cpu_user_regs *regs)

@@ -1,7 +1,7 @@
-diff --git a/tools/firmware/hvmloader/hvmloader.c b/tools/firmware/hvmloader/hvmloader.c
-index 9c1cba2..15e42f5 100644
---- a/tools/firmware/hvmloader/hvmloader.c
-+++ b/tools/firmware/hvmloader/hvmloader.c
+Index: xen-4.6.1/tools/firmware/hvmloader/hvmloader.c
+===================================================================
+--- xen-4.6.1.orig/tools/firmware/hvmloader/hvmloader.c
++++ xen-4.6.1/tools/firmware/hvmloader/hvmloader.c
 @@ -125,11 +125,13 @@ static void init_hypercalls(void)
          *(uint32_t *)(signature + 8) = edx;
          signature[12] = '\0';
@@ -18,11 +18,26 @@ index 9c1cba2..15e42f5 100644
  
      /* Fill in hypercall transfer pages. */
      cpuid(base + 2, &eax, &ebx, &ecx, &edx);
-diff --git a/tools/libxc/xc_cpuid_x86.c b/tools/libxc/xc_cpuid_x86.c
-index 17efc0f..77cb077 100644
---- a/tools/libxc/xc_cpuid_x86.c
-+++ b/tools/libxc/xc_cpuid_x86.c
-@@ -125,6 +125,7 @@ static void amd_xc_cpuid_policy(
+Index: xen-4.6.1/tools/libxc/include/xenctrl.h
+===================================================================
+--- xen-4.6.1.orig/tools/libxc/include/xenctrl.h
++++ xen-4.6.1/tools/libxc/include/xenctrl.h
+@@ -1344,6 +1344,10 @@ int xc_domain_set_time_offset(xc_interfa
+                               uint32_t domid,
+                               int32_t time_offset_seconds);
+ 
++int xc_domain_set_cores_per_socket(xc_interface *xch,
++				   uint32_t domid,
++				   uint32_t cores_per_socket);
++
+ int xc_domain_set_tsc_info(xc_interface *xch,
+                            uint32_t domid,
+                            uint32_t tsc_mode,
+Index: xen-4.6.1/tools/libxc/xc_cpuid_x86.c
+===================================================================
+--- xen-4.6.1.orig/tools/libxc/xc_cpuid_x86.c
++++ xen-4.6.1/tools/libxc/xc_cpuid_x86.c
+@@ -118,6 +118,7 @@ static void amd_xc_cpuid_policy(
          break;
      }
  
@@ -30,7 +45,7 @@ index 17efc0f..77cb077 100644
      case 0x80000008:
          /*
           * ECX[15:12] is ApicIdCoreSize: ECX[7:0] is NumberOfCores (minus one).
-@@ -132,6 +133,7 @@ static void amd_xc_cpuid_policy(
+@@ -125,6 +126,7 @@ static void amd_xc_cpuid_policy(
           */
          regs[2] = ((regs[2] & 0xf000u) + 1) | ((regs[2] & 0xffu) << 1) | 1u;
          break;
@@ -38,7 +53,7 @@ index 17efc0f..77cb077 100644
  
      case 0x8000000a: {
          if (!is_nestedhvm) {
-@@ -178,13 +180,8 @@ static void intel_xc_cpuid_policy(
+@@ -171,13 +173,8 @@ static void intel_xc_cpuid_policy(
          break;
  
      case 0x00000004:
@@ -54,7 +69,7 @@ index 17efc0f..77cb077 100644
          break;
  
      case 0x80000000:
-@@ -208,11 +205,6 @@ static void intel_xc_cpuid_policy(
+@@ -201,11 +198,6 @@ static void intel_xc_cpuid_policy(
      case 0x80000005:
          regs[0] = regs[1] = regs[2] = 0;
          break;
@@ -66,7 +81,7 @@ index 17efc0f..77cb077 100644
      }
  }
  
-@@ -300,12 +292,6 @@ static void xc_cpuid_hvm_policy(
+@@ -292,12 +284,6 @@ static void xc_cpuid_hvm_policy(
          break;
  
      case 0x00000001:
@@ -79,7 +94,7 @@ index 17efc0f..77cb077 100644
          regs[2] &= (bitmaskof(X86_FEATURE_XMM3) |
                      bitmaskof(X86_FEATURE_PCLMULQDQ) |
                      bitmaskof(X86_FEATURE_SSSE3) |
-@@ -348,8 +334,7 @@ static void xc_cpuid_hvm_policy(
+@@ -340,8 +326,7 @@ static void xc_cpuid_hvm_policy(
                      bitmaskof(X86_FEATURE_MMX) |
                      bitmaskof(X86_FEATURE_FXSR) |
                      bitmaskof(X86_FEATURE_XMM) |
@@ -89,7 +104,7 @@ index 17efc0f..77cb077 100644
              
          /* We always support MTRR MSRs. */
          regs[3] |= bitmaskof(X86_FEATURE_MTRR);
-@@ -403,7 +388,7 @@ static void xc_cpuid_hvm_policy(
+@@ -402,7 +387,7 @@ static void xc_cpuid_hvm_policy(
  
      case 0x80000008:
          regs[0] &= 0x0000ffffu;
@@ -98,11 +113,11 @@ index 17efc0f..77cb077 100644
          break;
  
      case 0x00000002: /* Intel cache info (dumped by AMD policy) */
-diff --git a/tools/libxc/xc_domain.c b/tools/libxc/xc_domain.c
-index c58f559..cf640b9 100644
---- a/tools/libxc/xc_domain.c
-+++ b/tools/libxc/xc_domain.c
-@@ -667,6 +667,17 @@ int xc_domain_set_time_offset(xc_interface *xch,
+Index: xen-4.6.1/tools/libxc/xc_domain.c
+===================================================================
+--- xen-4.6.1.orig/tools/libxc/xc_domain.c
++++ xen-4.6.1/tools/libxc/xc_domain.c
+@@ -776,6 +776,17 @@ int xc_domain_set_time_offset(xc_interfa
      return do_domctl(xch, &domctl);
  }
  
@@ -120,41 +135,26 @@ index c58f559..cf640b9 100644
  int xc_domain_disable_migrate(xc_interface *xch, uint32_t domid)
  {
      DECLARE_DOMCTL;
-diff --git a/tools/libxc/xenctrl.h b/tools/libxc/xenctrl.h
-index 3e028f8..57d7793 100644
---- a/tools/libxc/xenctrl.h
-+++ b/tools/libxc/xenctrl.h
-@@ -1127,6 +1127,10 @@ int xc_domain_set_time_offset(xc_interface *xch,
-                               uint32_t domid,
-                               int32_t time_offset_seconds);
- 
-+int xc_domain_set_cores_per_socket(xc_interface *xch,
-+				   uint32_t domid,
-+				   uint32_t cores_per_socket);
-+
- int xc_domain_set_tsc_info(xc_interface *xch,
-                            uint32_t domid,
-                            uint32_t tsc_mode,
-diff --git a/xen/arch/x86/hvm/hvm.c b/xen/arch/x86/hvm/hvm.c
-index c6fce9a..337bc6e 100644
---- a/xen/arch/x86/hvm/hvm.c
-+++ b/xen/arch/x86/hvm/hvm.c
-@@ -3864,6 +3864,10 @@ long do_hvm_op(unsigned long op, XEN_GUEST_HANDLE_PARAM(void) arg)
-                 if ( a.value > 1 )
-                     rc = -EINVAL;
-                 break;
-+            case HVM_PARAM_XCI_CPUID_SIGNATURE:
-+                if ( a.value > 1 )
-+                    rc = -EINVAL;
-+                break;
-             case HVM_PARAM_IDENT_PT:
-                 /* Not reflexive, as we must domain_pause(). */
-                 rc = -EPERM;
-diff --git a/xen/arch/x86/hvm/svm/svm.c b/xen/arch/x86/hvm/svm/svm.c
-index cdc176d..151ca78 100644
---- a/xen/arch/x86/hvm/svm/svm.c
-+++ b/xen/arch/x86/hvm/svm/svm.c
-@@ -1353,21 +1353,34 @@ static void svm_fpu_dirty_intercept(void)
+Index: xen-4.6.1/xen/arch/x86/hvm/hvm.c
+===================================================================
+--- xen-4.6.1.orig/xen/arch/x86/hvm/hvm.c
++++ xen-4.6.1/xen/arch/x86/hvm/hvm.c
+@@ -5945,6 +5945,10 @@ static int hvmop_set_param(
+              !(a.value & HVMPV_base_freq) )
+             rc = -EINVAL;
+         break;
++    case HVM_PARAM_XCI_CPUID_SIGNATURE:
++        if ( a.value > 1 )
++            rc = -EINVAL;
++        break;
+     case HVM_PARAM_IDENT_PT:
+         /*
+          * Only actually required for VT-x lacking unrestricted_guest
+Index: xen-4.6.1/xen/arch/x86/hvm/svm/svm.c
+===================================================================
+--- xen-4.6.1.orig/xen/arch/x86/hvm/svm/svm.c
++++ xen-4.6.1/xen/arch/x86/hvm/svm/svm.c
+@@ -1540,21 +1540,34 @@ static void svm_fpu_dirty_intercept(void
          vmcb_set_cr0(vmcb, vmcb_get_cr0(vmcb) & ~X86_CR0_TS);
  }
  
@@ -189,7 +189,7 @@ index cdc176d..151ca78 100644
      case 0x8000001c: 
      {
          /* LWP capability CPUID */
-@@ -1386,6 +1399,12 @@ static void svm_cpuid_intercept(
+@@ -1573,6 +1586,12 @@ static void svm_cpuid_intercept(
          }
          break;
      }
@@ -202,11 +202,11 @@ index cdc176d..151ca78 100644
      default:
          break;
      }
-diff --git a/xen/arch/x86/hvm/vmx/vmx.c b/xen/arch/x86/hvm/vmx/vmx.c
-index d0de44a..33886d5 100644
---- a/xen/arch/x86/hvm/vmx/vmx.c
-+++ b/xen/arch/x86/hvm/vmx/vmx.c
-@@ -1646,11 +1646,31 @@ static void vmx_cpuid_intercept(
+Index: xen-4.6.1/xen/arch/x86/hvm/vmx/vmx.c
+===================================================================
+--- xen-4.6.1.orig/xen/arch/x86/hvm/vmx/vmx.c
++++ xen-4.6.1/xen/arch/x86/hvm/vmx/vmx.c
+@@ -2065,11 +2065,31 @@ static void vmx_cpuid_intercept(
      unsigned int input = *eax;
      struct segment_register cs;
      struct vcpu *v = current;
@@ -238,11 +238,11 @@ index d0de44a..33886d5 100644
          case 0x80000001:
              /* SYSCALL is visible iff running in long mode. */
              vmx_get_segment_register(v, x86_seg_cs, &cs);
-diff --git a/xen/arch/x86/traps.c b/xen/arch/x86/traps.c
-index 0f2361a..8c7244e 100644
---- a/xen/arch/x86/traps.c
-+++ b/xen/arch/x86/traps.c
-@@ -700,10 +700,18 @@ int cpuid_hypervisor_leaves( uint32_t idx, uint32_t sub_idx,
+Index: xen-4.6.1/xen/arch/x86/traps.c
+===================================================================
+--- xen-4.6.1.orig/xen/arch/x86/traps.c
++++ xen-4.6.1/xen/arch/x86/traps.c
+@@ -778,10 +778,18 @@ int cpuid_hypervisor_leaves( uint32_t id
      switch ( idx )
      {
      case 0:
@@ -251,7 +251,7 @@ index 0f2361a..8c7244e 100644
 -        *ecx = XEN_CPUID_SIGNATURE_ECX;
 -        *edx = XEN_CPUID_SIGNATURE_EDX;
 +        /* possibly use XenClient cpuid signature */
-+        if (is_hvm_domain(d) && (d->arch.hvm_domain.params[HVM_PARAM_XCI_CPUID_SIGNATURE])) {
++        if (is_hvm_domain(currd) && (currd->arch.hvm_domain.params[HVM_PARAM_XCI_CPUID_SIGNATURE])) {
 +            *eax = base + limit; /* Largest leaf */
 +            *ebx = XCI_CPUID_SIGNATURE_EBX;
 +            *ecx = XCI_CPUID_SIGNATURE_ECX;
@@ -265,21 +265,21 @@ index 0f2361a..8c7244e 100644
          break;
  
      case 1:
-@@ -805,7 +813,6 @@ static void pv_cpuid(struct cpu_user_regs *regs)
-         __clear_bit(X86_FEATURE_PBE, &d);
+@@ -892,7 +900,6 @@ void pv_cpuid(struct cpu_user_regs *regs
+             __clear_bit(X86_FEATURE_MTRR, &d);
  
          __clear_bit(X86_FEATURE_DTES64 % 32, &c);
 -        __clear_bit(X86_FEATURE_MWAIT % 32, &c);
          __clear_bit(X86_FEATURE_DSCPL % 32, &c);
          __clear_bit(X86_FEATURE_VMXE % 32, &c);
          __clear_bit(X86_FEATURE_SMXE % 32, &c);
-diff --git a/xen/common/domctl.c b/xen/common/domctl.c
-index 03714e2..a55fe30 100644
---- a/xen/common/domctl.c
-+++ b/xen/common/domctl.c
-@@ -873,6 +873,21 @@ long do_domctl(XEN_GUEST_HANDLE_PARAM(xen_domctl_t) u_domctl)
-     }
-     break;
+Index: xen-4.6.1/xen/common/domctl.c
+===================================================================
+--- xen-4.6.1.orig/xen/common/domctl.c
++++ xen-4.6.1/xen/common/domctl.c
+@@ -1171,6 +1171,21 @@ long do_domctl(XEN_GUEST_HANDLE_PARAM(xe
+             copyback = 1;
+         break;
  
 +    case XEN_DOMCTL_setcorespersocket:
 +    {
@@ -299,13 +299,13 @@ index 03714e2..a55fe30 100644
      default:
          ret = arch_do_domctl(op, d, u_domctl);
          break;
-diff --git a/xen/include/public/arch-x86/cpuid.h b/xen/include/public/arch-x86/cpuid.h
-index d9bd627..42fc3d3 100644
---- a/xen/include/public/arch-x86/cpuid.h
-+++ b/xen/include/public/arch-x86/cpuid.h
-@@ -45,6 +45,11 @@
- #define XEN_CPUID_SIGNATURE_ECX 0x65584d4d /* "MMXe" */
- #define XEN_CPUID_SIGNATURE_EDX 0x4d4d566e /* "nVMM" */
+Index: xen-4.6.1/xen/include/public/arch-x86/cpuid.h
+===================================================================
+--- xen-4.6.1.orig/xen/include/public/arch-x86/cpuid.h
++++ xen-4.6.1/xen/include/public/arch-x86/cpuid.h
+@@ -42,6 +42,11 @@
+ #define XEN_CPUID_FIRST_LEAF 0x40000000
+ #define XEN_CPUID_LEAF(i)    (XEN_CPUID_FIRST_LEAF + (i))
  
 +/* alternate XenClient cpuid signature */
 +#define XCI_CPUID_SIGNATURE_EBX 0x56696358 /* "XciV" */
@@ -313,15 +313,15 @@ index d9bd627..42fc3d3 100644
 +#define XCI_CPUID_SIGNATURE_EDX 0x4d4d5669 /* "iVMM" */
 +
  /*
-  * Leaf 2 (0x40000001)
-  * EAX[31:16]: Xen major version.
-diff --git a/xen/include/public/domctl.h b/xen/include/public/domctl.h
-index 75a20b4..138fa97 100644
---- a/xen/include/public/domctl.h
-+++ b/xen/include/public/domctl.h
-@@ -858,6 +858,13 @@ struct xen_domctl_set_broken_page_p2m {
- typedef struct xen_domctl_set_broken_page_p2m xen_domctl_set_broken_page_p2m_t;
- DEFINE_XEN_GUEST_HANDLE(xen_domctl_set_broken_page_p2m_t);
+  * Leaf 1 (0x40000x00)
+  * EAX: Largest Xen-information leaf. All leaves up to an including @EAX
+Index: xen-4.6.1/xen/include/public/domctl.h
+===================================================================
+--- xen-4.6.1.orig/xen/include/public/domctl.h
++++ xen-4.6.1/xen/include/public/domctl.h
+@@ -1063,6 +1063,13 @@ struct xen_domctl_psr_cat_op {
+ typedef struct xen_domctl_psr_cat_op xen_domctl_psr_cat_op_t;
+ DEFINE_XEN_GUEST_HANDLE(xen_domctl_psr_cat_op_t);
  
 +#define XEN_DOMCTL_setcorespersocket  99
 +struct xen_domctl_setcorespersocket {
@@ -333,36 +333,36 @@ index 75a20b4..138fa97 100644
  struct xen_domctl {
      uint32_t cmd;
  #define XEN_DOMCTL_createdomain                   1
-@@ -955,6 +962,7 @@ struct xen_domctl {
+@@ -1165,6 +1172,7 @@ struct xen_domctl {
+         struct xen_domctl_ioport_permission ioport_permission;
          struct xen_domctl_hypercall_init    hypercall_init;
-         struct xen_domctl_arch_setup        arch_setup;
          struct xen_domctl_settimeoffset     settimeoffset;
 +        struct xen_domctl_setcorespersocket setcorespersocket;
          struct xen_domctl_disable_migrate   disable_migrate;
          struct xen_domctl_tsc_info          tsc_info;
-         struct xen_domctl_real_mode_area    real_mode_area;
-diff --git a/xen/include/public/hvm/params.h b/xen/include/public/hvm/params.h
-index 517a184..d8554d4 100644
---- a/xen/include/public/hvm/params.h
-+++ b/xen/include/public/hvm/params.h
-@@ -145,6 +145,11 @@
- /* SHUTDOWN_* action in case of a triple fault */
- #define HVM_PARAM_TRIPLE_FAULT_REASON 31
+         struct xen_domctl_hvmcontext        hvmcontext;
+Index: xen-4.6.1/xen/include/public/hvm/params.h
+===================================================================
+--- xen-4.6.1.orig/xen/include/public/hvm/params.h
++++ xen-4.6.1/xen/include/public/hvm/params.h
+@@ -192,6 +192,11 @@
+ /* Boolean: Enable altp2m */
+ #define HVM_PARAM_ALTP2M       35
  
--#define HVM_NR_PARAMS          32
+-#define HVM_NR_PARAMS          36
 +/* XenClient specific hvm params */
 +
 +/* use Xci cpuid signature instead of standard Xen one */
-+#define HVM_PARAM_XCI_CPUID_SIGNATURE 32 
++#define HVM_PARAM_XCI_CPUID_SIGNATURE 36 
 +
-+#define HVM_NR_PARAMS          33
++#define HVM_NR_PARAMS          37
  
  #endif /* __XEN_PUBLIC_HVM_PARAMS_H__ */
-diff --git a/xen/include/xen/sched.h b/xen/include/xen/sched.h
-index 8f78fcd..f5ec5a9 100644
---- a/xen/include/xen/sched.h
-+++ b/xen/include/xen/sched.h
-@@ -337,6 +337,9 @@ struct domain
+Index: xen-4.6.1/xen/include/xen/sched.h
+===================================================================
+--- xen-4.6.1.orig/xen/include/xen/sched.h
++++ xen-4.6.1/xen/include/xen/sched.h
+@@ -415,6 +415,9 @@ struct domain
  
      struct arch_domain arch;
  
