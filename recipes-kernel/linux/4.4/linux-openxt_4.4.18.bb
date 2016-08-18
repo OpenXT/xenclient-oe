@@ -46,18 +46,15 @@ SRC_URI += "https://www.kernel.org/pub/linux/kernel/v${PV_MAJOR}.x/linux-${PV}.t
     file://xsa-155-qsb-023-xen-netfront-do-not-use-data-already-exposed-to-back.patch;patch=1 \
     file://cve-2016-0758-KEYS-Fix-ASN.1-indefinite-length-object-parsing.patch \
     file://cve-2016-3135-netfilter-x_tables-check-for-size-overflow.patch \
-    file://cve-2016-3672-x86-mm-32-Enable-full-randomization-on-i386-and-X86_.patch \
-    file://cve-2016-3951-cdc_ncm-do-not-call-usbnet_link_change-from-cdc_ncm_.patch \
     file://cve-2016-4482-usbfs-fix-potential-infoleak-in-devio.patch \
     file://cve-2016-4568-media-videobuf2-v4l2-Verify-planes-array-in-buffer-d.patch \
     file://cve-2016-5244-rds-fix-an-infoleak-in-rds_inc_info_copy.patch \
-    file://cve-2016-5696-tcp-make-challenge-acks-less-predictable.patch \
     file://xenstore-from-pv-guest.patch \
     file://defconfig \
     "
 
-SRC_URI[kernel.md5sum] = "687c2d9063dfdc6b27a21d33f2f419ba"
-SRC_URI[kernel.sha256sum] = "159451471c0df6bde8043b85dfacafa58e65c4a0cabb1157e83916326cd04f81"
+SRC_URI[kernel.md5sum] = "e728f3d03930b19242e5c7d135611590"
+SRC_URI[kernel.sha256sum] = "e6b90cca5f612319280705d66b0e1168f81e411c312a77006b82424493b2572c"
 
 LIC_FILES_CHKSUM = "file://COPYING;md5=d7810fab7487fb0aad327b76f1be7cd7"
 
