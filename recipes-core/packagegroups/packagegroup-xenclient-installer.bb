@@ -54,6 +54,7 @@ RDEPENDS_${PN} = " \
     xenclient-pcrdiff \
     xenclient-tpm-scripts \
     ncurses \
+    intel-microcode \
 "
 
 # open-iscsi-user \
