@@ -8,7 +8,7 @@ LICENSE = "BSD-3-Clause"
 LIC_FILES_CHKSUM = "file://COPYRIGHT;md5=2f9cbf7e9401cec8a38666a08851ce6b"
 DEPENDS = "libx11 libxtst"
 
-SRC_URI = "http://semicomplete.googlecode.com/files/xdotool-${PV}.tar.gz"
+SRC_URI = "https://storage.googleapis.com/google-code-archive-downloads/v2/code.google.com/semicomplete/xdotool-${PV}.tar.gz"
 
 S = "${WORKDIR}/xdotool-${PV}"
 
