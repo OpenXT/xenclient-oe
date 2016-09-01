@@ -57,6 +57,9 @@ SRC_URI = "${XEN_SRC_URI};name=source \
     file://openxt-xen-xsmv4vuse.patch \
     file://xsa-154-x86-inconsistent-cachability-flags-on-guest-mappings.patch \
     file://xsa-182-x86-privilege-escalation-in-pv-guests.patch \
+    file://xsa-183-x86-missing-smap-whitelisting-in-32-bit-exception-event-delivery.patch \
+    file://xsa-185-x86-Disallow-L3-recursive-pagetable-for-32-bit-PV-guests.patch \
+    file://xsa-187-x86-hvm-overflow-of-sh_ctxt-seg_reg.patch \
 "
 
 SRC_URI[source.md5sum] := "${XEN_SRC_MD5SUM}"
