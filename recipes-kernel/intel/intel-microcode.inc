@@ -45,7 +45,7 @@ do_install() {
 	install -d ${D}${base_libdir}/firmware/intel-ucode/
 	install ${WORKDIR}/microcode_${PV}.bin ${D}${base_libdir}/firmware/intel-ucode/
 	cd ${D}${base_libdir}/firmware/intel-ucode/
-	ln -sf microcode_${PV}.bin microcode-intel.bin
+	ln -sf microcode_${PV}.bin microcode_intel.bin
 }
 
 do_deploy() {

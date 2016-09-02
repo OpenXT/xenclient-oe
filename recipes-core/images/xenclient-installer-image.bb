@@ -125,7 +125,7 @@ do_post_rootfs_items() {
 	cp -f ${IMAGE_ROOTFS}/boot/license-SINIT-ACMs.txt ${DEPLOY_DIR_IMAGE}/license-SINIT-ACMs.txt
 
 	# Add the microcode to the installer
-	cp -f ${IMAGE_ROOTFS}/boot/microcode-intel.bin ${DEPLOY_DIR_IMAGE}/microcode-intel.bin
+	cp -f ${IMAGE_ROOTFS}/boot/microcode_intel.bin ${DEPLOY_DIR_IMAGE}/microcode_intel.bin
 }
 
 addtask post_rootfs_items after do_rootfs before do_build
