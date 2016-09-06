@@ -1,0 +1,75 @@
+Index: refpolicy/policy/modules/services/updatemgr.te
+===================================================================
+--- refpolicy.orig/policy/modules/services/updatemgr.te	2016-09-01 16:06:27.000000000 -0400
++++ refpolicy/policy/modules/services/updatemgr.te	2016-09-01 16:06:28.000000000 -0400
+@@ -81,3 +81,7 @@
+ allow updatemgr_t updatemgr_tmp_t:file manage_file_perms;
+ allow updatemgr_t self:capability { dac_override chown fowner fsetid };
+ 
++# OTA upgrades
++fs_getattr_xattr_fs(updatemgr_t)
++xc_read_config_files(updatemgr_t)
++selinux_get_fs_mount(updatemgr_t)
+Index: refpolicy/policy/modules/system/lvm.te
+===================================================================
+--- refpolicy.orig/policy/modules/system/lvm.te	2016-09-01 16:06:25.000000000 -0400
++++ refpolicy/policy/modules/system/lvm.te	2016-09-01 16:06:28.000000000 -0400
+@@ -411,3 +411,9 @@
+ 	updatemgr_dontaudit_rw_stream_sockets(lvm_t)
+ 	xc_installer_read_tmp_files(lvm_t)
+ ')
++
++# OTA upgrades
++kernel_getattr_proc(lvm_t)
++allow lvm_t sysfs_t:filesystem getattr;
++# For reading /run/udev/queue.bin
++udev_read_pid_files(lvm_t)
+Index: refpolicy/policy/modules/system/mount.te
+===================================================================
+--- refpolicy.orig/policy/modules/system/mount.te	2016-09-01 16:06:25.000000000 -0400
++++ refpolicy/policy/modules/system/mount.te	2016-09-01 16:06:28.000000000 -0400
+@@ -267,3 +267,7 @@
+ optional_policy(`
+ 	xc_dontaudit_rw_v4v_chr(mount_t)
+ ')
++
++# OTA upgrades
++kernel_getattr_proc(mount_t)
++allow mount_t sysfs_t:filesystem getattr;
+Index: refpolicy/policy/modules/system/xc-installer.if
+===================================================================
+--- refpolicy.orig/policy/modules/system/xc-installer.if	2016-09-01 16:06:28.000000000 -0400
++++ refpolicy/policy/modules/system/xc-installer.if	2016-09-01 16:06:28.000000000 -0400
+@@ -48,6 +48,7 @@
+ 	corecmd_search_bin($1)
+ 	domtrans_pattern($1, updatemgr_storage_t, xc_installer_t)
+ 	domtrans_pattern($1, xc_installer_exec_t, xc_installer_t)
++	allow $1 xc_installer_t:process { noatsecure siginh rlimitinh };
+ ')
+ ########################################
+ ## <summary>
+@@ -61,10 +62,11 @@
+ #
+ interface(`xc_installer_delete',`
+ 	gen_require(`
+-		type xc_installer_t;
++		type xc_installer_storage_t;
+ 	')
+ 
+-	allow $1 xc_installer_t:file delete_file_perms;
++	allow $1 xc_installer_storage_t:dir manage_dir_perms;
++	allow $1 xc_installer_storage_t:file delete_file_perms;
+ ')
+ ########################################
+ ## <summary>
+Index: refpolicy/policy/modules/system/xc-installer.fc
+===================================================================
+--- refpolicy.orig/policy/modules/system/xc-installer.fc	2016-09-01 16:06:28.000000000 -0400
++++ refpolicy/policy/modules/system/xc-installer.fc	2016-09-01 16:06:28.000000000 -0400
+@@ -18,5 +18,5 @@
+ #
+ #############################################################################
+ 
+-/storage/update/upgrade		--	gen_context(system_u:object_r:xc_installer_t,s0)
++/storage/update/upgrade		--	gen_context(system_u:object_r:xc_installer_storage_t,s0)
+ /usr/share/xenclient/post-upgrade.sh	--	gen_context(system_u:object_r:xc_installer_exec_t,s0)
