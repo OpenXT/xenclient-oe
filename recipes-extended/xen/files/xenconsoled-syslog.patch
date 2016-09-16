@@ -1,10 +1,14 @@
 ################################################################################
 SHORT DESCRIPTION: 
 ################################################################################
+Enable Xen dmesg logging to syslog.
 
 ################################################################################
 LONG DESCRIPTION: 
 ################################################################################
+Makes xenconsoled reports guests logs to syslog by default (instead of
+individual logging files). Use --log-dir=<path> revert this behavior to normal,
+loging guests in individual files written in <path>.
 
 ################################################################################
 CHANGELOG 
@@ -17,6 +21,7 @@ REMOVAL
 ################################################################################
 UPSTREAM PLAN
 ################################################################################
+Possibly upstreamable if it was cleaned up a bit.
 
 ################################################################################
 INTERNAL DEPENDENCIES 
@@ -270,7 +275,7 @@ Index: xen-4.6.1/tools/console/daemon/io.c
  	char *bufptr = buffer;
  	unsigned int size;
  	static uint32_t index = 0;
-@@ -917,25 +993,44 @@ static void handle_hv_logs(xc_evtchn *xc
+@@ -917,25 +993,47 @@ static void handle_hv_logs(xc_evtchn *xc
  	if (!force && ((port = xc_evtchn_pending(xce_handle)) == -1))
  		return;
  
@@ -278,21 +283,6 @@ Index: xen-4.6.1/tools/console/daemon/io.c
 -	{
 -		int logret;
 -
--		size = sizeof(buffer);
--		if (xc_readconsolering(xc, bufptr, &size, 0, 1, &index) != 0 ||
--		    size == 0)
--			break;
--
--		if (log_time_hv)
--			logret = write_with_timestamp(log_hv_fd, buffer, size,
--						      &log_time_hv_needts);
--		else
--			logret = write_all(log_hv_fd, buffer, size);
--
--		if (logret < 0)
--			dolog(LOG_ERR, "Failed to write hypervisor log: "
--				       "%d (%s)", errno, strerror(errno));
--	} while (size == sizeof(buffer));
 +	if (log_hv_fd != -1) {
 +		do
 +		{
@@ -314,27 +304,44 @@ Index: xen-4.6.1/tools/console/daemon/io.c
 +				      "%d (%s)", errno, strerror(errno));
 +		} while (size == sizeof(buffer));
 +	} else {
-+		while (i < size) {
-+			while ((i < size) &&
-+			       (buffer[i] != '\n') && (buffer[i] != '\r')) {
-+				lbuf[loff++] = buffer[i++];
-+			}
-+			if ((buffer[i] == '\n') || (buffer[i] == '\r')) {
-+				lbuf[loff] = '\0';
-+				++i;
-+				if ((i < size) &&
-+				    ((buffer[i] == '\n') || (buffer[i] == '\r'))) {
-+					++i;
+ 		size = sizeof(buffer);
+-		if (xc_readconsolering(xc, bufptr, &size, 0, 1, &index) != 0 ||
+-		    size == 0)
+-			break;
+-
+-		if (log_time_hv)
+-			logret = write_with_timestamp(log_hv_fd, buffer, size,
+-						      &log_time_hv_needts);
+-		else
+-			logret = write_all(log_hv_fd, buffer, size);
+-
+-		if (logret < 0)
+-			dolog(LOG_ERR, "Failed to write hypervisor log: "
+-				       "%d (%s)", errno, strerror(errno));
+-	} while (size == sizeof(buffer));
++		if (xc_readconsolering(xc, bufptr, &size, 0, 1, &index) == 0 && size > 0) {
++			while (i < size) {
++				while ((i < size) &&
++				       (buffer[i] != '\n') && (buffer[i] != '\r')) {
++					lbuf[loff++] = buffer[i++];
 +				}
-+				syslog(LOG_INFO, "hypervisor: %s", lbuf);
-+				loff = 0;
++				if ((buffer[i] == '\n') || (buffer[i] == '\r')) {
++					lbuf[loff] = '\0';
++					++i;
++					if ((i < size) &&
++					    ((buffer[i] == '\n') || (buffer[i] == '\r'))) {
++						++i;
++					}
++					syslog(LOG_INFO, "hypervisor: %s", lbuf);
++					loff = 0;
++				}
 +			}
 +		}
 +        }
  
  	if (port != -1)
  		(void)xc_evtchn_unmask(xce_handle, port);
-@@ -1016,8 +1111,6 @@ void handle_io(void)
+@@ -1016,8 +1114,6 @@ void handle_io(void)
  			goto out;
  		}
  		log_hv_fd = create_hv_log();
@@ -355,37 +362,7 @@ Index: xen-4.6.1/tools/console/daemon/main.c
  #include <sys/resource.h>
  
  #include "xenctrl.h"
-@@ -55,6 +56,20 @@ static void version(char *name)
- 	printf("Xen Console Daemon 3.0\n");
- }
- 
-+static void renable_core_dumps (void)
-+{
-+	struct rlimit rlp;
-+	int rc;
-+
-+	rlp.rlim_cur = RLIM_INFINITY;
-+	rlp.rlim_max = RLIM_INFINITY;
-+
-+	rc = setrlimit (RLIMIT_CORE, &rlp);
-+	if (rc == -1) {
-+		printf("Couldn't set core size limit: %s", strerror (errno));
-+	}
-+}
-+
- static void increase_fd_limit(void)
- {
- 	/*
-@@ -113,6 +128,8 @@ int main(int argc, char **argv)
- 	int opt_ind = 0;
- 	char *pidfile = NULL;
- 
-+	renable_core_dumps();
-+
- 	while ((ch = getopt_long(argc, argv, sopts, lopts, &opt_ind)) != -1) {
- 		switch (ch) {
- 		case 'h':
-@@ -175,10 +192,6 @@ int main(int argc, char **argv)
+@@ -175,10 +176,6 @@ int main(int argc, char **argv)
  		}
  	}
  
@@ -396,7 +373,7 @@ Index: xen-4.6.1/tools/console/daemon/main.c
  	if (geteuid() != 0) {
  		fprintf(stderr, "%s requires root to run.\n", argv[0]);
  		exit(EPERM);
-@@ -187,7 +200,6 @@ int main(int argc, char **argv)
+@@ -187,7 +184,6 @@ int main(int argc, char **argv)
  	signal(SIGHUP, handle_hup);
  
  	openlog("xenconsoled", syslog_option, LOG_DAEMON);
