@@ -67,10 +67,6 @@ do_install () {
 	   install -m 644 ${WORKDIR}/custom-WebBrowser.desktop ${D}/root/.local/share/xfce4/helpers
 	   install -m 644 ${WORKDIR}/custom-MailReader.desktop ${D}/root/.local/share/xfce4/helpers
 
-	   install -d ${D}/root/.config/midori
-	   install -m 644 ${WORKDIR}/session.xbel ${D}/root/.config/midori/
-	   install -m 644 ${WORKDIR}/config ${D}/root/.config/midori/
-
 	   install -d ${D}/etc/modprobe.d
 	   install -m 644 ${WORKDIR}/framebuffer.conf ${D}/etc/modprobe.d/
 
