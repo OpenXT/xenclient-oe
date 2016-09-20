@@ -1,10 +1,17 @@
 ################################################################################
 SHORT DESCRIPTION: 
 ################################################################################
+Pull in SEABIOS ROM from out of tree and load extra OROMs.
 
 ################################################################################
 LONG DESCRIPTION: 
 ################################################################################
+This patch allows SEABIOS to be built and pulled in from outside the Xen tree.
+It also introduces a new function to layout the legacy guest firmware for the
+SEABIOS ROM, the selected VGA BIOS and the Ethernet/PXE OROM.
+
+Note the patch does not pop without being forced because it touches the
+tools/firmare/Makefile file that is modified by the configure step.
 
 ################################################################################
 CHANGELOG 
@@ -17,6 +24,7 @@ REMOVAL
 ################################################################################
 UPSTREAM PLAN
 ################################################################################
+None
 
 ################################################################################
 INTERNAL DEPENDENCIES 
@@ -96,7 +104,7 @@ Index: xen-4.6.1/tools/firmware/hvmloader/seabios.c
  extern unsigned char dsdt_anycpu_qemu_xen[];
  extern int dsdt_anycpu_qemu_xen_len;
  
-@@ -132,6 +143,70 @@ static void seabios_setup_e820(void)
+@@ -132,6 +143,62 @@ static void seabios_setup_e820(void)
      dump_e820_table(e820, info->e820_nr);
  }
  
@@ -127,14 +135,6 @@ Index: xen-4.6.1/tools/firmware/hvmloader/seabios.c
 +        vgabios_sz =
 +            round_option_rom((*(uint8_t *)(VGABIOS_PHYSICAL_ADDRESS+2)) * 512);
 +        break;
-+#if 0
-+    case VGA_xengfx:
-+        printf("Loading XenGFX VGABIOS ...\n");
-+        memcpy((void *)VGABIOS_PHYSICAL_ADDRESS,
-+               vgabios_xengfx, sizeof(vgabios_xengfx));
-+        vgabios_sz = round_option_rom(sizeof(vgabios_xengfx));
-+        break;
-+#endif
 +    default:
 +        printf("No emulated VGA adaptor ...\n");
 +        break;
@@ -145,7 +145,7 @@ Index: xen-4.6.1/tools/firmware/hvmloader/seabios.c
 +    etherboot_phys_addr = (etherboot_phys_addr + 0x7ff) & ~0x7ff;
 +    memcpy((void *)etherboot_phys_addr, etherboot, sizeof (etherboot));
 +    etherboot_sz = sizeof (etherboot);
-+    
++
 +    option_rom_phys_addr = etherboot_phys_addr + etherboot_sz;
 +    option_rom_sz = pci_load_option_roms(SEABIOS_OPTIONROM_PHYSICAL_END, option_rom_phys_addr);
 +
@@ -167,7 +167,7 @@ Index: xen-4.6.1/tools/firmware/hvmloader/seabios.c
  struct bios_config seabios_config = {
      .name = "SeaBIOS",
  
-@@ -140,7 +215,7 @@ struct bios_config seabios_config = {
+@@ -140,7 +207,7 @@ struct bios_config seabios_config = {
  
      .bios_address = 0x100000 - sizeof(seabios),
  
