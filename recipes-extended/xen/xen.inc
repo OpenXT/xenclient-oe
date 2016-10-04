@@ -21,7 +21,6 @@ SRC_URI = "${XEN_SRC_URI};name=source \
     file://hvm-rtc.patch;patch=1 \
     file://hvm-rtc-refresh-time.patch;patch=1 \
     file://acpi-pm-feature.patch \
-    file://hvm-info.patch \
     file://xenconsoled-syslog.patch;patch=1 \
     file://tboot-shutdown-disable-irqs.patch;patch=1 \
     file://Dell-980-txt-shutdown-acpi-access-width.patch;patch=1 \
@@ -50,10 +49,10 @@ SRC_URI = "${XEN_SRC_URI};name=source \
     file://stubdomain-msi-irq-access.patch;striplevel=1 \
     file://workaround-nehalem-igd-vtd.patch;patch=1 \
     file://xen-x86-Fix-up-rules-when-forcing-mno-sse.patch;patch=1 \
+    file://openxt-xen-xsmv4vuse.patch \
     file://xsa-155-paravirtualized-drivers-incautious-about-shared-memory-contents.patch;patch=1 \
     file://xsa-170-guest-user-mode-may-crash-guest-with-non-canonical-rip.patch;patch=1 \
     file://xsa-173-x86-shadow-pagetables-address-width-overflow.patch;patch=1 \
-    file://openxt-xen-xsmv4vuse.patch \
     file://xsa-154-x86-inconsistent-cachability-flags-on-guest-mappings.patch \
     file://xsa-182-x86-privilege-escalation-in-pv-guests.patch \
     file://xsa-183-x86-missing-smap-whitelisting-in-32-bit-exception-event-delivery.patch \
