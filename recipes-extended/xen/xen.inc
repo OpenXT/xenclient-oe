@@ -59,6 +59,7 @@ SRC_URI = "${XEN_SRC_URI};name=source \
     file://xsa-183-x86-missing-smap-whitelisting-in-32-bit-exception-event-delivery.patch \
     file://xsa-185-x86-Disallow-L3-recursive-pagetable-for-32-bit-PV-guests.patch \
     file://xsa-187-x86-hvm-overflow-of-sh_ctxt-seg_reg.patch \
+    file://xsa-190-x86-hvm-instr-emul-guest-user-mode-missing-exception.patch \
 "
 
 SRC_URI[source.md5sum] := "${XEN_SRC_MD5SUM}"
