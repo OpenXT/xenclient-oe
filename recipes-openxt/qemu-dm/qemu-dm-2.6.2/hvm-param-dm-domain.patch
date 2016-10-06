@@ -1,0 +1,33 @@
+Index: qemu-2.6.2/xen-hvm.c
+===================================================================
+--- qemu-2.6.2.orig/xen-hvm.c
++++ qemu-2.6.2/xen-hvm.c
+@@ -1205,6 +1205,13 @@ void xen_hvm_init(PCMachineState *pcms,
+     state->wakeup.notify = xen_wakeup_notifier;
+     qemu_register_wakeup_notifier(&state->wakeup);
+ 
++    /*
++     * We need to tell the hypervisor what the domid of the device model is.
++     * Usually, it's expecting dom0, but with a stubdomain, that is not the
++     * case.
++     */
++    xc_set_hvm_param(xen_xc, xen_domid, HVM_PARAM_DM_DOMAIN, DOMID_SELF);
++
+     rc = xen_get_ioreq_server_info(xen_xc, xen_domid, state->ioservid,
+                                    &ioreq_pfn, &bufioreq_pfn,
+                                    &bufioreq_evtchn);
+@@ -1305,9 +1312,14 @@ void xen_hvm_init(PCMachineState *pcms,
+         error_report("xen backend core setup failed");
+         goto err;
+     }
++
++    /* Since this is in a stubdom, there is no need to setup backend devices */
++#if 0
+     xen_be_register("console", &xen_console_ops);
+     xen_be_register("vkbd", &xen_kbdmouse_ops);
+     xen_be_register("qdisk", &xen_blkdev_ops);
++#endif
++
+     xen_read_physmap(state);
+     return;
+ 
