@@ -3,19 +3,6 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=441c28d2cf86e15a37fa47e15a72fbac  \
                     file://COPYING.LIB;md5=79ffa0ec772fa86740948cb7327a0cc7"
 DEPENDS = "xen-tools alsa-lib pciutils libpng xen-blktap libv4v openssl zlib libcap-ng libdmbus"
 
-# These patches were removed until further stabilization occurs. ioreq will likely not
-# return until a move to Xen 4.5 occurs. Pulling ioreq requires an additional patch
-# "0002-hvm..." and a removal of a Xen patch (xc-xt-multiple-ioreq)
-#
-#            file://0003-ioreq-server-upstream.patch;striplevel=1 \
-#            file://0004-ioreq-server.patch;striplevel=1 \
-#            file://0010-xc-emulated-nic-link-state-propagation.patch;striplevel=1 \
-#            file://0012-audio-alsa.patch;striplevel=1 \
-#            file://0014-audio-alsa-stub.patch;striplevel=1 \
-#            file://0026-openxtaudio.patch;striplevel=1 \
-#            file://0007-pci-reserve-igd-slot.patch;striplevel=1 \
-#
-
 # Leave this in it's own definition so that it can be replaced with a local
 # tarball (the QEMU download speed is terrible). If this is combined with the
 # other patches, it doesn't seem to work
