@@ -43,15 +43,12 @@ SRC_URI += "https://www.kernel.org/pub/linux/kernel/v${PV_MAJOR}.x/linux-${PV}.t
     file://xsa-155-qsb-023-xen-netfront-add-range-check-for-Tx-response-id.patch;patch=1 \
     file://xsa-155-qsb-023-xen-netfront-copy-response-out-of-shared-buffer-befo.patch;patch=1 \
     file://xsa-155-qsb-023-xen-netfront-do-not-use-data-already-exposed-to-back.patch;patch=1 \
-    file://cve-2016-0758-KEYS-Fix-ASN.1-indefinite-length-object-parsing.patch \
-    file://cve-2016-3135-netfilter-x_tables-check-for-size-overflow.patch \
-    file://cve-2016-5244-rds-fix-an-infoleak-in-rds_inc_info_copy.patch \
     file://xenstore-from-pv-guest.patch \
     file://defconfig \
     "
 
-SRC_URI[kernel.md5sum] = "03dfcd3522015afde8d7a5c0b6e5d6b6"
-SRC_URI[kernel.sha256sum] = "55ad0c6f0b62346f5e4b100f0e01970e8f3a5454f7c8af1e7bba490a3a6ac694"
+SRC_URI[kernel.md5sum] = "74f1dcafacf29900fecc9c61318269f8"
+SRC_URI[kernel.sha256sum] = "3330eb95e1e34a47fcab513a6825656c9f7c6556d72bcdd38d80662ec8091a7a"
 
 LIC_FILES_CHKSUM = "file://COPYING;md5=d7810fab7487fb0aad327b76f1be7cd7"
 
