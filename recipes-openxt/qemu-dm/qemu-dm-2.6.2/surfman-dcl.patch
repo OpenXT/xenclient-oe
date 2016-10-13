@@ -1,3 +1,92 @@
+From c1a9789a0b9886108c5865e546bbf9077a4c3378 Mon Sep 17 00:00:00 2001
+From: "Kyle J. Temkin" <temkink@ainfosec.com>
+Date: Mon, 16 Mar 2015 16:55:44 -0400
+Subject: [PATCH 2/2] Enable support for Surfman multiplexed display as a QEMU
+ display target.
+
+--------------------------------------------------------------------------------
+SHORT DESCRIPTION:
+--------------------------------------------------------------------------------
+Enables support for the Surfman multiplexed display handler as a QEMU display.
+
+--------------------------------------------------------------------------------
+LONG DESCRIPTION:
+--------------------------------------------------------------------------------
+This patch adds a custom Surfman UI frontend to QEMU, which allows QEMU HVM
+to use the Surfman display multiplexing architecture, and which provides support
+for the current zero-copy implementation of the i915 graphics front-end for
+integrated graphics.
+
+This patch modifies the QEMU Xen internals (xen-all.c) in order to allow other
+QEMU components to reference the guest's VRAM. This in turns allows the guest's
+linear framebuffer (LFB) to be passed to Surfman, which can render the LFB's
+contents onscreen.
+
+A Surfman UI is created (ui/surfman.c) which handles communication of guest
+framebuffer data to the Surfman display multiplexer. The guest address is
+communicated via the Device Management (DM) bus.
+
+Future contributors should take particular care when modifying this code, as
+the VRAM is used directly by the "i915" integrated graphics hardware. To
+maintain cache coherency with the displayed hardware, be sure to use the proper
+pointers to access the VRAM, as noted in "xen-all.c"and "surfman-ui.c".
+
+The majority of this patch was ported directly from the older IOEMU code, and
+modified to work with the new QEMU. "Gotchas" and areas that could use
+improvement are noted in the inline documentation.
+
+--------------------------------------------------------------------------------
+DEPENDENCIES
+--------------------------------------------------------------------------------
+External Dependencies:
+  -Surfman, the OpenXT multiplexed display handler.
+  -DMBus, the Device Management Bus
+
+Internal/Patch Dependencies:
+  -Input Server (openxt-input-server.patch) -- must be applied first
+  -DMBus Support (dmbus.patch) -- may be applied after
+
+--------------------------------------------------------------------------------
+CHANGELOG
+--------------------------------------------------------------------------------
+Documentation:           Kyle J. Temkin <temkink@ainfosec.com>   3/16/2015
+Coherency & Color Fixes: Kyle J. Temkin <temkink@ainfosec.com>   1/26/2015
+QEMU 1.4.0 Port:         Eric Chanudet  <chanudete@ainfosec.com> 1/16/2015
+QEMU 2.6.2 Port:         Ross Philipson, philipsonr@ainfosec.com, 10/13/2016
+
+--------------------------------------------------------------------------------
+REMOVAL
+--------------------------------------------------------------------------------
+This patch enables Surfman-multiplexed display for HVM domains. This should be
+removed and/or reworked if:
+  -Surfman is ever replaced with a different display handler; or
+  -The ioemugfx Surfman plugin is rewritten or replaced.
+
+--------------------------------------------------------------------------------
+UPSTREAM PLAN
+--------------------------------------------------------------------------------
+This code is OpenXT specific, and contains details specific to our modified
+i915 driver, which is patched to allow zero-copy display. As it is so specific
+to our stack, is is unlikely to be upstreamed.
+
+--------------------------------------------------------------------------------
+PATCHES
+--------------------------------------------------------------------------------
+---
+ configure               |  12 ++
+ hw/xen.h                |   2 +
+ include/sysemu/sysemu.h |   3 +-
+ include/ui/console.h    |   5 +
+ ui/Makefile.objs        |   1 +
+ ui/console.c            |  10 +-
+ ui/surfman.c            | 363 ++++++++++++++++++++++++++++++++++++++++++++++++
+ ui/surfman.h            | 118 ++++++++++++++++
+ vl.c                    |  14 +-
+ xen-all.c               |  97 ++++++++++++-
+ 10 files changed, 617 insertions(+), 8 deletions(-)
+ create mode 100644 ui/surfman.c
+ create mode 100644 ui/surfman.h
+
 Index: qemu-2.6.2/configure
 ===================================================================
 --- qemu-2.6.2.orig/configure

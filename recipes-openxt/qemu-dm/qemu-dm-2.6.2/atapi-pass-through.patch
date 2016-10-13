@@ -1,3 +1,188 @@
+--------------------------------------------------------------------------------
+SHORT DESCRIPTION:
+--------------------------------------------------------------------------------
+
+Provide hardware passthrough capability for CD/DVD drives.
+
+--------------------------------------------------------------------------------
+LONG DESCRIPTION:
+--------------------------------------------------------------------------------
+
+Added to protocols for use with qemu -drive: atapi-pt-v4v and atapi-pt-local
+
+Invocation for non-stubdom qemu:
+* -drive file=atapi-pt-local:<dom0 bsg dev path>,if=atapi-pt,media=cdrom
+   [,format=raw][,readonly=on|off]
+
+Invocation for stubdom qemu:
+* -drive file=atapi-pt-v4v:<dom0 bsg dev path>,if=atapi-pt,media=cdrom
+   [,format=raw][,readonly=on|off]
+
+Example:
+  -drive file=atapi-pt-v4v:/dev/bsg/1:0:0:0,if=atapi-pt,
+   media=cdrom,format=raw,readonly=on
+
+Logging:
+* Watch is setup on /xenclient/bsgdev/<a>_<b>_<c>_<d>/loglevel
+  where a,b,c,d refer to /dev/bsg/a:b:c:d
+* To set standard informational logging (default):
+  xenstore-write /xenclient/bsgdev/<a>_<b>_<c>_<d>/loglevel 0
+* To set verbose logging:
+  xenstore-write /xenclient/bsgdev/<a>_<b>_<c>_<d>/loglevel 1
+* To set debug-level logging:
+  xenstore-write /xenclient/bsgdev/<a>_<b>_<c>_<d>/loglevel 2
+
+Toolstack device assignment:
+* Command line APIs that control assignment:
+ - xec -o /host [list-cd-devices|assign-cd-device|
+                 get-cd-device-assignment|eject-cd-device]
+* The toolstack notifies qemu that it may attempt to grab lock using xenstore:
+ - /local/domain/<domid>/bsgdev-req/<a>_<b>_<c>_<d>/req-assign <= 1
+* The toolstack notifies qemu that it is losing the lock using xenstore:
+ - /local/domain/<domid>/bsgdev/<a>_<b>_<c>_<d>/lock <= (xenstore-rm)
+ - /local/domain/<domid>/bsgdev-req/<a>_<b>_<c>_<d>/req-assign <= 1
+ - /local/domain/<domid>/bsgdev-req/<a>_<b>_<c>_<d>/req-eject <= 1
+* Qemu must respond to assignment requests with:
+ - /local/domain/<domid>/bsgdev-req/<a>_<b>_<c>_<d>/req-assign <= (xenstore-rm)
+ - /local/domain/<domid>/bsgdev-req/<a>_<b>_<c>_<d>/req-eject <= (xenstore-rm)
+* When device lock successfully obtained, Qemu must notify with:
+ - /local/domain/<domid>/bsgdev/<a>_<b>_<c>_<d>/lock <= 1
+
+Autolock:
+* Command line APIs that control autolock:
+ - xec get autolock-cd-drives | xec set autolock-cd-drives [true|false]
+* autolock: a VM may attempt to grab exclusive lock of a DVD if it has focus.
+If obtained, lock will be given up when disk is ejected or VM shuts down.
+* No autolock: only specified VM may be given lock.
+
+Global media state:
+* Global media state is available, per device with the following xenstore key:
+ - /xenclient/bsgdev/<a>_<b>_<c>_<d>/media <= [0|1]
+* atapi pt instance with lock will update global media state when detecting
+changes to the state. It's not guaranteed to be correct, as there are cases
+where state isn't detected correctly by toolstack.  But in general it's just
+used for notifications to a guest if it obtains lock after initial boot.
+
+Exclusive device lock:
+* Device locking is held exclusively /var/log/xen-atapi-pt-lock-<a>_<b>_<c>_<d>
+using the fnctl() control.  If VM does not hold this lock, it will not be given
+full access to the drive.
+* In addition to the fcntl()-based lock to guarantee exclusivity, the qemu
+instance obtaining the lock will inform the toolstack/system as specified
+above in assignment discussion.
+
+--------------------------------------------------------------------------------
+UPSTREAM PLAN
+--------------------------------------------------------------------------------
+
+Unlikely to upstream.  They have a SCSI passthrough capability
+and the current "host_cdrom" support is limited.
+
+--------------------------------------------------------------------------------
+KNOWN ISSUES
+--------------------------------------------------------------------------------
+
+1) Specific commands always allowed through to drive
+   with policy-cd-access=true but w/o lock
+
+* There are a number of commands that are allowed to go to the drive, even if the
+VM sending them does not own the exclusive lock.  There are a number of reasons
+which make this necessary in the current approach for atapi-pt (notably, 
+allowing quick dynamic "hotplug"-esque usage across VMs without affecting
+functionality. Commands include:
+ - GPCMD_GET_CONFIGURATION
+ - GPCMD_GET_EVENT_STATUS_NOTIFICATION
+ - GPCMD_TEST_UNIT_READY
+ - GPCMD_GET_PERFORMANCE
+ - GPCMD_MECHANISM_STATUS
+ - GPCMD_MODE_SENSE_10
+ - GPCMD_REPORT_KEY
+ - GPCMD_READ_CDVD_CAPACITY
+ - GPCMD_READ_FORMAT_CAPACITIES
+** Data could possibly be discovered by VMs that the user does not expect to be
+able to access the drive, with the above commands.
+** VMs without lock could be sending these commands to the drive during
+critical times (e.g. user is burning a DVD), perhaps causing an error.
+
+2) Certain commands are blocked regardless of lock
+
+* There are a number of commands that are blocked regardless of exclusive lock,
+to ensure the device state is consistent for all VMs.  (e.g. VM cannot issue
+command to prevent ejecting the tray, but then loses lock before releasing).
+Commands include:
+ - GPCMD_START_STOP_UNIT / stop motor command
+ - GPCMD_PREVENT_ALLOW_MEDIUM_REMOVAL
+
+--------------------------------------------------------------------------------
+FUTURE WORK
+--------------------------------------------------------------------------------
+
+In my opinion, a lot of the complexity comes from allowing autolock & hotplug
+style functionality without a true hotplug solution.  It would make the most
+sense to require a DVD be assigned to a specific VM at boot time, or get proper
+hotplugging of the device into the VM.  Then once a disk is released from a VM,
+the mediator could clean up the state of the device to be ready for the next VM.
+This could address both issues #1 and #2, but would restrict present
+functionality.
+
+--------------------------------------------------------------------------------
+DEPENDENCIES
+--------------------------------------------------------------------------------
+
+generic-xenstore-extensions
+
+--------------------------------------------------------------------------------
+CHANGELOG
+--------------------------------------------------------------------------------
+
+OpenXT, Citrix, Initial Commit.
+
+Chris Patterson, <pattersonc@ainfosec.com>, 03/02/2015
+
+* use protocol instead of format specifiers:
+ - atapi-pt created a two protocols: atapi-pt-v4v and atapi-pt-local.
+ - example invocation:
+ -- -drive file=atapi-pt-local:/dev/bsg/1:0:0:0,if=atapi-pt,media=cdrom[,format=raw]
+* build options
+ - to build, two config options added to control feature inclusion:
+ -- --enable-atapi-pt to enable local pt functionality
+ -- --enable-atapi-pt-v4v to further enable v4v remoting
+ - Activate patches according to those switches, as well
+   as work on vanilla qemu outside of xt using atapi-pt-local.
+* drop "xenclient" references (sufficiently indicated with CONFIG_ATAPI_PT)
+* some formatting (indent'd) for consistency within files (tabs to spaces, etc)
+* dropped pt.c
+* added some TODOs for open questions/concerns
+* close v4v socket on disconnect
+
+Chris Patterson, <pattersonc@ainfosec.com>, 03/31/2015
+
+* removed shared memory interfaces in favor of exclusive usage of xenstore-based
+communication mechanisms and fnctl-based lock in dom0
+* added xenstore watches for all applicable xenstore communicated flag keys
+  - xenstore reads now occur only on initialization
+* implemented device locking for both autolock and no-autolock
+* re-wrote protocol to communicate between atapi_pt_helper and stubdom
+  - well defined message structures, added significant error checking
+  - added atapi_pt_v4v.h to be the common interface with atapi_pt_helper
+  - strictly defined SG_IO message passing to dom0
+* modified logging interfaces to support runtime log level specification, as
+well as be consistent across all atapi-pt components.
+* use readonly= flag to specify whether or not write commands are allowed
+(for policy-cd-recording)
+* formatting refactoring, consistent C style
+* added lots of comments where I found them to be useful
+* simplified eject/insert notification mechanisms
+* (re)added fake_inquiry that seemed to be dropped in original qemu 14 port
+* simplified atapi_pt_cmd handling to be more consistent
+* drop changes to struct BlockDriver, and hijack usage of ioctl for comms
+  - added atapi_pt_ioctl.h to define interfaces between atapi_pt backend
+    and protocol level
+
+Signed-off-by: Chris Patterson <pattersonc@ainfosec.com>
+
+Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
+
 Index: qemu-2.6.2/block/Makefile.objs
 ===================================================================
 --- qemu-2.6.2.orig/block/Makefile.objs

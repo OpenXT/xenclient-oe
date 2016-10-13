@@ -1,3 +1,67 @@
+--------------------------------------------------------------------------------
+SHORT DESCRIPTION:
+--------------------------------------------------------------------------------
+Enable changing of ISO media in stubdom after boot
+
+--------------------------------------------------------------------------------
+LONG DESCRIPTION:
+--------------------------------------------------------------------------------
+In the previous device model (ioemu), media changes for ISO backed CDROMs were
+communicated by the toolstack to the ioemu instance via xenstore. This
+functionality was lost in the port, as qemu now expects qmp based notification
+of ISO media changes. This code reintroduces the xenstore based mechanism for
+listening to the toolstack for the stubdomain, and calls the appropriate qmp
+code for the change.
+
+For the stubdom case special care has to be taken to ensure that the state
+between the blkfront and blkback drivers for the particular drive are correct.
+Basically the idea is to not tell qemu about the change until the backend for
+the drive gets to state 4.
+
+The non-stubdom case is far simpler than the stubdom one, as only the 'params'
+key for the particular blk device is needed. Once it changes, as long as the
+file exists, it's fine to tell qemu to do the change.
+
+This patch is also configurable, and can be disabled at compile time. It also
+introduces the define CONFIG_STUBDOM so code paths that are specific to the
+stubdom device model can coexist with non-stubdom code paths.
+
+--------------------------------------------------------------------------------
+CHANGELOG
+--------------------------------------------------------------------------------
+Intial Commit: Brendan Kerrigan, kerriganb@ainfosec.com, 3/17/2015
+Ported to QEMU 2.6.2: Ross Philipson, philipsonr@ainfosec.com, 10/13/2016
+
+--------------------------------------------------------------------------------
+REMOVAL
+--------------------------------------------------------------------------------
+This patch could be removed if a mechanism to bridge qmp commands to the stubdom
+is created, and appropriate toolstack changes are made to generate qmp commands
+for the ISO change event. While the qemu changes to support this are likely
+small, the toolstack changes would be considerable.
+
+10/13/2016:
+
+With the introduction of XL into OpenXT, removing this and using QMP is a much
+more attainable goal. See ticket:
+
+https://openxt.atlassian.net/browse/OXT-777
+
+--------------------------------------------------------------------------------
+UPSTREAM PLAN
+--------------------------------------------------------------------------------
+Until the use of Xenstore for communication is moved to qmp, it doesn't make
+sense to upstream this. The move to qmp would be more palatable for upstream,
+and provide finer grain control over anything the qmp interface exposes.
+
+--------------------------------------------------------------------------------
+INTERNAL DEPENDENCIES
+--------------------------------------------------------------------------------
+0001-generic-xenstore-extensions.patch
+
+Signed-off-by: Brendan Kerrigan <kerriganb@ainfosec.com>
+Signed-off-by: Jed Lejosne <lejosnej@ainfosec.com>
+
 Index: qemu-2.6.2/Makefile.target
 ===================================================================
 --- qemu-2.6.2.orig/Makefile.target
