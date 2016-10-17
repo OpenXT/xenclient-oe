@@ -213,7 +213,7 @@ Index: qemu-2.6.2/hw/xen/xen_acpi_pm.c
 ===================================================================
 --- /dev/null
 +++ qemu-2.6.2/hw/xen/xen_acpi_pm.c
-@@ -0,0 +1,1053 @@
+@@ -0,0 +1,1057 @@
 +/*
 + * APCI PM feature for battery/AC/lid management for OpenXT guests.
 + *
@@ -342,7 +342,7 @@ Index: qemu-2.6.2/hw/xen/xen_acpi_pm.c
 +typedef struct XenACPIPMState {
 +    SysBusDevice busdev;
 +
-+    MemoryRegion *space_io;
++    void *space_io;                  /* MemoryRegion */
 +    void *piix4_dev;
 +
 +    struct xen_battery_manager xbm;
@@ -1234,16 +1234,18 @@ Index: qemu-2.6.2/hw/xen/xen_acpi_pm.c
 +void xen_acpi_pm_create(MemoryRegion *space_io, void *opaque)
 +{
 +    DeviceState *dev;
-+    SysBusDevice *sbd;
-+    XenACPIPMState *s;
 +
 +    dev = qdev_create(NULL, TYPE_XEN_ACPI_PM);
++    qdev_prop_set_ptr(dev, "space_io", space_io);
++    qdev_prop_set_ptr(dev, "piix4_dev", opaque);
 +    qdev_init_nofail(dev);
-+    sbd = SYS_BUS_DEVICE(dev);
-+    s = XEN_ACPI_PM(sbd);
-+    s->space_io = space_io;
-+    s->piix4_dev = opaque;
 +}
++
++static Property xen_acpi_pm_properties[] = {
++    DEFINE_PROP_PTR("space_io", XenACPIPMState, space_io),
++    DEFINE_PROP_PTR("piix4_dev", XenACPIPMState, piix4_dev),
++    DEFINE_PROP_END_OF_LIST(),
++};
 +
 +static void xen_acpi_pm_class_init(ObjectClass *klass, void *data)
 +{
@@ -1251,6 +1253,8 @@ Index: qemu-2.6.2/hw/xen/xen_acpi_pm.c
 +    SysBusDeviceClass *k = SYS_BUS_DEVICE_CLASS(klass);
 +
 +    k->init = xen_acpi_pm_initfn;
++    dc->props = xen_acpi_pm_properties;
++    set_bit(DEVICE_CATEGORY_MISC, dc->categories);
 +    dc->desc = "Xen ACPI PM device";
 +}
 +
