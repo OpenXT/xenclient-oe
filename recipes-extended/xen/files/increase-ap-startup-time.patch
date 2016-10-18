@@ -1,0 +1,61 @@
+################################################################################
+SHORT DESCRIPTION: 
+################################################################################
+Increase the AP startup time when TBOOT is launching Xen.
+
+################################################################################
+LONG DESCRIPTION: 
+################################################################################
+TBOOT has the APs running in mini guests. The INIT IPI that Xen sends causes
+a VMEXIT to TBOOT's handler. It puts the AP into the Wait-for-SIPI state and
+VMRESUMES (of course the guest does not actually run any longer at this point).
+
+The Xen code was just waiting a very short period of time for all that to
+happen and it just wasn't long enough. The timeout was made considerably
+larger (up to the legacy INIT IPI timeout on Intel platforms) to guarantee
+all APs startup.
+
+See the ticket for more details:
+https://openxt.atlassian.net/browse/OXT-747
+
+################################################################################
+CHANGELOG 
+################################################################################
+Author: Ross Philipson, philipsonr@ainfosec.com, 10/11/2016
+
+################################################################################
+REMOVAL 
+################################################################################
+
+################################################################################
+UPSTREAM PLAN
+################################################################################
+Probably could be upstreamed.
+
+################################################################################
+INTERNAL DEPENDENCIES 
+################################################################################
+
+################################################################################
+PATCHES 
+################################################################################
+Index: xen-4.6.1/xen/arch/x86/smpboot.c
+===================================================================
+--- xen-4.6.1.orig/xen/arch/x86/smpboot.c
++++ xen-4.6.1/xen/arch/x86/smpboot.c
+@@ -461,7 +461,14 @@ static int wakeup_secondary_cpu(int phys
+          * While AP is in root mode handling the INIT the CPU will drop
+          * any SIPIs
+          */
+-        udelay(10);
++        /*
++         * Increase the wait time time because 10 us was simply not long enough
++         * for the VMEXIT, setting Wait-for-SIPI mode and VMRESUMING the APs.
++         * Some number of APs on some systems would just not be ready in time.
++         * See:
++         * https://openxt.atlassian.net/browse/OXT-747
++         */
++        udelay(10000);
+     }
+ 
+     maxlvt = get_maxlvt();
