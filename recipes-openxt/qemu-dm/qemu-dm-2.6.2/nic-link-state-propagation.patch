@@ -47,12 +47,20 @@ Index: qemu-2.6.2/include/hw/xen/xen.h
 ===================================================================
 --- qemu-2.6.2.orig/include/hw/xen/xen.h
 +++ qemu-2.6.2/include/hw/xen/xen.h
-@@ -33,6 +33,9 @@ void xen_piix_pci_write_config_client(ui
+@@ -8,6 +8,7 @@
+  */
+ 
+ #include "hw/irq.h"
++#include "net/net.h"
+ #include "qemu-common.h"
+ 
+ /* xen-machine.c */
+@@ -33,6 +34,9 @@ void xen_piix_pci_write_config_client(ui
  void xen_hvm_inject_msi(uint64_t addr, uint32_t data);
  int xen_is_pirq_msi(uint32_t msi_data);
  
-+int xenstore_register_nic(NetClientState *nc);
-+int xenstore_unregister_nic(NetClientState *nc);
++int xenstore_register_nic(NICConf *conf);
++int xenstore_unregister_nic(NICConf *conf);
 +
  qemu_irq *xen_interrupt_controller_init(void);
  
@@ -69,7 +77,7 @@ Index: qemu-2.6.2/hw/xen/xen_backend.c
  
  #include <xen/grant_table.h>
  
-@@ -607,6 +608,199 @@ static int xenstore_scan(const char *typ
+@@ -607,6 +608,209 @@ static int xenstore_scan(const char *typ
      return 0;
  }
  
@@ -143,22 +151,20 @@ Index: qemu-2.6.2/hw/xen/xen_backend.c
 +}
 +
 +/*
-+ * OpenXT: Return the NICInfo entry of the backend peered with the given NetClientState.
++ * OpenXT: Return the NICInfo entry of the backend peered with the
++ * given NICConf.
 + *
-+ * @param ncs a valid pointer to a NetClientState.
++ * @param conf a valid pointer to a NICConf.
 + * @return a pointer to the corresponding NICInfo, NULL else.
 + */
-+static /* const */ NICInfo *qemu_find_nicinfo(const NetClientState *ncs)
++static NICInfo *qemu_find_nicinfo(const NICConf *conf)
 +{
 +    size_t i;
 +
-+    assert(ncs);
-+    assert(ncs->info);
-+    assert(ncs->info->type == NET_CLIENT_OPTIONS_KIND_NIC);
++    assert(conf);
 +
 +    for (i = 0; i < MAX_NICS; ++i) {
-+        if (nd_table[i].used && nd_table[i].name &&
-+            nd_table[i].netdev == ncs->peer) {
++        if (!memcmp(&nd_table[i].macaddr.a[0], &conf->macaddr.a[0], 6)) {
 +            return &nd_table[i];
 +        }
 +    }
@@ -202,23 +208,34 @@ Index: qemu-2.6.2/hw/xen/xen_backend.c
 +}
 +
 +/*
++ * OpenXT: Print a MAC addr
++ *
++ * @param msg a valid message
++ * @param macaddr a valid pointer to a 6 byte array.
++ */
++static void qemu_mac_printf(const char *msg, const uint8_t *macaddr)
++{
++    fprintf(stderr, "%s %.2x:%.2x:%.2x:%.2x:%.2x:%.2x", msg,
++            macaddr[0], macaddr[1], macaddr[2],
++            macaddr[3], macaddr[4], macaddr[5]);
++}
++
++/*
 + * OpenXT: Register a Net Client in Xenstore.
 + *
-+ * @param ncs a valid pointer to a NetClientState object.
++ * @param conf a valid pointer to a NetClientState object.
 + * @return 0 on success, -ERRNO else.
 + */
-+int xenstore_register_nic(NetClientState *ncs)
++int xenstore_register_nic(NICConf *conf)
 +{
 +    char base[XEN_BUFSIZE];
-+    /* const */ NICInfo *ni;
++    NICInfo *ni;
 +
-+    assert(ncs);
-+    assert(ncs->info);
-+    assert(ncs->info->type == NET_CLIENT_OPTIONS_KIND_NIC);
++    assert(conf);
 +
-+    ni = qemu_find_nicinfo(ncs);
++    ni = qemu_find_nicinfo(conf);
 +    if (!ni) {
-+        fprintf(stderr, "Failed to find backend device for emulated NIC `%s'.\n", ncs->name);
++        fprintf(stderr, "Failed to find backend device for emulated NIC conf %p\n", conf);
 +        return -ENODEV;
 +    }
 +    if (xenstore_get_nic_path(ni, base)) {
@@ -231,28 +248,29 @@ Index: qemu-2.6.2/hw/xen/xen_backend.c
 +    }
 +    xenstore_update_nic(ni);
 +
++    qemu_mac_printf("Registered xenstore watch for NIC addr:",
++                    &conf->macaddr.a[0]);
++
 +    return 0;
 +}
 +
 +/*
-+ * OpenXT: Unregister a Net Client in Xenstore.
++ * OpenXT: Unregister a NICConf/NICInfo from Xenstore.
 + * Called when a device is removed and no longer used.
 + *
-+ * @param ncs a valid pointer to a NetClientState object.
++ * @param conf a valid pointer to a NICConf object.
 + * @return 0 on success, -ERRNO else.
 + */
-+int xenstore_unregister_nic(NetClientState *ncs)
++int xenstore_unregister_nic(NICConf *conf)
 +{
 +    char base[XEN_BUFSIZE];
-+    /* const */ NICInfo *ni;
++    NICInfo *ni;
 +
-+    assert(ncs);
-+    assert(ncs->info);
-+    assert(ncs->info->type == NET_CLIENT_OPTIONS_KIND_NIC);
++    assert(conf);
 +
-+    ni = qemu_find_nicinfo(ncs);
++    ni = qemu_find_nicinfo(conf);
 +    if (!ni) {
-+        fprintf(stderr, "Failed to find backend device for emulated NIC `%s'.\n", ncs->name);
++        fprintf(stderr, "Failed to find backend device for emulated NIC conf %p\n", conf);
 +        return -ENODEV;
 +    }
 +    if (xenstore_get_nic_path(ni, base)) {
@@ -283,28 +301,30 @@ Index: qemu-2.6.2/net/net.c
  /* Net bridge is currently not supported for W32. */
  #if !defined(_WIN32)
  # define CONFIG_NET_BRIDGE
-@@ -278,6 +281,12 @@ NetClientState *qemu_new_net_client(NetC
-     qemu_net_client_setup(nc, info, peer, model, name,
-                           qemu_net_client_destructor);
+@@ -305,6 +308,14 @@ NICState *qemu_new_nic(NetClientInfo *in
+         nic->ncs[i].queue_index = i;
+     }
  
-+    /* OpenXT: Register the new NetClientState to Xenstore.
-+     * Required for link-state propagation logic. */
++    /*
++     * OpenXT: Register the new NICConf/NICInfo with Xenstore.
++     * Required for link-state propagation logic.
++     */
 +    if (xen_enabled()) {
-+        xenstore_register_nic(nc);
++        xenstore_register_nic(conf);
 +    }
 +
-     return nc;
+     return nic;
  }
  
-@@ -336,6 +345,11 @@ static void qemu_cleanup_net_client(NetC
+@@ -409,6 +420,11 @@ void qemu_del_nic(NICState *nic)
  {
-     QTAILQ_REMOVE(&net_clients, nc, next);
+     int i, queues = MAX(nic->conf->peers.queues, 1);
  
-+    /* OpenXT: Unregister NetClientState from Xenstore. */
++    /* OpenXT: Unregister NICConf/NICInfo from Xenstore. */
 +    if (xen_enabled()) {
-+        xenstore_unregister_nic(nc);
++        xenstore_unregister_nic(nic->conf);
 +    }
 +
-     if (nc->info->cleanup) {
-         nc->info->cleanup(nc);
-     }
+     qemu_macaddr_set_free(&nic->conf->macaddr);
+ 
+     /* If this is a peer NIC and peer has already been deleted, free it now. */
