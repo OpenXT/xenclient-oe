@@ -28,6 +28,7 @@ IMAGE_INSTALL = "\
     packagegroup-base \
     packagegroup-xenclient-common \
     packagegroup-xenclient-dom0 \
+    packagegroup-openxt-test \
     v4v-module \
     xenclient-preload-hs-libs \
     ${ANGSTROM_EXTRA_INSTALL}"
