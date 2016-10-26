@@ -4,6 +4,8 @@ inherit pkgconfig pythonnative
 
 DEPENDS += "util-linux xen-tools openssl libaio libicbinn-resolved"
 
+RDEPENDS_${PN} += "glibc-gconv-utf-16"
+
 EXTRA_OEMAKE += "CROSS_SYS_ROOT=${STAGING_DIR_HOST} CROSS_COMPILE=${HOST_PREFIX}"
 EXTRA_OEMAKE += "CONFIG_IOEMU=n"
 EXTRA_OEMAKE += "DESTDIR=${D}"
