@@ -66,6 +66,9 @@ SRC_URI += " \
     file://policy/modules/services/network-daemon.fc \
     file://policy/modules/services/network-daemon.if \
     file://policy/modules/services/network-daemon.te \
+    file://policy/modules/services/rpcproxy.fc \
+    file://policy/modules/services/rpcproxy.if \
+    file://policy/modules/services/rpcproxy.te \
     file://policy/modules/services/surfman.fc \
     file://policy/modules/services/surfman.if \
     file://policy/modules/services/surfman.te \
@@ -169,7 +172,6 @@ SRC_URI += " \
     file://patches/xec-interfaces.diff \
     file://patches/xsmutils-interfaces.diff \
     file://patches/vusb-interfaces.diff \
-    file://patches/dbusbouncer-interfaces.diff \
     file://patches/qemu1.4_wrapper_file_context.patch;striplevel=1 \
     file://patches/openxt_system_unconfined_readonly_neverallow_fixes.patch;patch=1 \
     file://patches/upstream-add-binder-security-class.patch;patch=1 \
