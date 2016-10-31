@@ -21,7 +21,6 @@ SRC_URI = "${XEN_SRC_URI};name=source \
     file://hvm-rtc.patch;patch=1 \
     file://hvm-rtc-refresh-time.patch;patch=1 \
     file://acpi-pm-feature.patch \
-    file://hvm-info.patch \
     file://xenconsoled-syslog.patch;patch=1 \
     file://tboot-shutdown-disable-irqs.patch;patch=1 \
     file://Dell-980-txt-shutdown-acpi-access-width.patch;patch=1 \
