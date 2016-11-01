@@ -8,7 +8,7 @@ PV_MAJOR = "${@"${PV}".split('.', 3)[0]}"
 PV_MINOR = "${@"${PV}".split('.', 3)[1]}"
 
 FILESEXTRAPATHS_prepend := "${THISDIR}/patches:${THISDIR}/defconfigs:"
-SRC_URI += "https://www.kernel.org/pub/linux/kernel/v${PV_MAJOR}.x/linux-${PV}.tar.gz;name=kernel \
+SRC_URI += "https://www.kernel.org/pub/linux/kernel/v${PV_MAJOR}.x/linux-${PV}.tar.xz;name=kernel \
     file://bp-xen-pv-guest-pat-support.patch;patch=1 \
     file://bridge-carrier-follow-prio0.patch;patch=1 \
     file://privcmd-mmapnocache-ioctl.patch;patch=1 \
@@ -51,8 +51,8 @@ SRC_URI += "https://www.kernel.org/pub/linux/kernel/v${PV_MAJOR}.x/linux-${PV}.t
     file://defconfig \
     "
 
-SRC_URI[kernel.md5sum] = "ec798ecdf07065b68ce6a98f47818698"
-SRC_URI[kernel.sha256sum] = "b7a1fb79d55127cc75c7aaa6a5aca47d4b883e99f3eb93e7abe865d68803a60a"
+SRC_URI[kernel.md5sum] = "7c52da2f54381a84960118b5bf23381a"
+SRC_URI[kernel.sha256sum] = "5661ccb8e45ec290d16d9617056d32f54bdea1357b1b3047c9c4042c78824db2"
 
 LIC_FILES_CHKSUM = "file://COPYING;md5=d7810fab7487fb0aad327b76f1be7cd7"
 
