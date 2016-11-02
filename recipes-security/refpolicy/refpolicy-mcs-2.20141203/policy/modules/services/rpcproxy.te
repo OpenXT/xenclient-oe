@@ -1,0 +1,73 @@
+#############################################################################
+#
+# Copyright (C) 2014 Citrix Systems, Inc.
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License along
+# with this program; if not, write to the Free Software Foundation, Inc.,
+# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+#
+#############################################################################
+
+policy_module(rpcproxy, 0.1)
+
+type rpcproxy_t;
+type rpcproxy_exec_t;
+
+init_daemon_domain(rpcproxy_t, rpcproxy_exec_t)
+
+type rpcproxy_etc_t;
+files_type(rpcproxy_etc_t)
+
+# rpc-proxy executes openssl via WebSocket.
+# TODO: Assign openssl its own type so that we can limit what other binaries
+# rpc-proxy can execute.  Possibly run openssl in its own domain so that we
+# can distinguish them in policy and limit each to least privilege.
+corecmd_exec_bin(rpcproxy_t)
+# Use a pipe, likely to talk to openssl.
+allow rpcproxy_t self:fifo_file rw_fifo_file_perms;
+
+# Access the system dbus.
+dbus_connect_system_bus(rpcproxy_t)
+dbus_system_bus_client(rpcproxy_t)
+
+# Chat with any of the following dbus services.
+xen_dbus_chat(rpcproxy_t)
+dbd_dbus_chat(rpcproxy_t)
+input_server_dbus_chat(rpcproxy_t)
+vusbd_dbus_chat(rpcproxy_t)
+updatemgr_dbus_chat(rpcproxy_t)
+
+# Log via syslog.
+logging_send_syslog_msg(rpcproxy_t)
+
+# Access /proc/xen.
+fs_rw_xenfs_files(rpcproxy_t)
+
+# xen 4.6 uses /dev/xen/xenbus
+dev_rw_xen(rpcproxy_t)
+
+# Access /dev/v4v_*.
+xc_files_rw_v4v_chr(rpcproxy_t)
+
+# Talk to xenstore.
+xen_stream_connect_xenstore(rpcproxy_t)
+
+# Read config.
+files_search_etc(rpcproxy_t)
+allow rpcproxy_t rpcproxy_etc_t:file read_file_perms;
+
+# Silence noise from getcwd.
+files_dontaudit_search_home(rpcproxy_t)
+
+# Read /sys/devices/system/cpu/online.
+dev_read_sysfs(rpcproxy_t)
