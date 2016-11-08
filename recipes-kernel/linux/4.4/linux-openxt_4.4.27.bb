@@ -8,7 +8,7 @@ PV_MAJOR = "${@"${PV}".split('.', 3)[0]}"
 PV_MINOR = "${@"${PV}".split('.', 3)[1]}"
 
 FILESEXTRAPATHS_prepend := "${THISDIR}/patches:${THISDIR}/defconfigs:"
-SRC_URI += "https://www.kernel.org/pub/linux/kernel/v${PV_MAJOR}.x/linux-${PV}.tar.xz;name=kernel \
+SRC_URI += "https://cdn.kernel.org/pub/linux/kernel/v${PV_MAJOR}.x/linux-${PV}.tar.xz;name=kernel \
     file://bridge-carrier-follow-prio0.patch;patch=1 \
     file://privcmd-mmapnocache-ioctl.patch;patch=1 \
     file://xenkbd-tablet-resolution.patch;patch=1 \
