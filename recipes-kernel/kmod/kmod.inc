@@ -9,7 +9,7 @@ SECTION = "kernel/modules"
 DEPENDS = ""
 PR = "r0"
 
-SRC_URI = "https://www.kernel.org/pub/linux/utils/kernel/${PN}/${PN}-${PV}.tar.gz;name=tarball"
+SRC_URI = "https://cdn.kernel.org/pub/linux/utils/kernel/${PN}/${PN}-${PV}.tar.gz;name=tarball"
 
 S = "${WORKDIR}/${PN}-${PV}"
 
