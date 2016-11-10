@@ -20,54 +20,121 @@
 
 policy_module(rpcproxy, 0.1)
 
-type rpcproxy_t;
+# Attribute for all rpcproxy domains.
+attribute rpcproxy_common;
+
+# Type for rpc-proxy executable file.
 type rpcproxy_exec_t;
 
-init_daemon_domain(rpcproxy_t, rpcproxy_exec_t)
-
+# Type for rpc-proxy.rules file.
 type rpcproxy_etc_t;
 files_type(rpcproxy_etc_t)
 
-# rpc-proxy executes openssl via WebSocket.
-# TODO: Assign openssl its own type so that we can limit what other binaries
-# rpc-proxy can execute.  Possibly run openssl in its own domain so that we
-# can distinguish them in policy and limit each to least privilege.
-corecmd_exec_bin(rpcproxy_t)
-# Use a pipe, likely to talk to openssl.
-allow rpcproxy_t self:fifo_file rw_fifo_file_perms;
+# The base rpc-proxy instance, run as rpc-proxy -s, exposed to ndvm and uivm.
+type rpcproxy_t, rpcproxy_common;
+init_daemon_domain(rpcproxy_t, rpcproxy_exec_t)
 
-# Access the system dbus.
+# The so-called "guest" rpc-proxy instance, originally exposed to guests but
+# now only to syncvm.
+type rpcproxy_guest_t, rpcproxy_common;
+init_daemon_domain_spec_domtrans(rpcproxy_guest_t, rpcproxy_exec_t)
+
+# The "websockets" rpc-proxy instance, exposed only to uivm.
+type rpcproxy_websockets_t, rpcproxy_common;
+init_daemon_domain_spec_domtrans(rpcproxy_websockets_t, rpcproxy_exec_t)
+
+#############################################################
+# Policy common to all rpc-proxy instances.
+# These permissions are required for basic operation of rpc-proxy.
+#
+
+# Use a pipe.
+allow rpcproxy_common self:fifo_file rw_fifo_file_perms;
+
+# Log via syslog.
+logging_send_syslog_msg(rpcproxy_common)
+
+# Access /dev/v4v_*.
+xc_files_rw_v4v_chr(rpcproxy_common)
+
+# Talk to xenstore.
+xen_stream_connect_xenstore(rpcproxy_common)
+
+# Read config.
+files_search_etc(rpcproxy_common)
+allow rpcproxy_common rpcproxy_etc_t:file read_file_perms;
+
+# Silence noise from getcwd.
+files_dontaudit_search_home(rpcproxy_common)
+
+# Read /sys/devices/system/cpu/online.
+dev_read_sysfs(rpcproxy_common)
+
+#############################################################
+# Policy unique to the base rpc-proxy -s instance.
+# This instance listens on v4v port 5555 and is accessible by
+# the ndvm and uivm (as restricted by the v4v firewall).
+#
+
+# Register as com.citrix.xenclient.rpc_proxy on the system bus.
 dbus_connect_system_bus(rpcproxy_t)
+
+# Create connections to the system bus.
 dbus_system_bus_client(rpcproxy_t)
 
 # Chat with any of the following dbus services.
-xen_dbus_chat(rpcproxy_t)
+# This list was determined from testing and compared with
+# the rpc-proxy.rules and rpc-firewall entries for the ndvm and uivm.
 dbd_dbus_chat(rpcproxy_t)
-input_server_dbus_chat(rpcproxy_t)
-vusbd_dbus_chat(rpcproxy_t)
-updatemgr_dbus_chat(rpcproxy_t)
+xen_dbus_chat(rpcproxy_t)
+# redundant with rpcproxy_dbus_chat() call by network-daemon.te
+# and surfman.te; should probably get rid of one or the other.
+network_daemon_dbus_chat(rpcproxy_t)
+surfman_dbus_chat(rpcproxy_t)
 
-# Log via syslog.
-logging_send_syslog_msg(rpcproxy_t)
+#############################################################
+# Policy unique to the "guest" rpc-proxy instance.
+# This instance listens on v4v port 5556 and is accessible by
+# the syncvm (as restricted by the v4v firewall).
+#
 
-# Access /proc/xen.
-fs_rw_xenfs_files(rpcproxy_t)
+# Create connections to the system bus.
+dbus_system_bus_client(rpcproxy_guest_t)
 
-# xen 4.6 uses /dev/xen/xenbus
-dev_rw_xen(rpcproxy_t)
+# Chat with any of the following dbus services.
+# This list was inferred from the rpc-proxy.rules entries for syncvm,
+# which allows access to com.citrix.xenclient.db (dbd) and to
+# com.citrix.xenclient.xenmgr (xenmgr).
+xen_dbus_chat(rpcproxy_guest_t)
+dbd_dbus_chat(rpcproxy_guest_t)
 
-# Access /dev/v4v_*.
-xc_files_rw_v4v_chr(rpcproxy_t)
+#############################################################
+# Policy unique to the rpc-proxy websockets instance.
+# This instance listens on v4v port 8080 and should only be accessible
+# by the uivm (as restricted by the v4v firewall).
+#
 
-# Talk to xenstore.
-xen_stream_connect_xenstore(rpcproxy_t)
+# Create connections to the system bus.
+dbus_system_bus_client(rpcproxy_websockets_t)
 
-# Read config.
-files_search_etc(rpcproxy_t)
-allow rpcproxy_t rpcproxy_etc_t:file read_file_perms;
+# This list was determined from testing and compared with
+# the rpc-proxy.rules and rpc-firewall entries for the uivm.
+# Chat with any of the following dbus services.
+dbd_dbus_chat(rpcproxy_websockets_t)
+input_server_dbus_chat(rpcproxy_websockets_t)
+updatemgr_dbus_chat(rpcproxy_websockets_t)
+vusbd_dbus_chat(rpcproxy_websockets_t)
+xen_dbus_chat(rpcproxy_websockets_t)
+# redundant with rpcproxy_websockets_dbus_chat() call by network-daemon.te
+# and xenpmd.te; should probably get rid of one or the other.
+network_daemon_dbus_chat(rpcproxy_websockets_t)
+xenpmd_dbus_chat(rpcproxy_websockets_t)
+# Note: rpcproxy_websockets_t is also allowed to chat
+# with statusreport_t and uid_t via rpcproxy_websockets_dbus_chat() calls
+# in statusreport.te and uid.te.
 
-# Silence noise from getcwd.
-files_dontaudit_search_home(rpcproxy_t)
-
-# Read /sys/devices/system/cpu/online.
-dev_read_sysfs(rpcproxy_t)
+# Execute openssl via a WebSocket.
+# TODO: Assign openssl its own type so that we can limit what other binaries
+# rpc-proxy can execute.  Possibly run openssl in its own domain so that we
+# can distinguish it from rpc-proxy in policy and limit each to least privilege.
+corecmd_exec_bin(rpcproxy_websockets_t)
