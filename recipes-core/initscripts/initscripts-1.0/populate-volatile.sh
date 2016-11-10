@@ -80,7 +80,7 @@ link_file() {
 		ln -sf \"$1\" \"$2\";
 	else
 		ln -sf \"$1\" \"$2\";
-	fi
+	fi;
         [ -x ${RESTORECON} ] && ${RESTORECON} \"$2\" >/dev/null 2>/dev/null;"
 
 	if [ -z "$ROOT_DIR" ]; then
