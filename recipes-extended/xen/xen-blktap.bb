@@ -22,4 +22,7 @@ do_compile() {
 
 do_install() {
         oe_runmake DESTDIR=${D} -C tools subdir-install-blktap2
+        install -d ${D}/usr/include
+        install tools/blktap2/control/tap-ctl.h ${D}/usr/include
+        install tools/blktap2/include/tapdisk-message.h ${D}/usr/include	
 }
