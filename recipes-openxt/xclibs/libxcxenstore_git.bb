@@ -9,7 +9,6 @@ PR = "r1"
 
 SRCREV = "${AUTOREV}"
 SRC_URI = "git://${OPENXT_GIT_MIRROR}/xclibs.git;protocol=${OPENXT_GIT_PROTOCOL};branch=${OPENXT_BRANCH} \
-           file://fix-comparison.patch \
            "
 
 S = "${WORKDIR}/git/xcxenstore"
