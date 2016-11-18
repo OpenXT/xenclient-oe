@@ -30,6 +30,8 @@ SRC_URI = "file://enter-s3.sh \
 	   file://no-kvm-autosuspend.sh \
 "
 
+RDEPENDS_${PN} += "bash"
+
 FILES_${PN} = "/"
 
 inherit update-rc.d
