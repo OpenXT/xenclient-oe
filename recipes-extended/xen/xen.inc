@@ -51,7 +51,7 @@ SRC_URI = "${XEN_SRC_URI};name=source \
     file://xen-x86-Fix-up-rules-when-forcing-mno-sse.patch;patch=1 \
     file://increase-ap-startup-time.patch;patch=1 \
     file://openxt-xen-xsmv4vuse.patch \
-    file://xenstat_disable_tmem_use.patch;patch=1 \
+    file://xenstat-disable-tmem-use.patch;patch=1 \
     file://xsa-155-paravirtualized-drivers-incautious-about-shared-memory-contents.patch;patch=1 \
     file://xsa-170-guest-user-mode-may-crash-guest-with-non-canonical-rip.patch;patch=1 \
     file://xsa-173-x86-shadow-pagetables-address-width-overflow.patch;patch=1 \
