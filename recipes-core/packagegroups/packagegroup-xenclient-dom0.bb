@@ -61,6 +61,7 @@ RDEPENDS_${PN} = " \
     xenclient-sec-scripts \
     pmtools \
     xen-blktap \
+    xen-libxl \
     svirt-interpose \
     selinux-load \
     ustr \
@@ -83,6 +84,7 @@ RDEPENDS_${PN} = " \
     xenclient-language-sync \
     atapi-pt-helper \
     audio-helper \
+    qmp-helper \
     compleat \
     xec \
     apptool \
