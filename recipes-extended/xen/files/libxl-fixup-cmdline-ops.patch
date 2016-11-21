@@ -1,0 +1,384 @@
+################################################################################
+SHORT DESCRIPTION:
+################################################################################
+
+################################################################################
+LONG DESCRIPTION:
+################################################################################
+* Implement sleep and hibernate for xl.
+* Implemented some functions for the xl command line tool to help xenmgr. For
+  example, converting a uuid to domid, the primary method by which xenmgr ids
+  domains.
+
+################################################################################
+CHANGELOG
+################################################################################
+Authors:
+Chris Rogers <rogersc@ainfosec.com>
+
+################################################################################
+REMOVAL
+################################################################################
+
+################################################################################
+UPSTREAM PLAN
+################################################################################
+
+################################################################################
+INTERNAL DEPENDENCIES
+################################################################################
+
+################################################################################
+PATCHES
+################################################################################
+Index: xen-4.6.1/tools/libxl/libxl.c
+===================================================================
+--- xen-4.6.1.orig/tools/libxl/libxl.c
++++ xen-4.6.1/tools/libxl/libxl.c
+@@ -1160,6 +1160,24 @@ int libxl_domain_reboot(libxl_ctx *ctx,
+     return ret;
+ }
+ 
++int libxl_domain_sleep(libxl_ctx *ctx, uint32_t domid)
++{
++    GC_INIT(ctx);
++    int ret;
++    ret = libxl__domain_pvcontrol(gc, domid, "s3");
++    GC_FREE;
++    return ret;
++}
++
++int libxl_domain_hibernate(libxl_ctx *ctx, uint32_t domid)
++{
++    GC_INIT(ctx);
++    int ret;
++    ret = libxl__domain_pvcontrol(gc, domid, "hibernate");
++    GC_FREE;
++    return ret;
++}
++
+ static void domain_death_occurred(libxl__egc *egc,
+                                   libxl_evgen_domain_death **evg_upd,
+                                   const char *why) {
+Index: xen-4.6.1/tools/libxl/libxl.h
+===================================================================
+--- xen-4.6.1.orig/tools/libxl/libxl.h
++++ xen-4.6.1/tools/libxl/libxl.h
+@@ -1171,6 +1171,8 @@ int libxl_domain_remus_start(libxl_ctx *
+ 
+ int libxl_domain_shutdown(libxl_ctx *ctx, uint32_t domid);
+ int libxl_domain_reboot(libxl_ctx *ctx, uint32_t domid);
++int libxl_domain_sleep(libxl_ctx *ctx, uint32_t domid);
++int libxl_domain_hibernate(libxl_ctx *ctx, uint32_t domid);
+ int libxl_domain_destroy(libxl_ctx *ctx, uint32_t domid,
+                          const libxl_asyncop_how *ao_how)
+                          LIBXL_EXTERNAL_CALLERS_ONLY;
+Index: xen-4.6.1/tools/libxl/libxl_types.idl
+===================================================================
+--- xen-4.6.1.orig/tools/libxl/libxl_types.idl
++++ xen-4.6.1/tools/libxl/libxl_types.idl
+@@ -154,6 +154,7 @@ libxl_trigger = Enumeration("trigger", [
+     (4, "INIT"),
+     (5, "RESET"),
+     (6, "S3RESUME"),
++    (7, "HIBERNATE"),
+     ])
+ 
+ libxl_tsc_mode = Enumeration("tsc_mode", [
+@@ -296,6 +297,7 @@ libxl_dominfo = Struct("dominfo",[
+     #
+     # Otherwise set to a value guaranteed not to clash with any valid
+     # LIBXL_SHUTDOWN_REASON_* constant.
++    ("power_command", uint32),
+     ("shutdown_reason", libxl_shutdown_reason),
+     ("outstanding_memkb",  MemKB),
+     ("current_memkb",   MemKB),
+Index: xen-4.6.1/tools/libxl/libxl_utils.c
+===================================================================
+--- xen-4.6.1.orig/tools/libxl/libxl_utils.c
++++ xen-4.6.1/tools/libxl/libxl_utils.c
+@@ -93,6 +93,64 @@ int libxl_name_to_domid(libxl_ctx *ctx,
+     return ret;
+ }
+ 
++int libxl_get_acpi_state(libxl_ctx *ctx, int32_t domid, uint32_t *acpi_state)
++{
++    unsigned long hvm_s_state = 0;
++    int ret;
++    ret = xc_get_hvm_param(ctx->xch, domid, HVM_PARAM_ACPI_S_STATE, &hvm_s_state);
++    if (ret < 0) { 
++        hvm_s_state = 9; //since unsigned, use invalid acpi state
++    }
++    *acpi_state = hvm_s_state;
++    return 0;
++}
++
++int libxl_uuid_to_domid(libxl_ctx *ctx, const char *uuid_in, int32_t *domid)
++{
++    
++    int i, nb_domains;
++    libxl_dominfo *dominfo;
++    libxl_uuid uuid, uuid2;
++    int ret = 0;
++    *domid = -1;
++    libxl_uuid_from_string(&uuid2, uuid_in);
++    dominfo = libxl_list_domain(ctx, &nb_domains);
++    if (!dominfo)
++        return ERROR_NOMEM;
++    
++    for (i = 0; i < nb_domains; i++) {
++        uuid = dominfo[i].uuid;
++        if (libxl_uuid_compare(&uuid, &uuid2) == 0) {
++            *domid = dominfo[i].domid;
++            ret = 0;
++            break;
++        }
++    }
++    free(dominfo);
++    return ret;
++}
++
++int libxl_domid_to_uuid(libxl_ctx *ctx, libxl_uuid **uuid, uint32_t domid_in)
++{
++    int nb_domains, i;
++    uint32_t domid;
++    libxl_dominfo *dominfo;
++
++    dominfo = libxl_list_domain(ctx, &nb_domains);
++
++    for(i = 0; i < nb_domains; i++)
++    {
++        domid = dominfo[i].domid;
++        if (domid == domid_in)
++        {
++            *uuid = &dominfo[i].uuid;
++            return 0;
++        }
++    }
++    *uuid = NULL;
++    return -1;
++}
++
+ int libxl_domain_qualifier_to_domid(libxl_ctx *ctx, const char *name,
+                                     uint32_t *domid)
+ {
+Index: xen-4.6.1/tools/libxl/libxl_utils.h
+===================================================================
+--- xen-4.6.1.orig/tools/libxl/libxl_utils.h
++++ xen-4.6.1/tools/libxl/libxl_utils.h
+@@ -25,6 +25,9 @@ char *libxl_basename(const char *name);
+ 
+ unsigned long libxl_get_required_shadow_memory(unsigned long maxmem_kb, unsigned int smp_cpus);
+ int libxl_name_to_domid(libxl_ctx *ctx, const char *name, uint32_t *domid);
++int libxl_uuid_to_domid(libxl_ctx *ctx, const char *uuid, int32_t *domid);
++int libxl_domid_to_uuid(libxl_ctx *ctx, libxl_uuid **uuid, uint32_t domid);
++int libxl_get_acpi_state(libxl_ctx *ctx, int32_t domid, uint32_t * acpi_state);
+ int libxl_domain_qualifier_to_domid(libxl_ctx *ctx, const char *name, uint32_t *domid);
+ char *libxl_domid_to_name(libxl_ctx *ctx, uint32_t domid);
+ int libxl_cpupool_qualifier_to_cpupoolid(libxl_ctx *ctx, const char *p,
+Index: xen-4.6.1/tools/libxl/xl.h
+===================================================================
+--- xen-4.6.1.orig/tools/libxl/xl.h
++++ xen-4.6.1/tools/libxl/xl.h
+@@ -55,6 +55,9 @@ int main_unpause(int argc, char **argv);
+ int main_destroy(int argc, char **argv);
+ int main_shutdown(int argc, char **argv);
+ int main_reboot(int argc, char **argv);
++int main_hibernate(int argc, char **argv);
++int main_uuid(int argc, char **argv);
++int main_acpi(int argc, char **argv);
+ int main_list(int argc, char **argv);
+ int main_vm_list(int argc, char **argv);
+ int main_create(int argc, char **argv);
+Index: xen-4.6.1/tools/libxl/xl_cmdimpl.c
+===================================================================
+--- xen-4.6.1.orig/tools/libxl/xl_cmdimpl.c
++++ xen-4.6.1/tools/libxl/xl_cmdimpl.c
+@@ -3706,6 +3706,39 @@ static void wait_for_domain_deaths(libxl
+     }
+ }
+ 
++static void hibernate_domain(uint32_t domid,
++                            libxl_evgen_domain_death **deathw,
++                            libxl_ev_user for_user,
++                            int fallback_trigger)
++{
++   int rc;
++   libxl_update_state(ctx, domid, "shutdowning");
++   rc=libxl_domain_hibernate(ctx, domid);
++   if (rc == ERROR_NOPARAVIRT) {
++       if (fallback_trigger) {
++           fprintf(stderr, "PV control interface not available:" 
++                   " sending ACPI power button event.\n");
++           rc = libxl_send_trigger(ctx, domid, LIBXL_TRIGGER_HIBERNATE, 0);
++       } else {
++           fprintf(stderr, "PV control interface not available:"
++                   " external graceful hibernate not possible.\n");
++       }
++   }
++   
++   if (rc) {
++       fprintf(stderr, "hibernate failed (rc=%d)\n",rc);
++       exit(-1);
++   }
++
++   if (deathw) {
++       rc = libxl_evenable_domain_death(ctx, domid, for_user, deathw);
++       if (rc) {
++           fprintf(stderr,"wait for death failed (evgen, rc=%d)\n",rc);
++           exit(-1);
++       }
++   }
++}
++
+ static void shutdown_domain(uint32_t domid,
+                             libxl_evgen_domain_death **deathw,
+                             libxl_ev_user for_user,
+@@ -4792,6 +4825,43 @@ int main_destroy(int argc, char **argv)
+     return 0;
+ }
+ 
++int main_hibernate(int argc, char **argv)
++{
++
++    void (*fn)(uint32_t domid,
++               libxl_evgen_domain_death **, libxl_ev_user, int) =
++        &hibernate_domain;
++   int opt;
++   int wait_for_it = 0;
++   static struct option opts[] = {
++       {"wait", 0, 0, 'w'}
++   };
++
++   SWITCH_FOREACH_OPT(opt, "w", opts, "hibernate", 0) {
++       case 'w':
++           wait_for_it = 1;
++           break;
++   }
++
++   if (!argv[optind]) {
++       fprintf(stderr, "You must specify a domain id.\n\n");
++       return -1;
++   }
++
++   libxl_evgen_domain_death *deathw = NULL;
++   uint32_t domid = find_domain(argv[optind]);
++
++   /* Set Fallback Trigger to false for now since xen doesn't have a hibernate trigger, 
++       but maybe in the future */
++   fn(domid, wait_for_it ? &deathw : NULL, 0, 0);
++
++   if (wait_for_it)
++       wait_for_domain_deaths(&deathw, 1);
++
++   return 0;
++
++}
++
+ static int main_shutdown_or_reboot(int do_reboot, int argc, char **argv)
+ {
+     const char *what = do_reboot ? "reboot" : "shutdown";
+@@ -6331,6 +6401,51 @@ int main_domname(int argc, char **argv)
+     return 0;
+ }
+ 
++int main_acpi(int argc, char **argv)
++{
++    int32_t domid;
++    uint32_t acpi_state;
++    int opt;
++    
++    SWITCH_FOREACH_OPT(opt, "", NULL, "domid", 1) {
++        /* No options */
++    }
++    
++    domid = atoi(argv[optind]);
++    
++    if (libxl_get_acpi_state(ctx, domid, &acpi_state)) {
++        fprintf(stderr, "Can't get acpi state with domid of '%d', maybe this domain does not           exist.\n", domid);
++        return 1;
++    }
++    
++    printf("%d\n", acpi_state);
++    
++    return 0;
++    
++}
++
++int main_uuid(int argc, char **argv)
++{
++    int32_t domid;
++    int opt;
++    char *uuid = NULL;
++    
++    SWITCH_FOREACH_OPT(opt, "", NULL, "uuid", 1) {
++        /* No options */
++    }
++    
++    uuid = argv[optind];
++    
++    if (libxl_uuid_to_domid(ctx, uuid, &domid)){
++        fprintf(stderr, "Can't get domid with domain uuid of '%s', maybe this domain does not          exist.\n", uuid);
++        return 1;
++    }
++    
++    printf("%d\n", domid);
++    
++    return 0;
++}
++
+ int main_rename(int argc, char **argv)
+ {
+     uint32_t domid;
+@@ -6381,7 +6496,15 @@ int main_trigger(int argc, char **argv)
+         }
+     }
+ 
+-    libxl_send_trigger(ctx, domid, trigger, vcpuid);
++    if (trigger == LIBXL_TRIGGER_SLEEP){
++        int rc;
++        rc = libxl_domain_sleep(ctx, domid);
++        if(rc){
++            return -1;
++        }
++    } else {
++        libxl_send_trigger(ctx, domid, trigger, vcpuid);
++    }
+ 
+     return 0;
+ }
+Index: xen-4.6.1/tools/libxl/xl_cmdtable.c
+===================================================================
+--- xen-4.6.1.orig/tools/libxl/xl_cmdtable.c
++++ xen-4.6.1/tools/libxl/xl_cmdtable.c
+@@ -75,6 +75,13 @@ struct cmd_spec cmd_table[] = {
+       "                        no PV drivers.\n"
+       "-w, --wait              Wait for guest(s) to shutdown.\n"
+     },
++    { "hibernate",
++      &main_hibernate, 0, 1,
++      "Issue a hibernate signal to a domain, only works for PV",
++      "[options] <Domain>",
++      "-h                      Print this help.\n"
++      "-w, --wait              Wait for guest to shutdown.\n"
++    },
+     { "reboot",
+       &main_reboot, 0, 1,
+       "Issue a reboot signal to a domain",
+@@ -283,6 +290,16 @@ struct cmd_spec cmd_table[] = {
+       "Convert a domain id to domain name",
+       "<DomainId>",
+     },
++    { "acpi-state",
++      &main_acpi, 0, 0,
++      "Return the acpi state for a domain",
++      "<DomainId>",
++    },
++    { "uuid-to-domid",
++      &main_uuid, 0, 0,
++      "Convert a uuid to domain id",
++      "<Uuid>",
++    },
+     { "rename",
+       &main_rename, 0, 1,
+       "Rename a domain",

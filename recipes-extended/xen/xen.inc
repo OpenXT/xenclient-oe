@@ -66,6 +66,29 @@ SRC_URI = "${XEN_SRC_URI};name=source \
     file://xsa-193-x86-segment-base-write-emulation-lacking-canonical-address-checks.patch \
     file://xsa-195-x86-64-bit-bit-test-instruction-emulation-broken.patch \
     file://xsa-196-x86-software-interrupt-injection-mis-handled.patch \
+    file://libxl-do-not-destroy-in-use-tapdevs.patch \
+    file://libxl-syslog.patch \
+    file://libxl-RFC-4of7-Add-stubdomain-version-tools-domain-build-info.patch \
+    file://libxl-RFC-5of7-Handle-Linux-stubdomain-specific-QEMUoptions.patch \
+    file://libxl-RFC-6of7-Build-the-domain-with-a-Linux-based-stubdomain.patch \
+    file://libxl-RFC-7of7-Wait-for-QEMU-startup-in-stubdomain.patch \
+    file://libxl-RFC-fixes.patch \
+    file://libxl-misc-fixes.patch \
+    file://libxl-vif-make-ioemu-and-stubdom-mac-addresses-configurable.patch \
+    file://libxl-linux-stubdom-replace-disk-with-initramfs.patch \
+    file://libxl-openxt-helpers.patch \
+    file://libxl-openxt-qemu-args.patch \
+    file://libxl-openxt-xci-cpuid-signature.patch \
+    file://libxl-pass-qemu-options-through-linux-stubdom-cmdline.patch \
+    file://libxl-openxt-tweaks.patch \
+    file://libxl-domain-state.patch \
+    file://libxl-fixup-cmdline-ops.patch \
+    file://libxl-crypto-key-dir.patch \
+    file://libxl-fix-reboot.patch \
+    file://libxl-display-manager-support.patch \
+    file://libxl-xenmgr-support.patch \
+    file://libxl-move-extra-qemu-args-to-the-end.patch \
+    file://libxl-stubdom-options.patch \
 "
 
 SRC_URI[source.md5sum] := "${XEN_SRC_MD5SUM}"

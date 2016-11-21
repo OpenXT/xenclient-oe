@@ -1,0 +1,146 @@
+################################################################################
+SHORT DESCRIPTION:
+################################################################################
+
+################################################################################
+LONG DESCRIPTION:
+################################################################################
+Support passing a crypto key directory for a guest's disk(s). Otherwise uses
+platform default path
+
+################################################################################
+CHANGELOG
+################################################################################
+Authors:
+Chris Rogers <rogersc@ainfosec.com>
+
+################################################################################
+REMOVAL
+################################################################################
+
+################################################################################
+UPSTREAM PLAN
+################################################################################
+
+################################################################################
+INTERNAL DEPENDENCIES
+################################################################################
+
+################################################################################
+PATCHES
+################################################################################
+Index: xen-4.6.1/tools/libxl/libxl.c
+===================================================================
+--- xen-4.6.1.orig/tools/libxl/libxl.c
++++ xen-4.6.1/tools/libxl/libxl.c
+@@ -2570,7 +2570,7 @@ static void device_disk_add(libxl__egc *
+             case LIBXL_DISK_BACKEND_TAP:
+                 if (dev == NULL) {
+                     dev = libxl__blktap_devpath(gc, disk->pdev_path,
+-                                                disk->format);
++                                                disk->format, disk->crypto_key_dir);
+                     if (!dev) {
+                         LOG(ERROR, "failed to get blktap devpath for %p",
+                             disk->pdev_path);
+Index: xen-4.6.1/tools/libxl/libxl_blktap2.c
+===================================================================
+--- xen-4.6.1.orig/tools/libxl/libxl_blktap2.c
++++ xen-4.6.1/tools/libxl/libxl_blktap2.c
+@@ -25,7 +25,8 @@ int libxl__blktap_enabled(libxl__gc *gc)
+ 
+ char *libxl__blktap_devpath(libxl__gc *gc,
+                             const char *disk,
+-                            libxl_disk_format format)
++                            libxl_disk_format format,
++							char *keydir)
+ {
+     const char *type;
+     char *params, *devname = NULL;
+@@ -40,6 +41,11 @@ char *libxl__blktap_devpath(libxl__gc *g
+             return devname;
+     }
+ 
++	if(!keydir || !strcmp(keydir, ""))
++	    setenv("TAPDISK2_CRYPTO_KEYDIR", "/config/platform-crypto-keys", 1);
++	else
++		setenv("TAPDISK2_CRYPTO_KEYDIR", keydir, 1);
++
+     params = libxl__sprintf(gc, "%s:%s", type, disk);
+     err = tap_ctl_create(params, &devname);
+     if (!err) {
+Index: xen-4.6.1/tools/libxl/libxl_dm.c
+===================================================================
+--- xen-4.6.1.orig/tools/libxl/libxl_dm.c
++++ xen-4.6.1/tools/libxl/libxl_dm.c
+@@ -1142,7 +1142,7 @@ static int libxl__build_device_model_arg
+                 if (disks[i].backend == LIBXL_DISK_BACKEND_TAP) {
+                     format = qemu_disk_format_string(LIBXL_DISK_FORMAT_RAW);
+                     pdev_path = libxl__blktap_devpath(gc, disks[i].pdev_path,
+-                                                      disks[i].format);
++                                                      disks[i].format, disks[i].crypto_key_dir);
+                 } else {
+                     pdev_path = disks[i].pdev_path;
+                 }
+Index: xen-4.6.1/tools/libxl/libxl_internal.h
+===================================================================
+--- xen-4.6.1.orig/tools/libxl/libxl_internal.h
++++ xen-4.6.1/tools/libxl/libxl_internal.h
+@@ -1686,7 +1686,8 @@ _hidden int libxl__blktap_enabled(libxl_
+  */
+ _hidden char *libxl__blktap_devpath(libxl__gc *gc,
+                                     const char *disk,
+-                                    libxl_disk_format format);
++                                    libxl_disk_format format,
++                                    char *keydir);
+ 
+ /* libxl__device_destroy_tapdisk:
+  *   Destroys any tapdisk process associated with the backend represented
+Index: xen-4.6.1/tools/libxl/libxl_types.idl
+===================================================================
+--- xen-4.6.1.orig/tools/libxl/libxl_types.idl
++++ xen-4.6.1/tools/libxl/libxl_types.idl
+@@ -432,6 +432,9 @@ libxl_domain_build_info = Struct("domain
+     ("cpuid",           libxl_cpuid_policy_list),
+     ("blkdev_start",    string),
+ 
++	#directory containing the crypto keys for the vm's disks
++	("crypto_key_dir", string),
++
+     ("vnuma_nodes", Array(libxl_vnode_info, "num_vnuma_nodes")),
+     
+     ("device_model_version", libxl_device_model_version),
+@@ -565,6 +568,7 @@ libxl_device_disk = Struct("device_disk"
+     ("is_cdrom", integer),
+     ("direct_io_safe", bool),
+     ("discard_enable", libxl_defbool),
++    ("crypto_key_dir", string),
+     ])
+ 
+ libxl_device_nic = Struct("device_nic", [
+Index: xen-4.6.1/tools/libxl/xl_cmdimpl.c
+===================================================================
+--- xen-4.6.1.orig/tools/libxl/xl_cmdimpl.c
++++ xen-4.6.1/tools/libxl/xl_cmdimpl.c
+@@ -1480,6 +1480,9 @@ static void parse_config_data(const char
+     if (!xlu_cfg_get_long(config, "max_event_channels", &l, 0))
+         b_info->event_channels = l;
+ 
++	if (!xlu_cfg_get_string (config, "crypto_key_dir", &buf, 0))
++		xlu_cfg_replace_string(config, "crypto_key_dir", &b_info->crypto_key_dir, 0);
++
+     xlu_cfg_replace_string (config, "kernel", &b_info->kernel, 0);
+     xlu_cfg_replace_string (config, "ramdisk", &b_info->ramdisk, 0);
+     xlu_cfg_replace_string (config, "device_tree", &b_info->device_tree, 0);
+@@ -1789,6 +1792,12 @@ static void parse_config_data(const char
+                                              d_config->num_disks,
+                                              libxl_device_disk_init);
+             parse_disk_config(&config, buf2, disk);
++            if(d_config->b_info.crypto_key_dir && strcmp(d_config->b_info.crypto_key_dir, "")) {
++                disk->crypto_key_dir = malloc(sizeof(char) * strlen(d_config->b_info.crypto_key_dir));
++                strcpy(disk->crypto_key_dir, d_config->b_info.crypto_key_dir);
++            } else {
++                disk->crypto_key_dir = NULL;
++            }
+ 
+             free(buf2);
+         }

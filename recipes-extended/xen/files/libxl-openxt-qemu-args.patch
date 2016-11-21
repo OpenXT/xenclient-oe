@@ -1,0 +1,188 @@
+################################################################################
+SHORT DESCRIPTION:
+################################################################################
+LibXL QEMU argument fixes to match the version used by OpenXT.
+
+################################################################################
+LONG DESCRIPTION:
+################################################################################
+* Fix the path to qemu-ifup
+* Don't use "-vnc none" or "-net none", our version of QEMU doesn't support it
+* Replace "-std-vga" with "-vga std"
+* More QEMU option changes to satisfy our version
+
+################################################################################
+CHANGELOG
+################################################################################
+Authors:
+Martin Osterloh <osterlohm@ainfosec.com>
+Jed Lejosne <lejosnej@ainfosec.com>
+
+################################################################################
+REMOVAL
+################################################################################
+Probably not desired.
+
+################################################################################
+UPSTREAM PLAN
+################################################################################
+This is specific to OpenXT, nothing to upstream here.
+
+################################################################################
+INTERNAL DEPENDENCIES
+################################################################################
+libxl-RFC-*.patch
+
+################################################################################
+PATCHES
+################################################################################
+Index: xen-4.6.1/tools/libxl/libxl_dm.c
+===================================================================
+--- xen-4.6.1.orig/tools/libxl/libxl_dm.c
++++ xen-4.6.1/tools/libxl/libxl_dm.c
+@@ -25,10 +25,10 @@ static const char *libxl_tapif_script(li
+ {
+ #if defined(__linux__) || defined(__FreeBSD__)
+     if (info->stubdomain_version == LIBXL_STUBDOMAIN_VERSION_LINUX)
+-        return libxl__sprintf(gc, "/etc/qemu-ifup");
++        return libxl__sprintf(gc, "/etc/qemu/qemu-ifup");
+     return libxl__strdup(gc, "no");
+ #else
+-    return libxl__sprintf(gc, "%s/qemu-ifup", libxl__xen_script_dir_path());
++    return libxl__sprintf(gc, "%s/qemu/qemu-ifup", libxl__xen_script_dir_path());
+ #endif
+ }
+ 
+@@ -458,14 +458,7 @@ static int libxl__build_device_model_arg
+         if (libxl_defbool_val(vnc->findunused)) {
+             flexarray_append(dm_args, "-vncunused");
+         }
+-    } else
+-        /*
+-         * VNC is not enabled by default by qemu-xen-traditional,
+-         * however passing -vnc none causes SDL to not be
+-         * (unexpectedly) enabled by default. This is overridden by
+-         * explicitly passing -sdl below as required.
+-         */
+-        flexarray_append_pair(dm_args, "-vnc", "none");
++    } /* OpenXT: no else here, we don't support "-vnc none" */
+ 
+     if (sdl) {
+         flexarray_append(dm_args, "-sdl");
+@@ -525,7 +518,7 @@ static int libxl__build_device_model_arg
+ 
+         switch (b_info->u.hvm.vga.kind) {
+         case LIBXL_VGA_INTERFACE_TYPE_STD:
+-            flexarray_append(dm_args, "-std-vga");
++            flexarray_append_pair(dm_args, "-vga", "std");
+             break;
+         case LIBXL_VGA_INTERFACE_TYPE_CIRRUS:
+             break;
+@@ -606,10 +599,9 @@ static int libxl__build_device_model_arg
+                 ioemu_nics++;
+             }
+         }
+-        /* If we have no emulated nics, tell qemu not to create any */
+-        if ( ioemu_nics == 0 ) {
+-            flexarray_vappend(dm_args, "-net", "none", NULL);
+-        }
++
++        /* OpenXT: We don't support -net none, adding nothing if there's 0 nic */
++
+         if (libxl_defbool_val(b_info->u.hvm.gfx_passthru)) {
+             flexarray_append(dm_args, "-gfx_passthru");
+         }
+@@ -737,19 +729,22 @@ static int libxl__build_device_model_arg
+                       "-xen-domid",
+                       libxl__sprintf(gc, "%d", guest_domid), NULL);
+ 
+-    /* There is currently no way to access the QMP socket in the stubdom */
+     if (!is_stubdom) {
+-        flexarray_append(dm_args, "-chardev");
++        flexarray_append(dm_args, "-qmp");
+         flexarray_append(dm_args,
+-                         libxl__sprintf(gc, "socket,id=libxl-cmd,"
+-                                        "path=%s/qmp-libxl-%d,server,nowait",
++                         libxl__sprintf(gc, "unix:%s/qmp-libxl-%d,server,nowait",
+                                         libxl__run_dir_path(), guest_domid));
+-
+-        flexarray_append(dm_args, "-no-shutdown");
+-        flexarray_append(dm_args, "-mon");
+-        flexarray_append(dm_args, "chardev=libxl-cmd,mode=control");
++    } else {
++        /* OpenXT: We have V4V qmp, proxied by the qmp_helper */
++        flexarray_append_pair(dm_args, "-qmp", "v4v");
+     }
+ 
++    /* OpenXT: more options specific to us */
++    flexarray_append_pair(dm_args, "-device", "xenmou");
++    /* FIXME: -xen-acpi-pm seems to upset non-stubdom guests */
++    if (is_stubdom)
++        flexarray_append(dm_args, "-xen-acpi-pm");
++
+     for (i = 0; i < guest_config->num_channels; i++) {
+         connection = guest_config->channels[i].connection;
+         devid = guest_config->channels[i].devid;
+@@ -783,7 +778,7 @@ static int libxl__build_device_model_arg
+     }
+ 
+     if (c_info->name) {
+-        flexarray_vappend(dm_args, "-name", c_info->name, NULL);
++        flexarray_vappend(dm_args, "-name", libxl__sprintf(gc, "qemu-%d.0", guest_domid), NULL);
+     }
+ 
+     if (vnc && !is_stubdom) {
+@@ -825,17 +820,12 @@ static int libxl__build_device_model_arg
+         }
+ 
+         flexarray_append(dm_args, vncarg);
+-    } else
+-        /*
+-         * Ensure that by default no vnc server is created.
+-         */
+-        flexarray_append_pair(dm_args, "-vnc", "none");
++    } /* OpenXT: no else here, we don't support "-vnc none" */
+ 
+     /*
+-     * Ensure that by default no display backend is created. Further
+-     * options given below might then enable more.
++     * OpenXT: the default display backend is Surfman
+      */
+-    flexarray_append_pair(dm_args, "-display", "none");
++    flexarray_append_pair(dm_args, "-display", "surfman");
+ 
+     if (sdl && !is_stubdom) {
+         flexarray_append(dm_args, "-sdl");
+@@ -934,7 +924,7 @@ static int libxl__build_device_model_arg
+ 
+         if (b_info->u.hvm.boot) {
+             flexarray_vappend(dm_args, "-boot",
+-                    libxl__sprintf(gc, "order=%s", b_info->u.hvm.boot), NULL);
++                    libxl__sprintf(gc, "%s", b_info->u.hvm.boot), NULL);
+         }
+         if (libxl_defbool_val(b_info->u.hvm.usb)
+             || b_info->u.hvm.usbdevice
+@@ -1039,11 +1029,9 @@ static int libxl__build_device_model_arg
+                 ioemu_nics++;
+             }
+         }
+-        /* If we have no emulated nics, tell qemu not to create any */
+-        if ( ioemu_nics == 0 ) {
+-            flexarray_append(dm_args, "-net");
+-            flexarray_append(dm_args, "none");
+-        }
++
++        /* OpenXT: We don't support -net none, adding nothing if there's 0 nic */
++
+         if (libxl_defbool_val(b_info->u.hvm.gfx_passthru)) {
+             flexarray_append(dm_args, "-gfx_passthru");
+         }
+@@ -1128,7 +1116,7 @@ static int libxl__build_device_model_arg
+                 else if (b_info->stubdomain_version == LIBXL_STUBDOMAIN_VERSION_LINUX)
+                     drive = libxl__sprintf
+                         (gc, "file=%s,if=ide,index=%d,media=cdrom,cache=writeback,format=%s,id=ide-%i",
+-                         "/dev/xvdc", disk, "host_cdrom", dev_number);
++                         "/dev/xvdc", disk, "file", dev_number);
+                 else
+                     drive = libxl__sprintf
+                         (gc, "file=%s,if=ide,index=%d,readonly=%s,media=cdrom,format=%s,cache=writeback,id=ide-%i",

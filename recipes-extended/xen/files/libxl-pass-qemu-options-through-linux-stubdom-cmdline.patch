@@ -1,0 +1,105 @@
+################################################################################
+SHORT DESCRIPTION:
+################################################################################
+Use the Linux stubdomain kernel cmdline to pass arguments to its QEMU instance.
+
+################################################################################
+LONG DESCRIPTION:
+################################################################################
+When creating a VM with a Linux stubdomain, we need a way to tell the stubdom
+what arguments to call QEMU with.
+In OpenXT, we do it through the Linux kernel cmdline.
+
+################################################################################
+CHANGELOG
+################################################################################
+Authors:
+Martin Osterloh <osterlohm@ainfosec.com>
+Jed Lejosne <lejosnej@ainfosec.com>
+
+################################################################################
+REMOVAL
+################################################################################
+Will break Linux stubdomains in QEMU.
+
+################################################################################
+UPSTREAM PLAN
+################################################################################
+It's unclear how it's supposed to work upstream (or at least in the RFC)...
+This is potentially upstream-able.
+
+################################################################################
+INTERNAL DEPENDENCIES
+################################################################################
+libxl-RFC-*.patch
+
+################################################################################
+PATCHES
+################################################################################
+Index: xen-4.6.1/tools/libxl/libxl_dm.c
+===================================================================
+--- xen-4.6.1.orig/tools/libxl/libxl_dm.c
++++ xen-4.6.1/tools/libxl/libxl_dm.c
+@@ -1471,6 +1471,47 @@ void libxl__spawn_stub_dm(libxl__egc *eg
+         abort();
+     }
+ 
++    ret = libxl__build_device_model_args(gc, "stubdom-dm", guest_domid,
++                                         guest_config, &args, NULL,
++                                         d_state, NULL);
++    if (ret) {
++        ret = ERROR_FAIL;
++        goto out;
++    }
++
++    /* OpenXT: We pass the qemu options through the stubdom kernel cmdline.
++     * To do that, we need to convert the char** arg list into a char* string.
++     * We skip the first option (dm), which doesn't make sense here.
++     */
++    if (guest_config->b_info.stubdomain_version == LIBXL_STUBDOMAIN_VERSION_LINUX) {
++        int dmargs_size = 0;
++        char *dmargs;
++        char **arg;
++
++        /* Calculate the total length, add 1 per string for the space (or \0) */
++        arg = args;
++        arg++;
++        for (; *arg; arg++)
++            dmargs_size = dmargs_size + strlen(*arg) + 1;
++        dmargs = (char *) libxl__malloc(gc, dmargs_size);
++
++        /* Use strcat to concatenate everything */
++        dmargs[0] = '\0';
++        arg = args;
++        arg++;
++        if (arg) {
++            strcat(dmargs, *arg);
++            arg++;
++        }
++        for (; *arg; arg++) {
++            strcat(dmargs, " ");
++            strcat(dmargs, *arg);
++        }
++
++        /* Set the resulting string as the stubdom cmdline */
++        stubdom_state->pv_cmdline = dmargs;
++    }
++
+     /* fixme: this function can leak the stubdom if it fails */
+     ret = libxl__domain_make(gc, dm_config, &sdss->pvqemu.guest_domid,
+                              &stubdom_state->config);
+@@ -1516,14 +1557,6 @@ void libxl__spawn_stub_dm(libxl__egc *eg
+     if (ret)
+         goto out;
+ 
+-    ret = libxl__build_device_model_args(gc, "stubdom-dm", guest_domid,
+-                                         guest_config, &args, NULL,
+-                                         d_state, NULL);
+-    if (ret) {
+-        ret = ERROR_FAIL;
+-        goto out;
+-    }
+-
+     libxl__store_libxl_entry(gc, guest_domid, "dm-version",
+         libxl_device_model_version_to_string(dm_config->b_info.device_model_version));
+     libxl__store_libxl_entry(gc, dm_domid, "stubdom-version",
