@@ -74,6 +74,11 @@ post_rootfs_shell_commands() {
 	# Create mountpoint for boot/system
 	mkdir -p ${IMAGE_ROOTFS}/boot/system ;
 
+	# Create XL-related files and directories
+	mkdir -p ${IMAGE_ROOTFS}/var/lib/xen ;
+	mkdir -p ${IMAGE_ROOTFS}/etc/xen ;
+	touch ${IMAGE_ROOTFS}/etc/xen/xl.conf ;
+
 	# Remove unwanted packages specified above
 	opkg -f ${IPKGCONF_TARGET} -o ${IMAGE_ROOTFS} ${OPKG_ARGS} -force-depends remove ${PACKAGE_REMOVE};
 
