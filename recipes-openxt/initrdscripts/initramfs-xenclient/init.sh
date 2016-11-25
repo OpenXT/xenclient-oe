@@ -169,10 +169,11 @@ tpm_setup() {
     insmod /lib/modules/$(uname -r)/kernel/drivers/char/tpm/tpm.ko
     insmod /lib/modules/$(uname -r)/kernel/drivers/char/tpm/tpm_tis.ko
     mknod /dev/tpm0 c 10 224
-    echo -n "initramfs measuring $ROOT_DEVICE: "
+    echo -n "initramfs measuring $ROOT_DEVICE ...  "
     s=$(sha1sum $ROOT_DEVICE)
-    echo $s
+    echo "done"
     echo -n ${s:0:40} | TCSD_LOG_OFF=yes tpm_extendpcr_sa -p 15
+    [ $? -ne 0 ] && fatal "PCR-15 extend failed"
 }
 
 
@@ -199,10 +200,8 @@ mount_root
 
 maybe_break tpm
 
-[ -e /root/boot/system/tpm/enabled ] && {
-    echo "Setting up TPM..."
-    tpm_setup
-}
+echo "Setting up TPM..."
+tpm_setup
 
 maybe_break pivot
 boot_root
