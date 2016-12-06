@@ -1,0 +1,74 @@
+################################################################################
+SHORT DESCRIPTION:
+################################################################################
+XSA-199 http://xenbits.xen.org/xsa/advisory-199.html
+qemu ioport array overflow
+
+################################################################################
+LONG DESCRIPTION:
+################################################################################
+Source: http://xenbits.xen.org/xsa/advisory-199.html
+Patch: xsa199-trad.patch
+
+From b73bd1edc05d1bad5c018228146930d79315a5da Mon Sep 17 00:00:00 2001
+From: Ian Jackson <ian.jackson@eu.citrix.com>
+Date: Mon, 14 Nov 2016 17:19:46 +0000
+Subject: [PATCH] qemu: ioport_read, ioport_write: be defensive about 32-bit
+ addresses
+
+On x86, ioport addresses are 16-bit.  That these functions take 32-bit
+arguments is a mistake.  Changing the argument type to 16-bit will
+discard the top bits of any erroneous values from elsewhere in qemu.
+
+Also, check just before use that the value is in range.  (This turns
+an ill-advised change to MAX_IOPORTS into a possible guest crash
+rather than a privilege escalation vulnerability.)
+
+And, in the Xen ioreq processor, clamp incoming ioport addresses to
+16-bit values.  Xen will never write >16-bit values but the guest may
+have access to the ioreq ring.  We want to defend the rest of the qemu
+code from wrong values.
+
+This is XSA-199.
+
+Reported-by: yanghongke <yanghongke@huawei.com>
+Signed-off-by: Ian Jackson <Ian.Jackson@eu.citrix.com>
+---
+ i386-dm/helper2.c | 2 ++
+ vl.c              | 9 +++++++--
+ 2 files changed, 9 insertions(+), 2 deletions(-)
+
+################################################################################
+PATCHES
+################################################################################
+--- a/ioport.c
++++ b/ioport.c
+@@ -57,7 +57,7 @@ static IOPortDestructor *ioport_destruct
+ static IOPortReadFunc default_ioport_readb, default_ioport_readw, default_ioport_readl;
+ static IOPortWriteFunc default_ioport_writeb, default_ioport_writew, default_ioport_writel;
+ 
+-static uint32_t ioport_read(int index, uint32_t address)
++static uint32_t ioport_read(int index, uint16_t address)
+ {
+     static IOPortReadFunc * const default_func[3] = {
+         default_ioport_readb,
+@@ -70,7 +70,7 @@ static uint32_t ioport_read(int index, u
+     return func(ioport_opaque[address], address);
+ }
+ 
+-static void ioport_write(int index, uint32_t address, uint32_t data)
++static void ioport_write(int index, uint16_t address, uint32_t data)
+ {
+     static IOPortWriteFunc * const default_func[3] = {
+         default_ioport_writeb,
+--- a/xen-all.c
++++ b/xen-all.c
+@@ -770,6 +770,8 @@ static void cpu_ioreq_pio(ioreq_t *req)
+ {
+     uint32_t i;
+ 
++    req->addr &= 0x0ffffU;
++
+     if (req->size > sizeof(uint32_t)) {
+         hw_error("PIO: bad size (%u)", req->size);
+     }
