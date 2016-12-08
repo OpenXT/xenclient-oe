@@ -43,12 +43,11 @@ SRC_URI += "${KERNELORG_MIRROR}/linux/kernel/v${PV_MAJOR}.x/linux-${PV}.tar.xz;n
     file://xsa-155-qsb-023-xen-netfront-add-range-check-for-Tx-response-id.patch;patch=1 \
     file://xsa-155-qsb-023-xen-netfront-copy-response-out-of-shared-buffer-befo.patch;patch=1 \
     file://xsa-155-qsb-023-xen-netfront-do-not-use-data-already-exposed-to-back.patch;patch=1 \
-    file://xenstore-from-pv-guest.patch \
     file://defconfig \
     "
 
-SRC_URI[kernel.md5sum] = "3d45ce46c2c6b260feee53bae94aca0d"
-SRC_URI[kernel.sha256sum] = "6c437dd8f9e964c843211cf99a876b42724fe9f2013241c13e14b6ce17846afd"
+SRC_URI[kernel.md5sum] = "c23de77131c05a27e638026972ada85b"
+SRC_URI[kernel.sha256sum] = "30a90d0b63140073a5ec3ff1f917d58c792ed301723877731cd072a0f58903be"
 
 LIC_FILES_CHKSUM = "file://COPYING;md5=d7810fab7487fb0aad327b76f1be7cd7"
 
