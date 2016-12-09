@@ -65,6 +65,7 @@ SRC_URI += "file://xsa-126-unmediated-pci-command-register-access-in-qemu.patch;
             file://0034-maintain-time-offset.patch;striplevel=1 \
             file://0035-add-acpi-wakeup.patch;striplevel=1 \
             file://xsa-197-qemu-incautious-about-shared-ring-processing.patch \
+            file://xsa-199-qemu-ioport-array-overflow.patch \
             "
 
 SRC_URI[md5sum] = "78f13b774814b6b7ebcaf4f9b9204318"
