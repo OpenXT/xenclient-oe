@@ -8,7 +8,7 @@ PV_MAJOR = "${@"${PV}".split('.', 3)[0]}"
 PV_MINOR = "${@"${PV}".split('.', 3)[1]}"
 
 FILESEXTRAPATHS_prepend := "${THISDIR}/patches:${THISDIR}/defconfigs:"
-SRC_URI += "${KERNELORG_MIRROR}/linux/kernel/v${PV_MAJOR}.x/linux-${PV}.tar.gz;name=kernel \
+SRC_URI += "${KERNELORG_MIRROR}/linux/kernel/v${PV_MAJOR}.x/linux-${PV}.tar.xz;name=kernel \
     file://bridge-carrier-follow-prio0.patch;patch=1 \
     file://privcmd-mmapnocache-ioctl.patch;patch=1 \
     file://xenkbd-tablet-resolution.patch;patch=1 \
@@ -44,12 +44,11 @@ SRC_URI += "${KERNELORG_MIRROR}/linux/kernel/v${PV_MAJOR}.x/linux-${PV}.tar.gz;n
     file://xsa-155-qsb-023-xen-netfront-add-range-check-for-Tx-response-id.patch;patch=1 \
     file://xsa-155-qsb-023-xen-netfront-copy-response-out-of-shared-buffer-befo.patch;patch=1 \
     file://xsa-155-qsb-023-xen-netfront-do-not-use-data-already-exposed-to-back.patch;patch=1 \
-    file://xenstore-from-pv-guest.patch \
     file://defconfig \
     "
 
-SRC_URI[kernel.md5sum] = "3132b13f70447a85d70f58037db3a770"
-SRC_URI[kernel.sha256sum] = "0f995462425258b7fc50c03398a8f961d13a7e1df7955e7889ad1edd89da1882"
+SRC_URI[kernel.md5sum] = "c23de77131c05a27e638026972ada85b"
+SRC_URI[kernel.sha256sum] = "30a90d0b63140073a5ec3ff1f917d58c792ed301723877731cd072a0f58903be"
 
 LIC_FILES_CHKSUM = "file://COPYING;md5=d7810fab7487fb0aad327b76f1be7cd7"
 

@@ -40,11 +40,9 @@ drm-plugin 0-copy relies on that patch to manage guest display.
 ################################################################################
 PATCHES 
 ################################################################################
-Index: linux-4.4.6/drivers/gpu/drm/i915/Makefile
-===================================================================
---- linux-4.4.6.orig/drivers/gpu/drm/i915/Makefile	2016-03-16 16:43:17.000000000 +0100
-+++ linux-4.4.6/drivers/gpu/drm/i915/Makefile	2016-03-17 10:47:59.442557404 +0100
-@@ -32,6 +32,7 @@
+--- a/drivers/gpu/drm/i915/Makefile
++++ b/drivers/gpu/drm/i915/Makefile
+@@ -32,6 +32,7 @@ i915-y += i915_cmd_parser.o \
  	  i915_gem_shrinker.o \
  	  i915_gem_stolen.o \
  	  i915_gem_tiling.o \
@@ -52,11 +50,9 @@ Index: linux-4.4.6/drivers/gpu/drm/i915/Makefile
  	  i915_gem_userptr.o \
  	  i915_gpu_error.o \
  	  i915_trace_points.o \
-Index: linux-4.4.6/drivers/gpu/drm/i915/i915_dma.c
-===================================================================
---- linux-4.4.6.orig/drivers/gpu/drm/i915/i915_dma.c	2016-03-16 16:43:17.000000000 +0100
-+++ linux-4.4.6/drivers/gpu/drm/i915/i915_dma.c	2016-03-17 10:47:59.442557404 +0100
-@@ -1329,6 +1329,7 @@
+--- a/drivers/gpu/drm/i915/i915_dma.c
++++ b/drivers/gpu/drm/i915/i915_dma.c
+@@ -1329,6 +1329,7 @@ const struct drm_ioctl_desc i915_ioctls[
  	DRM_IOCTL_DEF_DRV(I915_GEM_USERPTR, i915_gem_userptr_ioctl, DRM_RENDER_ALLOW),
  	DRM_IOCTL_DEF_DRV(I915_GEM_CONTEXT_GETPARAM, i915_gem_context_getparam_ioctl, DRM_RENDER_ALLOW),
  	DRM_IOCTL_DEF_DRV(I915_GEM_CONTEXT_SETPARAM, i915_gem_context_setparam_ioctl, DRM_RENDER_ALLOW),
@@ -64,26 +60,24 @@ Index: linux-4.4.6/drivers/gpu/drm/i915/i915_dma.c
  };
  
  int i915_max_ioctl = ARRAY_SIZE(i915_ioctls);
-Index: linux-4.4.6/drivers/gpu/drm/i915/i915_drv.h
-===================================================================
---- linux-4.4.6.orig/drivers/gpu/drm/i915/i915_drv.h	2016-03-16 16:43:17.000000000 +0100
-+++ linux-4.4.6/drivers/gpu/drm/i915/i915_drv.h	2016-03-17 10:47:59.442557404 +0100
-@@ -2164,6 +2164,14 @@
- 			struct i915_mmu_object *mmu_object;
- 			struct work_struct *work;
- 		} userptr;
+--- a/drivers/gpu/drm/i915/i915_drv.h
++++ b/drivers/gpu/drm/i915/i915_drv.h
+@@ -2161,6 +2161,14 @@ struct drm_i915_gem_object {
+ 		struct work_struct *work;
+ 	} userptr;
+ 
++	struct i915_gem_foreign {
++		uint32_t flags;                 /* foreign region flags. */
++		unsigned long *mfns;            /* mfns "rent" from the guest */
++		size_t num_pages;               /* number of pages rented. */
++		unsigned long *mfns_ovr;        /* dom0 mfns overriden, used for reset. */
++		struct page **pvec;             /* vector of struct page backing the "rent" region. */
++	} foreign;
 +
-+                struct i915_gem_foreign {
-+                        uint32_t flags;                 /* foreign region flags. */
-+                        unsigned long *mfns;            /* mfns "rent" from the guest */
-+                        size_t num_pages;               /* number of pages rented. */
-+                        unsigned long *mfns_ovr;        /* dom0 mfns overriden, used for reset. */
-+                        struct page **pvec;             /* vector of struct page backing the "rent" region. */
-+                } foreign;
- 	};
+ 	/** for phys allocated objects */
+ 	struct drm_dma_handle *phys_handle;
  };
- #define to_intel_bo(x) container_of(x, struct drm_i915_gem_object, base)
-@@ -3218,6 +3226,8 @@
+@@ -3216,6 +3224,8 @@ i915_gem_object_create_stolen_for_preall
  unsigned long i915_gem_shrink(struct drm_i915_private *dev_priv,
  			      unsigned long target,
  			      unsigned flags);
@@ -92,10 +86,8 @@ Index: linux-4.4.6/drivers/gpu/drm/i915/i915_drv.h
  #define I915_SHRINK_PURGEABLE 0x1
  #define I915_SHRINK_UNBOUND 0x2
  #define I915_SHRINK_BOUND 0x4
-Index: linux-4.4.6/drivers/gpu/drm/i915/i915_gem_foreign.c
-===================================================================
---- /dev/null	1970-01-01 00:00:00.000000000 +0000
-+++ linux-4.4.6/drivers/gpu/drm/i915/i915_gem_foreign.c	2016-03-17 10:47:59.442557404 +0100
+--- /dev/null
++++ b/drivers/gpu/drm/i915/i915_gem_foreign.c
 @@ -0,0 +1,412 @@
 +/*
 + * Copyright © 2013 Citrix Systems, Inc.
@@ -509,11 +501,9 @@ Index: linux-4.4.6/drivers/gpu/drm/i915/i915_gem_foreign.c
 +	return 0;
 +}
 +
-Index: linux-4.4.6/include/uapi/drm/i915_drm.h
-===================================================================
---- linux-4.4.6.orig/include/uapi/drm/i915_drm.h	2016-03-16 16:43:17.000000000 +0100
-+++ linux-4.4.6/include/uapi/drm/i915_drm.h	2016-03-17 10:47:59.442557404 +0100
-@@ -230,6 +230,7 @@
+--- a/include/uapi/drm/i915_drm.h
++++ b/include/uapi/drm/i915_drm.h
+@@ -230,6 +230,7 @@ typedef struct _drm_i915_sarea {
  #define DRM_I915_GEM_USERPTR		0x33
  #define DRM_I915_GEM_CONTEXT_GETPARAM	0x34
  #define DRM_I915_GEM_CONTEXT_SETPARAM	0x35
@@ -521,7 +511,7 @@ Index: linux-4.4.6/include/uapi/drm/i915_drm.h
  
  #define DRM_IOCTL_I915_INIT		DRM_IOW( DRM_COMMAND_BASE + DRM_I915_INIT, drm_i915_init_t)
  #define DRM_IOCTL_I915_FLUSH		DRM_IO ( DRM_COMMAND_BASE + DRM_I915_FLUSH)
-@@ -283,6 +284,7 @@
+@@ -283,6 +284,7 @@ typedef struct _drm_i915_sarea {
  #define DRM_IOCTL_I915_GEM_USERPTR			DRM_IOWR (DRM_COMMAND_BASE + DRM_I915_GEM_USERPTR, struct drm_i915_gem_userptr)
  #define DRM_IOCTL_I915_GEM_CONTEXT_GETPARAM	DRM_IOWR (DRM_COMMAND_BASE + DRM_I915_GEM_CONTEXT_GETPARAM, struct drm_i915_gem_context_param)
  #define DRM_IOCTL_I915_GEM_CONTEXT_SETPARAM	DRM_IOWR (DRM_COMMAND_BASE + DRM_I915_GEM_CONTEXT_SETPARAM, struct drm_i915_gem_context_param)
@@ -529,7 +519,7 @@ Index: linux-4.4.6/include/uapi/drm/i915_drm.h
  
  /* Allow drivers to submit batchbuffers directly to hardware, relying
   * on the security mechanisms provided by hardware.
-@@ -1107,6 +1109,14 @@
+@@ -1107,6 +1109,14 @@ struct drm_i915_reset_stats {
  	__u32 pad;
  };
  
