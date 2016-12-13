@@ -52,20 +52,6 @@ SRC_URI = "${XEN_SRC_URI};name=source \
     file://increase-ap-startup-time.patch;patch=1 \
     file://openxt-xen-xsmv4vuse.patch \
     file://xenstat-disable-tmem-use.patch;patch=1 \
-    file://xsa-155-paravirtualized-drivers-incautious-about-shared-memory-contents.patch;patch=1 \
-    file://xsa-170-guest-user-mode-may-crash-guest-with-non-canonical-rip.patch;patch=1 \
-    file://xsa-173-x86-shadow-pagetables-address-width-overflow.patch;patch=1 \
-    file://xsa-154-x86-inconsistent-cachability-flags-on-guest-mappings.patch \
-    file://xsa-182-x86-privilege-escalation-in-pv-guests.patch \
-    file://xsa-183-x86-missing-smap-whitelisting-in-32-bit-exception-event-delivery.patch \
-    file://xsa-185-x86-Disallow-L3-recursive-pagetable-for-32-bit-PV-guests.patch \
-    file://xsa-187-x86-hvm-overflow-of-sh_ctxt-seg_reg.patch \
-    file://xsa-190-x86-hvm-instr-emul-guest-user-mode-missing-exception.patch \
-    file://xsa-191-x86-null-segments-not-always-treated-as-unusable.patch \
-    file://xsa-192-x86-task-switch-to-vm86-mode-mis-handled.patch \
-    file://xsa-193-x86-segment-base-write-emulation-lacking-canonical-address-checks.patch \
-    file://xsa-195-x86-64-bit-bit-test-instruction-emulation-broken.patch \
-    file://xsa-196-x86-software-interrupt-injection-mis-handled.patch \
     file://libxl-do-not-destroy-in-use-tapdevs.patch \
     file://libxl-syslog.patch \
     file://libxl-RFC-4of7-Add-stubdomain-version-tools-domain-build-info.patch \
@@ -89,6 +75,20 @@ SRC_URI = "${XEN_SRC_URI};name=source \
     file://libxl-xenmgr-support.patch \
     file://libxl-move-extra-qemu-args-to-the-end.patch \
     file://libxl-stubdom-options.patch \
+    file://xsa-155-paravirtualized-drivers-incautious-about-shared-memory-contents.patch;patch=1 \
+    file://xsa-170-guest-user-mode-may-crash-guest-with-non-canonical-rip.patch;patch=1 \
+    file://xsa-173-x86-shadow-pagetables-address-width-overflow.patch;patch=1 \
+    file://xsa-154-x86-inconsistent-cachability-flags-on-guest-mappings.patch \
+    file://xsa-182-x86-privilege-escalation-in-pv-guests.patch \
+    file://xsa-183-x86-missing-smap-whitelisting-in-32-bit-exception-event-delivery.patch \
+    file://xsa-185-x86-Disallow-L3-recursive-pagetable-for-32-bit-PV-guests.patch \
+    file://xsa-187-x86-hvm-overflow-of-sh_ctxt-seg_reg.patch \
+    file://xsa-190-x86-hvm-instr-emul-guest-user-mode-missing-exception.patch \
+    file://xsa-191-x86-null-segments-not-always-treated-as-unusable.patch \
+    file://xsa-192-x86-task-switch-to-vm86-mode-mis-handled.patch \
+    file://xsa-193-x86-segment-base-write-emulation-lacking-canonical-address-checks.patch \
+    file://xsa-195-x86-64-bit-bit-test-instruction-emulation-broken.patch \
+    file://xsa-196-x86-software-interrupt-injection-mis-handled.patch \
 "
 
 SRC_URI[source.md5sum] := "${XEN_SRC_MD5SUM}"
