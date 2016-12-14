@@ -40,16 +40,16 @@ Index: xen-4.6.1/tools/libxl/libxl_blktap2.c
 ===================================================================
 --- xen-4.6.1.orig/tools/libxl/libxl_blktap2.c
 +++ xen-4.6.1/tools/libxl/libxl_blktap2.c
-@@ -50,12 +50,42 @@ char *libxl__blktap_devpath(libxl__gc *g
+@@ -50,6 +50,35 @@ char *libxl__blktap_devpath(libxl__gc *g
      return NULL;
  }
  
-+static unsigned int count_tapdev_users(libxl__gc *gc, const char *params, int max)
++static bool tapdev_is_shared(libxl__gc *gc, const char *params)
 +{
 +    char **domids, **vbds;
 +    char *tp;
 +    unsigned int count1, count2, i, j;
-+    unsigned int res = 0;
++    unsigned int total = 0;
 +
 +    /* List all the domids that have vhd backends */
 +    domids = libxl__xs_directory(gc, XBT_NULL, "backend/vbd", &count1);
@@ -62,38 +62,30 @@ Index: xen-4.6.1/tools/libxl/libxl_blktap2.c
 +                    /* If the params are the same, we have a match */
 +                    tp = libxl__xs_read(gc, XBT_NULL, libxl__sprintf(gc, "backend/vbd/%s/%s/tapdisk-params", domids[i], vbds[j]));
 +                    if (tp != NULL && !strcmp(tp, params)) {
-+                        res++;
-+                        if (res == max)
-+                            return res;
++                        total++;
++                        if (total == 2)
++                            return true;
 +                    }
 +                }
 +            }
 +        }
 +    }
 +
-+    return res;
++    return false;
 +}
  
  int libxl__device_destroy_tapdisk(libxl__gc *gc, const char *params)
  {
-     char *type, *disk;
-     int err;
-     tap_list_t tap;
-+    unsigned int count;
- 
-     type = libxl__strdup(gc, params);
- 
-@@ -74,6 +104,13 @@ int libxl__device_destroy_tapdisk(libxl_
+@@ -74,6 +103,12 @@ int libxl__device_destroy_tapdisk(libxl_
          return ERROR_FAIL;
      }
  
-+    count = count_tapdev_users(gc, params, 2);
-+
-+    if (count > 1) {
++    /* We're using the tapdev. If anybody else also is, we can't destroy it! */
++    if (tapdev_is_shared(gc, params)) {
 +        LOG(DEBUG, "Not destroying tapdev%d, another VM uses it", tap.minor);
 +        return 0;
 +    }
-+        
++
      err = tap_ctl_destroy(tap.id, tap.minor);
      if (err < 0) {
          LOGEV(ERROR, -err, "Failed to destroy tap device id %d minor %d",
