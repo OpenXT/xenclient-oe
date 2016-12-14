@@ -93,7 +93,7 @@ case "$AGENT" in
             exec /usr/bin/dm-agent -q -n -t $DOMID
         else
             KERNEL_CMDLINE=`cat /proc/cmdline`
-            QEMU_CMDLINE=`echo ${KERNEL_CMDLINE##*obvious-delimiter-pattern}`
+            QEMU_CMDLINE=`echo ${KERNEL_CMDLINE##*ETXEOT}`
             DOMID=`echo $QEMU_CMDLINE | cut -d' ' -f2 `
             echo "Invoking qemu wrapper with QEMU_CMDLINE = ${QEMU_CMDLINE}"
             /usr/bin/qemu-dm-wrapper ${DOMID} ${QEMU_CMDLINE}
