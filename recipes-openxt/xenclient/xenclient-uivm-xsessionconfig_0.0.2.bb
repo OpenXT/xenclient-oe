@@ -10,8 +10,6 @@ SRC_URI = "file://xinitrc \
 	   file://Xdefaults \
 	   file://default \
 	   file://default.keyring \
-           file://midori_login.sh \
-           file://midori_report.sh \
            file://nm-applet-wrapper \
            file://nm-applet-launcher \
            file://start-nm-applet \
@@ -92,8 +90,6 @@ do_install () {
 	   install -m 644 ${WORKDIR}/custom-toolbar.scm ${D}/root/.uim.d/customs/
 
            install -d ${D}/usr/bin
-           install -m 755 ${WORKDIR}/midori_login.sh ${D}/usr/bin/
-           install -m 755 ${WORKDIR}/midori_report.sh ${D}/usr/bin/
            install -m 755 ${WORKDIR}/nm-applet-wrapper ${D}/usr/bin/
            install -m 755 ${WORKDIR}/nm-applet-launcher ${D}/usr/bin/
            install -m 755 ${WORKDIR}/start-nm-applet ${D}/usr/bin/
