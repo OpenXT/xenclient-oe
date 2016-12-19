@@ -85,15 +85,18 @@ case "$AGENT" in
         ;;
 
     *)
-        echo "No agent specified. Assume retro-compatibility by falling back to the deprecated behaviour."
         if [ "${KERNEL_CMDLINE/dmagent/}" != "${KERNEL_CMDLINE}" ]; then
             # Assumes we are stubbing for the domid passed at the end of the cmdline.
             DOMID=${KERNEL_CMDLINE##* }
             echo "Start dmagent..."
             exec /usr/bin/dm-agent -q -n -t $DOMID
         else
+            echo "No agent specified. Starting qemu directly."
             KERNEL_CMDLINE=`cat /proc/cmdline`
-            QEMU_CMDLINE=`echo ${KERNEL_CMDLINE##*ETXEOT}`
+            # Remove everything up to the first double quote of the qemu args
+            KERNEL_CMDLINE_STRIPPED="${KERNEL_CMDLINE##*openxt_qemu_args=\"}"
+            # Remove the last quote of the qemu args and everything after
+            QEMU_CMDLINE="${KERNEL_CMDLINE_STRIPPED%%\"*}"
             DOMID=`echo $QEMU_CMDLINE | cut -d' ' -f2 `
             echo "Invoking qemu wrapper with QEMU_CMDLINE = ${QEMU_CMDLINE}"
             /usr/bin/qemu-dm-wrapper ${DOMID} ${QEMU_CMDLINE}
