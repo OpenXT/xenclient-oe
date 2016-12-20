@@ -1,26 +1,21 @@
-Index: trousers-0.3.2-1/configure.in
-===================================================================
---- trousers-0.3.2-1.orig/configure.in	2009-08-18 19:24:30.000000000 +0000
-+++ trousers-0.3.2-1/configure.in	2010-08-01 18:14:13.000000000 +0000
-@@ -377,6 +377,7 @@
+--- a/configure.ac
++++ b/configure.ac
+@@ -398,6 +398,7 @@ AC_OUTPUT(dist/tcsd.conf \
  	  src/tcs/Makefile \
  	  src/tddl/Makefile \
  	  src/tspi/Makefile \
 +	  src/tspi_sa/Makefile \
  	  src/trspi/Makefile \
  	  src/tcsd/Makefile \
- 	  tools/Makefile \
-Index: trousers-0.3.2-1/src/tspi/rpc/tcstp/rpc.c
-===================================================================
---- trousers-0.3.2-1.orig/src/tspi/rpc/tcstp/rpc.c	2009-08-06 13:17:21.000000000 +0000
-+++ trousers-0.3.2-1/src/tspi/rpc/tcstp/rpc.c	2010-08-01 18:14:13.000000000 +0000
-@@ -32,6 +32,26 @@
- #include "obj.h"
+ 	  man/man8/tcsd.8 \
+--- a/src/tspi/rpc/tcstp/rpc.c
++++ b/src/tspi/rpc/tcstp/rpc.c
+@@ -33,6 +33,26 @@
  #include "rpc_tcstp_tsp.h"
+ #include "tsp_tcsi_param.h"
  
 +#ifdef TSS_LIB_SA
 +#define loadData tspi_loadData
-+#include "rpc_tcstp_tcs.h"
 +#include "req_mgr.h"
 +#include "tcsps.h"
 +/* tcs_utils.h */
@@ -37,11 +32,24 @@ Index: trousers-0.3.2-1/src/tspi/rpc/tcstp/rpc.c
 +};
 +TSS_RESULT get_tpm_metrics(struct tpm_properties *);
 +TSS_RESULT auth_mgr_init();
++TSS_RESULT sendit(struct host_table_entry *hte);
 +#endif
  
  void
  initData(struct tcsd_comm_data *comm, int parm_count)
-@@ -337,6 +357,7 @@
+@@ -276,7 +296,11 @@ sendTCSDPacket(struct host_table_entry *
+ 			return rc;
+ 		}
+ 	} else {
++#ifndef TSS_LIB_SA
+ 		if ((rc = tcs_sendit(hte))) {
++#else
++                if ((rc = sendit(hte))) {
++#endif
+ 			LogError("Failed to send packet");
+ 			return rc;
+ 		}
+@@ -335,6 +359,7 @@ send_to_socket(int sock, void *buffer, i
  	return send_total;
  }
  
@@ -49,9 +57,9 @@ Index: trousers-0.3.2-1/src/tspi/rpc/tcstp/rpc.c
  TSS_RESULT
  send_init(struct host_table_entry *hte)
  {
-@@ -511,4 +532,92 @@
- 
- 	return (short)port;
+@@ -456,6 +481,94 @@ tcs_sendit(struct host_table_entry *hte)
+ err_exit:
+ 	return result;
  }
 +#else
 +struct tcsd_config tcsd_options;
@@ -142,11 +150,11 @@ Index: trousers-0.3.2-1/src/tspi/rpc/tcstp/rpc.c
 +}
 +#endif
  
-Index: trousers-0.3.2-1/src/tspi_sa/Makefile.am
-===================================================================
---- /dev/null	1970-01-01 00:00:00.000000000 +0000
-+++ trousers-0.3.2-1/src/tspi_sa/Makefile.am	2010-08-01 18:16:03.000000000 +0000
-@@ -0,0 +1,237 @@
+ /* TODO: Future work - remove socket creation/manipulation from RPC-specific file */
+ TSS_RESULT
+--- /dev/null
++++ b/src/tspi_sa/Makefile.am
+@@ -0,0 +1,238 @@
 +lib_LTLIBRARIES=libtspi_sa.la
 +
 +libtspi_sa_la_LIBADD=../trspi/libtrousers.la
@@ -174,7 +182,7 @@ Index: trousers-0.3.2-1/src/tspi_sa/Makefile.am
 +                   ../tspi/spi_utils.c \
 +                   ../tspi/obj.c \
 +                   ../tspi/obj_policy.c \
-+                   ../tspi/tsp_policy.c \
++		   ../tspi/tsp_policy.c \
 +                   ../tspi/obj_tpm.c \
 +                   ../tspi/obj_context.c \
 +                   ../tspi/tsp_context_mem.c \
@@ -184,6 +192,7 @@ Index: trousers-0.3.2-1/src/tspi_sa/Makefile.am
 +                   ../tspi/rpc/hosttable.c \
 +                   ../tspi/rpc/@RPC@/rpc.c \
 +                   ../tcsd/platform.c \
++		   ../tspi/tsp_tcsi_param.c \
 +                   ../tcsd/tcsd_conf.c
 +
 +if TSS_BUILD_ASYM_CRYPTO
@@ -371,11 +380,11 @@ Index: trousers-0.3.2-1/src/tspi_sa/Makefile.am
 +libtspi_sa_la_LDFLAGS+=-lssl
 +libtspi_sa_la_SOURCES+=../tspi/ssl_ui.c
 +endif
-+#
-+#if TSS_BUILD_NV
-+#libtspi_la_SOURCES+=tspi_nv.c obj_nv.c tsp_nv.c rpc/@RPC@/rpc_nv.c
-+#libtspi_la_CFLAGS+=-DTSS_BUILD_NV
-+#endif
++
++if TSS_BUILD_NV
++libtspi_sa_la_SOURCES+=../tspi/tspi_nv.c ../tspi/obj_nv.c ../tspi/tsp_nv.c ../tspi/rpc/@RPC@/rpc_nv.c
++libtspi_sa_la_CFLAGS+=-DTSS_BUILD_NV
++endif
 +#if TSS_BUILD_DELEGATION
 +#libtspi_la_SOURCES+=tspi_delegate.c tsp_delegate.c obj_delfamily.c rpc/@RPC@/rpc_delegate.c
 +#libtspi_la_CFLAGS+=-DTSS_BUILD_DELEGATION
@@ -384,11 +393,9 @@ Index: trousers-0.3.2-1/src/tspi_sa/Makefile.am
 +#libtspi_la_SOURCES+=tspi_cmk.c obj_migdata.c rpc/@RPC@/rpc_cmk.c
 +#libtspi_la_CFLAGS+=-DTSS_BUILD_CMK
 +#endif
-Index: trousers-0.3.2-1/src/tcs/log.c
-===================================================================
---- trousers-0.3.2-1.orig/src/tcs/log.c	2009-08-06 13:17:21.000000000 +0000
-+++ trousers-0.3.2-1/src/tcs/log.c	2010-08-01 18:14:13.000000000 +0000
-@@ -36,6 +36,8 @@
+--- a/src/tcs/log.c
++++ b/src/tcs/log.c
+@@ -36,6 +36,8 @@ LogBlobData(char *szDescriptor, unsigned
  	unsigned int i;
  
  
@@ -397,27 +404,21 @@ Index: trousers-0.3.2-1/src/tcs/log.c
  	if (getenv("TCSD_FOREGROUND") == NULL)
  		openlog(szDescriptor, LOG_NDELAY|LOG_PID, TSS_SYSLOG_LVL);
  	memset(temp, 0, sizeof(temp));
-Index: trousers-0.3.2-1/src/Makefile.am
-===================================================================
---- trousers-0.3.2-1.orig/src/Makefile.am	2009-08-06 13:17:20.000000000 +0000
-+++ trousers-0.3.2-1/src/Makefile.am	2010-08-01 18:14:13.000000000 +0000
+--- a/src/Makefile.am
++++ b/src/Makefile.am
 @@ -1 +1 @@
 -SUBDIRS = trspi tddl tcs tspi tcsd include
 +SUBDIRS = trspi tddl tcs tspi tcsd include tspi_sa
-Index: trousers-0.3.2-1/src/tcs/Makefile.am
-===================================================================
---- trousers-0.3.2-1.orig/src/tcs/Makefile.am	2009-08-06 13:17:21.000000000 +0000
-+++ trousers-0.3.2-1/src/tcs/Makefile.am	2010-08-01 18:14:13.000000000 +0000
+--- a/src/tcs/Makefile.am
++++ b/src/tcs/Makefile.am
 @@ -1,4 +1,4 @@
 -noinst_LIBRARIES=libtcs.a
 +lib_LIBRARIES=libtcs.a
  
- libtcs_a_LIBADD=../tddl/libtddl.a
- libtcs_a_CFLAGS=-DAPPID=\"TCSD\ TCS\" -DVAR_PREFIX=\"@localstatedir@\" -DETC_PREFIX=\"@sysconfdir@\"
-Index: trousers-0.3.2-1/src/include/rpc_tcstp_tsp.h
-===================================================================
---- trousers-0.3.2-1.orig/src/include/rpc_tcstp_tsp.h	2009-08-06 13:17:21.000000000 +0000
-+++ trousers-0.3.2-1/src/include/rpc_tcstp_tsp.h	2010-08-01 18:14:13.000000000 +0000
+ CFLAGS+=-I${top_srcdir}/src/include
+ libtcs_a_LIBADD=${top_builddir}/src/tddl/libtddl.a
+--- a/src/include/rpc_tcstp_tsp.h
++++ b/src/include/rpc_tcstp_tsp.h
 @@ -16,6 +16,12 @@
  #include "tcsd_wrap.h"
  #include "tcsd.h"
@@ -431,3 +432,15 @@ Index: trousers-0.3.2-1/src/include/rpc_tcstp_tsp.h
  int setData(TCSD_PACKET_TYPE,int,void *,int,struct tcsd_comm_data *);
  UINT32 getData(TCSD_PACKET_TYPE,int,void *,int,struct tcsd_comm_data *);
  void initData(struct tcsd_comm_data *, int);
+--- a/src/tcsd/tcsd_conf.c
++++ b/src/tcsd/tcsd_conf.c
+@@ -35,6 +35,9 @@
+ #include "tcsd.h"
+ #include "tcsd_ops.h"
+ 
++#ifdef TSS_LIB_SA
++char *tcsd_config_file = TCSD_DEFAULT_CONFIG_FILE;
++#endif /* TSS_LIB_SA */
+ 
+ struct tcsd_config_options options_list[] = {
+ 	{"port", opt_port},
