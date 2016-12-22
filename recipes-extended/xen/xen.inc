@@ -132,6 +132,9 @@ SRC_URI = "${XEN_SRC_URI};name=source \
     file://xsa-192-x86-task-switch-to-vm86-mode-mis-handled.patch \
     file://xsa-193-x86-segment-base-write-emulation-lacking-canonical-address-checks.patch \
     file://xsa-195-x86-64-bit-bit-test-instruction-emulation-broken.patch \
+    file://xsa-200-x86-cmpxchg8b-emulation-fails-to-ignore-operand-size-override.patch \
+    file://xsa-202-x86-pv-guests-may-be-able-to-mask-interrupts.patch \
+    file://xsa-204-x86-mishandling-of-syscall-singlestep-during-emulation.patch \
 "
 
 SRC_URI[source.md5sum] := "${XEN_SRC_MD5SUM}"
