@@ -155,12 +155,12 @@ LICENSE = "GPLv2 & MIT"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/GPL-2.0;md5=801f80980d171dd6425610833a22dbe6      \
                     file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302"
 
-python() {
-    bb.data.delVarFlag("do_fetch", "noexec", d);
-    bb.data.delVarFlag("do_unpack", "noexec", d);
-    bb.data.delVarFlag("do_patch", "noexec", d);
-    bb.data.delVarFlag("do_configure", "noexec", d);
-    bb.data.delVarFlag("do_compile", "noexec", d);
-    bb.data.delVarFlag("do_install", "noexec", d);
+python () {
+    d.delVarFlag("do_fetch", "noexec");
+    d.delVarFlag("do_unpack", "noexec");
+    d.delVarFlag("do_patch", "noexec");
+    d.delVarFlag("do_configure", "noexec");
+    d.delVarFlag("do_compile", "noexec");
+    d.delVarFlag("do_install", "noexec");
 }
 do_rootfs[depends] += "xenclient-installer-image:do_install"
