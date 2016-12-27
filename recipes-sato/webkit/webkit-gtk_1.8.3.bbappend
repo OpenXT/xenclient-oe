@@ -2,7 +2,7 @@ PR .= ".2"
 
 DEPENDS = "zlib enchant libsoup-2.4 curl libxml2 cairo libxslt libxt libidn gnutls \
            gtk+ gstreamer1.0 gstreamer1.0-plugins-base flex-native gperf-native perl-native-runtime sqlite3 ${ICU_LIB}"
-DEPENDS += " ${@base_contains('DISTRO_FEATURES', 'opengl', 'virtual/libgl', '', d)}"
+DEPENDS += " ${@bb.utils.contains('DISTRO_FEATURES', 'opengl', 'virtual/libgl', '', d)}"
 
 FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}-${PV}:"
 
@@ -21,7 +21,7 @@ EXTRA_OECONF = "\
                 --enable-webgl=no \
                 --with-gtk=2.0 \
                 --disable-geolocation \
-                ${@base_contains('DISTRO_FEATURES', 'opengl', '--enable-webgl', '--disable-webgl', d)} \
+                ${@bb.utils.contains('DISTRO_FEATURES', 'opengl', '--enable-webgl', '--disable-webgl', d)} \
                 UNICODE_CFLAGS=-D_REENTRANT \
                "
 EXTRA_OECONF += "\
@@ -33,5 +33,4 @@ EXTRA_OECONF += "\
 do_install_prepend() {
 	cp ${S}/Programs/.libs/jsc ${S}/Programs/jsc-1 || true
 }
-
 

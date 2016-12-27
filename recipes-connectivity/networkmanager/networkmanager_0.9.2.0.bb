@@ -76,7 +76,7 @@ FILES_${PN} += " \
 RRECOMMENDS_${PN} += "iptables"
 RCONFLICTS_${PN} = "connman"
 RDEPENDS_${PN} = "wpa-supplicant dhcp-client \
-           ${@base_contains('COMBINED_FEATURES', '3gmodem', 'ppp', '', d)} \
+           ${@bb.utils.contains('COMBINED_FEATURES', '3gmodem', 'ppp', '', d)} \
            "
 
 FILES_${PN}-dbg += "${libdir}/NetworkManager/.debug/ \
