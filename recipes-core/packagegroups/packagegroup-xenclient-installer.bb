@@ -13,6 +13,7 @@ RDEPENDS_${PN} = " \
     util-linux-mount \
     util-linux-umount \
     xen-blktap \
+    xen-libxl \
     dialog \
     e2fsprogs \
     e2fsprogs-e2fsck \
