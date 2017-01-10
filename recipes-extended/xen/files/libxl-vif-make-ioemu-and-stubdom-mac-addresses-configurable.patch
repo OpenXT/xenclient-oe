@@ -1,0 +1,158 @@
+################################################################################
+SHORT DESCRIPTION:
+################################################################################
+New LibXL vif MAC address options
+
+################################################################################
+LONG DESCRIPTION:
+################################################################################
+A vif declaration in a guest configuration file can spawn up to three different
+network interfaces:
+* A pv network backend-frontend for the guest
+* An emulated network interface for the guest
+* A pv network backend-frontend for the stubdomain
+
+Without this patch, all 3 interfaces will have the same MAC address, which
+doesn't work.
+
+This patch allows to configure specific MAC addresses for each interface.
+
+If these new options are not used, the behavior stays the same as before, and
+all interfaces will have the same MAC address. This may or may not be desirable.
+
+################################################################################
+CHANGELOG
+################################################################################
+Authors:
+Jed Lejosne <lejosnej@ainfosec.com>
+
+################################################################################
+REMOVAL
+################################################################################
+If the problem gets solved upstream, we should remove this patch
+
+################################################################################
+UPSTREAM PLAN
+################################################################################
+We should try to upstream this.
+
+################################################################################
+INTERNAL DEPENDENCIES
+################################################################################
+
+################################################################################
+PATCHES
+################################################################################
+Index: xen-4.6.1/tools/libxl/libxl_dm.c
+===================================================================
+--- xen-4.6.1.orig/tools/libxl/libxl_dm.c
++++ xen-4.6.1/tools/libxl/libxl_dm.c
+@@ -582,8 +582,11 @@ static int libxl__build_device_model_arg
+ 
+         for (i = 0; i < num_nics; i++) {
+             if (nics[i].nictype == LIBXL_NIC_TYPE_VIF_IOEMU) {
+-                char *smac = libxl__sprintf(gc,
+-                                   LIBXL_MAC_FMT, LIBXL_MAC_BYTES(nics[i].mac));
++                char *smac;
++                if (!libxl__mac_is_default(&nics[i].mac_ioemu))
++                    smac = libxl__sprintf(gc, LIBXL_MAC_FMT, LIBXL_MAC_BYTES(nics[i].mac_ioemu));
++                else
++                    smac = libxl__sprintf(gc, LIBXL_MAC_FMT, LIBXL_MAC_BYTES(nics[i].mac));
+                 const char *ifname = libxl__device_nic_devname(gc,
+                                                 domid, nics[i].devid,
+                                                 LIBXL_NIC_TYPE_VIF_IOEMU);
+@@ -1013,8 +1016,11 @@ static int libxl__build_device_model_arg
+         }
+         for (i = 0; i < num_nics; i++) {
+             if (nics[i].nictype == LIBXL_NIC_TYPE_VIF_IOEMU) {
+-                char *smac = libxl__sprintf(gc,
+-                                LIBXL_MAC_FMT, LIBXL_MAC_BYTES(nics[i].mac));
++                char *smac;
++                if (!libxl__mac_is_default(&nics[i].mac_ioemu))
++                    smac = libxl__sprintf(gc, LIBXL_MAC_FMT, LIBXL_MAC_BYTES(nics[i].mac_ioemu));
++                else
++                    smac = libxl__sprintf(gc, LIBXL_MAC_FMT, LIBXL_MAC_BYTES(nics[i].mac));
+                 const char *ifname = libxl__device_nic_devname(gc,
+                                                 guest_domid, nics[i].devid,
+                                                 LIBXL_NIC_TYPE_VIF_IOEMU);
+@@ -1255,6 +1261,10 @@ static void libxl__dm_vifs_from_hvm_gues
+         if (dm_config->nics[i].ifname)
+             dm_config->nics[i].ifname = GCSPRINTF("%s" TAP_DEVICE_SUFFIX,
+                                                   dm_config->nics[i].ifname);
++        if (!libxl__mac_is_default(&guest_config->nics[i].mac_stubdom))
++            memcpy(dm_config->nics[i].mac, guest_config->nics[i].mac_stubdom, 6);
++
++		dm_config->nics[i].mac[0] = dm_config->nics[i].mac[0] ^ 0x2;
+     }
+ 
+     dm_config->num_nics = nr;
+Index: xen-4.6.1/tools/libxl/libxl_internal.c
+===================================================================
+--- xen-4.6.1.orig/tools/libxl/libxl_internal.c
++++ xen-4.6.1/tools/libxl/libxl_internal.c
+@@ -360,7 +360,7 @@ _hidden int libxl__compare_macs(libxl_ma
+     return 0;
+ }
+ 
+-_hidden int libxl__mac_is_default(libxl_mac *mac)
++_hidden int libxl__mac_is_default(const libxl_mac *mac)
+ {
+     return (!(*mac)[0] && !(*mac)[1] && !(*mac)[2] &&
+             !(*mac)[3] && !(*mac)[4] && !(*mac)[5]);
+Index: xen-4.6.1/tools/libxl/libxl_internal.h
+===================================================================
+--- xen-4.6.1.orig/tools/libxl/libxl_internal.h
++++ xen-4.6.1/tools/libxl/libxl_internal.h
+@@ -1715,7 +1715,7 @@ _hidden int libxl__parse_mac(const char
+ /* compare mac address @a and @b. 0 if the same, -ve if a<b and +ve if a>b */
+ _hidden int libxl__compare_macs(libxl_mac *a, libxl_mac *b);
+ /* return true if mac address is all zero (the default value) */
+-_hidden int libxl__mac_is_default(libxl_mac *mac);
++_hidden int libxl__mac_is_default(const libxl_mac *mac);
+ /* init a recursive mutex */
+ _hidden int libxl__init_recursive_mutex(libxl_ctx *ctx, pthread_mutex_t *lock);
+ 
+Index: xen-4.6.1/tools/libxl/libxl_types.idl
+===================================================================
+--- xen-4.6.1.orig/tools/libxl/libxl_types.idl
++++ xen-4.6.1/tools/libxl/libxl_types.idl
+@@ -571,6 +571,8 @@ libxl_device_nic = Struct("device_nic",
+     ("mtu", integer),
+     ("model", string),
+     ("mac", libxl_mac),
++    ("mac_ioemu", libxl_mac),
++    ("mac_stubdom", libxl_mac),
+     ("ip", string),
+     ("bridge", string),
+     ("ifname", string),
+Index: xen-4.6.1/tools/libxl/xl_cmdimpl.c
+===================================================================
+--- xen-4.6.1.orig/tools/libxl/xl_cmdimpl.c
++++ xen-4.6.1/tools/libxl/xl_cmdimpl.c
+@@ -1015,6 +1015,26 @@ static int parse_nic_config(libxl_device
+             nic->mac[i] = val;
+             oparg = endptr + 1;
+         }
++    } else if (MATCH_OPTION("mac_ioemu", token, oparg)) {
++        for (i = 0; i < 6; i++) {
++            val = strtoul(oparg, &endptr, 16);
++            if ((oparg == endptr) || (val > 255)) {
++                fprintf(stderr, "Invalid parameter `mac'.\n");
++                return 1;
++            }
++            nic->mac_ioemu[i] = val;
++            oparg = endptr + 1;
++        }
++    } else if (MATCH_OPTION("mac_stubdom", token, oparg)) {
++        for (i = 0; i < 6; i++) {
++            val = strtoul(oparg, &endptr, 16);
++            if ((oparg == endptr) || (val > 255)) {
++                fprintf(stderr, "Invalid parameter `mac'.\n");
++                return 1;
++            }
++            nic->mac_stubdom[i] = val;
++            oparg = endptr + 1;
++        }
+     } else if (MATCH_OPTION("bridge", token, oparg)) {
+         replace_string(&nic->bridge, oparg);
+     } else if (MATCH_OPTION("netdev", token, oparg)) {

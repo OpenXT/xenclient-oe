@@ -1,0 +1,91 @@
+################################################################################
+SHORT DESCRIPTION:
+################################################################################
+Keep alive tapdevs that are in use by other VMs
+
+################################################################################
+LONG DESCRIPTION:
+################################################################################
+When creating a VM that needs a tapdev for a given disk, LibXL will first check
+if one already exists, and in that case will use it instead of creating a new
+one.
+However, without this patch, when destroying a VM, LibXL will destroy the tapdev
+without first checking if any other VM is using it.
+This patch adds that missing check.
+
+################################################################################
+CHANGELOG
+################################################################################
+Authors:
+Jed Lejosne <lejosnej@ainfosec.com>
+
+################################################################################
+REMOVAL
+################################################################################
+If the problem gets solved upstream, we should remove this patch
+
+################################################################################
+UPSTREAM PLAN
+################################################################################
+We should try to upstream this.
+
+################################################################################
+INTERNAL DEPENDENCIES
+################################################################################
+
+################################################################################
+PATCHES
+################################################################################
+Index: xen-4.6.1/tools/libxl/libxl_blktap2.c
+===================================================================
+--- xen-4.6.1.orig/tools/libxl/libxl_blktap2.c
++++ xen-4.6.1/tools/libxl/libxl_blktap2.c
+@@ -50,6 +50,35 @@ char *libxl__blktap_devpath(libxl__gc *g
+     return NULL;
+ }
+ 
++static bool tapdev_is_shared(libxl__gc *gc, const char *params)
++{
++    char **domids, **vbds;
++    char *tp;
++    unsigned int count1, count2, i, j;
++    unsigned int total = 0;
++
++    /* List all the domids that have vhd backends */
++    domids = libxl__xs_directory(gc, XBT_NULL, "backend/vbd", &count1);
++    if (domids) {
++        for (i = 0; i < count1; ++i) {
++            /* List all the vbds for that domid */
++            vbds = libxl__xs_directory(gc, XBT_NULL, libxl__sprintf(gc, "backend/vbd/%s", domids[i]), &count2);
++            if (vbds) {
++                for (j = 0; j < count2; ++j) {
++                    /* If the params are the same, we have a match */
++                    tp = libxl__xs_read(gc, XBT_NULL, libxl__sprintf(gc, "backend/vbd/%s/%s/tapdisk-params", domids[i], vbds[j]));
++                    if (tp != NULL && !strcmp(tp, params)) {
++                        total++;
++                        if (total == 2)
++                            return true;
++                    }
++                }
++            }
++        }
++    }
++
++    return false;
++}
+ 
+ int libxl__device_destroy_tapdisk(libxl__gc *gc, const char *params)
+ {
+@@ -74,6 +103,12 @@ int libxl__device_destroy_tapdisk(libxl_
+         return ERROR_FAIL;
+     }
+ 
++    /* We're using the tapdev. If anybody else also is, we can't destroy it! */
++    if (tapdev_is_shared(gc, params)) {
++        LOG(DEBUG, "Not destroying tapdev%d, another VM uses it", tap.minor);
++        return 0;
++    }
++
+     err = tap_ctl_destroy(tap.id, tap.minor);
+     if (err < 0) {
+         LOGEV(ERROR, -err, "Failed to destroy tap device id %d minor %d",

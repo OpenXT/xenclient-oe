@@ -1,0 +1,127 @@
+################################################################################
+SHORT DESCRIPTION:
+################################################################################
+Support stubdom_memory and stubdom_cmdline options in libxl
+
+################################################################################
+LONG DESCRIPTION:
+################################################################################
+XenMgr allows the user to configure the memory of the stubdom and pass additonal
+kernel commandline args.  This patch allows libxl to support those features by
+parsing them from the xl domain config file and properly formatting them during
+stubdom creation.
+
+################################################################################
+CHANGELOG
+################################################################################
+Authors:
+Chris Rogers <rogersc@ainfosec.com>
+
+################################################################################
+REMOVAL
+################################################################################
+This patch should be removed if the stubdom work is upstreamed.
+
+################################################################################
+UPSTREAM PLAN
+################################################################################
+Should be upstreamed with the rest of stubdom work when appropriate.
+
+################################################################################
+INTERNAL DEPENDENCIES
+################################################################################
+
+################################################################################
+PATCHES
+################################################################################
+
+Index: xen-4.6.1/tools/libxl/libxl_types.idl
+===================================================================
+--- xen-4.6.1.orig/tools/libxl/libxl_types.idl
++++ xen-4.6.1/tools/libxl/libxl_types.idl
+@@ -462,6 +462,11 @@ libxl_domain_build_info = Struct("domain
+     #  parameters for all type of scheduler
+     ("sched_params",     libxl_domain_sched_params),
+ 
++    #Memory size for stubdom
++    ("stubdom_memory",  MemKB),
++    #Kernel args for stubdom
++    ("stubdom_cmdline", string),
++
+     ("ioports",          Array(libxl_ioport_range, "num_ioports")),
+     ("irqs",             Array(uint32, "num_irqs")),
+     ("iomem",            Array(libxl_iomem_range, "num_iomem")),
+Index: xen-4.6.1/tools/libxl/libxl_dm.c
+===================================================================
+--- xen-4.6.1.orig/tools/libxl/libxl_dm.c
++++ xen-4.6.1/tools/libxl/libxl_dm.c
+@@ -1431,6 +1431,7 @@ void libxl__spawn_stub_dm(libxl__egc *eg
+         abort();
+     }
+     dm_config->b_info.max_memkb += guest_config->b_info.video_memkb;
++    dm_config->b_info.max_memkb += guest_config->b_info.stubdom_memory;
+     dm_config->b_info.target_memkb = dm_config->b_info.max_memkb;
+ 
+     dm_config->b_info.u.pv.features = "";
+@@ -1442,6 +1443,7 @@ void libxl__spawn_stub_dm(libxl__egc *eg
+     dm_config->b_info.extra = guest_config->b_info.extra;
+     dm_config->b_info.extra_pv = guest_config->b_info.extra_pv;
+     dm_config->b_info.extra_hvm = guest_config->b_info.extra_hvm;
++    dm_config->b_info.stubdom_cmdline = guest_config->b_info.stubdom_cmdline;
+ 
+     dm_config->disks = guest_config->disks;
+     dm_config->num_disks = guest_config->num_disks;
+@@ -1497,6 +1499,7 @@ void libxl__spawn_stub_dm(libxl__egc *eg
+      */
+     if (guest_config->b_info.stubdomain_version == LIBXL_STUBDOMAIN_VERSION_LINUX) {
+         int dmargs_size = 0;
++        char kernel_arg_name[] = "openxt_qemu_args";
+         char *dmargs;
+         char **arg;
+ 
+@@ -1505,10 +1508,15 @@ void libxl__spawn_stub_dm(libxl__egc *eg
+         arg++;
+         for (; *arg; arg++)
+             dmargs_size = dmargs_size + strlen(*arg) + 1;
++        dmargs_size = dmargs_size + strlen(dm_config->b_info.stubdom_cmdline) + strlen(kernel_arg_name) + 4;
+         dmargs = (char *) libxl__malloc(gc, dmargs_size);
+ 
+         /* Use strcat to concatenate everything */
+         dmargs[0] = '\0';
++        strcat(dmargs, dm_config->b_info.stubdom_cmdline);
++        strcat(dmargs, " ");
++        strcat(dmargs, kernel_arg_name);
++        strcat(dmargs, "=\"");
+         arg = args;
+         arg++;
+         if (arg) {
+@@ -1519,6 +1527,7 @@ void libxl__spawn_stub_dm(libxl__egc *eg
+             strcat(dmargs, " ");
+             strcat(dmargs, *arg);
+         }
++        strcat(dmargs, "\"");
+ 
+         /* Set the resulting string as the stubdom cmdline */
+         stubdom_state->pv_cmdline = dmargs;
+Index: xen-4.6.1/tools/libxl/xl_cmdimpl.c
+===================================================================
+--- xen-4.6.1.orig/tools/libxl/xl_cmdimpl.c
++++ xen-4.6.1/tools/libxl/xl_cmdimpl.c
+@@ -2167,6 +2167,17 @@ skip_nic:
+     }
+ 
+ 
++    if (!xlu_cfg_get_long (config, "stubdom_memory", &l, 0))
++        b_info->stubdom_memory = l;
++
++    //If stubdom_cmdline is provided, use it, otherwise, always set default to empty string
++    if(!xlu_cfg_get_string(config, "stubdom_cmdline", &buf, 0)) {
++        xlu_cfg_replace_string(config, "stubdom_cmdline", &b_info->stubdom_cmdline, 0);
++    } else {
++        b_info->stubdom_cmdline = (char *) malloc(sizeof(char)*1);
++        b_info->stubdom_cmdline[0] = '\0';
++    }
++
+     xlu_cfg_replace_string (config, "device_model_override",
+                             &b_info->device_model, 0);
+     if (!xlu_cfg_get_string (config, "device_model_version", &buf, 0)) {

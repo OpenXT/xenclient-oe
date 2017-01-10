@@ -1,0 +1,174 @@
+################################################################################
+SHORT DESCRIPTION:
+################################################################################
+Log to syslog instead of logfiles
+
+################################################################################
+LONG DESCRIPTION:
+################################################################################
+LibXL only has one way to log messages, which uses log files.
+In OpenXT, we want all logs to go through syslog.
+This patch does that.
+
+################################################################################
+CHANGELOG
+################################################################################
+Authors:
+Jed Lejosne <lejosnej@ainfosec.com>
+
+################################################################################
+REMOVAL
+################################################################################
+If syslog support gets added upstream, we should remove this patch
+
+################################################################################
+UPSTREAM PLAN
+################################################################################
+As is it, this patch is not upstream-able.
+Givent the opportunity, we could make it right (adding an option to choose files
+or syslog) and then upstream it.
+
+################################################################################
+INTERNAL DEPENDENCIES
+################################################################################
+
+################################################################################
+PATCHES
+################################################################################
+Index: xen-4.6.1/tools/libxl/xl_cmdimpl.c
+===================================================================
+--- xen-4.6.1.orig/tools/libxl/xl_cmdimpl.c
++++ xen-4.6.1/tools/libxl/xl_cmdimpl.c
+@@ -475,7 +475,6 @@ out:
+ 
+ static int do_daemonize(char *name, const char *pidfile)
+ {
+-    char *fullname;
+     pid_t child1;
+     int nullfd, ret = 0;
+ 
+@@ -489,19 +488,10 @@ static int do_daemonize(char *name, cons
+ 
+     postfork();
+ 
+-    ret = libxl_create_logfile(ctx, name, &fullname);
+-    if (ret) {
+-        LOG("failed to open logfile %s: %s",fullname,strerror(errno));
+-        exit(-1);
+-    }
+-
+-    CHK_SYSCALL(logfile = open(fullname, O_WRONLY|O_CREAT|O_APPEND, 0644));
+-    free(fullname);
++    /* OpenXT: we don't want separate logfiles */
+ 
+     CHK_SYSCALL(nullfd = open("/dev/null", O_RDONLY));
+     dup2(nullfd, 0);
+-    dup2(logfile, 1);
+-    dup2(logfile, 2);
+ 
+     CHK_SYSCALL(daemon(0, 1));
+ 
+Index: xen-4.6.1/tools/libxl/libxl_internal.c
+===================================================================
+--- xen-4.6.1.orig/tools/libxl/libxl_internal.c
++++ xen-4.6.1/tools/libxl/libxl_internal.c
+@@ -199,6 +199,34 @@ char *libxl__dirname(libxl__gc *gc, cons
+     return libxl__strndup(gc, s, c - s);
+ }
+ 
++static int xtl_level_to_syslog_level(xentoollog_level x)
++{
++    int s;
++
++    switch(x) {
++    case XTL_DEBUG:
++        s = LOG_DEBUG;
++        break;
++    case XTL_NOTICE:
++        s = LOG_NOTICE;
++        break;
++    case XTL_WARN:
++        s = LOG_WARNING;
++        break;
++    case XTL_ERROR:
++        s = LOG_ERR;
++        break;
++    case XTL_CRITICAL:
++        s = LOG_CRIT;
++        break;
++    default:
++        s = LOG_INFO;
++        break;
++    }
++
++    return s;
++}
++
+ void libxl__logv(libxl_ctx *ctx, xentoollog_level msglevel, int errnoval,
+              const char *file, int line, const char *func,
+              const char *fmt, va_list ap)
+@@ -221,10 +249,14 @@ void libxl__logv(libxl_ctx *ctx, xentool
+     fileline[sizeof(fileline)-1] = 0;
+ 
+  x:
+-    xtl_log(ctx->lg, msglevel, errnoval, "libxl",
+-            "%s%s%s%s" "%s",
+-            fileline, func&&file?":":"", func?func:"", func||file?": ":"",
+-            base);
++    /* xtl_log(ctx->lg, msglevel, errnoval, "libxl", */
++    /*         "%s%s%s%s" "%s", */
++    /*         fileline, func&&file?":":"", func?func:"", func||file?": ":"", */
++    /*         base); */
++    /* OpenXT: we use syslog */
++    syslog(LOG_USER | xtl_level_to_syslog_level(msglevel), "%s%s%s%s%s",
++           fileline, func&&file?":":"", func?func:"", func||file?": ":"", base);
++
+     if (base != enomem) free(base);
+     errno = esave;
+ }
+Index: xen-4.6.1/tools/libxl/libxl_internal.h
+===================================================================
+--- xen-4.6.1.orig/tools/libxl/libxl_internal.h
++++ xen-4.6.1/tools/libxl/libxl_internal.h
+@@ -52,6 +52,9 @@
+ #include <xenctrl.h>
+ #include <xenguest.h>
+ 
++/* OpenXT: we use syslog */
++#include <syslog.h>
++
+ #include "xentoollog.h"
+ 
+ #include <xen/io/xenbus.h>
+Index: xen-4.6.1/tools/libxl/xl.c
+===================================================================
+--- xen-4.6.1.orig/tools/libxl/xl.c
++++ xen-4.6.1/tools/libxl/xl.c
+@@ -28,6 +28,9 @@
+ #include <inttypes.h>
+ #include <regex.h>
+ 
++/* OpenXT: we use syslog */
++#include <syslog.h>
++
+ #include "libxl.h"
+ #include "libxl_utils.h"
+ #include "libxlutil.h"
+@@ -291,6 +294,8 @@ static void xl_ctx_free(void)
+         free(lockfile);
+         lockfile = NULL;
+     }
++    /* OpenXT: we use syslog */
++    closelog();
+ }
+ 
+ int main(int argc, char **argv)
+@@ -333,6 +338,8 @@ int main(int argc, char **argv)
+     logger = xtl_createlogger_stdiostream(stderr, minmsglevel,
+         (progress_use_cr ? XTL_STDIOSTREAM_PROGRESS_USE_CR : 0));
+     if (!logger) exit(1);
++    /* OpenXT: we use syslog, we could probably comment out the above. */
++    openlog("xl", LOG_CONS, LOG_USER);
+ 
+     atexit(xl_ctx_free);
+ 

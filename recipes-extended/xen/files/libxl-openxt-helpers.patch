@@ -1,0 +1,166 @@
+################################################################################
+SHORT DESCRIPTION:
+################################################################################
+LibXL support for OpenXT helpers
+
+################################################################################
+LONG DESCRIPTION:
+################################################################################
+In OpenXT, to give Linux stubdomains indirect access to dom0 resources, we use
+"helpers".
+They communicate with the QEMU instance in the stubdom via V4V.
+Guests that use a stubdom need 2 helpers:
+* atapi-pt-helper, for CDROM access
+* audio-helper, for sound in/out
+* qmp-helper, for QMP interactions with the QEMU instance within the stubdom.
+
+################################################################################
+CHANGELOG
+################################################################################
+Authors:
+Jed Lejosne <lejosnej@ainfosec.com>
+
+################################################################################
+REMOVAL
+################################################################################
+Probably not desired.
+
+################################################################################
+UPSTREAM PLAN
+################################################################################
+This is specific to OpenXT.
+However, if the Xen community first adopts V4V and Linux stubdomain, they may be
+interested in these helpers.
+
+################################################################################
+INTERNAL DEPENDENCIES
+################################################################################
+libxl-RFC-*.patch
+atapi_pt_helper and qmp_helper
+
+################################################################################
+PATCHES
+################################################################################
+Index: xen-4.6.1/tools/libxl/libxl_dm.c
+===================================================================
+--- xen-4.6.1.orig/tools/libxl/libxl_dm.c
++++ xen-4.6.1/tools/libxl/libxl_dm.c
+@@ -1489,6 +1489,41 @@ void libxl__spawn_stub_dm(libxl__egc *eg
+     if (ret)
+         goto out;
+     uint32_t dm_domid = sdss->pvqemu.guest_domid;
++    pid_t pid;
++
++    /* OpenXT: Start the QMP helper */
++    pid = fork();
++    if (pid == -1)
++        LOG(ERROR, "Failed to fork");
++    else if (pid == 0)
++        execl(QMP_HELPER_PATH, QMP_HELPER_PATH, libxl__sprintf(gc, "%d", guest_domid), libxl__sprintf(gc, "%d", dm_domid), NULL);
++    libxl__xs_write(gc, XBT_NULL,
++                   libxl__sprintf(gc, "%s/qmp-helper-pid",
++                                  libxl__xs_get_dompath(gc, dm_domid)),
++                   "%d", pid);
++
++    /* OpenXT: Start the ATAPI helper */
++    pid = fork();
++    if (pid == -1)
++        LOG(ERROR, "Failed to fork");
++    else if (pid == 0)
++        execl(ATAPI_PT_HELPER_PATH, ATAPI_PT_HELPER_PATH, libxl__sprintf(gc, "%d", guest_domid), libxl__sprintf(gc, "%d", dm_domid), NULL);
++    libxl__xs_write(gc, XBT_NULL,
++                   libxl__sprintf(gc, "%s/atapi-pt-helper-pid",
++                                  libxl__xs_get_dompath(gc, dm_domid)),
++                   "%d", pid);
++
++    /* OpenXT: Start the audio helper */
++    pid = fork();
++    if (pid == -1)
++        LOG(ERROR, "Failed to fork");
++    else if (pid == 0)
++        execl(AUDIO_HELPER_PATH, AUDIO_HELPER_PATH, libxl__sprintf(gc, "%d", guest_domid), libxl__sprintf(gc, "%d", dm_domid), NULL);
++    libxl__xs_write(gc, XBT_NULL,
++                   libxl__sprintf(gc, "%s/audio-helper-pid",
++                                  libxl__xs_get_dompath(gc, dm_domid)),
++                   "%d", pid);
++
+     ret = libxl__domain_build(gc, dm_config, dm_domid, stubdom_state);
+     if (ret)
+         goto out;
+Index: xen-4.6.1/tools/libxl/libxl.c
+===================================================================
+--- xen-4.6.1.orig/tools/libxl/libxl.c
++++ xen-4.6.1/tools/libxl/libxl.c
+@@ -1629,6 +1629,36 @@ void libxl__destroy_domid(libxl__egc *eg
+ 
+         libxl__qmp_cleanup(gc, domid);
+     }
++    /* OpenXT: if the domain has a stubdom, we kill the stubdom helpers here */
++    int dm_domid = libxl_get_stubdom_id(ctx, domid);
++    if (dm_domid) {
++        /* OpenXT: Kill qmp-helper */
++        pid = libxl__xs_read(gc, XBT_NULL,
++                             libxl__sprintf(gc,
++                                            "/local/domain/%d/qmp-helper-pid", dm_domid));
++        if (!pid)
++            LOG(ERROR, "Cannot get qmp_helper pid for domain %d", dm_domid);
++        else
++            kill(strtol(pid, NULL, 10), SIGKILL);
++
++        /* OpenXT: Kill atapi-pt-helper */
++        pid = libxl__xs_read(gc, XBT_NULL,
++                             libxl__sprintf(gc,
++                                            "/local/domain/%d/atapi-pt-helper-pid", dm_domid));
++        if (!pid)
++            LOG(ERROR, "Cannot get atapi-pt_helper pid for domain %d", dm_domid);
++        else
++            kill(strtol(pid, NULL, 10), SIGKILL);
++
++        /* OpenXT: Kill audio-helper */
++        pid = libxl__xs_read(gc, XBT_NULL,
++                             libxl__sprintf(gc,
++                                            "/local/domain/%d/audio-helper-pid", dm_domid));
++        if (!pid)
++            LOG(ERROR, "Cannot get audio_helper pid for domain %d", dm_domid);
++        else
++            kill(strtol(pid, NULL, 10), SIGKILL);
++}
+     dis->drs.ao = ao;
+     dis->drs.domid = domid;
+     dis->drs.callback = devices_destroy_cb;
+Index: xen-4.6.1/tools/libxl/libxl_internal.h
+===================================================================
+--- xen-4.6.1.orig/tools/libxl/libxl_internal.h
++++ xen-4.6.1/tools/libxl/libxl_internal.h
+@@ -115,6 +115,10 @@
+ #define TAP_DEVICE_SUFFIX "-emu"
+ #define DOMID_XS_PATH "domid"
+ 
++#define QMP_HELPER_PATH "/usr/lib/xen/bin/qmp_helper"
++#define ATAPI_PT_HELPER_PATH "/usr/lib/xen/bin/atapi_pt_helper"
++#define AUDIO_HELPER_PATH "/usr/lib/xen/bin/audio_helper_start"
++
+ #define ARRAY_SIZE(a) (sizeof(a) / sizeof(a[0]))
+ 
+ #define ROUNDUP(_val, _order)                                           \
+Index: xen-4.6.1/tools/libxl/libxl_create.c
+===================================================================
+--- xen-4.6.1.orig/tools/libxl/libxl_create.c
++++ xen-4.6.1/tools/libxl/libxl_create.c
+@@ -1369,12 +1369,10 @@ static void domcreate_devmodel_started(l
+     if (dcs->dmss.dm.guest_domid) {
+         if (d_config->b_info.device_model_version
+             == LIBXL_DEVICE_MODEL_VERSION_QEMU_XEN) {
+-            if (!libxl_defbool_val(d_config->b_info.device_model_stubdomain)) {
+-                libxl__qmp_initializations(gc, domid, d_config);
+-            } else {
+-                int stubdom_domid = dcs->dmss.pvqemu.guest_domid;
+-                libxl__qmp_initializations(gc, stubdom_domid, d_config);
+-            }
++            /* OpenXT: for stubdom-enabled guests, qmp_helper creates the same
++             * unix socket than QEMU would for non-stubdom guests.
++             * Therefore there's no need to dissociate the two cases */
++            libxl__qmp_initializations(gc, domid, d_config);
+         }
+     }
+ 

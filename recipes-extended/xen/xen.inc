@@ -52,6 +52,29 @@ SRC_URI = "${XEN_SRC_URI};name=source \
     file://increase-ap-startup-time.patch;patch=1 \
     file://openxt-xen-xsmv4vuse.patch \
     file://xenstat-disable-tmem-use.patch;patch=1 \
+    file://libxl-do-not-destroy-in-use-tapdevs.patch \
+    file://libxl-syslog.patch \
+    file://libxl-RFC-4of7-Add-stubdomain-version-tools-domain-build-info.patch \
+    file://libxl-RFC-5of7-Handle-Linux-stubdomain-specific-QEMUoptions.patch \
+    file://libxl-RFC-6of7-Build-the-domain-with-a-Linux-based-stubdomain.patch \
+    file://libxl-RFC-7of7-Wait-for-QEMU-startup-in-stubdomain.patch \
+    file://libxl-RFC-fixes.patch \
+    file://libxl-misc-fixes.patch \
+    file://libxl-vif-make-ioemu-and-stubdom-mac-addresses-configurable.patch \
+    file://libxl-linux-stubdom-replace-disk-with-initramfs.patch \
+    file://libxl-openxt-helpers.patch \
+    file://libxl-openxt-qemu-args.patch \
+    file://libxl-openxt-xci-cpuid-signature.patch \
+    file://libxl-pass-qemu-options-through-linux-stubdom-cmdline.patch \
+    file://libxl-openxt-tweaks.patch \
+    file://libxl-domain-state.patch \
+    file://libxl-fixup-cmdline-ops.patch \
+    file://libxl-crypto-key-dir.patch \
+    file://libxl-fix-reboot.patch \
+    file://libxl-display-manager-support.patch \
+    file://libxl-xenmgr-support.patch \
+    file://libxl-move-extra-qemu-args-to-the-end.patch \
+    file://libxl-stubdom-options.patch \
     file://xsa-155-paravirtualized-drivers-incautious-about-shared-memory-contents.patch;patch=1 \
     file://xsa-170-guest-user-mode-may-crash-guest-with-non-canonical-rip.patch;patch=1 \
     file://xsa-173-x86-shadow-pagetables-address-width-overflow.patch;patch=1 \

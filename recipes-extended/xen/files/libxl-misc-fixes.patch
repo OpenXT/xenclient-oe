@@ -1,0 +1,119 @@
+################################################################################
+SHORT DESCRIPTION:
+################################################################################
+LibXL fixes
+
+################################################################################
+LONG DESCRIPTION:
+################################################################################
+* Add some linking flexibility for building the tools out-of-tree for example
+* Allow tapdisk to be a cdrom backend
+* Allow Linux stubdomains to have more than one disk
+
+################################################################################
+CHANGELOG
+################################################################################
+Authors:
+Jed Lejosne <lejosnej@ainfosec.com>
+
+################################################################################
+REMOVAL
+################################################################################
+Whenever things get fixed upstream
+
+################################################################################
+UPSTREAM PLAN
+################################################################################
+We should try to upstream this
+
+################################################################################
+INTERNAL DEPENDENCIES
+################################################################################
+
+################################################################################
+PATCHES
+################################################################################
+Index: xen-4.6.1/tools/Rules.mk
+===================================================================
+--- xen-4.6.1.orig/tools/Rules.mk
++++ xen-4.6.1/tools/Rules.mk
+@@ -35,23 +35,23 @@ SYMLINK_SHLIB = : symlink-shlib-unsuppor
+ endif
+ 
+ CFLAGS_libxenctrl = -I$(XEN_LIBXC)/include $(CFLAGS_xeninclude)
+-LDLIBS_libxenctrl = $(XEN_LIBXC)/libxenctrl$(libextension)
++LDLIBS_libxenctrl ?= $(XEN_LIBXC)/libxenctrl$(libextension)
+ SHLIB_libxenctrl  = -Wl,-rpath-link=$(XEN_LIBXC)
+ 
+ CFLAGS_libxenguest = -I$(XEN_LIBXC)/include $(CFLAGS_xeninclude)
+-LDLIBS_libxenguest = $(XEN_LIBXC)/libxenguest$(libextension)
++LDLIBS_libxenguest ?= $(XEN_LIBXC)/libxenguest$(libextension)
+ SHLIB_libxenguest  = -Wl,-rpath-link=L$(XEN_LIBXC)
+ 
+ CFLAGS_libxenstore = -I$(XEN_XENSTORE)/include $(CFLAGS_xeninclude)
+-LDLIBS_libxenstore = $(XEN_XENSTORE)/libxenstore$(libextension)
++LDLIBS_libxenstore ?= $(XEN_XENSTORE)/libxenstore$(libextension)
+ SHLIB_libxenstore  = -Wl,-rpath-link=$(XEN_XENSTORE)
+ 
+ CFLAGS_libxenstat  = -I$(XEN_LIBXENSTAT)
+-LDLIBS_libxenstat  = $(SHLIB_libxenctrl) $(SHLIB_libxenstore) $(XEN_LIBXENSTAT)/libxenstat$(libextension)
++LDLIBS_libxenstat  ?= $(SHLIB_libxenctrl) $(SHLIB_libxenstore) $(XEN_LIBXENSTAT)/libxenstat$(libextension)
+ SHLIB_libxenstat  = -Wl,-rpath-link=$(XEN_LIBXENSTAT)
+ 
+ CFLAGS_libxenvchan = -I$(XEN_LIBVCHAN)
+-LDLIBS_libxenvchan = $(SHLIB_libxenctrl) $(SHLIB_libxenstore) $(XEN_LIBVCHAN)/libxenvchan$(libextension)
++LDLIBS_libxenvchan ?= $(SHLIB_libxenctrl) $(SHLIB_libxenstore) $(XEN_LIBVCHAN)/libxenvchan$(libextension)
+ SHLIB_libxenvchan  = -Wl,-rpath-link=$(XEN_LIBVCHAN)
+ 
+ ifeq ($(debug),y)
+@@ -65,7 +65,7 @@ LIBXL_BLKTAP ?= $(CONFIG_BLKTAP2)
+ 
+ ifeq ($(LIBXL_BLKTAP),y)
+ CFLAGS_libblktapctl = -I$(XEN_BLKTAP2)/control -I$(XEN_BLKTAP2)/include $(CFLAGS_xeninclude)
+-LDLIBS_libblktapctl = $(XEN_BLKTAP2)/control/libblktapctl$(libextension)
++LDLIBS_libblktapctl ?= $(XEN_BLKTAP2)/control/libblktapctl$(libextension)
+ SHLIB_libblktapctl  = -Wl,-rpath-link=$(XEN_BLKTAP2)/control
+ else
+ CFLAGS_libblktapctl =
+@@ -74,7 +74,7 @@ SHLIB_libblktapctl  =
+ endif
+ 
+ CFLAGS_libxenlight = -I$(XEN_XENLIGHT) $(CFLAGS_libxenctrl) $(CFLAGS_xeninclude)
+-LDLIBS_libxenlight = $(XEN_XENLIGHT)/libxenlight$(libextension) $(SHLIB_libxenctrl) $(SHLIB_libxenstore) $(SHLIB_libblktapctl)
++LDLIBS_libxenlight ?= $(XEN_XENLIGHT)/libxenlight$(libextension) $(SHLIB_libxenctrl) $(SHLIB_libxenstore) $(SHLIB_libblktapctl)
+ SHLIB_libxenlight  = -Wl,-rpath-link=$(XEN_XENLIGHT)
+ 
+ CFLAGS += -D__XEN_TOOLS__
+Index: xen-4.6.1/tools/libxl/libxl_device.c
+===================================================================
+--- xen-4.6.1.orig/tools/libxl/libxl_device.c
++++ xen-4.6.1/tools/libxl/libxl_device.c
+@@ -218,11 +218,8 @@ static int disk_try_backend(disk_try_bac
+     case LIBXL_DISK_BACKEND_TAP:
+         if (a->disk->script) goto bad_script;
+ 
+-        if (a->disk->is_cdrom) {
+-            LOG(DEBUG, "Disk vdev=%s, backend tap unsuitable for cdroms",
+-                       a->disk->vdev);
+-            return 0;
+-        }
++        /* Note: keep going if the disk is a cdrom. tapdisk can handle them as "raw" */
++
+         if (!libxl__blktap_enabled(a->gc)) {
+             LOG(DEBUG, "Disk vdev=%s, backend tap unsuitable because blktap "
+                        "not available", a->disk->vdev);
+Index: xen-4.6.1/tools/libxl/libxl_dm.c
+===================================================================
+--- xen-4.6.1.orig/tools/libxl/libxl_dm.c
++++ xen-4.6.1/tools/libxl/libxl_dm.c
+@@ -1174,8 +1174,8 @@ static int libxl__build_device_model_arg
+                 else if (disk < 4) {
+                     if (b_info->stubdomain_version == LIBXL_STUBDOMAIN_VERSION_LINUX)
+                         drive = libxl__sprintf
+-                                (gc, "file=%s,if=ide,index=%d,media=disk,cache=writeback,format=%s",
+-                                 "/dev/xvda", disk, "host_device");
++                                (gc, "file=%s%c,if=ide,index=%d,media=disk,cache=writeback,format=%s",
++                                 "/dev/xvd", 'a' + disk, disk, "host_device");
+                     else
+                         drive = libxl__sprintf
+                                 (gc, "file=%s,if=ide,index=%d,media=disk,format=%s,cache=writeback",
