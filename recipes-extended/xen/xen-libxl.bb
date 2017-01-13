@@ -23,8 +23,8 @@ do_configure() {
 
 do_configure_prepend() {
 	#remove optimizations in the config files
-	sed -i 's/-O2//g' ${WORKDIR}/xen-4.6.1/Config.mk
-	sed -i 's/-O2//g' ${WORKDIR}/xen-4.6.1/config/StdGNU.mk
+	sed -i 's/-O2//g' ${WORKDIR}/xen-${XEN_VERSION}/Config.mk
+	sed -i 's/-O2//g' ${WORKDIR}/xen-${XEN_VERSION}/config/StdGNU.mk
 }
 
 do_compile() {
