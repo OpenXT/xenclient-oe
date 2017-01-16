@@ -36,6 +36,7 @@ SRC_URI += " \
            file://disable_available_to_all_users_checkbox.patch;patch=1 \
            file://default-certs-dir.patch;patch=1 \
            file://always-use-psk-hash.patch;patch=1 \
+           file://disable-show-password.patch;patch=1 \
            file://nm-signal-00.png \
            file://nm-signal-25.png \
            file://nm-signal-50.png \
