@@ -4,30 +4,49 @@ SECTION = "bootloaders"
 PRIORITY = "optional"
 DEPENDS = "trousers"
 
-EXTRA_OEMAKE += "TARGET_ARCH=x86_32 CROSS_COMPILE=${TARGET_PREFIX} INSTALL_STRIP="
-
 do_compile() {
-	oe_runmake SUBDIRS:="tboot" CC="${HOST_PREFIX}gcc ${TOOLCHAIN_OPTIONS}" CPP="${HOST_PREFIX}cpp ${TOOLCHAIN_OPTIONS}" LDFLAGS="" CFLAGS=""
-	oe_runmake -C ${S}/tb_polgen CFLAGS+="-std=c99"
-	oe_runmake -C ${S}/lcptools CFLAGS+="-std=c99"
-	oe_runmake CFLAGS+=" -std=c99 "
-	${STRIP} ${S}/tb_polgen/tb_polgen
+	oe_runmake SUBDIRS="tboot" CC="${HOST_PREFIX}gcc ${TOOLCHAIN_OPTIONS}" CPP="${HOST_PREFIX}cpp ${TOOLCHAIN_OPTIONS}" LDFLAGS="" CFLAGS=""
+	oe_runmake SUBDIRS="lcptools tb_polgen utils" CFLAGS+="-std=c99" TARGET_ARCH="x86_32"
 }
 
 do_install() {
-	install -d ${D}/boot
-	install -m 444 tboot/tboot.gz ${D}/boot/
-        install -d ${D}/usr/share/xenclient
-	oe_runmake -C ${S}/tb_polgen install DISTDIR=${D} 
-	oe_runmake -C ${S}/lcptools install DISTDIR=${D}
-	oe_runmake -C ${S}/utils install DISTDIR=${D}
+	oe_runmake SUBDIRS="tboot lcptools tb_polgen utils" DISTDIR="${D}${base_prefix}" install
 }
 
-FILES_${PN}-dbg += " /boot/tboot-syms "
+PACKAGES += " \
+    ${PN}-grub \
+    ${PN}-lcptools \
+    ${PN}-tbpolgen \
+    ${PN}-utils \
+"
 
-FILES_${PN} += " \
-        /boot/tboot.gz \
-        /usr/sbin/txt-stat \
-        /usr/sbin/parse_err \
-        /usr/share/xenclient \
+FILES_${PN} = " \
+    ${base_prefix}/boot/tboot.gz \
+"
+FILES_${PN}-dbg += " \
+    ${base_prefix}/boot/tboot-syms \
+"
+FILES_${PN}-grub = " \
+    ${sysconfdir}/grub.d/20_linux_tboot \
+    ${sysconfdir}/grub.d/20_linux_xen_tboot \
+"
+FILES_${PN}-lcptools = " \
+    ${sbindir}/lcp_crtpconf \
+    ${sbindir}/lcp_crtpol \
+    ${sbindir}/lcp_crtpol2 \
+    ${sbindir}/lcp_crtpolelt \
+    ${sbindir}/lcp_crtpollist \
+    ${sbindir}/lcp_mlehash \
+    ${sbindir}/lcp_readpol \
+    ${sbindir}/lcp_writepol \
+    ${sbindir}/tb_polgen \
+    ${sbindir}/tpmnv_defindex \
+    ${sbindir}/tpmnv_getcap \
+    ${sbindir}/tpmnv_lock \
+    ${sbindir}/tpmnv_relindex \
+"
+FILES_${PN}-utils = " \
+    ${sbindir}/txt-stat \
+    ${sbindir}/parse_err \
+    ${sbindir}/acminfo \
 "
