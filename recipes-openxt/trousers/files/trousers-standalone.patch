@@ -1,5 +1,7 @@
---- a/configure.ac
-+++ b/configure.ac
+Index: trousers-0.3.14/configure.ac
+===================================================================
+--- trousers-0.3.14.orig/configure.ac
++++ trousers-0.3.14/configure.ac
 @@ -398,6 +398,7 @@ AC_OUTPUT(dist/tcsd.conf \
  	  src/tcs/Makefile \
  	  src/tddl/Makefile \
@@ -8,8 +10,10 @@
  	  src/trspi/Makefile \
  	  src/tcsd/Makefile \
  	  man/man8/tcsd.8 \
---- a/src/tspi/rpc/tcstp/rpc.c
-+++ b/src/tspi/rpc/tcstp/rpc.c
+Index: trousers-0.3.14/src/tspi/rpc/tcstp/rpc.c
+===================================================================
+--- trousers-0.3.14.orig/src/tspi/rpc/tcstp/rpc.c
++++ trousers-0.3.14/src/tspi/rpc/tcstp/rpc.c
 @@ -33,6 +33,26 @@
  #include "rpc_tcstp_tsp.h"
  #include "tsp_tcsi_param.h"
@@ -152,8 +156,10 @@
  
  /* TODO: Future work - remove socket creation/manipulation from RPC-specific file */
  TSS_RESULT
+Index: trousers-0.3.14/src/tspi_sa/Makefile.am
+===================================================================
 --- /dev/null
-+++ b/src/tspi_sa/Makefile.am
++++ trousers-0.3.14/src/tspi_sa/Makefile.am
 @@ -0,0 +1,238 @@
 +lib_LTLIBRARIES=libtspi_sa.la
 +
@@ -393,8 +399,10 @@
 +#libtspi_la_SOURCES+=tspi_cmk.c obj_migdata.c rpc/@RPC@/rpc_cmk.c
 +#libtspi_la_CFLAGS+=-DTSS_BUILD_CMK
 +#endif
---- a/src/tcs/log.c
-+++ b/src/tcs/log.c
+Index: trousers-0.3.14/src/tcs/log.c
+===================================================================
+--- trousers-0.3.14.orig/src/tcs/log.c
++++ trousers-0.3.14/src/tcs/log.c
 @@ -36,6 +36,8 @@ LogBlobData(char *szDescriptor, unsigned
  	unsigned int i;
  
@@ -404,21 +412,27 @@
  	if (getenv("TCSD_FOREGROUND") == NULL)
  		openlog(szDescriptor, LOG_NDELAY|LOG_PID, TSS_SYSLOG_LVL);
  	memset(temp, 0, sizeof(temp));
---- a/src/Makefile.am
-+++ b/src/Makefile.am
+Index: trousers-0.3.14/src/Makefile.am
+===================================================================
+--- trousers-0.3.14.orig/src/Makefile.am
++++ trousers-0.3.14/src/Makefile.am
 @@ -1 +1 @@
 -SUBDIRS = trspi tddl tcs tspi tcsd include
 +SUBDIRS = trspi tddl tcs tspi tcsd include tspi_sa
---- a/src/tcs/Makefile.am
-+++ b/src/tcs/Makefile.am
+Index: trousers-0.3.14/src/tcs/Makefile.am
+===================================================================
+--- trousers-0.3.14.orig/src/tcs/Makefile.am
++++ trousers-0.3.14/src/tcs/Makefile.am
 @@ -1,4 +1,4 @@
 -noinst_LIBRARIES=libtcs.a
 +lib_LIBRARIES=libtcs.a
  
  CFLAGS+=-I${top_srcdir}/src/include
  libtcs_a_LIBADD=${top_builddir}/src/tddl/libtddl.a
---- a/src/include/rpc_tcstp_tsp.h
-+++ b/src/include/rpc_tcstp_tsp.h
+Index: trousers-0.3.14/src/include/rpc_tcstp_tsp.h
+===================================================================
+--- trousers-0.3.14.orig/src/include/rpc_tcstp_tsp.h
++++ trousers-0.3.14/src/include/rpc_tcstp_tsp.h
 @@ -16,6 +16,12 @@
  #include "tcsd_wrap.h"
  #include "tcsd.h"
@@ -432,8 +446,10 @@
  int setData(TCSD_PACKET_TYPE,int,void *,int,struct tcsd_comm_data *);
  UINT32 getData(TCSD_PACKET_TYPE,int,void *,int,struct tcsd_comm_data *);
  void initData(struct tcsd_comm_data *, int);
---- a/src/tcsd/tcsd_conf.c
-+++ b/src/tcsd/tcsd_conf.c
+Index: trousers-0.3.14/src/tcsd/tcsd_conf.c
+===================================================================
+--- trousers-0.3.14.orig/src/tcsd/tcsd_conf.c
++++ trousers-0.3.14/src/tcsd/tcsd_conf.c
 @@ -35,6 +35,9 @@
  #include "tcsd.h"
  #include "tcsd_ops.h"
@@ -444,3 +460,39 @@
  
  struct tcsd_config_options options_list[] = {
  	{"port", opt_port},
+Index: trousers-0.3.14/src/tspi/rpc/hosttable.c
+===================================================================
+--- trousers-0.3.14.orig/src/tspi/rpc/hosttable.c
++++ trousers-0.3.14/src/tspi/rpc/hosttable.c
+@@ -19,17 +19,14 @@
+ #include "hosttable.h"
+ #include "obj.h"
+ 
+-static struct host_table *ht = NULL;
++/* Original version allocates /struct host_table/. Keep the diff limited by
++ * puting it in .data and still use the old symbol. */
++static struct host_table __ht = { 0 };
++static struct host_table *ht = &__ht;
+ 
+ TSS_RESULT
+ host_table_init()
+ {
+-	ht = calloc(1, sizeof(struct host_table));
+-	if (ht == NULL) {
+-		LogError("malloc of %zd bytes failed.", sizeof(struct host_table));
+-		return TSPERR(TSS_E_OUTOFMEMORY);
+-	}
+-
+ 	MUTEX_INIT(ht->lock);
+ 
+ 	return TSS_SUCCESS;
+@@ -64,9 +61,6 @@ host_table_final()
+ 	}
+ 
+ 	MUTEX_UNLOCK(ht->lock);
+-
+-	free(ht);
+-	ht = NULL;
+ }
+ 
+ #ifdef SOLARIS
