@@ -1,6 +1,6 @@
 FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}-${PV}:"
 
-PR .= ".2"
+PR .= ".3"
 
 SRC_URI += " \
     file://config \
@@ -181,6 +181,7 @@ SRC_URI += " \
     file://patches/openxt-dbus-deny-send-unconfined.patch;patch=1 \
     file://patches/xen4.6-uprev.patch;patch=1 \
     file://patches/openxt-init-spec-domtrans.patch;patch=1 \
+    file://patches/busybox-mmap-read-execute-checks-from-new-domain.patch \
     "
     
 def get_poltype(f):
