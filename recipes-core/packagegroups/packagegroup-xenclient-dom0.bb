@@ -87,7 +87,6 @@ RDEPENDS_${PN} = " \
     qmp-helper \
     compleat \
     xec \
-    apptool \
     dmidecode \
     netcat \
     libicbinn-server \
