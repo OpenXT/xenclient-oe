@@ -66,7 +66,6 @@ read_args() {
             debug)
                 set -x ;;
             fbcon)
-                depmod -a
                 modprobe fbcon
                 FBCON=true
                 ;;
@@ -165,10 +164,7 @@ fatal() {
 
 tpm_setup() {
     CMDLINE="ro measured" read_args
-    insmod /lib/modules/$(uname -r)/kernel/drivers/char/tpm/tpm_bios.ko
-    insmod /lib/modules/$(uname -r)/kernel/drivers/char/tpm/tpm.ko
-    insmod /lib/modules/$(uname -r)/kernel/drivers/char/tpm/tpm_tis.ko
-    mknod /dev/tpm0 c 10 224
+    modprobe tpm_tis
     echo -n "initramfs measuring $ROOT_DEVICE: "
     s=$(sha1sum $ROOT_DEVICE)
     echo $s
