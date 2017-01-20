@@ -32,8 +32,7 @@ sig=$(dd if="/dev/mapper/${CONFIG_LV}" bs=4 count=1 2>/dev/null)
 case "$sig" in
 LUKS)
 	keycmd="get-config-key"
-	slot=0
-	eval $keycmd | cryptsetup -q -d - -S $slot luksOpen \
+	eval $keycmd | cryptsetup -q -d - luksOpen \
 	    "/dev/mapper/${CONFIG_LV}" config >/dev/null 2>&1 || {
 	    {
                 modprobe fbcon
@@ -48,10 +47,7 @@ LUKS)
 		    echo -e -n "\nEnter administrative passphrase to proceed: "
 		    read -s pw
 		    echo
-		    echo -n "$pw" | openssl rsautl -decrypt \
-			-inkey /boot/system/config/recovery-private-key.conf \
-			-in /boot/system/config/recovery-disk-key.ssl \
-			-passin stdin | cryptsetup -q -d - luksOpen \
+		    echo -n "$pw" | cryptsetup -q -d - luksOpen \
 		        "/dev/mapper/${CONFIG_LV}" \
 		        config >/dev/null 2>&1 && {
                                 echo -n "Would you like to reseal the device with the current configuration ? [y/N] "
@@ -68,18 +64,12 @@ LUKS)
 
 	    eval $keycmd > $KEYFILE
 
-	    echo -n "$pw" | openssl rsautl -decrypt \
-		-inkey /boot/system/config/recovery-private-key.conf \
-		-in /boot/system/config/recovery-disk-key.ssl \
-		-passin stdin | cryptsetup -q -d - luksKillSlot \
+	    echo -n "$pw" |  cryptsetup -q -d - luksKillSlot \
 		"/dev/mapper/${CONFIG_LV}" 0 || {
 		echo "cryptsetup luksKillSlot failed: $?"
 	    }
 
-	    echo -n "$pw" | openssl rsautl -decrypt \
-		-inkey /boot/system/config/recovery-private-key.conf \
-		-in /boot/system/config/recovery-disk-key.ssl \
-		-passin stdin | cryptsetup -q -i 100 -d - -S $slot luksAddKey \
+	    echo -n "$pw" | cryptsetup -q -i 100 -d - -S $slot luksAddKey \
 		"/dev/mapper/${CONFIG_LV}" $KEYFILE || {
 		echo "cryptsetup luksAddKey failed: $?"
 	    }

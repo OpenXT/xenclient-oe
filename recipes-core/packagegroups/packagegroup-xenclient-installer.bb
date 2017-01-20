@@ -54,6 +54,8 @@ RDEPENDS_${PN} = " \
     tpm-tools \
     xenclient-pcrdiff \
     xenclient-tpm-scripts \
+    openxt-keymanagement \
+    openxt-measuredlaunch \
     ncurses \
     intel-microcode \
 "

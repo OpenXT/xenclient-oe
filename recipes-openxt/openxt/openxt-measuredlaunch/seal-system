@@ -1,0 +1,104 @@
+#!/bin/bash
+
+. /usr/lib/tpm-scripts/tpm-functions
+[ $? -eq 0 ] || {
+    echo "failed to load tpm-functions"
+    exit 1
+}
+
+. /usr/lib/openxt/ml-functions
+[ $? -eq 0 ] || {
+    echo "failed to load ml-functions"
+    exit 1
+}
+
+err() {
+    echo "seal-system: $1" >&2
+    exit 1
+}
+
+# Globals
+TPM_DEV="$(find /sys/class -name tpm0)/device"
+
+# Configurables
+operation="seal"
+config_key="/config/keys/config.key"
+sealed_key="/boot/system/tpm/config.tss"
+pcr_list="/config/config.pcrs"
+good_pcrs="/config/good.pcrs"
+bad_pcrs="/boot/system/tpm/bad.pcrs"
+root_dev="/dev/mapper/xenclient-root"
+
+while getopts ":fc:t:p:g:b:r:" opt; do
+    case $opt in
+    f)
+        operation="forward"
+    ;;
+    c)
+        config_key=${OPTARG}
+    ;;
+    t)
+        sealed_key=${OPTARG}
+    ;;
+    p)
+        pcr_list=${OPTARG}
+    ;;
+    g)
+        good_pcrs=${OPTARG}
+    ;;
+    b)
+        bad_pcrs=${OPTARG}
+    ;;
+    r)
+        root_dev=${OPTARG}
+    ;;
+    *)
+        err "invalid option: -$opt"
+    ;;
+    esac
+done
+
+
+case $operation in
+seal)
+    sealout=$(tpm_sealdata_sa -i ${config_key} \
+        -o ${sealed_key} -z $(cat ${pcr_list}) 2>&1)
+    sealerr=$?
+
+    if [ $sealerr -eq 0 ]; then
+        # store PCR hints for recovery
+        if [ -d "${TPM_DEV}" ]; then
+            [ -f "${bad_pcrs}" ] && rm "${bad_pcrs}"
+            cat "${TPM_DEV}/pcrs" > "${good_pcrs}"
+        fi
+
+        exit 0
+    fi
+;;
+forward)
+    pcrs=$(calculate_pcrs "/" /boot/system/grub/grub.cfg) ||
+        err "failed to calculate pcrs"
+
+    pcr17=$(echo $pcrs | awk '{ print $1 }')
+    pcr18=$(echo $pcrs | awk '{ print $2 }')
+    pcr19=$(echo $pcrs | awk '{ print $3 }')
+
+    # During early init, rootfs is hashed and is given to
+    # tpm_extend which hashes the rootfs hash and hands that value
+    # to the TPM to be extended into PCR 15
+    root_hash=$(sha1sum ${root_dev}|cut -f1 -d' ')
+    pcr15=$(hash_extend 0 $(echo -n ${root_hash}|sha1sum|cut -f1 -d' ')) ||
+        err "failed to hash root device"
+
+    if [ -e "${sealed_key}" ]; then
+        mv ${sealed_key} ${sealed_key}.old
+    fi
+    tpm_forward_seal -r/ -p15:${pcr15} -p17:${pcr17} -p18:${pcr18} \
+        -p19:${pcr19} ${config_key} ${sealed_key}
+    [ $? -eq 0 ] || err "forward seal of key failed"
+
+    exit 0
+;;
+esac
+
+err "unexpectedly finsihed"

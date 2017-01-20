@@ -1,0 +1,1691 @@
+From 0c2f3729d908ab8fdcbf8da38d2eb2d41731f040 Mon Sep 17 00:00:00 2001
+From: "Daniel P. Smith" <dpsmith@apertussolutions.com>
+Date: Wed, 11 May 2016 18:28:38 -0400
+Subject: [PATCH] Add a PCR calculator to predict measurements
+
+This is a rudimentary PCR calculator that will allow the ability to
+forward calculate PCRs 17, 18, and 19.
+---
+ pcr-calc/Makefile      |  70 ++++++++++
+ pcr-calc/acmod.c       | 158 ++++++++++++++++++++++
+ pcr-calc/hash.c        | 210 ++++++++++++++++++++++++++++
+ pcr-calc/heap.c        | 189 ++++++++++++++++++++++++++
+ pcr-calc/heap.h        | 266 ++++++++++++++++++++++++++++++++++++
+ pcr-calc/module_hash.c | 361 +++++++++++++++++++++++++++++++++++++++++++++++++
+ pcr-calc/sinit_hash.c  | 157 +++++++++++++++++++++
+ pcr-calc/sinit_hash.h  |  92 +++++++++++++
+ pcr-calc/tb_policy.c   | 103 ++++++++++++++
+ 9 files changed, 1606 insertions(+)
+ create mode 100644 pcr-calc/Makefile
+ create mode 100644 pcr-calc/acmod.c
+ create mode 100644 pcr-calc/hash.c
+ create mode 100644 pcr-calc/heap.c
+ create mode 100644 pcr-calc/heap.h
+ create mode 100644 pcr-calc/module_hash.c
+ create mode 100644 pcr-calc/sinit_hash.c
+ create mode 100644 pcr-calc/sinit_hash.h
+ create mode 100644 pcr-calc/tb_policy.c
+
+diff --git a/pcr-calc/Makefile b/pcr-calc/Makefile
+new file mode 100644
+index 0000000..4f402de
+--- /dev/null
++++ b/pcr-calc/Makefile
+@@ -0,0 +1,70 @@
++# Copyright (c) 2006-2010, Intel Corporation
++# All rights reserved.
++
++# -*- mode: Makefile; -*-
++
++#
++# utils makefile
++#
++
++ROOTDIR ?= $(CURDIR)/..
++
++include $(ROOTDIR)/Config.mk
++
++TARGETS := sinit_hash module_hash
++
++CFLAGS += -D_LARGEFILE64_SOURCE
++
++LIBS += -lcrypto -lz
++
++ifdef HAVE_BZIP
++BZIP_LIB := -lbz2
++else
++BZIP_LIB := 
++endif
++
++#
++# universal targets
++#
++build : $(TARGETS)
++
++
++dist : install
++
++
++install :
++	@set -e; for i in $(TARGETS);\
++	do \
++		$(MAKE) DISTDIR=$(DISTDIR) INST_TARGET=$(DISTDIR)/usr/sbin/$$i do_install; \
++	done
++
++.PHONY: do_install
++do_install : $(INST_TARGET)
++
++$(INST_TARGET) : $(notdir $(INST_TARGET))
++	[ -d $(DISTDIR)/usr/sbin ] || $(INSTALL_DIR) $(DISTDIR)/usr/sbin
++	$(INSTALL_PROG) -t $(DISTDIR)/usr/sbin $^
++
++
++clean :
++	rm -f $(TARGETS) *~ *.o *.mod.* *.symvers
++
++
++distclean : clean
++
++
++#
++# dependencies
++#
++
++BUILD_DEPS := $(ROOTDIR)/Config.mk $(CURDIR)/Makefile
++
++
++sinit_hash : acmod.o hash.o heap.o sinit_hash.o tb_policy.o
++	$(CC) $(CFLAGS) $(LDFLAGS) $^ $(LIBS) -o $@
++
++module_hash : module_hash.o hash.o
++	$(CC) $(CFLAGS) $(LDFLAGS) $^ $(LIBS) $(BZIP_LIB) -o $@
++
++%.o : %.c $(BUILD_DEPS)
++	$(CC) $(CFLAGS) -DNO_TBOOT_LOGLVL -c $< -o $@
+diff --git a/pcr-calc/acmod.c b/pcr-calc/acmod.c
+new file mode 100644
+index 0000000..053049d
+--- /dev/null
++++ b/pcr-calc/acmod.c
+@@ -0,0 +1,158 @@
++/*
++ * acmod.c: loads and hashes SINIT ACM
++ *
++ * Copyright (c) 2015 Daniel P. Smith
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ *
++ *   * Redistributions of source code must retain the above copyright
++ *     notice, this list of conditions and the following disclaimer.
++ *   * Redistributions in binary form must reproduce the above
++ *     copyright notice, this list of conditions and the following
++ *     disclaimer in the documentation and/or other materials provided
++ *     with the distribution.
++ *   * Neither the name of the Intel Corporation nor the names of its
++ *     contributors may be used to endorse or promote products derived
++ *     from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
++ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
++ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
++ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
++ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
++ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
++ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
++ * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED
++ * OF THE POSSIBILITY OF SUCH DAMAGE.
++ *
++ */
++
++#include <stdlib.h>
++#include <stddef.h>
++#include <limits.h>
++#include <sys/types.h>
++#include <sys/stat.h>
++#include <fcntl.h>
++#include <unistd.h>
++#include <sys/mman.h>
++#include "sinit_hash.h"
++
++#define SINIT_MLE_DATA_VER7 7
++
++bool load_acm(struct mle_env *env, const char *path) {
++	int fd;
++	struct stat st;
++	void *buf = NULL;
++
++	fd = open(path, O_RDONLY);
++	if ( fd == -1 ) {
++		error_msg("cannot open %s\n", path);
++		return false;
++	}
++
++	if (fstat(fd, &st) == -1) {
++		error_msg("cannot stat %s\n", path);
++		goto fd;
++	}
++
++	if (st.st_size < (off_t) sizeof(acm_hdr_t) ) {
++		error_msg("%s does not appear to be an AC Module\n", path);
++		goto fd;
++	}
++
++	buf = mmap(NULL, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
++	if ( buf == MAP_FAILED ) {
++		error_msg("cannot mmap %s\n", path);
++		goto fd;
++	}
++	
++	env->acm_size = st.st_size;
++	env->_acm_buf = buf;
++	env->acm_hdr = (acm_hdr_t *) buf;
++	env->acm_fd = fd;
++	return true;
++
++fd:
++	close(fd);
++	return false;
++}
++
++void unload_acm(struct mle_env *env) {
++	if (env->_acm_buf)
++		munmap(env->_acm_buf, env->acm_size);
++
++	close(env->acm_fd);
++}
++
++/* Calculates the hash of the ACM. */
++bool acmod_hash(struct mle_env *env) {
++	acm_hdr_t *hdr = env->acm_hdr; /* avoid three levels of dereference */
++	sinit_mle_data_t *sinit_mle_data;
++	size_t user_size, hdr_size, buf_size;
++	unsigned char *buf, *p;
++	bool ret = false;
++
++	if (hdr == NULL || env->txt_heap == NULL)
++		return false;
++
++	sinit_mle_data = get_sinit_mle_data_start(env->txt_heap);
++
++	/* The hash consist of the first 128 bytes of the header, the user
++	 * area of the AC module and the SINIT flags in the EDX register
++	 */
++	hdr_size = offsetof(acm_hdr_t, rsa2048_pubkey);
++	user_size = env->acm_size - (hdr->user_area - (uint8_t *)hdr);
++
++	if (hdr_size + user_size < UINT_MAX)
++		buf_size = hdr_size + user_size;
++	else
++		return false;
++
++	p = buf = malloc(buf_size);
++
++	if (buf == NULL)
++		return false;
++
++	memcpy(p, hdr, hdr_size);
++	p += hdr_size;
++	memcpy(p, hdr->user_area, user_size);
++
++	if (sinit_mle_data->version > SINIT_MLE_DATA_VER7)
++		ret = hash_buffer(buf, buf_size,
++				&env->acm_hash ,TB_HALG_SHA256); 
++	else
++		ret = hash_buffer(buf, buf_size,
++				&env->acm_hash ,TB_HALG_SHA1);
++
++	if (!ret)
++		goto bail;
++
++	memset(buf,0,buf_size);
++
++	p=buf;
++	buf_size=0;
++
++	if (sinit_mle_data->version > SINIT_MLE_DATA_VER7) {
++		memcpy(buf, env->acm_hash.sha256, sizeof(env->acm_hash.sha256));
++		buf_size += sizeof(env->acm_hash.sha256);
++	} else {
++		memcpy(buf, env->acm_hash.sha1, sizeof(env->acm_hash.sha1));
++		buf_size += sizeof(env->acm_hash.sha1);
++	}
++	p += buf_size;
++
++	memcpy(p, &(sinit_mle_data->edx_senter_flags), sizeof(uint32_t));
++	buf_size += sizeof(uint32_t);
++
++	ret = hash_buffer(buf, buf_size, &env->acm_hash, TB_HALG_SHA1);
++
++bail:
++	free(buf);
++	return ret;
++}
+diff --git a/pcr-calc/hash.c b/pcr-calc/hash.c
+new file mode 100644
+index 0000000..8dac43a
+--- /dev/null
++++ b/pcr-calc/hash.c
+@@ -0,0 +1,210 @@
++/*
++ * hash.c: support functions for tb_hash_t type
++ *
++ * Copyright (c) 2015, Daniel P. Smith
++ * Copyright (c) 2006-2008, Intel Corporation
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ *
++ *   * Redistributions of source code must retain the above copyright
++ *     notice, this list of conditions and the following disclaimer.
++ *   * Redistributions in binary form must reproduce the above
++ *     copyright notice, this list of conditions and the following
++ *     disclaimer in the documentation and/or other materials provided
++ *     with the distribution.
++ *   * Neither the name of the Intel Corporation nor the names of its
++ *     contributors may be used to endorse or promote products derived
++ *     from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
++ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
++ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
++ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
++ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
++ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
++ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
++ * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED
++ * OF THE POSSIBILITY OF SUCH DAMAGE.
++ *
++ */
++
++#include <stdlib.h>
++#include <openssl/evp.h>
++#include "sinit_hash.h"
++
++/*
++ * are_hashes_equal
++ *
++ * compare whether two hash values are equal.
++ *
++ */
++bool are_hashes_equal(const tb_hash_t *hash1, const tb_hash_t *hash2,
++                             uint16_t hash_alg)
++{
++    if ( ( hash1 == NULL ) || ( hash2 == NULL ) ) {
++        error_msg("Error: hash pointer is zero.\n");
++        return false;
++    }
++
++    if ( hash_alg == TB_HALG_SHA1 )
++        return (memcmp(hash1, hash2, SHA1_LENGTH) == 0);
++    else if ( hash_alg == TB_HALG_SHA256 )
++        return (memcmp(hash1, hash2, SHA256_LENGTH) == 0);
++    else {
++        error_msg("unsupported hash alg (%d)\n", hash_alg);
++        return false;
++    }
++}
++
++/*
++ * hash_buffer
++ *
++ * hash the buffer according to the algorithm
++ *
++ */
++bool hash_buffer(const unsigned char* buf, size_t size, tb_hash_t *hash,
++                        uint16_t hash_alg)
++{
++    if ( hash == NULL ) {
++        error_msg("Error: There is no space for output hash.\n");
++        return false;
++    }
++
++    if ( hash_alg == TB_HALG_SHA1 ) {
++        EVP_MD_CTX *ctx;
++        const EVP_MD *md;
++
++        md = EVP_sha1();
++        ctx = EVP_MD_CTX_create();
++        EVP_DigestInit_ex(ctx, md, NULL);
++        EVP_DigestUpdate(ctx, buf, size);
++        EVP_DigestFinal_ex(ctx, hash->sha1, NULL);
++        EVP_MD_CTX_destroy(ctx);
++
++        return true;
++    }
++    else if ( hash_alg == TB_HALG_SHA256 ) {
++        EVP_MD_CTX *ctx;
++        const EVP_MD *md;
++
++        md = EVP_sha256();
++        ctx = EVP_MD_CTX_create();
++        EVP_DigestInit_ex(ctx, md, NULL);
++        EVP_DigestUpdate(ctx, buf, size);
++        EVP_DigestFinal_ex(ctx, hash->sha256, NULL);
++        EVP_MD_CTX_destroy(ctx);
++
++        return true;
++    }
++    else {
++        error_msg("unsupported hash alg (%d)\n", hash_alg);
++        return false;
++    }
++}
++
++/*
++ * extend_hash
++ *
++ * perform "extend" of two hashes (i.e. hash1 = SHA(hash1 || hash2)
++ *
++ */
++bool extend_hash(tb_hash_t *hash1, const tb_hash_t *hash2,
++                        uint16_t hash_alg)
++{
++    uint8_t buf[2*sizeof(tb_hash_t)];
++
++    if ( hash1 == NULL || hash2 == NULL ) {
++        error_msg("Error: There is no space for output hash.\n");
++        return false;
++    }
++
++    if ( hash_alg == TB_HALG_SHA1 ) {
++        EVP_MD_CTX *ctx;
++        const EVP_MD *md;
++
++        memcpy(buf, &(hash1->sha1), sizeof(hash1->sha1));
++        memcpy(buf + sizeof(hash1->sha1), &(hash2->sha1), sizeof(hash2->sha1));
++        md = EVP_sha1();
++        ctx = EVP_MD_CTX_create();
++        EVP_DigestInit_ex(ctx, md, NULL);
++        EVP_DigestUpdate(ctx, buf, 2*sizeof(hash1->sha1));
++        EVP_DigestFinal_ex(ctx, hash1->sha1, NULL);
++        EVP_MD_CTX_destroy(ctx);
++        return true;
++    }
++    else if ( hash_alg == TB_HALG_SHA256 ) {
++        EVP_MD_CTX *ctx;
++        const EVP_MD *md;
++
++        memcpy(buf, &(hash1->sha256), sizeof(hash1->sha256));
++        memcpy(buf + sizeof(hash1->sha256), &(hash2->sha256), sizeof(hash1->sha256));
++        md = EVP_sha256();
++        ctx = EVP_MD_CTX_create();
++        EVP_DigestInit_ex(ctx, md, NULL);
++        EVP_DigestUpdate(ctx, buf, 2*sizeof(hash1->sha256));
++        EVP_DigestFinal_ex(ctx, hash1->sha256, NULL);
++        EVP_MD_CTX_destroy(ctx);
++        return true;
++    }
++    else {
++        error_msg("unsupported hash alg (%d)\n", hash_alg);
++        return false;
++    }
++}
++
++void print_hash(const tb_hash_t *hash, uint16_t hash_alg)
++{
++    if ( hash == NULL ) {
++        error_msg("NULL");
++        return;
++    }
++
++    if ( hash_alg == TB_HALG_SHA1 ) {
++        for ( unsigned int i = 0; i < sizeof(hash->sha1); i++ )
++            printf("%02x ", hash->sha1[i]);
++        printf("\n");
++    }
++    else if ( hash_alg == TB_HALG_SHA256 ) {
++        for ( unsigned int i = 0; i < sizeof(hash->sha256); i++ )
++            printf("%02x ", hash->sha256[i]);
++        printf("\n");
++    }
++    else {
++        error_msg("unsupported hash alg (%d)\n", hash_alg);
++        return;
++    }
++}
++
++void copy_hash(tb_hash_t *dest_hash, const tb_hash_t *src_hash,
++                      uint16_t hash_alg)
++{
++    if ( dest_hash == NULL || dest_hash == NULL ) {
++        error_msg("hashes are NULL\n");
++        return;
++    }
++
++    if ( hash_alg == TB_HALG_SHA1 )
++        memcpy(dest_hash, src_hash, SHA1_LENGTH);
++    else if ( hash_alg == TB_HALG_SHA256 )
++        memcpy(dest_hash, src_hash, SHA256_LENGTH);
++    else
++        error_msg("unsupported hash alg (%d)\n", hash_alg);
++}
++
++
++
++/*
++ * Local variables:
++ * mode: C
++ * c-set-style: "BSD"
++ * c-basic-offset: 4
++ * tab-width: 4
++ * indent-tabs-mode: nil
++ * End:
++ */
+diff --git a/pcr-calc/heap.c b/pcr-calc/heap.c
+new file mode 100644
+index 0000000..0f3c5e2
+--- /dev/null
++++ b/pcr-calc/heap.c
+@@ -0,0 +1,189 @@
++/*
++ * Copyright (c) 2015, Daniel P. Smith
++ * Copyright (c) 2006-2008, Intel Corporation
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ *
++ *   * Redistributions of source code must retain the above copyright
++ *     notice, this list of conditions and the following disclaimer.
++ *   * Redistributions in binary form must reproduce the above
++ *     copyright notice, this list of conditions and the following
++ *     disclaimer in the documentation and/or other materials provided
++ *     with the distribution.
++ *   * Neither the name of the Intel Corporation nor the names of its
++ *     contributors may be used to endorse or promote products derived
++ *     from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
++ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
++ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
++ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
++ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
++ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
++ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
++ * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED
++ * OF THE POSSIBILITY OF SUCH DAMAGE.
++ *
++ */
++
++
++#include <stdint.h>
++#include <stdlib.h>
++#include <sys/types.h>
++#include <sys/stat.h>
++#include <sys/mman.h>
++#include <fcntl.h>
++#include <unistd.h>
++#include <errno.h>
++
++#include "sinit_hash.h"
++
++#define TXT_PUB_CONFIG_REGS_BASE       0xfed30000
++#define TXT_PRIV_CONFIG_REGS_BASE      0xfed20000
++
++#define TXT_CONFIG_REGS_SIZE           (TXT_PUB_CONFIG_REGS_BASE - \
++                                        TXT_PRIV_CONFIG_REGS_BASE)
++
++/* offsets to config regs (from either public or private _BASE) */
++#define TXTCR_STS                   0x0000
++#define TXTCR_ESTS                  0x0008
++#define TXTCR_ERRORCODE             0x0030
++#define TXTCR_CMD_RESET             0x0038
++#define TXTCR_CMD_CLOSE_PRIVATE     0x0048
++#define TXTCR_VER_FSBIF             0x0100
++#define TXTCR_DIDVID                0x0110
++#define TXTCR_VER_QPIIF             0x0200
++#define TXTCR_CMD_UNLOCK_MEM_CONFIG 0x0218
++#define TXTCR_SINIT_BASE            0x0270
++#define TXTCR_SINIT_SIZE            0x0278
++#define TXTCR_MLE_JOIN              0x0290
++#define TXTCR_HEAP_BASE             0x0300
++#define TXTCR_HEAP_SIZE             0x0308
++#define TXTCR_MSEG_BASE             0x0310
++#define TXTCR_MSEG_SIZE             0x0318
++#define TXTCR_DPR                   0x0330
++#define TXTCR_CMD_OPEN_LOCALITY1    0x0380
++#define TXTCR_CMD_CLOSE_LOCALITY1   0x0388
++#define TXTCR_CMD_OPEN_LOCALITY2    0x0390
++#define TXTCR_CMD_CLOSE_LOCALITY2   0x0398
++#define TXTCR_PUBLIC_KEY            0x0400
++#define TXTCR_CMD_SECRETS           0x08e0
++#define TXTCR_CMD_NO_SECRETS        0x08e8
++#define TXTCR_E2STS                 0x08f0
++
++
++static inline uint64_t read_txt_config_reg(void *config_regs_base,
++                                           uint32_t reg)
++{       
++	/* these are MMIO so make sure compiler doesn't optimize */
++	return *(volatile uint64_t *)(config_regs_base + reg);
++}                  
++
++
++bool load_heap(struct mle_env *env) {
++	void *buf = NULL;
++	uint64_t heap = 0;
++	uint64_t heap_size = 0;
++
++	env->mem_fd = open("/dev/mem", O_RDONLY);
++	if ( env->mem_fd == -1 ) {
++		error_msg("cannot open /dev/mem\n");
++		goto fail;
++	}
++
++	buf = mmap(NULL, TXT_CONFIG_REGS_SIZE, PROT_READ,
++			MAP_PRIVATE, env->mem_fd, TXT_PUB_CONFIG_REGS_BASE);
++	if ( buf == MAP_FAILED ) {
++		error_msg("cannot map config regs by mmap()\n");
++		goto fail_fd;
++	}
++
++	heap = read_txt_config_reg(buf, TXTCR_HEAP_BASE);
++	heap_size = read_txt_config_reg(buf, TXTCR_HEAP_SIZE);
++	munmap(buf, TXT_CONFIG_REGS_SIZE);
++
++	if ( heap && heap_size ) {
++		env->txt_heap = (txt_heap_t *)mmap(NULL, heap_size, PROT_READ,
++			MAP_PRIVATE, env->mem_fd, heap);
++		if ( buf == MAP_FAILED ) {
++			printf("ERROR: cannot map TXT heap by mmap()\n");
++			goto fail_fd;
++		}
++
++		env->txt_heap_size = heap_size;
++	} else {
++		error_msg("empty heap location and size\n");
++		goto fail_fd;
++	}
++
++	return true;
++
++fail_fd:
++	close(env->mem_fd);
++fail:
++	return false;
++}
++
++void unload_heap(struct mle_env *env) {
++	if (env->txt_heap)
++		munmap(env->txt_heap, env->txt_heap_size);
++
++	close(env->mem_fd);
++}
++
++/* If SINIT to MLE data table versions < 8 */
++#define V7_BUFFER_SIZE 76
++
++/* SINIT to MLE data table versions >= 8 */
++#define V8_BUFFER_SIZE 80
++
++#define MEASURE_OS_SINT 1<<2
++
++/* Calculates the hash of the TXT heap. */
++bool heap_hash(struct mle_env *env) {
++	sinit_mle_data_t *sinit_mle_data;
++	os_sinit_data_t *os_sinit_data;
++	unsigned char *buf, *ptr;
++	uint8_t bufsize;
++	bool ret;
++
++	if (env->txt_heap == NULL)
++		return false;
++
++	sinit_mle_data = get_sinit_mle_data_start(env->txt_heap);
++	os_sinit_data = get_os_sinit_data_start(env->txt_heap);
++
++	bufsize = sinit_mle_data->version < 8 ? V7_BUFFER_SIZE : V8_BUFFER_SIZE;
++	buf = malloc(bufsize);
++
++	if (buf)
++		ptr = buf;
++	else
++		return false;
++
++	BUF_APPEND(ptr, &sinit_mle_data->bios_acm_id, sizeof(sha1_hash_t));
++	BUF_APPEND(ptr, &sinit_mle_data->mseg_valid, sizeof(uint64_t));
++	BUF_APPEND(ptr, &sinit_mle_data->stm_hash, sizeof(sha1_hash_t));
++	BUF_APPEND(ptr, &sinit_mle_data->lcp_policy_control, sizeof(uint32_t));
++	BUF_APPEND(ptr, &sinit_mle_data->lcp_policy_hash, sizeof(sha1_hash_t));
++
++	if (sinit_mle_data->lcp_policy_control & MEASURE_OS_SINT)
++		BUF_APPEND(ptr, &os_sinit_data->capabilities._raw, sizeof(uint32_t));
++	else
++		BUF_Z_APPEND(ptr, 4);
++
++	if (sinit_mle_data->version > 7)
++		BUF_APPEND(ptr, &sinit_mle_data->proc_scrtm_status, sizeof(uint32_t));
++
++	ret = hash_buffer(buf, bufsize, &env->txt_hash, TB_HALG_SHA1);
++	free(buf);
++
++	return ret;
++}
++
+diff --git a/pcr-calc/heap.h b/pcr-calc/heap.h
+new file mode 100644
+index 0000000..c4a85aa
+--- /dev/null
++++ b/pcr-calc/heap.h
+@@ -0,0 +1,266 @@
++/*
++ * heap.h: Intel(r) TXT heap definitions
++ *
++ * Copyright (c) 2003-2011, Intel Corporation
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ *
++ *   * Redistributions of source code must retain the above copyright
++ *     notice, this list of conditions and the following disclaimer.
++ *   * Redistributions in binary form must reproduce the above
++ *     copyright notice, this list of conditions and the following
++ *     disclaimer in the documentation and/or other materials provided
++ *     with the distribution.
++ *   * Neither the name of the Intel Corporation nor the names of its
++ *     contributors may be used to endorse or promote products derived
++ *     from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
++ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
++ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
++ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
++ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
++ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
++ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
++ * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED
++ * OF THE POSSIBILITY OF SUCH DAMAGE.
++ *
++ */
++
++#ifndef __TXT_HEAP_H__
++#define __TXT_HEAP_H__
++
++/*
++ * Extensible TXT heap data structure
++ */
++
++typedef struct __packed {
++    uint32_t   type;
++    uint32_t   size;
++    uint8_t    data[];
++} heap_ext_data_element_t;
++
++/*
++ * HEAP_END_ELEMENT
++ */
++#define HEAP_EXTDATA_TYPE_END             0
++
++/* size == 8; there is no data[] */
++
++/*
++ * HEAP_BIOS_SPEC_VER_ELEMENT
++ */
++#define HEAP_EXTDATA_TYPE_BIOS_SPEC_VER   1
++
++typedef struct __packed {
++    uint16_t   spec_ver_major;
++    uint16_t   spec_ver_minor;
++    uint16_t   spec_ver_rev;
++} heap_bios_spec_ver_elt_t;
++
++/*
++ * HEAP_ACM_ELEMENT
++ */
++#define HEAP_EXTDATA_TYPE_ACM             2
++
++typedef struct __packed {
++    uint32_t   num_acms;
++    uint64_t   acm_addrs[];
++} heap_acm_elt_t;
++
++/*
++ * HEAP_CUSTOM_ELEMENT
++ */
++#define HEAP_EXTDATA_TYPE_CUSTOM          4
++
++typedef struct __packed {
++    uuid_t     uuid;
++    uint8_t    data[];
++} heap_custom_elt_t;
++
++
++/*
++ * data-passing structures contained in TXT heap:
++ *   - BIOS
++ *   - OS/loader to MLE
++ *   - OS/loader to SINIT
++ *   - SINIT to MLE
++ */
++
++/*
++ * BIOS structure
++ */
++typedef struct __packed {
++    uint32_t  version;              /* currently 2-4 */
++    uint32_t  bios_sinit_size;
++    uint64_t  lcp_pd_base;
++    uint64_t  lcp_pd_size;
++    uint32_t  num_logical_procs;
++    /* versions >= 3 */
++    uint64_t  flags;
++    /* versions >= 4 */
++    heap_ext_data_element_t  ext_data_elts[];
++} bios_data_t;
++
++/*
++ * OS/loader to MLE structure
++ *   - private to tboot (so can be any format we need)
++ */
++#define MAX_LCP_PO_DATA_SIZE     64*1024  /* 64k */
++#define MAX_EVENT_LOG_SIZE       4*1024   /* 4k */
++
++
++#define MIN_OS_SINIT_DATA_VER    4
++#define MAX_OS_SINIT_DATA_VER    6
++/*
++ * OS/loader to SINIT structure
++ */
++typedef struct __packed {
++    uint32_t    version;           /* currently 4-6 */
++    uint32_t    reserved;
++    uint64_t    mle_ptab;
++    uint64_t    mle_size;
++    uint64_t    mle_hdr_base;
++    uint64_t    vtd_pmr_lo_base;
++    uint64_t    vtd_pmr_lo_size;
++    uint64_t    vtd_pmr_hi_base;
++    uint64_t    vtd_pmr_hi_size;
++    uint64_t    lcp_po_base;
++    uint64_t    lcp_po_size;
++    txt_caps_t  capabilities;
++    /* versions >= 5 */
++    uint64_t    efi_rsdt_ptr;
++    /* versions >= 6 */
++    heap_ext_data_element_t  ext_data_elts[];
++} os_sinit_data_t;
++
++/*
++ * SINIT to MLE structure
++ */
++#define MDR_MEMTYPE_GOOD                0x00
++#define MDR_MEMTYPE_SMM_OVERLAY         0x01
++#define MDR_MEMTYPE_SMM_NONOVERLAY      0x02
++#define MDR_MEMTYPE_PCIE_CONFIG_SPACE   0x03
++#define MDR_MEMTYPE_PROTECTED           0x04
++
++typedef struct __packed {
++    uint64_t  base;
++    uint64_t  length;
++    uint8_t   mem_type;
++    uint8_t   reserved[7];
++} sinit_mdr_t;
++
++typedef struct __packed {
++    uint32_t     version;             /* currently 6-8 */
++    sha1_hash_t  bios_acm_id;
++    uint32_t     edx_senter_flags;
++    uint64_t     mseg_valid;
++    sha1_hash_t  sinit_hash;
++    sha1_hash_t  mle_hash;
++    sha1_hash_t  stm_hash;
++    sha1_hash_t  lcp_policy_hash;
++    uint32_t     lcp_policy_control;
++    uint32_t     rlp_wakeup_addr;
++    uint32_t     reserved;
++    uint32_t     num_mdrs;
++    uint32_t     mdrs_off;
++    uint32_t     num_vtd_dmars;
++    uint32_t     vtd_dmars_off;
++    /* versions >= 8 */
++    uint32_t     proc_scrtm_status;
++} sinit_mle_data_t;
++
++
++/*
++ * TXT heap data format and field accessor fns
++ */
++
++/*
++ * offset                 length                      field
++ * ------                 ------                      -----
++ *  0                      8                          bios_data_size
++ *  8                      bios_data_size - 8      bios_data
++ *
++ *  bios_data_size      8                          os_mle_data_size
++ *  bios_data_size +    os_mle_data_size - 8       os_mle_data
++ *   8
++ *
++ *  bios_data_size +    8                          os_sinit_data_size
++ *   os_mle_data_size
++ *  bios_data_size +    os_sinit_data_size - 8     os_sinit_data
++ *   os_mle_data_size +
++ *   8
++ *
++ *  bios_data_size +    8                          sinit_mle_data_size
++ *   os_mle_data_size +
++ *   os_sinit_data_size
++ *  bios_data_size +    sinit_mle_data_size - 8    sinit_mle_data
++ *   os_mle_data_size +
++ *   os_sinit_data_size +
++ *   8
++ */
++
++typedef void   txt_heap_t;
++
++
++static inline uint64_t get_bios_data_size(const txt_heap_t *heap)
++{
++    return *(uint64_t *)heap;
++}
++
++static inline bios_data_t *get_bios_data_start(const txt_heap_t *heap)
++{
++    return (bios_data_t *)((char*)heap + sizeof(uint64_t));
++}
++
++static inline uint64_t get_os_mle_data_size(const txt_heap_t *heap)
++{
++    return *(uint64_t *)(heap + get_bios_data_size(heap));
++}
++
++static inline uint64_t get_os_sinit_data_size(const txt_heap_t *heap)
++{
++    return *(uint64_t *)(heap + get_bios_data_size(heap) +
++                         get_os_mle_data_size(heap));
++}
++
++static inline os_sinit_data_t *get_os_sinit_data_start(const txt_heap_t *heap)
++{
++    return (os_sinit_data_t *)(heap + get_bios_data_size(heap) +
++                               get_os_mle_data_size(heap) +
++                               sizeof(uint64_t));
++}
++
++static inline uint64_t get_sinit_mle_data_size(const txt_heap_t *heap)
++{
++    return *(uint64_t *)(heap + get_bios_data_size(heap) +
++                         get_os_mle_data_size(heap) +
++                         get_os_sinit_data_size(heap));
++}
++
++static inline sinit_mle_data_t *get_sinit_mle_data_start(const txt_heap_t *heap)
++{
++    return (sinit_mle_data_t *)(heap + get_bios_data_size(heap) +
++                                get_os_mle_data_size(heap) +
++                                get_os_sinit_data_size(heap) +
++                                sizeof(uint64_t));
++}
++
++
++#endif      /* __TXT_HEAP_H__ */
++
++
++/*
++ * Local variables:
++ * mode: C
++ * c-basic-offset: 4
++ * tab-width: 4
++ * indent-tabs-mode: nil
++ * End:
++ */
+diff --git a/pcr-calc/module_hash.c b/pcr-calc/module_hash.c
+new file mode 100644
+index 0000000..534a3c6
+--- /dev/null
++++ b/pcr-calc/module_hash.c
+@@ -0,0 +1,361 @@
++/*
++ * 
++ * Copyright (c) 2015 Daniel P. Smith
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ *
++ *   * Redistributions of source code must retain the above copyright
++ *     notice, this list of conditions and the following disclaimer.
++ *   * Redistributions in binary form must reproduce the above
++ *     copyright notice, this list of conditions and the following
++ *     disclaimer in the documentation and/or other materials provided
++ *     with the distribution.
++ *   * Neither the name of the Intel Corporation nor the names of its
++ *     contributors may be used to endorse or promote products derived
++ *     from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
++ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
++ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
++ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
++ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
++ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
++ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
++ * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED
++ * OF THE POSSIBILITY OF SUCH DAMAGE.
++ *
++ */
++
++#include <stdio.h>
++#include <stdlib.h>
++#include <memory.h>
++#include <stdbool.h>
++#include <stdint.h>
++#include <stdarg.h>
++#include <getopt.h>
++#include <zlib.h>
++#include <sys/stat.h>
++#include <openssl/evp.h>
++#include "../include/hash.h"
++
++#if HAVE_BZIP
++#include <bzlib.h>
++#endif
++
++#define error_msg(fmt, ...)         fprintf(stderr, fmt, ##__VA_ARGS__)
++
++#define BUFFER_SIZE 1024
++
++#define NO_COMPRESSION 1
++#define GZ_COMPRESSION 1<<1
++#if HAVE_BZIP
++#define BZ_COMPRESSION 1<<2
++#endif
++
++
++#if HAVE_BZIP
++bool read_bzip2(const char *path, FILE *dest_fd, size_t *len) {
++	FILE *fd;
++	BZFILE *bzfd;
++	char buf[BUFFER_SIZE];
++	size_t bytes;
++	int bzerror;
++
++	*len = 0;
++	if (!dest_fd)
++		goto fail;
++
++	fd = fopen(path, "r");
++	if (!fd) {
++		goto fail;
++	}
++
++	bzfd = BZ2_bzReadOpen(&bzerror, fd, 0, 0, NULL, 0 );
++	if (bzerror != BZ_OK) {
++		goto fail_bzfd;
++	}
++
++	bzerror = BZ_OK;
++	while (bzerror == BZ_OK) {
++		bytes = BZ2_bzRead(&bzerror, bzfd, buf, BUFFER_SIZE);
++		if (bzerror == BZ_OK || bzerror == BZ_STREAM_END) {
++			*len += bytes;
++			if (fwrite(buf, 1, bytes, dest_fd) != bytes)
++				goto fail_bzfd;
++		} else {
++			goto fail_bzfd;
++		}
++	}
++
++	BZ2_bzReadClose(&bzerror, bzfd);
++	fclose(fd);
++	return true;
++
++fail_bzfd:
++	BZ2_bzReadClose(&bzerror, bzfd);
++	fclose(fd);
++fail:
++	return false;
++}
++#endif
++
++bool read_gzip(const char *path, FILE *dest_fd, size_t *len) {
++	gzFile gzfd = NULL;
++	char buf[BUFFER_SIZE];
++	size_t bytes;
++
++	*len = 0;
++
++	gzfd = gzopen(path, "rb");
++	if (!gzfd)
++		goto fail;
++
++	while (!gzeof(gzfd)) {
++		bytes = gzread(gzfd, buf, BUFFER_SIZE);
++		*len += bytes;
++		if (fwrite(buf, 1, bytes, dest_fd) != bytes)
++			goto fail_gz;
++	}
++
++	gzclose(gzfd);
++	return true;
++
++fail_gz:
++	gzclose(gzfd);
++fail:
++	return false;
++}
++
++bool read_module(const char *path, char **buffer, size_t *len, uint8_t flag) {
++	FILE *tmpfd = NULL;
++	struct stat st;
++
++	*len = 0;
++	*buffer = NULL;
++
++	if (stat(path, &st))
++		goto fail;
++
++	tmpfd = tmpfile();
++	if (!tmpfd)
++		goto fail;
++
++	if ((flag & NO_COMPRESSION) || (flag & GZ_COMPRESSION)) {
++		if (read_gzip(path, tmpfd, len) == false)
++			goto fail_tmp;
++#if HAVE_BZIP
++	} else if (flag & BZ_COMPRESSION) {
++		if (read_bzip2(path, tmpfd, len) == false)
++			goto fail_tmp;
++#endif
++	} else {
++		goto fail_tmp;
++	}
++
++	if (*len > 0)
++		fseek(tmpfd, 0, SEEK_SET);
++	else
++		goto fail_tmp;
++
++	*buffer = malloc(*len);
++	if (*buffer == NULL)
++		goto fail_tmp;
++	memset(*buffer, 0, *len);
++
++	if (fread(*buffer, 1, *len, tmpfd) != *len)
++		goto fail_buf;
++
++	fclose(tmpfd);
++	return true;
++
++fail_buf:
++	free(*buffer);
++fail_tmp:
++	fclose(tmpfd);
++fail:
++	return false;
++}
++
++bool hash_module(tb_hash_t *hash, const char* cmdline, const char *module, size_t size) {
++	tb_hash_t img_hash;
++
++	if (cmdline == NULL)
++		cmdline = "";
++
++	if (module == NULL) {
++		error_msg("passed an empty module for hashing\n");
++		return false;
++	}
++
++	if (!hash_buffer((const unsigned char *)cmdline, strlen(cmdline), hash,
++	      TB_HALG_SHA1)) {
++		error_msg("failed to hash cmdline\n");
++		return false;
++	}
++
++	/* hash image and extend into cmdline hash */
++	if (!hash_buffer((const unsigned char *)module, size, &img_hash, TB_HALG_SHA1)) {
++		error_msg("failed to hash module\n");
++		return false;
++	}
++	if (!extend_hash(hash, &img_hash, TB_HALG_SHA1)) {
++		error_msg("failed to extend cmdline hash with  module hash\n");
++		return false;
++	}
++
++	return true;
++}
++
++void print_sha1(tb_hash_t *hash) {
++	int i;
++
++	if (hash == NULL)
++		return;
++
++	for (i = 0; i < SHA1_LENGTH; i++)
++		printf("%02x", hash->sha1[i]);
++
++	printf("\n");
++}
++
++bool read_hash(const char *hexstr, tb_hash_t *hash) {
++	int len = strlen(hexstr);
++	int i = 0, j = 0;
++	unsigned char *buf = (unsigned char *)hash->sha1;
++
++	if (len == 1 && hexstr[0] == '0') {
++		memset(buf, 0, SHA1_LENGTH);
++		return true;
++	}
++
++	if (len/2 != SHA1_LENGTH)
++		return false;
++
++	if (len % 2 == 1) {
++		if (sscanf(&(hexstr[0]), "%1hhx", &(buf[0])) != 1)
++			return false;
++
++		i = j = 1;
++	}
++
++	for (; i < len; i+=2, j++) {
++		if (sscanf(&(hexstr[i]), "%2hhx", &(buf[j])) != 1)
++			return false;
++	}
++
++	return true;
++}
++
++void print_help(void) {
++	error_msg("module_hash [-hjz] [-e hash_str] -c cmd_line module_file\n"
++		"\t-h Help: will print out this help message.\n"
++		"\t-j module is compressed with BZip2\n"
++		"\t-z module is compressed with GZip\n"
++		"\t-e hash_str Extend Hash: has to be extended with module hash.\n"
++		"\t-c cmd_line Command Line: the command line passed.\n"
++		"\tmodule_file: file name of module to hash.\n");
++}
++
++int main(int argc, char *argv[]) {
++	extern int optind;
++	int opt;
++	size_t mod_len;
++	char *module_path = NULL;
++	char *cmdline = NULL;
++	char *ext_str = NULL;
++	char *mod_buf = NULL;
++	uint8_t flags = NO_COMPRESSION;
++	tb_hash_t mod_hash, ext_hash;
++
++	while ((opt = getopt(argc, (char ** const)argv, "he:c:jz")) != -1) {
++		switch (opt) {
++			case 'c': 
++				cmdline = malloc(strlen(optarg) + 1);
++				if ( cmdline == NULL ) {
++					printf("Out of memory\n");
++					return 1;
++				}
++				strcpy(cmdline, optarg);
++			break;
++			case 'e': 
++				ext_str = malloc(strlen(optarg) + 1);
++				if ( ext_str == NULL ) {
++					printf("Out of memory\n");
++					return 1;
++				}
++				strcpy(ext_str, optarg);
++			break;
++#ifdef HAVE_BZIP
++			case 'j':
++				if (flags & GZ_COMPRESSION) {
++					print_help();
++					error_msg("Error: -j cannot be used inconjunction with -z");
++					return 1;
++				} else {
++					flags = BZ_COMPRESSION;
++				}
++			break;
++#endif
++			case 'z':
++#ifdef HAVE_BZIP
++				if (flags & BZ_COMPRESSION) {
++					print_help();
++					error_msg("Error: -z cannot be used inconjunction with -j");
++					return 1;
++				} else {
++					flags = GZ_COMPRESSION;
++				}
++#else
++				flags = GZ_COMPRESSION;
++#endif
++			break;
++			case 'h':
++				print_help();
++				free(cmdline);
++				return 1;
++			default:
++			break;
++		}
++	}
++
++	module_path = argv[optind];
++
++	if(read_module(module_path, &mod_buf, &mod_len, flags) == false) {
++		error_msg("failed to read in the module\n");
++		goto fail;
++	}
++
++	if (hash_module(&mod_hash, cmdline, mod_buf, mod_len) == false) {
++		error_msg("failed to hash the module\n");
++		goto fail;
++	}
++
++	if (ext_str != NULL) {
++		if (read_hash(ext_str, &ext_hash) == false) {
++			error_msg("failed to pass valid hash to -e\n");
++			goto fail;
++		}
++		if (extend_hash(&ext_hash, &mod_hash, TB_HALG_SHA1) == false) {
++			error_msg("failed to extend hash\n");
++			goto fail;
++		}
++
++		print_sha1(&ext_hash);
++	} else {
++		print_sha1(&mod_hash);
++	}
++
++	if (ext_str != NULL) free(ext_str);
++	if (cmdline != NULL) free(cmdline);
++	return 0;
++fail:
++	if (ext_str != NULL) free(ext_str);
++	if (cmdline != NULL) free(cmdline);
++	return 1;
++}
+diff --git a/pcr-calc/sinit_hash.c b/pcr-calc/sinit_hash.c
+new file mode 100644
+index 0000000..f5ea579
+--- /dev/null
++++ b/pcr-calc/sinit_hash.c
+@@ -0,0 +1,157 @@
++/*
++ * 
++ *
++ * Copyright (c) 2015 Daniel P. Smith
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ *
++ *   * Redistributions of source code must retain the above copyright
++ *     notice, this list of conditions and the following disclaimer.
++ *   * Redistributions in binary form must reproduce the above
++ *     copyright notice, this list of conditions and the following
++ *     disclaimer in the documentation and/or other materials provided
++ *     with the distribution.
++ *   * Neither the name of the Intel Corporation nor the names of its
++ *     contributors may be used to endorse or promote products derived
++ *     from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
++ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
++ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
++ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
++ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
++ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
++ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
++ * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED
++ * OF THE POSSIBILITY OF SUCH DAMAGE.
++ *
++ */
++
++#include <stdlib.h>
++#include <unistd.h>
++#include <getopt.h>
++#include <sys/mman.h>
++#include "sinit_hash.h"
++
++void print_help(void) {
++	error_msg("sinit_hash [-h] -p policy acmod_file\n"
++		"\t-h Help: will print out this help message.\n"
++		"\t-p policy Policy: the Measured/Verified Launch policy file.\n"
++		"\tacmod_file: file name of SINIT ACM binary to hash.\n");
++}
++
++void print_hex(tb_hash_t *hash) {
++	int i;
++
++	for (i = 0; i < SHA1_LENGTH; i++) {
++		printf("%02x", hash->sha1[i]);
++
++		if (i < SHA1_LENGTH - 1)
++			printf(" ");
++	}
++
++	printf("\n");
++}
++
++bool first_extend(struct mle_env *env, const char *acm_path, tb_hash_t *pcr17) {
++	if (!load_acm(env, acm_path))
++		goto error_acm;
++
++	if (!load_heap(env))
++		goto error_heap;
++
++	if (!(acmod_hash(env) && extend_hash(pcr17, &env->acm_hash, TB_HALG_SHA1)))
++		goto error_heap;
++
++	return true;
++error_heap:
++	unload_heap(env);
++error_acm:
++	unload_acm(env);
++	return false;
++}
++
++bool second_extend(struct mle_env *env, tb_hash_t *pcr17) {
++	if (env->txt_heap == NULL && !load_heap(env))
++		goto error;
++
++	if (!(heap_hash(env) && extend_hash(pcr17, &env->txt_hash, TB_HALG_SHA1)))
++		goto error;
++
++	return true;
++error:
++	debug("failed during second extend\n");
++	unload_heap(env);
++	return false;
++}
++
++bool third_extend(struct mle_env *env, const char *pol_path, tb_hash_t *pcr17) {
++	if (!load_tb_policy(env, pol_path))
++		goto error;
++
++	if (!(tb_policy_hash(env) && extend_hash(pcr17, &env->tb_policy_hash, TB_HALG_SHA1)))
++		goto error;
++
++	return true;
++error:
++	debug("failed during third extend\n");
++	unload_tb_policy(env);
++	return false;
++}
++
++int main(int argc, char *argv[]) {
++	extern int optind;
++	int opt;
++	char *pol_path = NULL, *acm_path;
++	struct mle_env env;
++	tb_hash_t pcr17;
++
++	while ((opt = getopt(argc, (char ** const)argv, "hp:")) != -1) {
++		switch (opt) {
++			case 'p': 
++				pol_path = malloc(strlen(optarg) + 1);
++				if ( pol_path == NULL ) {
++					error_msg("Out of memory\n");
++					return 1;
++				}
++				strcpy(pol_path, optarg);
++			break;
++			case 'h':
++				print_help();
++				free(pol_path);
++				return 1;
++			default:
++			break;
++		}
++	}
++
++	if (pol_path == NULL) {
++		print_help();
++		return 1;
++	}
++
++	acm_path = argv[optind];
++
++	memset(&pcr17, 0, sizeof(tb_hash_t));
++	if (!first_extend(&env, acm_path, &pcr17))
++		goto error;
++	if (!second_extend(&env, &pcr17))
++		goto error;
++	if (!third_extend(&env, pol_path, &pcr17))
++		goto error;
++
++	print_hex(&pcr17);
++
++	free(pol_path);
++	return 0;
++
++error:
++	free(pol_path);
++	return 1;
++}
+diff --git a/pcr-calc/sinit_hash.h b/pcr-calc/sinit_hash.h
+new file mode 100644
+index 0000000..5f7229d
+--- /dev/null
++++ b/pcr-calc/sinit_hash.h
+@@ -0,0 +1,92 @@
++/*
++ * pcr-calc.h: pcr-calc definitions
++ *
++ * Copyright (c) 2015 Daniel P. Smith
++ * All rights reserved.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
++ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
++ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
++ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
++ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
++ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
++ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
++ * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED
++ * OF THE POSSIBILITY OF SUCH DAMAGE.
++ *
++ */
++
++#ifndef __PCR_CALC_H__
++#define __PCR_CALC_H__
++
++#define error_msg(fmt, ...)         fprintf(stderr, fmt, ##__VA_ARGS__)
++#define info_msg(fmt, ...)          if (verbose) printf(fmt , ##__VA_ARGS__)
++
++#define PRINT printf
++
++#ifdef DEBUG
++#define debug(fmt, ...)         fprintf(stderr, fmt, ##__VA_ARGS__)
++#else
++#define debug(fmt, ...)         (void)0
++#endif
++
++#define BUF_APPEND(d, s, l) do { memcpy(d,s,l); d += l; } while (0)
++#define BUF_Z_APPEND(d, l) do { memset(d,0,l); d += l; } while (0)
++
++#include <stdint.h>
++#include <stdio.h>
++#include <string.h>
++#include <stdbool.h>
++#include "../include/config.h"
++#include "../include/uuid.h"
++#include "../include/hash.h"
++#include "../include/mle.h"
++#include "../include/lcp2.h"
++#include "../include/tb_policy.h"
++#include "../tboot/include/txt/acmod.h"
++#include "heap.h"
++
++
++struct mle_env {
++	/* AC Module */
++	int		acm_fd;
++	void 		*_acm_buf;
++	acm_hdr_t	*acm_hdr;
++	uint64_t	acm_size;
++	tb_hash_t 	acm_hash;
++
++	/* TXT Heap */
++	int		mem_fd;
++	txt_heap_t	*txt_heap;
++	uint64_t	txt_heap_size;
++	tb_hash_t 	txt_hash;
++
++	/* TXT's Launch Control Policy */
++	int		lcp_fd;
++	lcp_policy_t	*lcp;
++	uint64_t	lcp_size;
++	tb_hash_t 	lcp_hash;
++
++	/* tboot's Verified Launch Policy */
++	int		tb_policy_fd;
++	void		*_tb_policy_buf;
++	tb_policy_t	*tb_policy;
++	uint64_t	tb_policy_size;
++	tb_hash_t 	tb_policy_hash;
++};
++
++
++bool load_acm(struct mle_env *env, const char *path);
++void unload_acm(struct mle_env *env);
++bool acmod_hash(struct mle_env *env);
++bool load_heap(struct mle_env *env);
++void unload_heap(struct mle_env *env);
++bool heap_hash(struct mle_env *env);
++bool load_tb_policy(struct mle_env *env, const char *path);
++void unload_tb_policy(struct mle_env *env);
++bool tb_policy_hash(struct mle_env *env);
++
++#endif
+diff --git a/pcr-calc/tb_policy.c b/pcr-calc/tb_policy.c
+new file mode 100644
+index 0000000..efb5b93
+--- /dev/null
++++ b/pcr-calc/tb_policy.c
+@@ -0,0 +1,103 @@
++/*
++ * Copyright (c) 2015, Daniel P. Smith
++ * Copyright (c) 2006-2008, Intel Corporation
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ *
++ *   * Redistributions of source code must retain the above copyright
++ *     notice, this list of conditions and the following disclaimer.
++ *   * Redistributions in binary form must reproduce the above
++ *     copyright notice, this list of conditions and the following
++ *     disclaimer in the documentation and/or other materials provided
++ *     with the distribution.
++ *   * Neither the name of the Intel Corporation nor the names of its
++ *     contributors may be used to endorse or promote products derived
++ *     from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
++ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
++ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
++ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
++ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
++ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
++ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
++ * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED
++ * OF THE POSSIBILITY OF SUCH DAMAGE.
++ *
++ */
++
++
++#include <sys/types.h>
++#include <sys/stat.h>
++#include <fcntl.h>
++#include <unistd.h>
++#include <sys/mman.h>
++#include "sinit_hash.h"
++
++bool load_tb_policy(struct mle_env *env, const char *path) {
++	int fd;
++	struct stat st;
++	void *buf = NULL;
++
++	fd = open(path, O_RDONLY);
++	if ( fd == -1 ) {
++		error_msg("cannot open %s\n", path);
++		return false;
++	}
++
++	if (fstat(fd, &st) == -1) {
++		error_msg("cannot stat %s\n", path);
++		goto fd;
++	}
++
++	buf = mmap(NULL, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
++	if ( buf == MAP_FAILED ) {
++		error_msg("cannot mmap %s\n", path);
++		goto fd;
++	}
++	
++	env->_tb_policy_buf = buf;
++	env->tb_policy_size = st.st_size;
++	env->tb_policy = (tb_policy_t *) buf;
++	env->tb_policy_fd = fd;
++	return true;
++fd:
++	close(fd);
++	return false;
++}
++
++void unload_tb_policy(struct mle_env *env) {
++	if (env->_tb_policy_buf)
++		munmap(env->_tb_policy_buf, env->tb_policy_size);
++
++	close(env->tb_policy_fd);
++}
++
++bool tb_policy_hash(struct mle_env *env) {
++	tb_policy_t *pol = env->tb_policy;
++	uint8_t buf[sizeof(tb_hash_t) + sizeof(pol->policy_control)];
++
++	if (pol == NULL)
++		return false;
++
++	memset(buf, 0, sizeof(buf));
++	memcpy(buf, &pol->policy_control, sizeof(pol->policy_control));
++
++	if ( pol->policy_control & TB_POLCTL_EXTEND_PCR17 )
++		if ( !hash_buffer((unsigned char *)pol, env->tb_policy_size,
++                     (tb_hash_t *)&buf[sizeof(pol->policy_control)],
++		     TB_HALG_SHA1))
++			return false;
++
++	if ( !hash_buffer(buf, SHA1_LENGTH + sizeof(pol->policy_control),
++	     &env->tb_policy_hash, TB_HALG_SHA1) )
++		return false;
++
++	return true;
++}
+-- 
+2.1.4
+
