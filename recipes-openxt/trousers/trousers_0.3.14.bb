@@ -1,24 +1,25 @@
-SRC_URI[md5sum] = "b824764fa87e36be27c0bc29f84dda55"
-SRC_URI[sha256sum] = "27bb906cc06d29ead85ca95e7268401b914c2eac81663a7db0e241f1178a4ba4"
+SRC_URI[md5sum] = "4a476b4f036dd20a764fb54fc24edbec"
+SRC_URI[sha256sum] = "ce50713a261d14b735ec9ccd97609f0ad5ce69540af560e8c3ce9eb5f2d28f47"
 DEPENDS = "openssl"
 LICENSE = "CPL-1.0"
-LIC_FILES_CHKSUM = "file://LICENSE;md5=3728dd9198d68b49f7f9ed1f3f50ba14"
+LIC_FILES_CHKSUM = "file://LICENSE;md5=8031b2ae48ededc9b982c08620573426"
 
-PR = "r1"
+PR = "r0"
 
-SRC_URI = "http://downloads.sourceforge.net/${PN}/${PN}-${PV}.tar.gz \
-           file://trousers-no-groups-users.patch;patch=1 \
+SRC_URI = "http://downloads.sourceforge.net/${PN}/${PN}-${PV}.tar.gz;subdir=${PN}-${PV} \
            file://trousers-tcsd-conf.patch;patch=1 \
            file://trousers-standalone.patch;patch=1 \
-           file://trousers_compile_with_newer_gcc.patch;patch=1 \
-           file://gcc5.patch \
            file://trousers.initscript \
            file://45-trousers.rules \
 "
 
+S = "${WORKDIR}/${PN}-${PV}"
+
+EXTRA_OECONF += " --disable-usercheck"
 CFLAGS_append = " -Wno-error=unused-parameter -Wno-error=strict-aliasing -std=gnu89"
 
-inherit xenclient update-rc.d useradd
+inherit update-rc.d useradd autotools-brokensep pkgconfig
+
 
 INITSCRIPT_PACKAGES = "${PN}"
 
@@ -35,8 +36,6 @@ pkg_postinst_${PN}() {
         chown tss:tss $D/boot/system/tpm
         install -o tss -g tss -m 600 $D/usr/share/trousers/system.data.auth $D/boot/system/tpm/system.data
 }
-
-inherit autotools-brokensep pkgconfig
 
 do_install_append() {
 	install -m 0755 -d ${D}${datadir}/trousers
