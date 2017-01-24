@@ -21,4 +21,8 @@ do_install() {
 	install -m 0755 ${WORKDIR}/seal-system ${D}${sbindir}
 }
 
-RDEPENDS_${PN} = "bash"
+RDEPENDS_${PN} = " \
+    bash \
+    tboot-lcptools \
+    tboot-utils \
+"
