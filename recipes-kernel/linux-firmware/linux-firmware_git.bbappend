@@ -1,16 +1,21 @@
-PR .= ".1"
+PR .= ".2"
 
 LICENSE_append := "& WHENCE \
+                   & Firmware-i915_firmware \
 "
 
-LIC_FILES_CHKSUM += "file://WHENCE;beginline=1224;endline=1264;md5=c31e99ad18d493aaa6bac6d78ea37155"
+LIC_FILES_CHKSUM += "file://WHENCE;beginline=1224;endline=1264;md5=c31e99ad18d493aaa6bac6d78ea37155 \
+                     file://LICENSE.i915;md5=2b0b2e0d20984affd4490ba2cba02570 \
+                     "
 
 NO_GENERIC_LICENSE[WHENCE] = "WHENCE"
+NO_GENERIC_LICENSE[Firmware-i915_firmware] = "LICENCE.i915"
 
 PACKAGES =+ "${PN}-whence-license ${PN}-bnx2 \
              ${PN}-iwlwifi \
              ${PN}-iwlwifi-7260-12 ${PN}-iwlwifi-7260-13 \
              ${PN}-iwlwifi-8000c \
+             ${PN}-i915 ${PN}-i915-license \
             "
 # note that ${PN}-iwlwifi-misc is added to PACKAGES in do_package_prepend below.
 
@@ -21,6 +26,7 @@ LICENSE_${PN}-iwlwifi-7260-12 = "Firmware-iwlwifi_firmware"
 LICENSE_${PN}-iwlwifi-7260-13 = "Firmware-iwlwifi_firmware"
 LICENSE_${PN}-iwlwifi-8000c = "Firmware-iwlwifi_firmware"
 LICENSE_${PN}-iwlwifi-misc = "Firmware-iwlwifi_firmware"
+LICENSE_${PN}-i915 = "Firmware-i915_firmware"
 
 # bug fix: these LICENSE lines are missing upstream:
 LICENSE_${PN}-iwlwifi-6000g2b-5 = "Firmware-iwlwifi_firmware"
@@ -32,6 +38,12 @@ FILES_${PN}-iwlwifi-7260-12 = "/lib/firmware/iwlwifi-7260-12.ucode"
 FILES_${PN}-iwlwifi-7260-13 = "/lib/firmware/iwlwifi-7260-13.ucode"
 FILES_${PN}-iwlwifi-8000c = "/lib/firmware/iwlwifi-8000C-*.ucode"
 FILES_${PN}-iwlwifi-misc = "/lib/firmware/iwlwifi-*.ucode"
+FILES_${PN}-i915 = " \
+        /lib/firmware/i915/*.bin \
+"
+FILES_${PN}-i915-license = " \
+        /lib/firmware/LICENSE.i915 \
+"
 
 # -iwlwifi-misc is a "catch all" package that includes all the iwlwifi
 # firmwares that are not already included in other -iwlwifi- packages.
@@ -46,6 +58,7 @@ RDEPENDS_${PN}-iwlwifi-7260-12 = "${PN}-iwlwifi-license"
 RDEPENDS_${PN}-iwlwifi-7260-13 = "${PN}-iwlwifi-license"
 RDEPENDS_${PN}-iwlwifi-8000c = "${PN}-iwlwifi-license"
 RDEPENDS_${PN}-iwlwifi-misc = "${PN}-iwlwifi-license"
+RDEPENDS_${PN}-i915 = "${PN}-i915-license"
 
 LICENSE_${PN} += "& WHENCE \
 "

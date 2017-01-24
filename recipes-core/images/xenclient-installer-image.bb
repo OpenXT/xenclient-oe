@@ -41,6 +41,7 @@ IMAGE_INSTALL = "\
     kernel-module-e1000e \
     linux-firmware-iwlwifi \
     linux-firmware-bnx2 \
+    linux-firmware-i915 \
     ${ANGSTROM_EXTRA_INSTALL}"
 
 IMAGE_FSTYPES = "cpio.gz"
