@@ -31,6 +31,7 @@ IMAGE_INSTALL = "\
     packagegroup-openxt-test \
     v4v-module \
     xenclient-preload-hs-libs \
+    linux-firmware-i915 \
     ${ANGSTROM_EXTRA_INSTALL}"
 
 # IMAGE_PREPROCESS_COMMAND = "create_etc_timestamp"
