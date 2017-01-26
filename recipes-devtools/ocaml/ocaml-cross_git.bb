@@ -12,6 +12,7 @@ SRC_URI = "git://${OPENXT_GIT_MIRROR}/ocaml.git;protocol=${OPENXT_GIT_PROTOCOL};
 	   file://config.patch \
            file://remove-absolute-linker-path-from-lib.patch \
            file://finaliser-on-weak-array-gives-dangling-pointers.patch \
+           file://manual-major-GC-fails-to-compact-the-heap.patch \
 "
 
 inherit xenclient
