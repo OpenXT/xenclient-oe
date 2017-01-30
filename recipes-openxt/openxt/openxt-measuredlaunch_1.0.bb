@@ -25,4 +25,5 @@ RDEPENDS_${PN} = " \
     bash \
     tboot-lcptools \
     tboot-utils \
+    tboot-pcr-calc \
 "
