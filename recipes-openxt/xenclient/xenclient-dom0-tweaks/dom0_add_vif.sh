@@ -19,19 +19,18 @@
 
 local_mac="$1"
 
+[ ! -e /config/system/dom0-networking-disabled ] && exit
+
 while true; do
         backend=`xenstore-read "backend-domid"`
         [ "$?" -eq 0 ] && break
 done
 
 while true; do
-        timeout 5 xenops add_vif -backend-domid "$backend" -domid 0 -mac "$local_mac" -devid 0
+        xec -s com.citrix.xenclient.networkdaemon add-vif 0 $backend $local_mac
         [ "$?" -eq 0 ] && break;
-        xenops del_vif -backend-domid "$backend" -domid 0 -mac "$local_mac" -devid 0
+	sleep 1
 done
 
-ifconfig eth0 inet 0.0.0.0
-if [ ! -e /config/system/dom0-networking-disabled ]; then
-        ifconfig eth0 up
-        exec udhcpc -i eth0
-fi
+ifconfig eth0 inet 0.0.0.0 up
+exec udhcpc -i eth0
