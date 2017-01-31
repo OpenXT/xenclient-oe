@@ -6,11 +6,11 @@ DEPENDS = "trousers"
 
 do_compile() {
 	oe_runmake SUBDIRS="tboot" CC="${HOST_PREFIX}gcc ${TOOLCHAIN_OPTIONS}" CPP="${HOST_PREFIX}cpp ${TOOLCHAIN_OPTIONS}" LDFLAGS="" CFLAGS=""
-	oe_runmake SUBDIRS="lcptools tb_polgen utils" CFLAGS+="-std=c99" TARGET_ARCH="x86_32"
+	oe_runmake SUBDIRS="lcptools tb_polgen utils pcr-calc" CFLAGS+="-std=c99" TARGET_ARCH="x86_32"
 }
 
 do_install() {
-	oe_runmake SUBDIRS="tboot lcptools tb_polgen utils" DISTDIR="${D}${base_prefix}" install
+	oe_runmake SUBDIRS="tboot lcptools tb_polgen utils pcr-calc" DISTDIR="${D}${base_prefix}" install
 }
 
 PACKAGES += " \
@@ -18,6 +18,7 @@ PACKAGES += " \
     ${PN}-lcptools \
     ${PN}-tbpolgen \
     ${PN}-utils \
+    ${PN}-pcr-calc \
 "
 
 FILES_${PN} = " \
@@ -49,4 +50,8 @@ FILES_${PN}-utils = " \
     ${sbindir}/txt-stat \
     ${sbindir}/parse_err \
     ${sbindir}/acminfo \
+"
+FILES_${PN}-pcr-calc = " \
+    ${sbindir}/module_hash \
+    ${sbindir}/sinit_hash \
 "
