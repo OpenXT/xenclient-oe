@@ -1,0 +1,143 @@
+################################################################################
+SHORT DESCRIPTION:
+################################################################################
+Fix PCI passthrough for guests that use a stubdomain
+
+################################################################################
+LONG DESCRIPTION:
+################################################################################
+2 fixes here:
+* Don't try to add PCI devices to the stubdom config file, they don't have one
+* Wait until pcifront in the stubdom enables the device before sending a QMP
+  message to QEMU to start probing the device
+
+################################################################################
+CHANGELOG
+################################################################################
+Authors:
+Jed Lejosne <lejosnej@ainfosec.com>
+
+################################################################################
+REMOVAL
+################################################################################
+Remove when upstreamed...
+
+################################################################################
+UPSTREAM PLAN
+################################################################################
+Both fixes should be upstreamed.
+
+################################################################################
+INTERNAL DEPENDENCIES
+################################################################################
+
+################################################################################
+PATCHES
+################################################################################
+Index: xen-4.6.4/tools/libxl/libxl_device.c
+===================================================================
+--- xen-4.6.4.orig/tools/libxl/libxl_device.c
++++ xen-4.6.4/tools/libxl/libxl_device.c
+@@ -1272,6 +1272,32 @@ int libxl__wait_for_backend(libxl__gc *g
+     return ERROR_FAIL;
+ }
+ 
++int libxl__wait_for_backend_device(libxl__gc *gc, const char *be_path,
++                                       int id, const char *state)
++{
++    int watchdog = 100;
++    const char *p, *path = GCSPRINTF("%s/state-%d", be_path, id);
++    int rc;
++
++    while (watchdog-- > 0) {
++        rc = libxl__xs_read_checked(gc, XBT_NULL, path, &p);
++        if (rc) return rc;
++
++        if (p == NULL) {
++            LOG(ERROR, "Backend %s does not exist", be_path);
++            return ERROR_FAIL;
++        }
++
++        usleep(100000);
++
++        if (!strcmp(p, state))
++            return 0;
++    }
++
++    LOG(ERROR, "Backend %s not ready", be_path);
++    return ERROR_FAIL;
++}
++
+ /*
+  * Local variables:
+  * mode: C
+Index: xen-4.6.4/tools/libxl/libxl_internal.h
+===================================================================
+--- xen-4.6.4.orig/tools/libxl/libxl_internal.h
++++ xen-4.6.4/tools/libxl/libxl_internal.h
+@@ -1168,6 +1168,8 @@ _hidden int libxl__parse_backend_path(li
+ _hidden int libxl__device_destroy(libxl__gc *gc, libxl__device *dev);
+ _hidden int libxl__wait_for_backend(libxl__gc *gc, const char *be_path,
+                                     const char *state);
++_hidden int libxl__wait_for_backend_device(libxl__gc *gc, const char *be_path,
++                                       int id, const char *state);
+ _hidden int libxl__nic_type(libxl__gc *gc, libxl__device *dev,
+                             libxl_nic_type *nictype);
+ _hidden int libxl__init_console_from_channel(libxl__gc *gc,
+Index: xen-4.6.4/tools/libxl/libxl_pci.c
+===================================================================
+--- xen-4.6.4.orig/tools/libxl/libxl_pci.c
++++ xen-4.6.4/tools/libxl/libxl_pci.c
+@@ -166,17 +166,23 @@ static int libxl__device_pci_add_xenstor
+         goto out;
+     }
+ 
+-    rc = libxl__get_domain_configuration(gc, domid, &d_config);
+-    if (rc) goto out;
++    /* Stubdoms don't have a configuration file */
++    if (!libxl_is_stubdom(ctx, domid, NULL)) {
++        rc = libxl__get_domain_configuration(gc, domid, &d_config);
++        if (rc) goto out;
+ 
+-    DEVICE_ADD(pci, pcidevs, domid, &pcidev_saved, COMPARE_PCI, &d_config);
++        DEVICE_ADD(pci, pcidevs, domid, &pcidev_saved, COMPARE_PCI, &d_config);
++    }
+ 
+     for (;;) {
+         rc = libxl__xs_transaction_start(gc, &t);
+         if (rc) goto out;
+ 
+-        rc = libxl__set_domain_configuration(gc, domid, &d_config);
+-        if (rc) goto out;
++        /* Stubdoms don't have a configuration file */
++        if (!libxl_is_stubdom(ctx, domid, NULL)) {
++            rc = libxl__set_domain_configuration(gc, domid, &d_config);
++            if (rc) goto out;
++        }
+ 
+         libxl__xs_writev(gc, t, be_path,
+                          libxl__xs_kvs_of_flexarray(gc, back, back->count));
+@@ -1133,10 +1139,23 @@ int libxl__device_pci_add(libxl__gc *gc,
+     stubdomid = libxl_get_stubdom_id(ctx, domid);
+     if (stubdomid != 0) {
+         libxl_device_pci pcidev_s = *pcidev;
++        char *num_devs, *be_path;
++        int num;
++
+         /* stubdomain is always running by now, even at create time */
+         rc = do_pci_add(gc, stubdomid, &pcidev_s, 0);
++
+         if ( rc )
+             goto out;
++
++        /* Wait for the device to be ready before moving on */
++        be_path = libxl__sprintf(gc, "%s/backend/pci/%d/0", libxl__xs_get_dompath(gc, 0), stubdomid);
++        num_devs = libxl__xs_read(gc, XBT_NULL, libxl__sprintf(gc, "%s/num_devs", be_path));
++        if (num_devs) {
++            num = atoi(num_devs) - 1;
++            libxl__wait_for_backend_device(gc, be_path, num, GCSPRINTF("%d", XenbusStateInitialised));
++            /* TODO: set the state to XenbusStateConnected? */
++        }
+     }
+ 
+     orig_vdev = pcidev->vdevfn & ~7U;
