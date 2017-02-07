@@ -1,0 +1,78 @@
+################################################################################
+SHORT DESCRIPTION:
+################################################################################
+Cores-per-socket support in libxl
+
+################################################################################
+LONG DESCRIPTION:
+################################################################################
+The OpenXT Xen patchqueue adds a DOMCTL call for new function that consolidates
+the number of cores on the socket that is exposed to the guest.  This is useful
+for OS's that have a limit on the number of visible sockets. In OpenXT, this
+the the method by which we assign more than 2 vcpus to Windows guests (win 7
+in particular).
+
+################################################################################
+CHANGELOG
+################################################################################
+Authors:
+Chris Rogers <rogersc@ainfosec.com>
+
+################################################################################
+REMOVAL
+################################################################################
+Do not remove
+
+################################################################################
+UPSTREAM PLAN
+################################################################################
+This is specific to OpenXT, nothing to upstream here.
+
+################################################################################
+INTERNAL DEPENDENCIES
+################################################################################
+
+################################################################################
+PATCHES
+################################################################################
+
+Index: xen-4.6.4/tools/libxl/libxl_dom.c
+===================================================================
+--- xen-4.6.4.orig/tools/libxl/libxl_dom.c
++++ xen-4.6.4/tools/libxl/libxl_dom.c
+@@ -370,6 +370,9 @@ int libxl__build_pre(libxl__gc *gc, uint
+         }
+     }
+ 
++    if (info->cores_per_socket > 0)
++        xc_domain_set_cores_per_socket(ctx->xch, domid, info->cores_per_socket);
++
+     if (info->nodemap.size)
+         libxl_domain_set_nodeaffinity(ctx, domid, &info->nodemap);
+ 
+Index: xen-4.6.4/tools/libxl/libxl_types.idl
+===================================================================
+--- xen-4.6.4.orig/tools/libxl/libxl_types.idl
++++ xen-4.6.4/tools/libxl/libxl_types.idl
+@@ -435,6 +435,7 @@ libxl_domain_build_info = Struct("domain
+     ("disable_migrate", libxl_defbool),
+     ("cpuid",           libxl_cpuid_policy_list),
+     ("blkdev_start",    string),
++    ("cores_per_socket",  integer),
+ 
+ 	#directory containing the crypto keys for the vm's disks
+ 	("crypto_key_dir", string),
+Index: xen-4.6.4/tools/libxl/xl_cmdimpl.c
+===================================================================
+--- xen-4.6.4.orig/tools/libxl/xl_cmdimpl.c
++++ xen-4.6.4/tools/libxl/xl_cmdimpl.c
+@@ -1377,6 +1377,9 @@ static void parse_config_data(const char
+     if (!xlu_cfg_get_long (config, "maxvcpus", &l, 0))
+         b_info->max_vcpus = l;
+ 
++    if (!xlu_cfg_get_long (config, "cores_per_socket", &l, 0))
++        b_info->cores_per_socket = l;
++
+     parse_vnuma_config(config, b_info);
+ 
+     /* Set max_memkb to target_memkb and max_vcpus to avail_vcpus if
