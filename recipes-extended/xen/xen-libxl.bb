@@ -1,8 +1,10 @@
 require xen.inc
 
-inherit pkgconfig pythonnative
+inherit pkgconfig pythonnative update-rc.d
 
-DEPENDS += "util-linux xen-tools xen-blktap"
+DEPENDS += "util-linux xen-tools xen-blktap libnl"
+
+SRC_URI += " file://xen-init-dom0.initscript "
 
 EXTRA_OEMAKE += "CROSS_SYS_ROOT=${STAGING_DIR_HOST} CROSS_COMPILE=${HOST_PREFIX}"
 EXTRA_OEMAKE += "CONFIG_IOEMU=n"
@@ -17,6 +19,13 @@ BUILD_OPTIMIZATION = "-pipe"
 FULL_OPTIMIZATION = "-pipe ${DEBUG_FLAGS}"
 
 TARGET_CC_ARCH += "${LDFLAGS}"
+
+INITSCRIPT_NAME = "xen-init-dom0"
+INITSCRIPT_PARAMS = "defaults 21"
+
+FILES_${PN} += " /usr/lib/xen/bin "
+FILES_${PN}-dbg += " /usr/lib/xen/bin/.debug "
+
 do_configure() {
         DESTDIR=${D} ./configure --prefix=${prefix}
 }
@@ -38,4 +47,6 @@ do_compile() {
 
 do_install() {
         oe_runmake DESTDIR=${D} -C tools subdir-install-libxl
+        install -d ${D}${sysconfdir}/init.d
+        install -m 0755 ${WORKDIR}/xen-init-dom0.initscript ${D}${sysconfdir}/init.d/xen-init-dom0
 }
