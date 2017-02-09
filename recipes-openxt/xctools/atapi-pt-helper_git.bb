@@ -9,6 +9,7 @@ SRCREV = "${AUTOREV}"
 SRC_URI = "git://${OPENXT_GIT_MIRROR}/xctools.git;protocol=${OPENXT_GIT_PROTOCOL};branch=${OPENXT_BRANCH}"
 
 FILES_${PN} += "/usr/lib/xen/bin/atapi_pt_helper"
+FILES_${PN}-dbg += " /usr/lib/xen/bin/.debug "
 
 S = "${WORKDIR}/git/atapi_pt_helper"
 

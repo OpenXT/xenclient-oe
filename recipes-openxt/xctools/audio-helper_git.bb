@@ -11,6 +11,7 @@ SRC_URI = "git://${OPENXT_GIT_MIRROR}/xctools.git;protocol=${OPENXT_GIT_PROTOCOL
 
 FILES_${PN} += "/usr/lib/xen/bin/audio_helper \
                 /usr/lib/xen/bin/audio_helper_start "
+FILES_${PN}-dbg += " /usr/lib/xen/bin/.debug "
 
 S = "${WORKDIR}/git/audio_helper"
 
