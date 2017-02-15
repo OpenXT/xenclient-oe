@@ -15,7 +15,6 @@ SRC_URI = "${XEN_SRC_URI};name=source \
     file://xsm-add-corespersocket.patch \
     file://hvm-pm-hibernate-s-state.patch;patch=1 \
     file://prune-vga-acpi-dev.patch;patch=1 \
-    file://xen-libhvm.patch;patch=1 \
     file://smbios.patch;patch=1 \
     file://evtchn-do-not-set-pending-if-s3.patch;patch=1 \
     file://hvm-rtc.patch;patch=1 \
