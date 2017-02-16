@@ -25,6 +25,8 @@ SRC_URI[bdw.md5sum] = "f40771addcb12c82b44c2ad53dbbe994"
 SRC_URI[bdw.sha256sum] = "3057efadd6bcf9ddf192c6aa027cc28e07ae6997a5c0037ef1fa09e8938893f0"
 SRC_URI[skl.md5sum] = "b07b5fb355815655be14c84df84a69a5"
 SRC_URI[skl.sha256sum] = "9f7b17dfb87719dc7c789d7e319071a0fbcca5b547bfd8b2aa3bf253760e23c6"
+SRC_URI[kbl.md5sum] = "542133cb3e6911bda1e83d27fc0872b2"
+SRC_URI[kbl.sha256sum] = "a3ea9055c27481ed48e5ce8b7e02d37e8d27cff4fd1cf911ff219b8e210ccfaf"
 
 PR="r3"
 LICENSE = "Intel-ACMs"
@@ -38,6 +40,7 @@ LIC_FILES_CHKSUM = "file://GM45_GS45_PM45-SINIT_51/license.txt;md5=60d123634e0b9
                     file://4th_gen_i5_i7-SINIT_75/license.txt;md5=a879c484244808a2202d65166a2f3f72 \
                     file://5th_gen_i5_i7-SINIT_79/license.txt;md5=68248a22232ba4fd23010e9c65209406 \
                     file://6th_gen_i5_i7-SINIT_71/license.txt;md5=1d626a5a455fd0bff690b866040198c2 \
+                    file://7th_gen_i5_i7-SINIT_74/license.txt;md5=4897766beede80773ddd162b2724a8bb \
 "
 
 SRC_URI = "${OPENXT_MIRROR}/GM45_GS45_PM45-SINIT_51.zip;name=gm45 \
@@ -51,6 +54,7 @@ SRC_URI = "${OPENXT_MIRROR}/GM45_GS45_PM45-SINIT_51.zip;name=gm45 \
            ${OPENXT_MIRROR}/4th-gen-i5-i7-sinit-75.zip;name=hsw \
            ${OPENXT_MIRROR}/5th_gen_i5_i7-SINIT_79.zip;name=bdw \
            ${OPENXT_MIRROR}/6th_gen_i5_i7-SINIT_71.zip;name=skl \
+           ${OPENXT_MIRROR}/7th_gen_i5_i7-SINIT_74.zip;name=kbl \
 "
 
 FILES_${PN} = "/boot"
@@ -65,6 +69,6 @@ do_install() {
         done
 
         # After inspection of the licenses of the individual ACM files,
-        # the most recent Skylake license is sufficient to cover all:
-        install -m 444 6th_gen_i5_i7-SINIT_71/license.txt ${D}/boot/license-SINIT-ACMs.txt
+        # the most recent KabyLake license is sufficient to cover all:
+        install -m 444 7th_gen_i5_i7-SINIT_74/license.txt ${D}/boot/license-SINIT-ACMs.txt
 }
