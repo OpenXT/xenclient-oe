@@ -104,12 +104,29 @@ Index: refpolicy/policy/modules/contrib/qemu.te
 ===================================================================
 --- refpolicy.orig/policy/modules/contrib/qemu.te
 +++ refpolicy/policy/modules/contrib/qemu.te
-@@ -27,6 +27,44 @@ role qemu_roles types qemu_t;
+@@ -27,6 +27,61 @@ role qemu_roles types qemu_t;
  # Local policy
  #
  
 +dbus_system_bus_client(qemu_t)
 +dbus_connect_system_bus(qemu_t)
++
++xc_read_etc_files(qemu_t)
++
++# For appending to /var/log/xen/qemu-dm-linux.log.
++# The init module does not provide any interfaces for this type.
++gen_require(`
++	type initrc_var_log_t;
++')
++allow qemu_t initrc_var_log_t:file append;
++# Likely isatty() check.
++allow qemu_t initrc_var_log_t:file ioctl;
++
++# Create /var/run/qmp-libxl-N socket
++type qemu_var_run_t;
++files_pid_file(qemu_var_run_t)
++files_pid_filetrans(qemu_t, qemu_var_run_t, sock_file)
++allow qemu_t qemu_var_run_t:sock_file manage_file_perms;
 +
 +# XC begin: qmeu reads & writes /dev/bsg/stuff
 +storage_read_scsi_generic(qemu_t)
@@ -149,7 +166,7 @@ Index: refpolicy/policy/modules/contrib/qemu.te
  tunable_policy(`qemu_full_network',`
  	corenet_udp_sendrecv_generic_if(qemu_t)
  	corenet_udp_sendrecv_generic_node(qemu_t)
-@@ -41,6 +79,21 @@ optional_policy(`
+@@ -41,6 +96,21 @@ optional_policy(`
  	xserver_user_x_domain_template(qemu, qemu_t, qemu_tmpfs_t)
  ')
  

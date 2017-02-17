@@ -1,0 +1,311 @@
+################################################################################
+SHORT DESCRIPTION: 
+################################################################################
+Adjust GRUB2 module placement locations when TBOOT changes e820 mem types.
+
+################################################################################
+LONG DESCRIPTION: 
+################################################################################
+It has been found that GRUB2 will build its heap from all the RAM
+regions < 4G found in the memory map. This means that sometimes GRUB2
+will locate one or more modules in higher memory regions that are above
+RESERVED regions. The PMR protection logic can cause these high RAM
+regions to be remapped from RAM->RESERVED thus leaving the module in
+an invalid region and causing the verify_modules() call to fail etc.
+
+This fix attempts to locate such modules and move them down into
+the RAM area inhabited by TBOOT itself (and safely into the region that
+will be PMR protected).
+
+################################################################################
+CHANGELOG 
+################################################################################
+Origins: 1.7.0 patch, Ross Philipson, ross.philipson@citrix.com
+
+Ported: Ross Philipson, philipsonr@ainfosec.com, 8/27/2015
+
+################################################################################
+REMOVAL 
+################################################################################
+
+################################################################################
+UPSTREAM PLAN 
+################################################################################
+A more complete fix that could be upstreamed will attempt to always
+moved the MBI and modules to locations just above TBOOT to provide a
+more consistent environment and to prevent future issues with boot
+loaders.
+
+This patch should be modified per the above and upstreamed.
+
+https://openxt.atlassian.net/browse/OXT-363
+
+################################################################################
+INTERNAL DEPENDENCIES 
+################################################################################
+None
+
+################################################################################
+PATCHES 
+################################################################################
+Index: tboot-1.9.5/tboot/common/e820.c
+===================================================================
+--- tboot-1.9.5.orig/tboot/common/e820.c
++++ tboot-1.9.5/tboot/common/e820.c
+@@ -758,6 +758,29 @@ efi_memory_desc_t
+     return efi_memmap_addr;
+ }
+ 
++/* locate the RAM region that addr is in (first, if there are overlaps) */
++bool get_ram_region(uint64_t addr, uint64_t *ram_base, uint64_t *ram_size)
++{
++    if ( ram_base == NULL || ram_size == NULL )
++        return false;
++
++    for ( unsigned int i = 0; i < g_nr_map; i++ ) {
++        memory_map_t *entry = &g_copy_e820_map[i];
++
++        if ( entry->type == E820_RAM ) {
++            uint64_t base = e820_base_64(entry);
++            uint64_t size = e820_length_64(entry);
++            if ( addr >= base && addr < (base + size) ) {
++                *ram_base = base;
++                *ram_size = size;
++                return true;
++            }
++        }
++    }
++
++    return false;
++}
++
+ /*
+  * Local variables:
+  * mode: C
+Index: tboot-1.9.5/tboot/common/loader.c
+===================================================================
+--- tboot-1.9.5.orig/tboot/common/loader.c
++++ tboot-1.9.5/tboot/common/loader.c
+@@ -1996,6 +1996,183 @@ void determine_loader_type(void *addr, u
+      */
+ }
+ 
++static bool overlapped_ranges(uint32_t r1_start, uint32_t r1_end,
++                              uint32_t r2_start, uint32_t r2_end)
++{
++    if ( (r1_start >= r2_start && r1_start <= r2_end) ||
++         (r1_end >= r2_start && r1_end <= r2_end) ||
++         (r2_start >= r1_start && r2_start <= r1_end) ||
++         (r2_end >= r1_start && r2_end <= r1_end) )
++        return true;
++
++    return false;
++}
++
++static uint32_t location_available(multiboot_info_t *mbi, uint32_t location,
++                                   uint32_t length)
++{
++    static uint32_t mbi_end = 0;
++    module_t *m;
++
++    if ( mbi_end == 0 )
++        mbi_end = (uint32_t)get_mbi_mem_end_mb1(mbi);
++
++    /* first, is the MBI at this location? */
++    if ( overlapped_ranges(location, (location + length),
++                           (uint32_t)mbi, mbi_end) ) {
++        return (uint32_t)PAGE_UP((uint8_t*)mbi_end + 1);
++    }
++
++    /* next check if another module is sitting there */
++    for ( unsigned int i = 0; i < mbi->mods_count; i++ ) {
++        m = (module_t *)(mbi->mods_addr + i*sizeof(module_t));
++        if ( overlapped_ranges(location, (location + length),
++                               m->mod_start, m->mod_end) ) {
++            return (uint32_t)PAGE_UP((uint8_t*)m->mod_end + 1);
++        }
++    }
++
++    /* available location, return the location itself */
++    return location;
++}
++
++/*
++ * Attempt to move the module into a valid RAM area near other
++ * modules.
++ */
++static bool adjust_module_location(multiboot_info_t *mbi, module_t *m)
++{
++    uint32_t location = (uint32_t)PAGE_UP(get_tboot_mem_end());
++    uint32_t next;
++    uint32_t size = (m->mod_end - m->mod_start);
++    uint64_t ram_base = 0, ram_size = 0, top;
++
++    /* find the extent of the RAM area where tboot lives */
++    if ( !get_ram_region(location, &ram_base, &ram_size) ) {
++        printk("ram range for TBOOT module not found: failure");
++        return false;
++    }
++    top = ram_base + ram_size;
++
++    if ( top < TBOOT_BASE_ADDR || top > 0x100000000ULL ) {
++        printk("ram extent for TBOOT module invalid: %Lx", top);
++        return false;
++    }
++
++    while ( location < top ) {
++        next = location_available(mbi, location, size);
++        if ( next == location ) {
++            printk("module moved from %x to %x\n", m->mod_start, location);
++            memcpy((void *)location, (void *)m->mod_start, size);
++            m->mod_start = location;
++            m->mod_end = location + size;
++            return true;
++        }
++
++        location = next;
++    }
++
++    return false;
++}
++
++/*
++ * Check if the module was in a valid RAM area in the original
++ * MBI mmap before it was adjusted.
++ */
++static bool mmap_check_region(uint64_t base, uint64_t length,
++                              multiboot_info_t *mbi)
++{
++    uint32_t entry_offset = 0;
++    uint64_t ebase, elength;
++
++    /* Only deal with MBIs that have MEMMAPs */
++    if ( (mbi->flags & MBI_MEMMAP) == 0 )
++        return false;
++
++    while ( entry_offset < mbi->mmap_length ) {
++        memory_map_t *entry = (memory_map_t *)(mbi->mmap_addr + entry_offset);
++        ebase = ((uint64_t)entry->base_addr_high << 32) |
++                 (uint64_t)entry->base_addr_low;
++        elength = ((uint64_t)entry->length_high << 32) |
++                 (uint64_t)entry->length_low;
++
++        if ( base >= ebase && length <= elength ) {
++            if ( entry->type == E820_RAM )
++                return true;
++            else
++                return false;
++        }
++
++        entry_offset += entry->size + sizeof(entry->size);
++    }
++
++    return false;
++}
++
++/*
++ * It has been found that GRUB2 will build its heap from all the RAM
++ * regions < 4G found in the memory map. This means that sometimes GRUB2
++ * will locate one or more modules in higher memory regions that are above
++ * RESERVED regions. The PMR protection logic can cause these high RAM
++ * regions to be remapped from RAM->RESERVED thus leaving the module in
++ * an invalid region and causing the verify_modules() call to fail etc.
++ *
++ * This fix attempts to locate such modules and move them down into
++ * the RAM area inhabited by TBOOT itself (and safely into the region that
++ * will be PMR protected).
++ *
++ * TODO a more complete fix that could be upstreamed will attempt to always
++ * moved the MBI and modules to locations just above TBOOT to provide a
++ * more consistent environment and to prevent future issues with boot
++ * loaders.
++ */
++void adjust_modules(loader_ctx *lctx)
++{
++    uint64_t base, size;
++    module_t *m;
++    uint32_t type;
++    multiboot_info_t *mbi;
++
++    /*
++     * TODO Currently only doing this for multiboot1. When we support UEFI
++     * or when we make a proper upstream patch, this should support
++     * multiboot2.
++     */
++    if ( lctx->type != MB1_ONLY )
++        return;
++
++    mbi = (multiboot_info_t *) lctx->addr;
++
++    printk("check for module location adjustments.\n");
++
++    for ( unsigned int i = 0; i < mbi->mods_count; i++ ) {
++        m = (module_t *)(mbi->mods_addr + i*sizeof(module_t));
++        base = m->mod_start;
++        size = m->mod_end - m->mod_start;
++        type = e820_check_region(base, size);
++        if ( type == E820_RAM )
++            continue;
++
++        printk("adjust module %d of mbi (%Lx - %Lx) in e820 table\n\t",
++               i, base, (base + size - 1));
++        if ( type != E820_RESERVED ) {
++            printk(": failed, current memory region invalid - type %d\n",
++                   (int)type);
++            return;
++        }
++
++        if ( !mmap_check_region(base, size, mbi) ) {
++            printk(": failed, original memory region invalid.\n");
++            return;
++        }
++
++        if ( !adjust_module_location(mbi, m) ) {
++            printk(": failed, could not adjust location\n");
++            return;
++        }
++    }
++}
++
+ /*
+  * Local variables:
+  * mode: C
+Index: tboot-1.9.5/tboot/common/tboot.c
+===================================================================
+--- tboot-1.9.5.orig/tboot/common/tboot.c
++++ tboot-1.9.5/tboot/common/tboot.c
+@@ -171,6 +171,9 @@ static void post_launch(void)
+     /* remove all TXT modules before verifying modules */
+     remove_txt_modules(g_ldr_ctx);
+ 
++    /* adjust the MBI, move any modules that were in RAM */
++    adjust_modules(g_ldr_ctx);
++
+     /*
+      * verify e820 table and adjust it to protect our memory regions
+      */
+Index: tboot-1.9.5/tboot/include/e820.h
+===================================================================
+--- tboot-1.9.5.orig/tboot/include/e820.h
++++ tboot-1.9.5/tboot/include/e820.h
+@@ -88,6 +88,8 @@ extern bool get_ram_ranges(uint64_t *min
+                            uint64_t *min_hi_ram, uint64_t *max_hi_ram);
+ extern void get_highest_sized_ram(uint64_t size, uint64_t limit,
+                                   uint64_t *ram_base, uint64_t *ram_size);
++extern bool get_ram_region(uint64_t addr,
++                           uint64_t *ram_base, uint64_t *ram_size);
+ 
+ /* EFI memory map support */
+ extern efi_memory_desc_t *get_efi_memmap(uint32_t *memmap_size);
+Index: tboot-1.9.5/tboot/include/loader.h
+===================================================================
+--- tboot-1.9.5.orig/tboot/include/loader.h
++++ tboot-1.9.5/tboot/include/loader.h
+@@ -82,6 +82,7 @@ extern bool verify_modules(loader_ctx *l
+ extern module_t *get_module(loader_ctx *lctx, unsigned int i);
+ extern unsigned int get_module_count(loader_ctx *lctx);
+ extern bool remove_txt_modules(loader_ctx *lctx);
++extern void adjust_modules(loader_ctx *lctx);
+ 
+ extern bool	have_loader_memlimits(loader_ctx *lctx);
+ extern bool have_loader_memmap(loader_ctx *lctx);

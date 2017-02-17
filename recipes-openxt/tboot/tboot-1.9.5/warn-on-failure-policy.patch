@@ -1,0 +1,1492 @@
+################################################################################
+SHORT DESCRIPTION: 
+################################################################################
+Introduce default policy with better error checking and no-LCP support.
+
+################################################################################
+LONG DESCRIPTION: 
+################################################################################
+See the documented added by the patch: docs/error_handling.txt
+
+This patch addes a new policy type that has better error checking than the
+old TB_POLTYPE_CONT_VERIFY_FAIL type but allows launching without external
+LCP policies being present.
+
+################################################################################
+CHANGELOG 
+################################################################################
+Origins: 1.7.0 patch, Author Unknown
+
+Ported: Ross Philipson, philipsonr@ainfosec.com, 8/31/2015
+
+################################################################################
+REMOVAL 
+################################################################################
+
+################################################################################
+UPSTREAM PLAN 
+################################################################################
+Hopefully this patch can be upstreamed. The TB_POLTYPE_WARN_ON_FAILURE policy
+type seems much more useful than the previous TB_POLTYPE_CONT_VERIFY_FAIL type.
+It seems TB_POLTYPE_CONT_NON_FATAL is too open for production use.
+
+https://openxt.atlassian.net/browse/OXT-365
+
+################################################################################
+INTERNAL DEPENDENCIES 
+################################################################################
+None
+
+################################################################################
+PATCHES 
+################################################################################
+Index: tboot-1.9.5/docs/error_handling.txt
+===================================================================
+--- /dev/null
++++ tboot-1.9.5/docs/error_handling.txt
+@@ -0,0 +1,219 @@
++Goal:
++====
++
++The goal of tboot's error handling logic is to provide the kernel/VMM with
++enough information to detect and remediate any errors.  This should happen
++with a minimal amount of delay (i.e. reboots) but maintain a secure
++environment at all times (i.e. not leave TXT "open" when the kernel/VMM
++is not secure).
++
++
++Error code locations:
++====================
++
++There are two locations for TXT-related errors:
++  1)  TXT.ERRORCODE (offset 0x030 in the TXT configuration space) which can
++      only be written to post-launch (and by SINIT).  The contents of this
++      register survive soft resets but are cleared on power cycles.
++  2)  TB_LAUNCH_ERR_IDX (0x20000002) TPM NV index which is writable from
++      all localities (i.e. at any time by anyone).  The contents of this
++      index persist across all types of resets and can only be cleared/changed
++      by software or by the clearing of the TPM owner.
++TXT.ERRORCODE is always present on a TXT system and is always used by SINIT
++to write its errors.  tboot will also write errors, occurring post-launch, to
++TXT.ERRORCODE.  TB_LAUNCH_ERR_IDX is optional and will be used by tboot
++if it exists.  TB_LAUNCH_ERR_IDX is not used by SINIT.
++
++
++Tboot policies:
++==============
++
++Tboot is built with a default policy hardcoded (in the _def_policy variable in
++tboot/common/policy.c).  This policy is used by tboot until it is able to load
++its owner-defined policy from TPM NV and/or if that load fails.  The use of the
++default policy and subsequent loading of the tboot owner policy happens on
++initial launch of tboot (i.e. pre-SENTER) and once it begins executing after
++SENTER.  The owner policy must be re-loaded after SENTER because tboot cannot
++trust that the policy loaded before was actually the valid policy (as code that
++executes prior to SENTER is not trusted).  If there is an error loading the
++owner-defined policy, the handling of the error is governed by the default
++policy; if the action is to continue then the default policy will remain in
++effect.
++
++The policy_type field of the tboot policy governs the behavior of tboot when
++an error is detected.  This field can contain one of the TB_POLTYPE_* values
++defined in include/tb_policy.h.  These policy type values are used to lookup
++the tb_policy_map_t (tboot/common/policy.c) that defines the action(s) to
++take for a given error.
++
++The tb_policy_map entry for a policy type contains two default actions fields,
++one for errors that occur before SENTER and the other for errors occurring
++after SENTER.  These defaults are used if there are no specific actions
++defined for a given error.  The entry also contains a table of error-codes-to-
++actions.  Each entry in the table (tb_policy_map_entry_t) consists of the
++error value and a set of pre- and post- SENTER actions (same semantics as for
++the default actions).  If an error matches one of the entries in this table
++then the actions specified in it will be used; otherwise the default actions
++will be used.
++
++The possible actions are defined by the tb_policy_action_t enum
++(tboot/common/policy.c):  TB_POLACT_IGNORE, TB_POLACT_CONTINUE,
++TB_POLACT_UNMEASURED_LAUNCH, TB_POLACT_HALT, TB_POLACT_REBOOT, TB_POLACT_WARN.
++The description of each are comments on the members of the enum and are fairly
++self-explanatory.  All errors will be written to the error locations (above)
++unless the (first) action is TB_POLACT_IGNORE.  Fatal errors (TB_ERR_FATAL)
++must never continue execution (including to launch unmeasured).
++
++There can be two actions associated with an error, though if the first action
++does not continue processing (e.g. TB_POLACT_REBOOT) then the second will not
++be executed.  Currently, only TB_POLACT_WARN makes sense as a first action in
++a multiple-action set.
++
++
++Error handling/behavior:
++=======================
++
++The handling of errors will depend on when the error occurred and in what
++component (i.e. tboot, SINIT, VMM/kernel) it was detected.  For errors detected
++by tboot, handling is also determined by the tboot policy in force at the time
++the error is detected.  Errors detected by SINIT (or the SENTER microcode)
++will always result in a TXT reset with an appropriate error code placed in the
++TXT.ERRORCODE register.
++
++When tboot detects an error, it will first determine whether there was a
++previous error (in either TXT.ERRORCODE or TB_LAUNCH_ERR_IDX)--if there was a
++previous error then tboot will not write the new error to these locations (it
++will, however take whatever action is defined in the policy).  This behavior is
++necessary to prevent "second-order" errors from overwriting the real error
++source.  For instance, when SINIT generates an error and resets the system,
++on some platforms this will set the TXT_RESET.STS which will then be detected
++as preventing a TXT launch--the real error that should be reported is the one
++from SINIT and so that should not be overwritten by the TXT_RESET.STS error.
++If an OS/VMM fixes the error then it needs to write TB_ERR_NONE to the
++TB_LAUNCH_ERR_IDX (if it is being used) and power cycle the system to clear
++the TXT.ERRORCODE register.  If the OS/VMM does not clear these locations then
++succeeding launches may revert to a non-measured launch (depending on the
++policy) even though the measured launch would succeed.
++
++On a successful completion of SENTER (and SINIT) and entry to tboot
++(i.e. post-launch), TXT.ERRORCODE will be 0xC0000001.  If SENTER/SINIT fails
++for any reason, TXT.ERRORCODE will contain the failure error code and the
++platform will be (soft) reset; TB_LAUNCH_ERR_IDX is unchanged by SINIT.
++
++On a no-error completion of tboot and launch of the VMM/kernel, TXT.ERRORCODE
++and TB_LAUNCH_INDEX will both contain (i.e. tboot will set them to) 0x00.
++Depending on the tboot policy, it is possible for tboot to allow a TXT launch
++of the VMM/kernel even if there was an error.  In this case, that (tboot)
++error code will be placed into both TXT.ERRORCODE (with the appropriate format
++as described below) and TB_LAUNCH_ERR_IDX.
++
++
++The TB_POLTYPE_CONT_NON_FATAL policy:
++------------------------------------
++This policy type is intended for debugging/development and non-production
++builds of tboot.
++
++It will reboot for fatal errors.  It will attempt a TXT launch for any error
++that would not actually prevent such a launch, even if that error would be a
++security or policy violation (e.g. TB_ERR_MODULE_VERIFICATION_FAILED or
++TB_ERR_S3_INTEGRITY).
++
++
++The TB_POLTYPE_WARN_ON_FAILURE policy:
++-------------------------------------
++This policy type is intended for production builds.
++
++For fatal errors it will display a warning/error message and pause, then
++reboot the system.  For the error of an owner-defined policy not being present
++in TPM NV, it will ignore it (not even write it to the error locations).  For
++all other errors, if the error occurs before SENTER it will warn the user and
++perform an un-measured launch of the OS/VMM; if the error occurs after SENTER
++completed, it will warn the user and reboot.  This last behavior includes the
++case of detecting an error from a previous launch.
++
++
++Previous launch error detection:
++===============================
++
++If TB_LAUNCH_ERR_IDX has an error (any value other than TB_ERR_NONE or all FFs,
++which is the value of a TPM NV index that has not been written to), then tboot
++will treat this as a previous error regardless of the value in TXT.ERRORCODE
++(since if the system had been power cycled, TXT.ERRORCODE would be cleared).
++
++Otherwise, if TXT.ERRORCODE has an error then this will be treated as a
++previous launch error.  Tboot will write TB_ERR_PREV_LAUNCH_FAILURE to
++TB_LAUNCH_ERR_IDX, if it exists.
++
++
++TXT.ERRORCODE format:
++====================
++
++Bit   Name        Description
++---   ----        -----------
++31    Valid       Valid error when set to '1'. The rest of the register
++                  contents should be ignored if '0'
++30    External    '0' if induced from the processor
++                  '1' if induced from software
++29:0  Type        This is implementation and source specific. It provides more
++                  details on the actual error.
++Processor-initiated errors (External = 0) are defined in Table 15 of the MLE
++Developers Guide.
++
++Errors generated by AC Modules will have External = 1 and will have bit 15 = 0.
++The details of the Type field (bits 29:0) for ACM errors are found in the
++sinit_error.txt file included with the SINIT ACMs.
++
++Errors generated by tboot will have External = 1 and bit 15 = 1.  The format
++of bits 29:0 is:
++
++Bit     Description
++---     -----------
++29:16   reserved
++15      1
++14:12   0 - tboot, 1-7 - kernel/VMM specific
++11:0    tboot error code (TB_ERR_*)
++
++
++OS/VMM error handling:
++=====================
++
++An OS or VMM has two options for handling errors:  use TB_LAUNCH_ERR_IDX or
++just use TXT.ERRORCODE.
++
++Using TB_LAUNCH_ERR_IDX
++-----------------------
++If TB_LAUNCH_ERR_IDX contains TB_ERR_NONE, then no error has occurred and
++there is no need to examine the TXT.ERRORCODE register.
++
++If TB_LAUNCH_ERR_IDX contains TB_ERR_PREV_LAUNCH_FAILURE, the OS/VMM needs to
++read TXT.ERRORCODE to determine the failure (see above for format).  When it
++corrects the condition, it needs to write TB_ERR_NONE to TB_LAUNCH_ERR_IDX and
++power cycle the system (in order to clear TXT.ERRORCODE).
++
++If TB_LAUNCH_ERR_IDX contains another value, then that is the failure and there
++is no need to read TXT.ERRORCODE.  If the policy allows for continuing launch
++for some errors, then there may be an error recorded even if the launch
++succeeded.  The OS/VMM can detect this by reading the TXT.STS register and
++seeing if the SENTER.DONE.STS bit (bit 0) is clear (failed).  When the OS/VMM
++corrects the condition, it needs to write TB_ERR_NONE to TB_LAUNCH_ERR_IDX and
++power cycle the system (in order to clear TXT.ERRORCODE).
++
++Using TXT.ERRORCODE
++-------------------
++If the valid bit (bit 31) is set then there has been an error.  The type of
++error can be determined according to the format as described above.  When the
++OS/VMM corrects the condition, it needs to power cycle the system in order to
++clear TXT.ERRORCODE.
++
++If the valid bit is clear, there may still have been an error that was detected
++by tboot before it attempted a launch.  Since this register is not writable
++by tboot before SENTER, tboot will not have been able to record the error.  The
++OS/VMM can still detect that the launch failed by reading the TXT.STS register
++and seeing if the SENTER.DONE.STS bit (bit 0) is clear (failed).  In such a
++case, the OS/VMM will need to use some other method to determine and remediate
++the problem.
++
++Note:  If the system is power cycled before the error condition is fixed, the
++       error code will be lost and a subsequent reboot will attempt a
++       measured launch again (and presumably fail again).
++
+Index: tboot-1.9.5/include/tb_error.h
+===================================================================
+--- tboot-1.9.5.orig/include/tb_error.h
++++ tboot-1.9.5/include/tb_error.h
+@@ -36,45 +36,59 @@
+ #ifndef __TB_ERROR_H__
+ #define __TB_ERROR_H__
+ 
++/* see errorcode.h for format */
++#define MAKE_TBOOT_ERRORCODE(err)     (0xc0000000 | 0x8000 | (err))
++
++#ifdef __ASSEMBLY__
++
++/* special errorcode used for layout error (in boot.S) */
++#define TB_ERR_LAYOUT 1
++
++#else
++
+ typedef enum {
+-    TB_ERR_NONE                = 0,         /* succeed */
+-    TB_ERR_FIXED               = 1,         /* previous error has been fixed */
++    TB_ERR_NONE                       = 0,  /* succeed */
++    TB_ERR_LAYOUT                     = 1,  /* layout in boot.S (not matches) */
+ 
+-    TB_ERR_GENERIC,                         /* non-fatal generic error */
++    TB_ERR_GENERIC                    = 2,  /* non-fatal generic error */
+ 
+-    TB_ERR_TPM_NOT_READY,                   /* tpm not ready */
+-    TB_ERR_SMX_NOT_SUPPORTED,               /* smx not supported */
+-    TB_ERR_VMX_NOT_SUPPORTED,               /* vmx not supported */
+-    TB_ERR_TXT_NOT_SUPPORTED,               /* txt not supported */
++    TB_ERR_TPM_NOT_READY              = 3,  /* tpm not ready */
++    TB_ERR_SMX_NOT_SUPPORTED          = 4,  /* smx not supported */
++    TB_ERR_VMX_NOT_SUPPORTED          = 5,  /* vmx not supported */
++    TB_ERR_TXT_NOT_SUPPORTED          = 6,  /* txt not supported */
++    TB_ERR_CPU_NOT_READY              = 7,  /* CPU not able to launch */
+ 
+-    TB_ERR_MODULE_VERIFICATION_FAILED,      /* module failed to verify against
++    TB_ERR_MODULE_VERIFICATION_FAILED = 8,  /* module failed to verify against
+                                                policy */
+-    TB_ERR_MODULES_NOT_IN_POLICY,           /* modules in mbi but not in
++    TB_ERR_MODULES_NOT_IN_POLICY      = 9,  /* modules in mbi but not in
+                                                policy */
+-    TB_ERR_POLICY_INVALID,                  /* policy is invalid */
+-    TB_ERR_POLICY_NOT_PRESENT,              /* no policy in TPM NV */
++    TB_ERR_POLICY_INVALID             = 10, /* policy is invalid */
++    TB_ERR_POLICY_NOT_PRESENT         = 11, /* no policy in TPM NV */
+ 
+-    TB_ERR_SINIT_NOT_PRESENT,               /* SINIT ACM not provided */
+-    TB_ERR_ACMOD_VERIFY_FAILED,             /* verifying AC module failed */
++    TB_ERR_SINIT_NOT_PRESENT          = 12, /* SINIT ACM not provided */
++    TB_ERR_ACMOD_VERIFY_FAILED        = 13, /* verifying AC module failed */
+ 
+-    TB_ERR_POST_LAUNCH_VERIFICATION,        /* verification of post-launch
++    TB_ERR_POST_LAUNCH_VERIFICATION   = 14, /* verification of post-launch
+                                                failed */
+-    TB_ERR_S3_INTEGRITY,                    /* creation or verification of
++    TB_ERR_S3_INTEGRITY               = 15, /* creation or verification of
+                                                S3 integrity measurements
+                                                failed */
+ 
+-    TB_ERR_FATAL,                           /* generic fatal error */
+-    TB_ERR_NV_VERIFICATION_FAILED,          /* NV failed to verify against
++    TB_ERR_FATAL                      = 16, /* generic fatal error */
++    TB_ERR_NV_VERIFICATION_FAILED     = 17, /* NV failed to verify against
+                                                policy */
+-    TB_ERR_MAX
++    TB_ERR_PREV_LAUNCH_FAILURE        = 18, /* failure on previous launch */
++
++    TB_ERR_MAX                              /* must be <= 2^12 */
+ } tb_error_t;
+ 
+ 
+ extern void print_tb_error_msg(tb_error_t error);
+-extern bool read_tb_error_code(tb_error_t *error);
+-extern bool write_tb_error_code(tb_error_t error);
++extern bool read_error_index(tb_error_t *error);
++extern void write_tb_error(tb_error_t error);
+ extern bool was_last_boot_error(void);
+ 
++#endif /* __ASSEMBLY__ */
+ 
+ #endif /* __TB_ERROR_H__ */
+ 
+Index: tboot-1.9.5/include/tb_policy.h
+===================================================================
+--- tboot-1.9.5.orig/include/tb_policy.h
++++ tboot-1.9.5/include/tb_policy.h
+@@ -41,11 +41,11 @@
+  * policy types
+  */
+ enum {
+-    TB_POLTYPE_CONT_NON_FATAL,     /* ignore all non-fatal errors and */
+-                                   /* continue */
+-    TB_POLTYPE_CONT_VERIFY_FAIL,   /* ignore verification errors and */
+-                                   /* halt otherwise */
+-    TB_POLTYPE_HALT,               /* halt on any errors */
++    TB_POLTYPE_CONT_NON_FATAL,        /* ignore all non-fatal errors and
++                                         continue */
++    TB_POLTYPE_HALT,                  /* halt on any errors */
++    TB_POLTYPE_WARN_ON_FAILURE,       /* display warning if there is a failure
++                                         (and then do unmeasured launch) */
+     TB_POLTYPE_MAX
+ };
+ 
+@@ -136,10 +136,10 @@ static inline const char *policy_type_to
+ {
+     if ( policy_type == TB_POLTYPE_CONT_NON_FATAL )
+         return "TB_POLTYPE_CONT_NON_FATAL";
+-    else if ( policy_type == TB_POLTYPE_CONT_VERIFY_FAIL )
+-        return "TB_POLTYPE_CONT_VERIFY_FAIL";
+     else if ( policy_type == TB_POLTYPE_HALT )
+         return "TB_POLTYPE_HALT";
++    else if ( policy_type == TB_POLTYPE_WARN_ON_FAILURE )
++        return "TB_POLTYPE_WARN_ON_FAILURE";
+     else {
+         static char buf[32];
+         snprintf(buf, sizeof(buf), "unsupported (%u)", policy_type);
+Index: tboot-1.9.5/tb_polgen/param.c
+===================================================================
+--- tboot-1.9.5.orig/tb_polgen/param.c
++++ tboot-1.9.5/tb_polgen/param.c
+@@ -49,7 +49,7 @@
+ #include "tb_polgen.h"
+ 
+ static const char *help[] = {
+-    "tb_polgen --create --type        nonfatal|continue|halt\n",
++    "tb_polgen --create --type        nonfatal|warn|halt\n",
+     "                   [--ctrl       <policy control value>]\n",
+     "                   [--verbose]\n",
+     "                   <policy file name>\n",
+@@ -111,7 +111,7 @@ typedef struct {
+ 
+ static option_table_t policy_type_opts[] = {
+     {"nonfatal",     int_opt : TB_POLTYPE_CONT_NON_FATAL},
+-    {"continue",     int_opt : TB_POLTYPE_CONT_VERIFY_FAIL},
++    {"warn",         int_opt : TB_POLTYPE_WARN_ON_FAILURE},
+     {"halt",         int_opt : TB_POLTYPE_HALT},
+     {NULL}
+ };
+Index: tboot-1.9.5/tboot/common/boot.S
+===================================================================
+--- tboot-1.9.5.orig/tboot/common/boot.S
++++ tboot-1.9.5/tboot/common/boot.S
+@@ -38,6 +38,7 @@
+ #include <msr.h>
+ #include <page.h>
+ #include <processor.h>
++#include <tb_error.h>
+ 
+ #define BSP_STACK_SIZE		0x2000
+ #define AP_STACK_SIZE		0x0800
+@@ -62,9 +63,6 @@
+ /* OsSinitData field offsets */
+ #define MLE_PGTBL_OFF          8
+ 
+-/* errorcode for post-launch memory layout verfication failure */
+-#define LAYOUT_ERR             0xc0008001
+-
+ .section ".tboot_multiboot_header","w"
+         .align 4
+ /* multiboot header */
+@@ -145,17 +143,17 @@ ENTRY(_post_launch_entry)
+ 	je __start                /* yes, so continue with normal launch */
+ 
+ layout_err:       /* layout check failed so TXT RESET */
+-	                 /* set a special error code */
+-	movl $LAYOUT_ERR, (TXT_PRIV_CONFIG_REGS_BASE + TXTCR_ERRORCODE)
+-	                 /* unlock memory config (and serialize) */
++	                /* unlock memory config (and serialize) */
++                        /* set an error code (can't safely write to
++                           TB_LAUNCH_ERR_IDX at this time */
++	mov $MAKE_TBOOT_ERRORCODE(TB_ERR_LAYOUT), %eax
++	movl %eax, (TXT_PRIV_CONFIG_REGS_BASE + TXTCR_ERRORCODE)
+ 	movl $1, (TXT_PRIV_CONFIG_REGS_BASE + TXTCR_CMD_UNLOCK_MEM_CONFIG)
+ 	movl (TXT_PRIV_CONFIG_REGS_BASE + TXTCR_STS), %eax
+ 	                 /* TXT RESET */
+ 	movl $1, (TXT_PRIV_CONFIG_REGS_BASE + TXTCR_CMD_RESET)
+-	mov $6, %eax
+-	mov $0xcf9, %edx
+-	out %al, (%dx)   /* for debug chipsets where TXT RESET may not work */
+-	ud2
++                         /* give chipset time to reset CPU */
++1:      jmp 1b
+ 
+ 
+ ENTRY(__start)
+Index: tboot-1.9.5/tboot/common/integrity.c
+===================================================================
+--- tboot-1.9.5.orig/tboot/common/integrity.c
++++ tboot-1.9.5/tboot/common/integrity.c
+@@ -228,7 +228,7 @@ bool seal_pre_k_state(void)
+     if ( !seal_data(&g_pre_k_s3_state, sizeof(g_pre_k_s3_state),
+                     NULL, 0,
+                     sealed_pre_k_state, &sealed_pre_k_state_size) )
+-        goto error;
++    { /* TODO needs investigaton...  goto error; */ }
+ 
+     /* we can't leave the system in a state without valid measurements of
+        about-to-execute code in the PCRs, so this is a fatal error */
+Index: tboot-1.9.5/tboot/common/loader.c
+===================================================================
+--- tboot-1.9.5.orig/tboot/common/loader.c
++++ tboot-1.9.5/tboot/common/loader.c
+@@ -1384,6 +1384,9 @@ bool launch_kernel(bool is_measured_laun
+         if(!move_modules_above_elf_kernel(g_ldr_ctx, (elf_header_t *)kernel_image))
+             return false;
+ 
++        /* launch succeeded, so clear error codes */
++        write_tb_error(TB_ERR_NONE);
++
+         printk(TBOOT_INFO"transfering control to kernel @%p...\n", 
+                kernel_entry_point);
+         /* (optionally) pause when transferring to kernel */
+@@ -1410,6 +1413,10 @@ bool launch_kernel(bool is_measured_laun
+         expand_linux_image(kernel_image, kernel_size,
+                            initrd_image, initrd_size,
+                            &kernel_entry_point, is_measured_launch);
++
++        /* launch succeeded, so clear error codes */
++        write_tb_error(TB_ERR_NONE);
++
+         printk(TBOOT_INFO"transfering control to kernel @%p...\n", 
+                kernel_entry_point);
+         /* (optionally) pause when transferring to kernel */
+@@ -1418,7 +1425,6 @@ bool launch_kernel(bool is_measured_laun
+         return jump_linux_image(kernel_entry_point);
+     }
+ 
+-    printk(TBOOT_ERR"unknown kernel type\n");
+     return false;
+ }
+ 
+Index: tboot-1.9.5/tboot/common/paging.c
+===================================================================
+--- tboot-1.9.5.orig/tboot/common/paging.c
++++ tboot-1.9.5/tboot/common/paging.c
+@@ -116,7 +116,7 @@ void map_pages_to_tboot(unsigned long vs
+ }
+ 
+ /* map tboot pages into tboot */
+-static void map_tboot_pages(unsigned long pfn, unsigned long nr_pfns)
++static bool map_tboot_pages(unsigned long pfn, unsigned long nr_pfns)
+ {
+     uint64_t start, end;
+ 
+@@ -131,10 +131,12 @@ static void map_tboot_pages(unsigned lon
+     if ( end > DIRECTMAP_VIRT_END ) {
+         printk(TBOOT_ERR"0x%llx ~ 0x%llx cannot be mapped as direct map\n", start, end);
+         disable_paging();
+-        apply_policy(TB_ERR_FATAL);
++        return false;
+     }
+ 
+     map_pages_to_tboot(start, pfn, nr_pfns);
++
++    return true;
+ }
+ 
+ /* destroy the map */
+@@ -187,13 +189,16 @@ static unsigned long build_directmap_pag
+     tboot_epfn = ((unsigned long)(TBOOT_KERNEL_CMDLINE_ADDR
+                      + TBOOT_KERNEL_CMDLINE_SIZE + MAC_PAGE_SIZE - 1))
+                      >> TB_L1_PAGETABLE_SHIFT;
+-    map_tboot_pages(tboot_spfn, tboot_epfn - tboot_spfn);
++    if (! map_tboot_pages(tboot_spfn, tboot_epfn - tboot_spfn))
++        return 0;
++
+ 
+     /* map tboot */
+     tboot_spfn = (unsigned long)&_start >> TB_L1_PAGETABLE_SHIFT;
+     tboot_epfn = ((unsigned long)&_end + MAC_PAGE_SIZE - 1)
+                      >> TB_L1_PAGETABLE_SHIFT;
+-    map_tboot_pages(tboot_spfn, tboot_epfn - tboot_spfn);
++    if (! map_tboot_pages(tboot_spfn, tboot_epfn - tboot_spfn))
++        return 0;
+ 
+     return (unsigned long)pdptr_table;
+ }
+@@ -203,6 +208,7 @@ static unsigned long cr0, cr4;
+ bool enable_paging(void)
+ {
+     unsigned long eflags;
++    unsigned long new_cr3;
+ 
+     /* disable interrupts */
+     eflags = read_eflags();
+@@ -217,8 +223,11 @@ bool enable_paging(void)
+ 
+     write_cr4((cr4 | CR4_PAE | CR4_PSE) & ~CR4_PGE);
+ 
+-    write_cr3(build_directmap_pagetable());
+-    write_cr0(cr0 | CR0_PG);
++    new_cr3 = build_directmap_pagetable();
++    if (new_cr3 != 0) {
++        write_cr3(new_cr3);
++        write_cr0(cr0 | CR0_PG);
++    }
+ 
+     /* enable interrupts */
+     write_eflags(eflags);
+Index: tboot-1.9.5/tboot/common/policy.c
+===================================================================
+--- tboot-1.9.5.orig/tboot/common/policy.c
++++ tboot-1.9.5/tboot/common/policy.c
+@@ -65,61 +65,92 @@
+ extern void shutdown(void);
+ extern void s3_launch(void);
+ 
++extern void vga_puts(const char *s, unsigned int cnt);
++
+ /* MLE/kernel shared data page (in boot.S) */
+ extern tboot_shared_t _tboot_shared;
+ 
+ extern long s3_flag;
+ 
++const char *warning_msg = "An error had occurred on this launch or the "
++                          "previous.";
++#define WARN_DELAY  0     /* in sec */
++
+ /*
+  * policy actions
+  */
+ typedef enum {
+-    TB_POLACT_CONTINUE,
+-    TB_POLACT_UNMEASURED_LAUNCH,
+-    TB_POLACT_HALT,
++    TB_POLACT_IGNORE,               /* continue execution (don't log error) */
++    TB_POLACT_CONTINUE,             /* log error and continue execution */
++    TB_POLACT_UNMEASURED_LAUNCH,    /* don't complete measured launch but
++                                       skip to launch of kernel/VMM */
++    TB_POLACT_HALT,                 /* halt system */
++    TB_POLACT_REBOOT,               /* reboot */
++    TB_POLACT_WARN,                 /* display message on VGA and wait 5 sec.
++                                       then continue */
+ } tb_policy_action_t;
+ 
++/* # actions that can be specified for each error condition */
++#define MAX_ACTIONS     2
++
+ /* policy map types */
+ typedef struct {
+     tb_error_t         error;
+-    tb_policy_action_t action;
++    tb_policy_action_t pre_actions[MAX_ACTIONS];
++    tb_policy_action_t post_actions[MAX_ACTIONS];
+ } tb_policy_map_entry_t;
+ 
+ typedef struct {
+     uint8_t                policy_type;
+-    tb_policy_action_t     default_action;
++    tb_policy_action_t     default_pre_actions[MAX_ACTIONS];
++    tb_policy_action_t     default_post_actions[MAX_ACTIONS];
++                           /* must have TB_ERR_NONE as last entry in these
++                            * and its actions will be ignored */
+     tb_policy_map_entry_t  exception_action_table[TB_ERR_MAX];
+-                           /* have TB_ERR_NONE as last entry */
+ } tb_policy_map_t;
+ 
+-/* map */
++/*
++ * map of policy types to actions
++ *
++ * TB_ERR_FATAL should never map to TB_POLACT_CONTINUE or TB_POLACT_IGNORE
++ * because tboot code assumes that this error cannot return to the caller
++ */
+ static const tb_policy_map_t g_policy_map[] = {
+-    { TB_POLTYPE_CONT_NON_FATAL,               TB_POLACT_CONTINUE,
++    { TB_POLTYPE_CONT_NON_FATAL,               {TB_POLACT_CONTINUE}, {TB_POLACT_CONTINUE},
+       {
+-          {TB_ERR_FATAL,                       TB_POLACT_HALT},
+-          {TB_ERR_TPM_NOT_READY,               TB_POLACT_UNMEASURED_LAUNCH},
+-          {TB_ERR_SMX_NOT_SUPPORTED,           TB_POLACT_UNMEASURED_LAUNCH},
+-          {TB_ERR_VMX_NOT_SUPPORTED,           TB_POLACT_UNMEASURED_LAUNCH},
+-          {TB_ERR_TXT_NOT_SUPPORTED,           TB_POLACT_UNMEASURED_LAUNCH},
+-          {TB_ERR_SINIT_NOT_PRESENT,           TB_POLACT_UNMEASURED_LAUNCH},
+-          {TB_ERR_ACMOD_VERIFY_FAILED,         TB_POLACT_UNMEASURED_LAUNCH},
+-          {TB_ERR_NONE,                        TB_POLACT_CONTINUE},
++          {TB_ERR_FATAL,                       {TB_POLACT_REBOOT}, {TB_POLACT_REBOOT}},
++          {TB_ERR_TPM_NOT_READY,               {TB_POLACT_UNMEASURED_LAUNCH}, {TB_POLACT_UNMEASURED_LAUNCH}},
++          {TB_ERR_SMX_NOT_SUPPORTED,           {TB_POLACT_UNMEASURED_LAUNCH}, {TB_POLACT_UNMEASURED_LAUNCH}},
++          {TB_ERR_VMX_NOT_SUPPORTED,           {TB_POLACT_UNMEASURED_LAUNCH}, {TB_POLACT_UNMEASURED_LAUNCH}},
++          {TB_ERR_TXT_NOT_SUPPORTED,           {TB_POLACT_UNMEASURED_LAUNCH}, {TB_POLACT_UNMEASURED_LAUNCH}},
++          {TB_ERR_CPU_NOT_READY,               {TB_POLACT_UNMEASURED_LAUNCH}, {TB_POLACT_UNMEASURED_LAUNCH}},
++          {TB_ERR_SINIT_NOT_PRESENT,           {TB_POLACT_UNMEASURED_LAUNCH}, {TB_POLACT_UNMEASURED_LAUNCH}},
++          {TB_ERR_ACMOD_VERIFY_FAILED,         {TB_POLACT_UNMEASURED_LAUNCH}, {TB_POLACT_UNMEASURED_LAUNCH}},
++          {TB_ERR_NONE,                        {}, {}},
+       }
+     },
+ 
+-    { TB_POLTYPE_CONT_VERIFY_FAIL,             TB_POLACT_HALT,
++    { TB_POLTYPE_HALT,                         {TB_POLACT_HALT}, {TB_POLACT_HALT},
+       {
+-          {TB_ERR_MODULE_VERIFICATION_FAILED,  TB_POLACT_CONTINUE},
+-          {TB_ERR_NV_VERIFICATION_FAILED,      TB_POLACT_CONTINUE},
+-          {TB_ERR_POLICY_NOT_PRESENT,          TB_POLACT_CONTINUE},
+-          {TB_ERR_POLICY_INVALID,              TB_POLACT_CONTINUE},
+-          {TB_ERR_NONE,                        TB_POLACT_CONTINUE},
++          {TB_ERR_NONE,                        {}, {}},
+       }
+     },
+ 
+-    { TB_POLTYPE_HALT,                         TB_POLACT_HALT,
++    { TB_POLTYPE_WARN_ON_FAILURE,              {TB_POLACT_WARN, TB_POLACT_UNMEASURED_LAUNCH},
++                                               {TB_POLACT_WARN, TB_POLACT_REBOOT},
+       {
+-          {TB_ERR_NONE,                        TB_POLACT_CONTINUE},
++          {TB_ERR_FATAL,                       {TB_POLACT_WARN, TB_POLACT_REBOOT},
++                                               {TB_POLACT_WARN, TB_POLACT_REBOOT}},
++          {TB_ERR_TPM_NOT_READY,               {TB_POLACT_UNMEASURED_LAUNCH}, {TB_POLACT_UNMEASURED_LAUNCH}},
++          {TB_ERR_SMX_NOT_SUPPORTED,           {TB_POLACT_UNMEASURED_LAUNCH}, {TB_POLACT_UNMEASURED_LAUNCH}},
++          {TB_ERR_VMX_NOT_SUPPORTED,           {TB_POLACT_UNMEASURED_LAUNCH}, {TB_POLACT_UNMEASURED_LAUNCH}},
++          {TB_ERR_TXT_NOT_SUPPORTED,           {TB_POLACT_UNMEASURED_LAUNCH}, {TB_POLACT_UNMEASURED_LAUNCH}},
++          /*
++           * whether no policy in TPM NV is error or not depends on
++           * deployment model
++           */
++          {TB_ERR_POLICY_NOT_PRESENT,          {TB_POLACT_IGNORE}, {TB_POLACT_IGNORE}},
++          {TB_ERR_NONE,                        {}, {}},
+       }
+     },
+ };
+@@ -134,7 +165,7 @@ static uint8_t _policy_index_buf[MAX_POL
+ /* default policy */
+ static const tb_policy_t _def_policy = {
+     version        : 2,
+-    policy_type    : TB_POLTYPE_CONT_NON_FATAL,
++    policy_type    : TB_POLTYPE_WARN_ON_FAILURE,
+     hash_alg       : TB_HALG_SHA1,
+     policy_control : TB_POLCTL_EXTEND_PCR17,
+     num_entries    : 3,
+@@ -164,7 +195,7 @@ static const tb_policy_t _def_policy = {
+ /* default policy for Details/Authorities pcr mapping */
+ static const tb_policy_t _def_policy_da = {
+     version        : 2,
+-    policy_type    : TB_POLTYPE_CONT_NON_FATAL,
++    policy_type    : TB_POLTYPE_WARN_ON_FAILURE,
+     hash_alg       : TB_HALG_SHA1,
+     policy_control : TB_POLCTL_EXTEND_PCR17,
+     num_entries    : 3,
+@@ -536,30 +567,35 @@ static bool is_hash_in_policy_entry(cons
+ /*
+  * map policy type + error -> action
+  */
+-static tb_policy_action_t evaluate_error(tb_error_t error)
+-{
+-    tb_policy_action_t action = TB_POLACT_HALT;
+ 
+-    if ( error == TB_ERR_NONE )
+-        return TB_POLACT_CONTINUE;
++/* there appears to be a compiler bug that prevents this being local static */
++static const tb_policy_action_t *no_actions = (const tb_policy_action_t [])
++                                              {TB_POLACT_HALT, TB_POLACT_HALT};
++
++static const tb_policy_action_t *evaluate_error(tb_error_t error)
++{
++    const tb_policy_action_t *actions = no_actions;
+ 
+     for ( unsigned int i = 0; i < ARRAY_SIZE(g_policy_map); i++ ) {
+         if ( g_policy_map[i].policy_type == g_policy->policy_type ) {
+-            action = g_policy_map[i].default_action;
++            actions = txt_is_launched() ? g_policy_map[i].default_post_actions :
++                                          g_policy_map[i].default_pre_actions;
+             for ( unsigned int j = 0;
+                   j < ARRAY_SIZE(g_policy_map[i].exception_action_table);
+                   j++ ) {
+                 if ( g_policy_map[i].exception_action_table[j].error ==
+-                     error )
+-                    action = g_policy_map[i].exception_action_table[j].action;
+-                if ( g_policy_map[i].exception_action_table[j].error ==
+                      TB_ERR_NONE )
+                     break;
++                if ( g_policy_map[i].exception_action_table[j].error ==
++                     error )
++                    actions = txt_is_launched() ?
++                        g_policy_map[i].exception_action_table[j].post_actions :
++                        g_policy_map[i].exception_action_table[j].pre_actions;
+             }
+         }
+     }
+ 
+-    return action;
++    return actions;
+ }
+ 
+ /*
+@@ -567,34 +603,59 @@ static tb_policy_action_t evaluate_error
+  */
+ void apply_policy(tb_error_t error)
+ {
+-    tb_policy_action_t action;
++    if ( error == TB_ERR_NONE )
++        return;
+ 
+-    /* save the error to TPM NV */
+-    write_tb_error_code(error);
++    print_tb_error_msg(error);
+ 
+-    if ( error != TB_ERR_NONE )
+-        print_tb_error_msg(error);
++    const tb_policy_action_t *actions = evaluate_error(error);
+ 
+-    action = evaluate_error(error);
+-    switch ( action ) {
+-        case TB_POLACT_CONTINUE:
+-            return;
+-        case TB_POLACT_UNMEASURED_LAUNCH:
+-            /* restore mtrr state saved before */
+-            restore_mtrrs(NULL);
+-            if ( s3_flag )
+-                s3_launch();
+-            else
+-                launch_kernel(false);
+-            break; /* if launch xen fails, do halt at the end */
+-        case TB_POLACT_HALT:
+-            break; /* do halt at the end */
+-        default:
+-            printk(TBOOT_ERR"Error: invalid policy action (%d)\n", action);
+-            /* do halt at the end */
++    /*
++     * write error to TXT.ERRORCODE (if post-launch) and to tboot's TPM NV
++     * error index (if defined)
++     * don't log error if TB_POLACT_IGNORE or if error was that there was a
++     * previous error
++     */
++    if ( error != TB_ERR_PREV_LAUNCH_FAILURE && actions[0] != TB_POLACT_IGNORE )
++        write_tb_error(error);
++
++    for ( unsigned int i = 0; i < MAX_ACTIONS; i++ ) {
++        switch ( actions[i] ) {
++            case TB_POLACT_CONTINUE:
++            case TB_POLACT_IGNORE:
++                return;
++            case TB_POLACT_UNMEASURED_LAUNCH:
++                /* restore mtrr state saved before */
++                restore_mtrrs(NULL);
++                if ( s3_flag )
++                    s3_launch();
++                else
++                    launch_kernel(false);
++                break; /* if launch xen fails, do reboot at the end */
++            case TB_POLACT_HALT:
++                _tboot_shared.shutdown_type = TB_SHUTDOWN_HALT;
++                shutdown();
++                break;
++            case TB_POLACT_REBOOT:
++                _tboot_shared.shutdown_type = TB_SHUTDOWN_REBOOT;
++                shutdown();
++                break;
++            case TB_POLACT_WARN:
++                /* display message to user */
++                printk("%s\n", warning_msg);
++                vga_puts(warning_msg, strlen(warning_msg));
++                /* wait to let user read it */
++                delay(WARN_DELAY);
++                break;
++            default:
++                printk("Error: invalid policy action (%u)\n", actions[i]);
++                _tboot_shared.shutdown_type = TB_SHUTDOWN_REBOOT;
++                shutdown();
++        }
+     }
+ 
+-    _tboot_shared.shutdown_type = TB_SHUTDOWN_HALT;
++    /* shouldn't get here */
++    _tboot_shared.shutdown_type = TB_SHUTDOWN_REBOOT;
+     shutdown();
+ }
+ 
+Index: tboot-1.9.5/tboot/common/tb_error.c
+===================================================================
+--- tboot-1.9.5.orig/tboot/common/tb_error.c
++++ tboot-1.9.5/tboot/common/tb_error.c
+@@ -49,6 +49,8 @@
+ #include <tpm.h>
+ #include <tboot.h>
+ #include <txt/config_regs.h>
++#include <txt/txt.h>
++#include <txt/errorcode.h>
+ 
+ #define TB_LAUNCH_ERR_IDX     0x20000002      /* launch error index */
+ 
+@@ -66,9 +68,6 @@ void print_tb_error_msg(tb_error_t error
+         case TB_ERR_NONE:
+             printk(TBOOT_INFO"succeeded.\n");
+             break;
+-        case TB_ERR_FIXED:
+-            printk(TBOOT_INFO"previous error has been fixed.\n");
+-            break;
+         case TB_ERR_GENERIC:
+             printk(TBOOT_WARN"non-fatal generic error.\n");
+             break;
+@@ -84,6 +83,9 @@ void print_tb_error_msg(tb_error_t error
+         case TB_ERR_TXT_NOT_SUPPORTED:
+             printk(TBOOT_ERR"TXT not supported.\n");
+             break;
++        case TB_ERR_CPU_NOT_READY:
++            printk(TBOOT_ERR"CPU not ready for launch.\n");
++            break;
+         case TB_ERR_MODULES_NOT_IN_POLICY:
+             printk(TBOOT_ERR"modules in mbi but not in policy.\n");
+             break;
+@@ -114,6 +116,9 @@ void print_tb_error_msg(tb_error_t error
+         case TB_ERR_NV_VERIFICATION_FAILED:
+             printk(TBOOT_ERR"verifying nv against policy failed.\n");
+             break;
++        case TB_ERR_PREV_LAUNCH_FAILURE:
++            printk(TBOOT_ERR"error on previous launch.\n");
++            break;
+         default:
+             printk(TBOOT_ERR"unknown error (%d).\n", error);
+             break;
+@@ -121,12 +126,35 @@ void print_tb_error_msg(tb_error_t error
+ }
+ 
+ /*
+- * read_tb_error_code
++ * write_error_index
++ *
++ * write error code to TPM NV
++ *
++ */
++static void write_error_index(tb_error_t error)
++{
++    if ( !g_tpm || no_err_idx )
++         return;
++
++    /* to prevent wearout, only write if data has changed */
++    tb_error_t prev_error = TB_ERR_NONE;
++    if ( read_error_index(&prev_error) ) {
++        if ( prev_error != error ) {
++            if ( !g_tpm->nv_write(g_tpm, 0, g_tpm->tb_err_index, 0,
++                                  (uint8_t *)&error, sizeof(tb_error_t)) ) {
++                no_err_idx = true;
++            }
++        }
++    }
++}
++
++/*
++ * read_error_index
+  *
+  * read error code from TPM NV (TB_LAUNCH_ERR_IDX)
+  *
+  */
+-bool read_tb_error_code(tb_error_t *error)
++bool read_error_index(tb_error_t *error)
+ {
+     uint32_t size = sizeof(tb_error_t);
+ 
+@@ -152,22 +180,36 @@ bool read_tb_error_code(tb_error_t *erro
+ /*
+  * write_tb_error_code
+  *
+- * write error code into TPM NV (TB_LAUNCH_ERR_IDX)
++ * write error code to TXT.ERRORCODE (if post-launch) and into
++ * TPM NV (TB_LAUNCH_ERR_IDX) (if defined).
+  *
+  */
+-bool write_tb_error_code(tb_error_t error)
++void write_tb_error(tb_error_t error)
+ {
+-    if ( !g_tpm || no_err_idx )
+-        return false;
++    /* don't write (new) error if there is an existing error */
++    if ( was_last_boot_error() ) {
++        printk("previous error exists, not overwriting\n");
++        return;
++    }
+ 
+-    if ( !g_tpm->nv_write(g_tpm, g_tpm->cur_loc, g_tpm->tb_err_index, 0,
+-				      (uint8_t *)&error, sizeof(tb_error_t)) ) {
+-        printk(TBOOT_WARN"Error: write TPM error: 0x%x.\n", g_tpm->error);
+-        no_err_idx = true;
+-        return false;
++    /* write to TXT.ERRORCODE only if we're post-launch */
++    if ( txt_is_launched() ) {
++        /* must do this in fn, so do here */
++        COMPILE_TIME_ASSERT( TB_ERR_MAX <= (1<<12) );
++
++        tboot_errorcode_t tboot_err;
++
++        /* TB_ERR_NONE is not really an error, so just write 0s */
++        if ( error == TB_ERR_NONE )
++            tboot_err._raw = 0;
++        else
++            tboot_err._raw = MAKE_TBOOT_ERRORCODE(error);
++        write_priv_config_reg(TXTCR_ERRORCODE, tboot_err._raw);
++        printk("writing error (0x%Lx) to TXT.ERRORCODE\n", tboot_err._raw);
+     }
+ 
+-    return true;
++    /* write to TB_LAUNCH_ERR_IDX, if it exists */
++    write_error_index(error);
+ }
+ 
+ /*
+@@ -176,20 +218,19 @@ bool write_tb_error_code(tb_error_t erro
+  */
+ bool was_last_boot_error(void)
+ {
+-    tb_error_t error;
+-    txt_errorcode_t txt_err;
+-
+-    /* check TB_LAUNCH_ERR_IDX */
+-    if ( read_tb_error_code(&error) ) {
+-        if ( error != TB_ERR_FIXED )
+-            return true;
+-    }
++    /*
++     * if it's TB_ERR_NONE, still need to check TXT.ERRORCODE because might
++     * have cleared it but fix didn't work and so will error out again in
++     * SINIT, setting TXT.ERRORCODE but leaving TB_LAUNCH_ERR_IDX clear, and
++     * otherwise would have reset loop
++     */
+ 
+     /* check TXT.ERRORCODE */
+-    txt_err = (txt_errorcode_t)read_pub_config_reg(TXTCR_ERRORCODE);
+-    if ( txt_err.valid && txt_err.type > 0 )
++    if ( is_txt_errorcode_error() ) {
++        /* put TB_ERR_PREV_LAUNCH_FAILURE into TB_LAUNCH_ERR_IDX. */
++        write_error_index(TB_ERR_PREV_LAUNCH_FAILURE);
+         return true;
+-
++    }
+     return false;
+ }
+ 
+Index: tboot-1.9.5/tboot/common/tboot.c
+===================================================================
+--- tboot-1.9.5.orig/tboot/common/tboot.c
++++ tboot-1.9.5/tboot/common/tboot.c
+@@ -182,8 +182,9 @@ static void post_launch(void)
+     err = txt_protect_mem_regions();
+     apply_policy(err);
+ 
+-    /* ensure all modules are in RAM */
+-    if ( !verify_modules(g_ldr_ctx) )     apply_policy(TB_ERR_POST_LAUNCH_VERIFICATION);
++    /* ensure all modules are in RAM (after reserving anything). */
++    if ( !verify_modules(g_ldr_ctx) )
++        apply_policy(TB_ERR_POST_LAUNCH_VERIFICATION);
+ 
+     /* verify that tboot is in valid RAM (i.e. E820_RAM) */
+     base = (uint64_t)TBOOT_BASE_ADDR;
+@@ -296,7 +297,7 @@ void launch_racm(void)
+ 
+     /* prepare cpu */
+     if ( !prepare_cpu() )
+-        apply_policy(TB_ERR_FATAL);
++        apply_policy(TB_ERR_CPU_NOT_READY);
+ 
+     /* prepare tpm */
+     if ( !prepare_tpm() )
+@@ -415,7 +416,7 @@ void begin_launch(void *addr, uint32_t m
+     apply_policy(err);
+ 
+     /* print any errors on last boot, which must be from TXT launch */
+-    txt_get_error();
++    display_last_boot_error();
+ 
+     /* need to verify that platform can perform measured launch */
+     err = verify_platform();
+@@ -445,9 +446,10 @@ void begin_launch(void *addr, uint32_t m
+     }
+ 
+     /* check for error from previous boot */
+-    printk(TBOOT_INFO"checking previous errors on the last boot.\n\t");
+-    if ( was_last_boot_error() )
++    if ( was_last_boot_error() ) {
+         printk(TBOOT_INFO"last boot has error.\n");
++        apply_policy(TB_ERR_PREV_LAUNCH_FAILURE);
++    }
+     else
+         printk(TBOOT_INFO"last boot has no error.\n");
+ 
+@@ -482,6 +484,9 @@ void s3_launch(void)
+     if ( g_vga_delay > 0 )
+         delay(g_vga_delay * 1000);
+ 
++    /* launch succeeded, so clear error codes */
++    write_tb_error(TB_ERR_NONE);
++
+     _prot_to_real(g_post_k_s3_state.kernel_s3_resume_vector);
+ }
+ 
+Index: tboot-1.9.5/tboot/include/txt/errorcode.h
+===================================================================
+--- tboot-1.9.5.orig/tboot/include/txt/errorcode.h
++++ tboot-1.9.5/tboot/include/txt/errorcode.h
+@@ -37,59 +37,110 @@
+ #define __TXT_ERRORCODE_H__
+ 
+ /*
+- * error values for processor error codes (ERRORCODE.external = 0)
+- */
+-#define TXT_ERR_PROC_LEGACY_SHUTDOWN          0
+-#define TXT_ERR_PROC_INVALID_ACM_MEM_TYPE     5
+-#define TXT_ERR_PROC_UNSUPPORTED_ACM          6
+-#define TXT_ERR_PROC_AUTH_FAIL                7
+-#define TXT_ERR_PROC_INVALID_ACM_FORMAT       8
+-#define TXT_ERR_PROC_UNEXPECTED_HITM          9
+-#define TXT_ERR_PROC_INVALID_EVENT           10
+-#define TXT_ERR_PROC_INVALID_JOIN_FORMAT     11
+-#define TXT_ERR_PROC_UNRECOVERABLE_MCE       12
+-#define TXT_ERR_PROC_VMX_ABORT               13
+-#define TXT_ERR_PROC_ACM_CORRUPT             14
+-#define TXT_ERR_PROC_INVALID_VIDB_RATIO      15
+-
+-/*
+- * for SW errors (ERRORCODE.external = 1)
++ * format of ERRORCODE register for tboot errors
++ *
++ * Bit     Description
++ * ---     -----------
++ * 31      '1' (Valid)
++ * 30      '1' (External)
++ * 29:16   reserved
++ * 15      '1' (error not from ACM)
++ * 14:12   '0' - tboot, '1'-'7' - kernel/VMM specific
++ * 11:0    tboot error code (TB_ERR_*)
+  */
+ typedef union {
+-    uint32_t _raw;
++    uint64_t _raw;
+     struct {
+-        uint32_t  err1     : 15;     /* specific to src */
+-        uint32_t  src      : 1;      /* 0=ACM, 1=other */
+-        uint32_t  err2     : 14;     /* specific to src */
+-        uint32_t  external : 1;      /* always 1 for this type */
+-        uint32_t  valid    : 1;      /* always 1 */
++        uint64_t   error      : 12;  /* bits 11:0 */
++        uint64_t   src        : 3;   /* bits 14:12 */
++        uint64_t   non_acm    : 1;   /* bit 15 */
++        uint64_t   reserved   : 14;  /* bits 29:16 */
++        uint64_t   external   : 1;   /* bit 30 */
++        uint64_t   valid      : 1;   /* bit 31 */
+     };
+-} txt_errorcode_sw_t;
++} tboot_errorcode_t;
+ 
+ /*
+- * ACM errors (txt_errorcode_sw_t.src=0), format of err1+src+err2 fields
++ * format of ERRORCODE register for ACM errors
++ *
++ * Bit     Description
++ * ---     -----------
++ * 31      '1' (Valid)
++ * 30      '1' (External)
++ * 29:25   Reserved
++ * 24:16   TPM command return code, valid only for progress code 0dh and error
++ *         code 1010
++ * 24:16   LCP v2 minor error code, valid only for progress code 10h
++ *         24:22   Index (in LCP_POLICY_DATA::PolicyLists) of item responsible
++ *                 for error
++ *         21:16   Minor error code (see progress code 10h below)
++ * 15      '0' (error generated by AC module)
++ * 14:10   AC module error codes
++ * 9:4     AC module progress codes
++ * 3:0     AC module type
++ *         0000  BIOS
++ *         0001  SINIT
++ *         0010 - 1111 Reserved for future use
+  */
+-typedef union __attribute__((packed)){
+-    uint32_t _raw;
+-    struct __attribute__((packed)){
+-        uint32_t acm_type  : 4;  /* 0000=BIOS ACM, 0001=SINIT, */
+-                                 /* 0010-1111=reserved */
+-        uint32_t progress  : 6;
+-        uint32_t error     : 5;
+-        uint32_t src       : 1;  /* above value */
+-        union __attribute__((packed)){
+-            struct __attribute__((packed)) {  /* progress=0x0d, error=1010 */
+-                uint32_t tpm_err    : 9;
+-                uint32_t reserved1  : 5;
+-            };
+-            struct __attribute__((packed)) {  /* progress=0x10 */
+-                uint32_t lcp_minor  : 6;
+-                uint32_t lcp_index  : 3;
+-                uint32_t reserved2  : 5;
+-            };
+-        }; /* sub-error */
++typedef union {
++    uint64_t _raw;
++    struct {
++        uint64_t   acm_type   : 4;   /* bits 3:0 */
++        uint64_t   progress   : 6;   /* bits 9:4 */
++        uint64_t   error      : 5;   /* bits 14:10 */
++        uint64_t   non_acm    : 1;   /* bit 15 */
++        uint64_t   error2     : 9;   /* bits 24:16 */
++        uint64_t   reserved   : 5;   /* bits 29:25 */
++        uint64_t   external   : 1;   /* bit 30 */
++        uint64_t   valid      : 1;   /* bit 31 */
+     };
+-} acmod_error_t;
++} acmod_errorcode_t;
++
++static inline void display_txt_errorcode(uint64_t raw_err)
++{
++    txt_errorcode_t err;
++    err._raw = raw_err;
++
++    printk("TXT.ERRORCODE: 0x%Lx\n", (unsigned long long)err._raw);
++
++    /* AC module error (don't know how to parse other errors) */
++    if ( err.valid ) {
++        if ( err.external == 0 )            /* processor error */
++            printk("\t processor error: 0x%x\n", (uint32_t)err.type);
++        else {                              /* SW error (tboot or ACM) */
++            tboot_errorcode_t tboot_err;
++            tboot_err._raw = err._raw;
++            if ( tboot_err.non_acm  ) {     /* tboot or kernel error */
++                if ( tboot_err.src == 0 ) {
++                    printk("\t tboot error :\n");
++                    printk("\t     error: %d\n", tboot_err.error);
++                }
++                else {
++                    printk("\t kernel error (%d) :\n", tboot_err.src);
++                    printk("\t     error: 0x%x\n", tboot_err.error);
++                    printk("\t     reserved: 0x%x\n", tboot_err.reserved);
++                }
++            }
++            else {                          /* ACM error */
++                acmod_errorcode_t acmod_err;
++                acmod_err._raw = err._raw;
++                printk("\t AC module error :\n");
++                printk("\t     acm_type: 0x%x\n", acmod_err.acm_type);
++                printk("\t     progress: 0x%02x\n", acmod_err.progress);
++                printk("\t     error: 0x%x\n", acmod_err.error);
++                /* error = 0x0a, progress = 0x0d => error2 is a TPM error */
++                if ( acmod_err.error == 0x0a && acmod_err.progress == 0x0d )
++                    printk("\t     TPM error code: 0x%x\n", acmod_err.error2);
++                /* error = 0x10 => error2 is an LCP v2 error */
++                else if ( acmod_err.progress == 0x10 && acmod_err.error2 != 0 )
++                    printk("\t     LCP minor error code: 0x%x\n",
++                           acmod_err.error2);
++            }
++        }
++    }
++}
++
++extern bool is_txt_errorcode_error(void);
+ 
+ #endif    /* __TXT_ERRORCODE_H__ */
+ 
+Index: tboot-1.9.5/tboot/include/txt/txt.h
+===================================================================
+--- tboot-1.9.5.orig/tboot/include/txt/txt.h
++++ tboot-1.9.5/tboot/include/txt/txt.h
+@@ -50,6 +50,7 @@ extern void txt_post_launch(void);
+ extern tb_error_t txt_protect_mem_regions(void);
+ extern tb_error_t txt_post_launch_verify_platform(void);
+ extern bool txt_s3_launch_environment(void);
++extern void display_last_boot_error(void);
+ extern void txt_shutdown(void);
+ extern bool txt_is_powercycle_required(void);
+ extern void ap_wait(unsigned int cpuid);
+Index: tboot-1.9.5/tboot/txt/errors.c
+===================================================================
+--- tboot-1.9.5.orig/tboot/txt/errors.c
++++ tboot-1.9.5/tboot/txt/errors.c
+@@ -46,83 +46,22 @@
+ #include <txt/errorcode.h>
+ 
+ 
+-static void display_errors(void)
++bool is_txt_errorcode_error(void)
+ {
+-    txt_errorcode_t err;
+-    txt_ests_t ests;
+-    txt_e2sts_t e2sts;
+-    txt_errorcode_sw_t sw_err;
+-    acmod_error_t acmod_err;
++    acmod_errorcode_t err;
++    err._raw = read_pub_config_reg(TXTCR_ERRORCODE);
+ 
+-    /*
+-     * display TXT.ERRORODE error
+-     */
+-    err = (txt_errorcode_t)read_pub_config_reg(TXTCR_ERRORCODE);
+-    if (err._raw == 0 || err._raw == 0xc0000001 || err._raw == 0xc0000009)
+-        printk(TBOOT_INFO"TXT.ERRORCODE: 0x%Lx\n", err._raw);
+-    else
+-        printk(TBOOT_ERR"TXT.ERRORCODE: 0x%Lx\n", err._raw);
++    if ( !err.valid )
++        return false;
+ 
+-    /* AC module error (don't know how to parse other errors) */
+-    if ( err.valid ) {
+-        if ( err.external == 0 )       /* processor error */
+-            printk(TBOOT_ERR"\t processor error 0x%x\n", (uint32_t)err.type);
+-        else {                         /* external SW error */
+-            sw_err._raw = err.type;
+-            if ( sw_err.src == 1 )     /* unknown SW error */
+-                printk(TBOOT_ERR"unknown SW error 0x%x:0x%x\n", sw_err.err1, sw_err.err2);
+-            else {                     /* ACM error */
+-                acmod_err._raw = sw_err._raw;
+-                if ( acmod_err._raw == 0x0 || acmod_err._raw == 0x1 ||
+-                     acmod_err._raw == 0x9 )
+-                    printk(TBOOT_INFO"AC module error : acm_type=0x%x, progress=0x%02x, "
+-                           "error=0x%x\n", acmod_err.acm_type, acmod_err.progress,
+-                           acmod_err.error);
+-                else
+-                    printk(TBOOT_ERR"AC module error : acm_type=0x%x, progress=0x%02x, "
+-                           "error=0x%x\n", acmod_err.acm_type, acmod_err.progress,
+-                           acmod_err.error);
+-                /* error = 0x0a, progress = 0x0d => TPM error */
+-                if ( acmod_err.error == 0x0a && acmod_err.progress == 0x0d )
+-                    printk(TBOOT_ERR"TPM error code = 0x%x\n", acmod_err.tpm_err);
+-                /* progress = 0x10 => LCP2 error */
+-                else if ( acmod_err.progress == 0x10 && acmod_err.lcp_minor != 0 )
+-                    printk(TBOOT_ERR"LCP2 error:  minor error = 0x%x, index = %u\n",
+-                           acmod_err.lcp_minor, acmod_err.lcp_index);
+-            }
+-        }
++    /* SINIT returns 0xC0000001 for success, which need to treat as no error */
++    if ( err.external ) {
++        if ( !err.non_acm  && err.acm_type == 1 &&
++             err.progress == 0 && err.error == 0 )
++            return false;
+     }
+ 
+-    /*
+-     * display TXT.ESTS error
+-     */
+-    ests = (txt_ests_t)read_pub_config_reg(TXTCR_ESTS);
+-    if (ests._raw == 0)
+-        printk(TBOOT_INFO"TXT.ESTS: 0x%Lx\n", ests._raw);
+-    else
+-        printk(TBOOT_ERR"TXT.ESTS: 0x%Lx\n", ests._raw);
+-
+-    /*
+-     * display TXT.E2STS error
+-     */
+-    e2sts = (txt_e2sts_t)read_pub_config_reg(TXTCR_E2STS);
+-    if (e2sts._raw == 0 || e2sts._raw == 0x200000000)
+-        printk(TBOOT_INFO"TXT.E2STS: 0x%Lx\n", e2sts._raw);
+-    else
+-        printk(TBOOT_ERR"TXT.E2STS: 0x%Lx\n", e2sts._raw);
+-}
+-
+-bool txt_get_error(void)
+-{
+-    txt_errorcode_t err;
+-
+-    display_errors();
+-
+-    err = (txt_errorcode_t)read_pub_config_reg(TXTCR_ERRORCODE);
+-    if ( err.valid )
+-        return false;
+-    else
+-        return true;
++    return true;
+ }
+ 
+ #define CLASS_ACM_ENTRY 0x1
+@@ -177,7 +116,7 @@ enum ENUM_MISC_CONFIG {
+ void txt_get_racm_error(void)
+ {
+     txt_errorcode_t err;
+-    acmod_error_t acmod_err;
++    acmod_errorcode_t acmod_err;
+ 
+     /*
+      * display TXT.ERRORODE error
+@@ -197,7 +136,7 @@ void txt_get_racm_error(void)
+     }
+ 
+     acmod_err._raw = err.type;
+-    if ( acmod_err.src == 1 ) {
++    if ( acmod_err.non_acm == 1 ) {
+         printk(TBOOT_ERR"Unknown SW error.\n");
+         return;
+     }
+Index: tboot-1.9.5/tboot/txt/txt.c
+===================================================================
+--- tboot-1.9.5.orig/tboot/txt/txt.c
++++ tboot-1.9.5/tboot/txt/txt.c
+@@ -58,6 +58,7 @@
+ #include <acpi.h>
+ #include <txt/txt.h>
+ #include <txt/config_regs.h>
++#include <txt/errorcode.h>
+ #include <txt/mtrrs.h>
+ #include <txt/heap.h>
+ #include <txt/acmod.h>
+@@ -690,7 +691,7 @@ tb_error_t txt_launch_environment(loader
+                              g_mle_hdr.mle_start_off + TBOOT_BASE_ADDR,
+                              g_mle_hdr.mle_end_off - g_mle_hdr.mle_start_off);
+     if ( mle_ptab_base == NULL )
+-        return TB_ERR_FATAL;
++        return TB_ERR_GENERIC;
+ 
+     /* initialize TXT heap */
+     txt_heap = init_txt_heap(mle_ptab_base, g_sinit, lctx);
+@@ -701,7 +702,8 @@ tb_error_t txt_launch_environment(loader
+     os_mle_data = get_os_mle_data_start(txt_heap);
+     save_mtrrs(&(os_mle_data->saved_mtrr_state));
+ 
+-    /* set MTRRs properly for AC module (SINIT) */
++    /* set MTRRs properly for AC module (SINIT); if this fails the MTRRs may
++       not be in a good state to continue a launch, so return TB_ERR_FATAL */
+     if ( !set_mtrrs_for_acmod(g_sinit) )
+         return TB_ERR_FATAL;
+ 
+@@ -1099,6 +1101,18 @@ tb_error_t txt_protect_mem_regions(void)
+     return TB_ERR_NONE;
+ }
+ 
++void display_last_boot_error(void)
++{
++    /* display TB_LAUNCH_ERR_IDX, if it exists */
++    tb_error_t tb_error;
++    if ( read_error_index(&tb_error) )
++        printk("TB_LAUNCH_ERR_IDX: %d\n", tb_error);
++
++    /* display TXT.ERRORCODE */
++    uint64_t errorcode = read_pub_config_reg(TXTCR_ERRORCODE);
++    display_txt_errorcode(errorcode);
++}
++
+ void txt_shutdown(void)
+ {
+     unsigned long apicbase;
+Index: tboot-1.9.5/tboot/txt/verify.c
+===================================================================
+--- tboot-1.9.5.orig/tboot/txt/verify.c
++++ tboot-1.9.5/tboot/txt/verify.c
+@@ -215,6 +215,18 @@ tb_error_t supports_txt(void)
+     printk(TBOOT_INFO"SMX is enabled\n");
+ 
+     /*
++     * display LT.ESTS error
++     */
++    txt_ests_t ests = (txt_ests_t)read_pub_config_reg(TXTCR_ESTS);
++    printk("LT.ESTS: 0x%Lx\n", ests._raw);
++
++    /*
++     * display LT.E2STS error
++     */
++    txt_e2sts_t e2sts = (txt_e2sts_t)read_pub_config_reg(TXTCR_E2STS);
++    printk("LT.E2STS: 0x%Lx\n", e2sts._raw);
++
++    /*
+      * verify that an TXT-capable chipset is present and
+      * check that all needed SMX capabilities are supported
+      */
+@@ -365,12 +377,6 @@ void set_vtd_pmrs(os_sinit_data_t *os_si
+ tb_error_t txt_verify_platform(void)
+ {
+     txt_heap_t *txt_heap;
+-    tb_error_t err;
+-
+-    /* check TXT supported */
+-    err = supports_txt();
+-    if ( err != TB_ERR_NONE )
+-        return err;
+ 
+     /* check is TXT_RESET.STS is set, since if it is SENTER will fail */
+     txt_ests_t ests = (txt_ests_t)read_pub_config_reg(TXTCR_ESTS);
+Index: tboot-1.9.5/utils/parse_err.c
+===================================================================
+--- tboot-1.9.5.orig/utils/parse_err.c
++++ tboot-1.9.5/utils/parse_err.c
+@@ -57,7 +57,7 @@ static inline uint64_t read_txt_config_r
+ 
+ int main(int argc, char *argv[])
+ {
+-    txt_errorcode_t err;
++    uint64_t err;
+ 
+     if ( argc > 2 ) {
+         printf("usage:  %s [<TXT.ERRORCODE value>]\n", argv[0]);
+@@ -65,7 +65,7 @@ int main(int argc, char *argv[])
+     }
+ 
+     if ( argc == 2 ) {
+-        err._raw = strtoul(argv[1], NULL, 0);
++        err = strtoul(argv[1], NULL, 0);
+         if ( errno != 0 ) {
+             printf("Error:  TXT.ERRORCODE value is not a valid number\n");
+             return 1;
+@@ -85,41 +85,13 @@ int main(int argc, char *argv[])
+             return 1;
+         }
+ 
+-        err._raw = read_txt_config_reg(txt_pub, TXTCR_ERRORCODE);
++        err = read_txt_config_reg(txt_pub, TXTCR_ERRORCODE);
+ 
+         munmap(txt_pub, TXT_CONFIG_REGS_SIZE);
+         close(fd_mem);
+     }
+ 
+-    printf("ERRORCODE: 0x%08jx\n", err._raw);
+-
+-    /* AC module error (don't know how to parse other errors) */
+-    if ( err.valid ) {
+-        if ( err.external == 0 )       /* processor error */
+-            printk("\t processor error 0x%x\n", (uint32_t)err.type);
+-        else {                         /* external SW error */
+-            txt_errorcode_sw_t sw_err;
+-            sw_err._raw = err.type;
+-            if ( sw_err.src == 1 )     /* unknown SW error */
+-                printk("unknown SW error 0x%x:0x%x\n", sw_err.err1, sw_err.err2);
+-            else {                     /* ACM error */
+-                acmod_error_t acmod_err;
+-                acmod_err._raw = sw_err._raw;
+-                printk("AC module error : acm_type=0x%x, progress=0x%02x, "
+-                       "error=0x%x\n", acmod_err.acm_type, acmod_err.progress,
+-                       acmod_err.error);
+-                /* error = 0x0a, progress = 0x0d => TPM error */
+-                if ( acmod_err.error == 0x0a && acmod_err.progress == 0x0d )
+-                    printk("TPM error code = 0x%x\n", acmod_err.tpm_err);
+-                /* progress = 0x10 => LCP2 error */
+-                else if ( acmod_err.progress == 0x10 && acmod_err.lcp_minor != 0 )
+-                    printk("LCP2 error:  minor error = 0x%x, index = %u\n",
+-                           acmod_err.lcp_minor, acmod_err.lcp_index);
+-            }
+-        }
+-    }
+-    else
+-        printk("no error\n");
++    display_txt_errorcode(err);
+ 
+     return 0;
+ }

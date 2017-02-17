@@ -1,0 +1,93 @@
+################################################################################
+SHORT DESCRIPTION: 
+################################################################################
+Mark TPM region [0xfed40000-0xfed44fff] as reserved in case BIOS does not.
+
+################################################################################
+LONG DESCRIPTION: 
+################################################################################
+TPM specification defines one region @0xfed40000-0xfed44fff.  Given a 32bits
+dom0 with "enough" memory (dom_mem=>4G), it is likely that the kernel will try
+to use every last region for RAM, even in upper 32bit regions.
+
+For some reason, BIOS in HPs or Dells do not report that region in the e820 as
+reserved.  It is only reported in one of the SSDT. This patch tries to work
+that around by doing so in TBoot.
+
+################################################################################
+PATCHES 
+################################################################################
+Index: tboot-1.9.5/tboot/common/tboot.c
+===================================================================
+--- tboot-1.9.5.orig/tboot/common/tboot.c
++++ tboot-1.9.5/tboot/common/tboot.c
+@@ -186,6 +186,9 @@ static void post_launch(void)
+     if ( !verify_modules(g_ldr_ctx) )
+         apply_policy(TB_ERR_POST_LAUNCH_VERIFICATION);
+ 
++    /* mark iomem regions of TPM as E820_RESERVED. */
++    tpm_protect_mem_regions();
++
+     /* verify that tboot is in valid RAM (i.e. E820_RAM) */
+     base = (uint64_t)TBOOT_BASE_ADDR;
+     size = (uint64_t)((unsigned long)&_end - base);
+Index: tboot-1.9.5/tboot/common/tpm.c
+===================================================================
+--- tboot-1.9.5.orig/tboot/common/tpm.c
++++ tboot-1.9.5/tboot/common/tpm.c
+@@ -42,6 +42,10 @@
+ #include <processor.h>
+ #include <io.h>
+ #include <string.h>
++#include <page.h>
++#include <uuid.h>
++#include <loader.h>
++#include <e820.h>
+ #include <tpm.h>
+ #include <sha1.h>
+ 
+@@ -899,6 +903,32 @@ void tpm_print(struct tpm_if *ti)
+     printk(TBOOT_INFO"\t timeout values: A: %u, B: %u, C: %u, D: %u\n", ti->timeout.timeout_a, ti->timeout.timeout_b, ti->timeout.timeout_c, ti->timeout.timeout_d);
+ }
+ 
++void tpm_protect_mem_regions(void)
++{
++    /* TPM specification defines one region @0xfed40000-0xfed44fff.
++     * Given a 32bits dom0 with "enough" memory (dom_mem=>4G), it is likely
++     * that the kernel will try to use every last region for RAM, even in upper
++     * 32bit regions.
++     * For some reason, the BIOS does not report that region in the e820 as
++     * reserved. It is only reported in one of the SSDT.
++     * There is many way to deal with that problem:
++     * - add memmap=0x5000$0xfed40000 to Linux (dom0) cmdline
++     * - patch Linux dom0 memory layout management to leave that region alone.
++     * - Have the tpm_tis driver ioremap that region without checking if the
++     *   kernel used it for something else (devm_ioremap() instead of
++     *   devm_ioremap_resource(), the later being used since around 4.6).
++     * - Or have tboot change the e820 to mark that region reserved...
++     */
++    uint64_t base = TPM_LOCALITY_BASE;
++    uint64_t size = (NR_TPM_LOCALITY_PAGES * TPM_NR_LOCALITIES) << PAGE_SHIFT;
++
++    printk(TBOOT_INFO"Marking TPM region [%#llx-%#llx] as reserved...\n",
++           base, base + size - 1);
++    if ( !e820_protect_region(base, size, E820_RESERVED) )
++        printk(TBOOT_WARN"TPM region [%#llx-%#llx] is not reserved.\n",
++               base, base + size - 1);
++}
++
+ /*
+  * Local variables:
+  * mode: C
+Index: tboot-1.9.5/tboot/include/tpm.h
+===================================================================
+--- tboot-1.9.5.orig/tboot/include/tpm.h
++++ tboot-1.9.5/tboot/include/tpm.h
+@@ -490,6 +490,7 @@ extern bool release_locality(uint32_t lo
+ extern bool prepare_tpm(void);
+ extern bool tpm_detect(void);
+ extern void tpm_print(struct tpm_if *ti);
++void tpm_protect_mem_regions(void);
+ extern bool tpm_submit_cmd(u32 locality, u8 *in, u32 in_size, u8 *out, u32 *out_size);
+ extern bool tpm_submit_cmd_crb(u32 locality, u8 *in, u32 in_size, u8 *out, u32 *out_size);
+ extern bool tpm_wait_cmd_ready(uint32_t locality);

@@ -3,6 +3,8 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=441c28d2cf86e15a37fa47e15a72fbac  \
                     file://COPYING.LIB;md5=79ffa0ec772fa86740948cb7327a0cc7"
 DEPENDS = "xen-tools alsa-lib pciutils libpng xen-blktap libv4v openssl zlib libcap-ng libdmbus"
 
+RDEPENDS_${PN} += "libusb1 nettle gnutls"
+
 # Leave this in it's own definition so that it can be replaced with a local
 # tarball (the QEMU download speed is terrible). If this is combined with the
 # other patches, it doesn't seem to work
@@ -33,7 +35,13 @@ SRC_URI += "file://compile-time-stubdom-flag.patch \
             file://maintain-time-offset.patch \
             file://acpi-wakeup.patch \
             file://openxt-misc-fixes.patch \
+            file://qmp-v4v-char-driver.patch \
+            file://use-relative-xenstore-nodes.patch \
+            file://exit-mainloop-on-reset.patch \
+            file://write-acpi-state-to-xenstore.patch \
+            file://xsa-197-qemu-incautious-about-shared-ring-processing.patch \
             "
+
 SRC_URI[md5sum] = "bdf1f3d0c177ebeb35a079a4bc3fc74e"
 SRC_URI[sha256sum] = "9a7ec64f147b9e1e570c410e00ebe271869b5d4c85392ba047db7617c297faa3"
 

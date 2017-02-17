@@ -56,10 +56,10 @@ do_compile() {
         make V=1 XEN_DIST_ROOT="${STAGING_DIR}"
 }
 OCAML_INSTALL_LIBS  = "libs/uuid libs/stdext libs/mmap \
-                      libs/base64 libs/scsi libs/udev \
+                      libs/base64 \
                       libs/json libs/jsonrpc libs/http \
                       libs/log libs/xc libs/eventchn \
-                      libs/xb libs/xs libs/netdev \
+                      libs/xb libs/xs \
 		      libs/common"
 
 do_configure_xenclient-nilfvm() {
