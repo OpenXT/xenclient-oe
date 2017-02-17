@@ -17,6 +17,7 @@ RDEPENDS_${PN} = " \
     xen-xsm-policy \
     grub \
     tboot \
+    tboot-utils \
     e2fsprogs-tune2fs \
     e2fsprogs-resize2fs \
     kernel-modules \
@@ -61,6 +62,7 @@ RDEPENDS_${PN} = " \
     xenclient-sec-scripts \
     pmtools \
     xen-blktap \
+    xen-libxl \
     svirt-interpose \
     selinux-load \
     ustr \
@@ -83,9 +85,9 @@ RDEPENDS_${PN} = " \
     xenclient-language-sync \
     atapi-pt-helper \
     audio-helper \
+    qmp-helper \
     compleat \
     xec \
-    apptool \
     dmidecode \
     netcat \
     libicbinn-server \

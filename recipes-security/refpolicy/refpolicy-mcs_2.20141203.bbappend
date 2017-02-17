@@ -1,14 +1,11 @@
 FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}-${PV}:"
 
-PR .= ".2"
+PR .= ".3"
 
 SRC_URI += " \
     file://config \
     file://policy/modules-upstream.conf \
     file://policy/modules-openxt.conf \
-    file://policy/modules/admin/apptool.fc \
-    file://policy/modules/admin/apptool.if \
-    file://policy/modules/admin/apptool.te \
     file://policy/modules/admin/getedid.fc \
     file://policy/modules/admin/getedid.if \
     file://policy/modules/admin/getedid.te \
@@ -149,7 +146,6 @@ SRC_URI += " \
     file://patches/policy.modules.contrib.tcsd.patch \
     file://patches/policy.modules.contrib.networkmanager_xt.diff \
     file://patches/policy.modules.system.init_xt.diff \
-    file://patches/apptool-interfaces.diff \
     file://patches/blktap-interfaces.diff \
     file://patches/db-cmd-interfaces.diff \
     file://patches/dbd-interfaces.diff \
@@ -181,6 +177,7 @@ SRC_URI += " \
     file://patches/openxt-dbus-deny-send-unconfined.patch;patch=1 \
     file://patches/xen4.6-uprev.patch;patch=1 \
     file://patches/openxt-init-spec-domtrans.patch;patch=1 \
+    file://patches/busybox-mmap-read-execute-checks-from-new-domain.patch \
     "
     
 def get_poltype(f):

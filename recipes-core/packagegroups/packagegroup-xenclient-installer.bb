@@ -13,6 +13,7 @@ RDEPENDS_${PN} = " \
     util-linux-mount \
     util-linux-umount \
     xen-blktap \
+    xen-libxl \
     dialog \
     e2fsprogs \
     e2fsprogs-e2fsck \
@@ -47,12 +48,15 @@ RDEPENDS_${PN} = " \
     dmidecode \
     netcat \
     tboot \
+    tboot-utils \
     acms \
     trousers \
     trousers-data \
     tpm-tools \
     xenclient-pcrdiff \
     xenclient-tpm-scripts \
+    openxt-keymanagement \
+    openxt-measuredlaunch \
     ncurses \
     intel-microcode \
 "

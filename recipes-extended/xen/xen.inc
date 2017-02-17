@@ -15,7 +15,6 @@ SRC_URI = "${XEN_SRC_URI};name=source \
     file://xsm-add-corespersocket.patch \
     file://hvm-pm-hibernate-s-state.patch;patch=1 \
     file://prune-vga-acpi-dev.patch;patch=1 \
-    file://xen-libhvm.patch;patch=1 \
     file://smbios.patch;patch=1 \
     file://evtchn-do-not-set-pending-if-s3.patch;patch=1 \
     file://hvm-rtc.patch;patch=1 \
@@ -52,15 +51,41 @@ SRC_URI = "${XEN_SRC_URI};name=source \
     file://increase-ap-startup-time.patch;patch=1 \
     file://openxt-xen-xsmv4vuse.patch \
     file://xenstat-disable-tmem-use.patch;patch=1 \
-    file://xsa-155-paravirtualized-drivers-incautious-about-shared-memory-contents.patch;patch=1 \
-    file://xsa-170-guest-user-mode-may-crash-guest-with-non-canonical-rip.patch;patch=1 \
-    file://xsa-173-x86-shadow-pagetables-address-width-overflow.patch;patch=1 \
-    file://xsa-154-x86-inconsistent-cachability-flags-on-guest-mappings.patch \
-    file://xsa-182-x86-privilege-escalation-in-pv-guests.patch \
-    file://xsa-183-x86-missing-smap-whitelisting-in-32-bit-exception-event-delivery.patch \
-    file://xsa-185-x86-Disallow-L3-recursive-pagetable-for-32-bit-PV-guests.patch \
-    file://xsa-187-x86-hvm-overflow-of-sh_ctxt-seg_reg.patch \
-    file://xsa-190-x86-hvm-instr-emul-guest-user-mode-missing-exception.patch \
+    file://libxl-do-not-destroy-in-use-tapdevs.patch \
+    file://libxl-syslog.patch \
+    file://libxl-RFC-4of7-Add-stubdomain-version-tools-domain-build-info.patch \
+    file://libxl-RFC-5of7-Handle-Linux-stubdomain-specific-QEMUoptions.patch \
+    file://libxl-RFC-6of7-Build-the-domain-with-a-Linux-based-stubdomain.patch \
+    file://libxl-RFC-7of7-Wait-for-QEMU-startup-in-stubdomain.patch \
+    file://libxl-RFC-fixes.patch \
+    file://libxl-misc-fixes.patch \
+    file://libxl-vif-make-ioemu-and-stubdom-mac-addresses-configurable.patch \
+    file://libxl-linux-stubdom-replace-disk-with-initramfs.patch \
+    file://libxl-openxt-helpers.patch \
+    file://libxl-openxt-qemu-args.patch \
+    file://libxl-openxt-xci-cpuid-signature.patch \
+    file://libxl-pass-qemu-options-through-linux-stubdom-cmdline.patch \
+    file://libxl-openxt-tweaks.patch \
+    file://libxl-domain-state.patch \
+    file://libxl-fixup-cmdline-ops.patch \
+    file://libxl-crypto-key-dir.patch \
+    file://libxl-fix-reboot.patch \
+    file://libxl-display-manager-support.patch \
+    file://libxl-xenmgr-support.patch \
+    file://libxl-move-extra-qemu-args-to-the-end.patch \
+    file://libxl-stubdom-options.patch \
+    file://libxl-add-cores-per-socket-support.patch \
+    file://libxl-support-hvm-readonly-disks.patch \
+    file://libxl-pci-passthrough-fixes.patch \
+    file://xsa-191-x86-null-segments-not-always-treated-as-unusable.patch \
+    file://xsa-192-x86-task-switch-to-vm86-mode-mis-handled.patch \
+    file://xsa-193-x86-segment-base-write-emulation-lacking-canonical-address-checks.patch \
+    file://xsa-195-x86-64-bit-bit-test-instruction-emulation-broken.patch \
+    file://xsa-196-x86-software-interrupt-injection-mis-handled.patch \
+    file://xsa-200-x86-cmpxchg8b-emulation-fails-to-ignore-operand-size-override.patch \
+    file://xsa-202-x86-pv-guests-may-be-able-to-mask-interrupts.patch \
+    file://xsa-203-x86-missing-null-pointer-check-in-vmfunc-emulation.patch \
+    file://xsa-204-x86-mishandling-of-syscall-singlestep-during-emulation.patch \
 "
 
 SRC_URI[source.md5sum] := "${XEN_SRC_MD5SUM}"

@@ -12,7 +12,7 @@ SRC_URI = "file://initramfs-tcsd.conf \
 
 IMAGE_FSTYPES = "cpio.gz"
 IMAGE_INSTALL = "busybox lvm2-static initramfs-xenclient"
-IMAGE_INSTALL += "kernel-module-tpm"
+IMAGE_INSTALL += "kernel-module-tpm kernel-module-tpm-tis kernel-module-tpm-tis-core"
 IMAGE_INSTALL += "kernel-module-tpm-tis"
 IMAGE_INSTALL += "tpm-tools-sa xenclient-initramfs-shared-libs"
 IMAGE_INSTALL += "kernel-module-fbcon kernel-module-tileblit kernel-module-font kernel-module-bitblit kernel-module-softcursor"
@@ -59,6 +59,7 @@ write_config_files() {
 	install -m 0644 ${WORKDIR}/initramfs-passwd ${IMAGE_ROOTFS}${sysconfdir}/passwd
 	install -m 0644 ${WORKDIR}/initramfs-group ${IMAGE_ROOTFS}${sysconfdir}/group
 	install -m 0644 ${WORKDIR}/initramfs-nsswitch.conf ${IMAGE_ROOTFS}${sysconfdir}/nsswitch.conf
+	chown tss:tss ${IMAGE_ROOTFS}${sysconfdir}/tcsd.conf
 }
 
 ROOTFS_POSTPROCESS_COMMAND += " post_rootfs_shell_commands; write_config_files; "

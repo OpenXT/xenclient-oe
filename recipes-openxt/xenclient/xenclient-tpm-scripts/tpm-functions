@@ -38,79 +38,51 @@ tcsd_start() {
 #         1 if inactive
 #         2 if indeterminant
 tpm_is_active() {
-    local ret=0
-    local msg=""
+    local tpm="$(find /sys/class -name tpm0 2>/dev/null)/device"
+    local state=""
 
-    msg=$(tpm_setactive -z -s 2>&1)
+    state=$(cat ${tpm}/active)
     if [ $? -ne 0 ]; then
-        case "$msg" in
-            *TPM\ is\ deactivated) ret=1 ;;
-            *TPM\ is\ disabled) ret=1 ;;
-            *Authentication\ failed) ;;
-            *No\ SRK) ;;
-            *) ret=2 ;;
-        esac
-    else
-        # If tpm is deactivated we currently don't get here because tcsd returns
-        # an error.  Putting this here for completeness for now.
-        echo "$msg" | while read LINE; do
-            case "$LINE" in
-                *true) ret=1; break ;;
-                *false) ;;
-                *) ret=2; break ;;
-            esac
-        done
+        return 2
     fi
-    return $ret
+
+    [ $state -eq 1 ] && state=0 || state=1
+
+    return $state
 }
 # Function to determine whether or not the TPM is enabled
 # return 0 if TPM is enabled
 #        1 if TPM is disabled
 #        2 if indeterminant
 tpm_is_enabled() {
-    local ret=0
-    local msg=""
+    local tpm="$(find /sys/class -name tpm0 2>/dev/null)/device"
+    local state=""
 
-    msg=$(tpm_setenable -z -s 2>&1)
+    state=$(cat ${tpm}/enabled)
     if [ $? -ne 0 ]; then
-        case "$msg" in
-            *TPM\ is\ deactivated) ret=1 ;;
-            *TPM\ is\ disabled) ret=1 ;;
-            *Authentication\ failed) ;;
-            *No\ SRK) ;;
-            *) ret=2 ;;
-        esac
-    else
-        case "$msg" in
-            Disabled\ status:\ false) ;;
-            Disabled\ status:\ true) ret=1 ;;
-            *) ret=2
-        esac
+        return 2
     fi
-    return $ret
+
+    [ $state -eq 1 ] && state=0 || state=1
+
+    return $state
 }
 # Function to determine whether or not the TPM is owned.
 # returns 0 if TPM is owned
 #         1 if TPM is not owned
 #         2 if indeterminant
 tpm_is_owned() {
-    local ret=0
-    local msg=""
+    local tpm="$(find /sys/class -name tpm0 2>/dev/null)/device"
+    local state=""
 
-    # want to check tpm_setownable -z -s here but my Dell system always reports
-    #   that the TPM is ownable even when it's not :(
-    # Test is now based on the existance of an SRK which only seems to exist
-    #   when my TPMs are owned.
-    msg=$(echo "data" | tpm_sealdata -z 2>&1)
+    state=$(cat ${tpm}/owned)
     if [ $? -ne 0 ]; then
-        case "$msg" in
-            *TPM\ is\ deactivated) ret=2 ;;
-            *Authentication\ failed) ;;
-            *No\ SRK | *Handle\ is\ incorrect*) ret=1 ;;
-            *) ret=2 ;;
-        esac
+        return 2
     fi
-    return $ret
+
+    [ $state -eq 1 ] && state=0 || state=1
+
+    return $state
 }
 # Function to determin whether or not the TPM owner password is the well known
 #   secret of 20 bytes of 0's
@@ -176,121 +148,16 @@ tpm_has_ek() {
     fi
     return $ret
 }
-# Function to determine whether or not tboot was able to setup an MLE
-# return 0 if tboot was successful
-#        1 if tboot was not successful
-#        2 if indeterminant
-mle_success() {
-    local ret=0
-    local msg=""
-
-    msg=$(txt-stat | grep 'TXT measured launch' | awk '{print $4}')
-    case "$msg" in
-        TRUE)  ;;
-        FALSE) ret=1 ;;
-        *)     ret=2 ;;
-    esac
-    return $ret
-}
-# Function to create password for use as TPM owner password.
-# parameter 0: path to public key used to encrypt password on disk
-#           1: path to output file for encrypted password storage
-#           2: password length (if omitted 15 characters are used)
-# return 0 on success
-#        1 on error
-# output stdout: passwd in plain text (don't write this to disk!)
-#        stderr: error text in the event of error
-tpm_create_passwd() {
-    local pub_key="$1"
-    local out_file="$2"
-    local paswd_len="${3:-15}"
-    local passwd=""
-
-    # generate random password, printable characters only w/o spaces
-    passwd=$(cat /dev/urandom | tr -cd "[[:graph:]]" | head -c ${passwd_len:-15})
-    if [ -z ${passwd} ]; then
-        echo "unable to generate random password" >&2
-        return 1
-    fi
-    # encrypt password with provided public key
-    err=$(echo -n "${passwd}" | openssl rsautl -encrypt -inkey "${pub_key}" -pubin -out "${out_file}" 2>&1)
-    if [ $? -ne 0 ] || [ ! -f "${out_file}" ]; then
-        echo "error encrypting TPM owner password: ${err}" >&2
-        [ -f "${out_file}" ] && rm "${out_file}"
-        return 1
-    fi
-    echo "${passwd}"
-    return 0
-}
-
-# Function to configure measured launch on platform.  The next boot will cause
-#   init-root.ro to perform first sealing operation.
-# parameter 0: mount point for rootfs
-# return 0 on success
-#        1 on error
-configure_measured_launch()
-{
-    local root="${1:-/}"
-    local key_file="${root}/config/keys/config.key"
-    local config_dev="/dev/mapper/xenclient-config"
-    local tpm_dir="${root}/boot/system/tpm"
-
-    # this will block w/o some IO to seen entropy
-    dd if=/dev/random bs=1 count=32 of="${key_file}" 2>/dev/null || return 1
-    get-config-key | cryptsetup -q -d - -S 0 luksKillSlot \
-        ${config_dev} 1 >/dev/null 2>&1
-    get-config-key | cryptsetup -q -d - -S 1 -i 1 luksAddKey \
-        ${config_dev} ${key_file} || {
-        echo "failed to add crypto key to config LUKS" >&2
-        rm -f ${key_file}
-        return 1
-    }
-    cat ${key_file} | cryptsetup -q -d - -S 1 luksOpen --test-passphrase \
-        ${config_dev} >/dev/null 2>&1 || {
-        echo "failed to verify new crypto key in config LUKS" >&2
-        rm -f ${key_file}
-        return 1
-    }
-
-    echo "-p 0 -p 1 -p 2 -p 3 -p 15 -p 17 -p 18 -p 19" > ${root}/config/config.pcrs
-    mkdir -p ${tpm_dir}
-    touch ${tpm_dir}/clear-config-key
-    touch ${tpm_dir}/setup
-    touch ${tpm_dir}/enabled
-
-    return 0
-}
 # Function to take ownership of the TPM.  Wraps some common functionality to
 #   create an EK and check that we can seal with the well-known SRK.
 # parameter 0: password
 #           1: create EK (true|false)
 # return 0 on success
 #        1 on error
-tpm_configure_gen_passwd () {
-    local passwd=""
-    local err=""
-    local public_key="$1"
-    local passwd_ssl="$2"
-    local has_ek="${3:-false}"
+tpm_take_ownership() {
+    local passwd="$1"
+    local has_ek="${2:-false}"
 
-    # sanity
-    if [ ! -f "${public_key}" ]; then
-        echo "No recovery key available: ${public_key}" >&2
-        echo "Cannot encrypt generated TPM key." >&2
-        return 1
-    fi
-    if [ -f "${passwd_ssl}" ]; then
-        echo "Encrypted passwd file already exists: ${passwd_ssl}" >&2
-        echo "Refusing to overwrite" >&2
-        return 1
-    fi
-
-    # generate password & encrypt it
-    passwd=$(tpm_create_passwd "${public_key}" "${passwd_ssl}")
-    if [ $? -ne 0 ]; then
-        echo "tpm_create_passwd failed" >&2
-        return 1
-    fi
     # create EK if necessary
     case ${has_ek} in
         true) ;;
@@ -306,7 +173,7 @@ tpm_configure_gen_passwd () {
             return 1
     esac
     # take ownership of TPM
-    err=$(echo -n "${passwd}" | tpm_takeownership --srk-well-known --stdin 2>&1)
+    err=$(cat "${passwd}" | tpm_takeownership --srk-well-known --stdin 2>&1)
     if [ $? -ne 0 ]; then
         echo "error taking ownership of TPM: ${err}" >&2
         return 1
@@ -318,6 +185,47 @@ tpm_configure_gen_passwd () {
         return 1
     }
     return 0
+}
+tpm_forward_seal() {
+    local root=""
+    local forward_values=""
+    local OPTIND
+    local opt
+    local p
+
+    while getopts ":r:p:" opt; do
+        case "${opt}" in
+            r)
+                root=${OPTARG}
+			;;
+            p)
+                forward_values="${forward_values} ${OPTARG}"
+            ;;
+        esac
+    done
+    shift $((OPTIND-1))
+
+    local pcrs=$(cat ${root}/config/config.pcrs)
+    local key="${root}/${1}"
+    local tss="${root}/${2}"
+
+    for p in ${forward_values}; do
+        i=$(echo ${p} | cut -f 1 -d :)
+        echo ${pcrs} | egrep -q -e "\s${i}\s*" || {
+            pcrs="${pcrs} -p ${p}"
+            continue
+        }
+        pcrs=$(echo ${pcrs}|sed -e "s/\s${i}\s*/ ${p} /")
+    done
+
+    /etc/init.d/trousers status > /dev/null 2>&1
+    if [ $? -ne 0 ]; then
+        tpm_sealdata_sa -i ${key} -o ${tss} -z ${pcrs} 2>&1
+        return $?
+    else
+        tpm_sealdata -i ${key} -o ${tss} -z ${pcrs} 2>&1
+        return $?
+    fi
 }
 
 QUIRK_D="/usr/lib/tpm-scripts/quirks.d"

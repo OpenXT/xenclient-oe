@@ -36,7 +36,7 @@ IMAGE_INSTALL = "\
     xinit \
     xprop \
     xrandr \
-    midori \
+    surf \
     network-manager-applet \
     network-manager-applet-locale-de \
     network-manager-applet-locale-es \
@@ -122,7 +122,7 @@ IMAGE_INSTALL = "\
 #    kernel-modules \
 #    hal \
 #    devilspie \
-#    midori \
+#    surf \
 #    ${SPLASH} \
 #    ${ANGSTROM_EXTRA_INSTALL}"
 
