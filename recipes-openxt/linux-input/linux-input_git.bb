@@ -2,7 +2,7 @@ SRCREV = "e4331cbc61dfe706c72b19febe65f368f4af0208"
 PR = "r5"
 PV = "0.0+git${SRCPV}"
 
-SRC_URI = "git://git.code.sf.net/p/linuxconsole/code \
+SRC_URI = "git://git.code.sf.net/p/linuxconsole/code;protocol=https \
 	file://serio.h \
 	file://makefile.patch;patch=1;pnum=0 \
 	file://snes232.patch;patch=1;pnum=0 \
