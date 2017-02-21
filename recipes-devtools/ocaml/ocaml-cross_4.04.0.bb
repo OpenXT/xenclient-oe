@@ -1,17 +1,13 @@
+SRC_URI[md5sum] = "496f99822133bb905171bae8f64b7be4"
+SRC_URI[sha256sum] = "cb63486f6cb837a5a57ab93e4c429551127561d0da61b7712116769a6a8322de"
 SECTION = "devel"
-LICENSE = "QPL-1.0"
-LIC_FILES_CHKSUM = "file://LICENSE;md5=524443efef4a3e092cca058d99996c88"
+LICENSE = "LGPLv2.1"
+LIC_FILES_CHKSUM = "file://LICENSE;md5=4f72f33f302a53dc329f4d3819fe14f9"
 
-PR = "r2"
+PR = "r3"
 
-PV = "0+git${SRCPV}"
-
-SRCREV = "${AUTOREV}"
-SRC_URI = "git://${OPENXT_GIT_MIRROR}/ocaml.git;protocol=${OPENXT_GIT_PROTOCOL};branch=${OPENXT_BRANCH} \
-           file://0007-Fix-ocamlopt-w.r.t.-binutils-2.21.patch;patch=1 \
+SRC_URI = "http://caml.inria.fr/pub/distrib/ocaml-4.04/ocaml-4.04.0.tar.gz \
 	   file://config.patch \
-           file://remove-absolute-linker-path-from-lib.patch \
-           file://finaliser-on-weak-array-gives-dangling-pointers.patch \
 "
 
 inherit xenclient
@@ -20,14 +16,11 @@ inherit cross
 
 FILESEXTRAPATHS_prepend := "${THISDIR}/ocaml-cross:"
 
-S = "${WORKDIR}/git"
+S = "${WORKDIR}/ocaml-${PV}"
 
 RDEPENDS_${PN}-dev = ""
 
 do_configure() {
-#	linux32 ./configure -no-curses -prefix ${STAGING_DIR} \
-#		-bindir ${STAGING_BINDIR} -libdir ${STAGING_LIBDIR} \
-#	        -no-tk -cc "$CC -m32" -as "$AS --32" -aspp "$CC -m32 -c"
 #	Ugly fix to cross-compile. I think we need to use cross-compil patch
 #	for ocaml
 	CFLAGS="${BUILD_CFLAGS} -m32" \
@@ -36,7 +29,7 @@ do_configure() {
 			-libdir ${libdir}/ocaml \
 			-mandir ${datadir}/man \
             -cc "${TARGET_PREFIX}gcc -m32 --sysroot=${STAGING_DIR_TARGET}" -mksharedlib "${TARGET_PREFIX}ld -shared" \
-			-no-tk -as "${TARGET_PREFIX}as --32" -aspp "${TARGET_PREFIX}gcc -m32 -c"
+			-as "${TARGET_PREFIX}as --32" -aspp "${TARGET_PREFIX}gcc -m32 -c"
 
 	sed -i'' -re 's/-lX11//' config/Makefile
 	sed -i'' -re 's/OTHERLIBRARIES=.*/OTHERLIBRARIES=unix str num dynlink bigarray systhreads threads/' config/Makefile
@@ -50,11 +43,6 @@ do_compile() {
 	ln -sf ${CROSS_DIR}/bin/${HOST_PREFIX}gcc ${WORKDIR}/targetcc/gcc
 	make opt PATH="${WORKDIR}/targetcc:${PATH}"
 }
-
-#do_stage() {
-#	make install
-#	mv -v ${STAGING_LIBDIR}/ocaml/caml ${STAGING_INCDIR}/
-#}
 
 do_install() {
 	make PREFIX="${D}/${prefix}" BINDIR="${D}/${bindir}" LIBDIR="${D}/${libdir}/ocaml" MANDIR="${D}/${datadir}/man" install
