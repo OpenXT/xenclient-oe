@@ -5,7 +5,7 @@ PROVIDES = "xen"
 PACKAGES += "${PN}-efi"
 
 FILES_${PN}-efi = "/usr/lib64/efi/*"
-FILES_${PN}-dbg += "/boot/xen*syms*"
+FILES_${PN}-dbg += "${libdir}/debug"
 FILES_${PN} += "/boot"
 
 EXTRA_OEMAKE += "CFLAGS='' LDFLAGS='' XEN_TARGET_ARCH=x86_64 CC='${BUILD_CC}' LD='${BUILD_LD}' XEN_VENDORVERSION=-xc"
