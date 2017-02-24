@@ -54,16 +54,15 @@ msg "Mounting /boot/system"
 mount /dev/mapper/xenclient-boot /boot/system 2> /dev/null || msg "Couldn't mount, already mounted?"
 
 msg "Detecting PV partition with xenclient-boot"
-t=`dmsetup table xenclient-boot`
-p=`echo "$t" | awk '{print $5}'`
-major=`echo $p | cut -f1 -d:`
-minor=`echo $p | cut -f2 -d:`
-pv_part=`egrep "^ *$major +$minor +" /proc/partitions  |  awk '{ print $4; }'`
-pv_disk=`basename $(dirname $(readlink /sys/dev/block/${major}\:${minor}))`
-pv_offset=`fdisk -l /dev/$pv_disk -u | grep $pv_part | awk '{print $3}'`
-lv_size=`echo $t | awk '{ print $3; }'`
-lv_reloffset=`echo $t | awk '{ print $6; }'`
-lv_absoffset=$(($pv_offset + $lv_reloffset))
+dmtable_line=(`dmsetup table xenclient-boot`)
+lv_size=${dmtable_line[1]}
+major=${dmtable_line[3]%%:*}
+minor=${dmtable_line[3]##*:}
+lv_reloffset=${dmtable_line[4]}
+
+sysfs_dev=`readlink /sys/dev/block/${major}\:${minor}`
+pv_disk=`basename $(dirname $sysfs_dev)`
+pv_part=`basename $sysfs_dev`
 
 msg "PV partition: $pv_part"
 msg "Disk: $pv_disk"
