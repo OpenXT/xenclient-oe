@@ -18,6 +18,7 @@ SRC_URI += "file://dbd.initscript \
 "
 
 FILES_${PN} += "/usr/share/xenclient/db.default"
+RDEPENDS_${PN} += "bash"
 
 S = "${WORKDIR}/git/dbd"
 
