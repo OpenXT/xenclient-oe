@@ -1,6 +1,6 @@
 require xen.inc
 
-inherit pkgconfig update-rc.d pythonnative
+inherit autotools-brokensep gettext pkgconfig update-rc.d
 
 SRC_URI += "file://xenstored.initscript \
 	    file://xenconsoled.initscript \
@@ -9,7 +9,7 @@ SRC_URI += "file://xenstored.initscript \
 DEPENDS += " gettext ncurses openssl python zlib seabios ipxe gmp lzo glib-2.0 iasl-native xz "
 DEPENDS += "util-linux pixman libaio yajl"
 # lzo2 required by libxenguest.
-RDEPENDS_${PN} += " lzo"
+RDEPENDS_${PN} += "lzo bash"
 
 PACKAGES = "${PN}-libxenstore ${PN}-libxenstore-dev ${PN}-libxenstore-dbg ${PN}-libxenstore-staticdev   \
             ${PN}-xenstore-utils ${PN}-xenstore-utils-dbg                                               \
@@ -18,6 +18,8 @@ PACKAGES = "${PN}-libxenstore ${PN}-libxenstore-dev ${PN}-libxenstore-dbg ${PN}-
             ${PN}-xenctx                                                                                \
             ${PN}-xentrace                                                                              \
             ${PN}-xenpvnetboot                                                                          \
+            ${PN}-flask                                                                                 \
+            ${PN}-misc                                                                                  \
             ${PN} ${PN}-dbg ${PN}-doc ${PN}-dev ${PN}-staticdev                                         \
 "
 
@@ -41,14 +43,23 @@ FILES_${PN}-xenstore-utils = "${bindir}/xenstore-*"
 FILES_${PN}-xenstore-utils-dbg = "${bindir}/.debug/xenstore-*"
 RDEPENDS_${PN}-xenstore-utils += "${PN}-libxenstore"
 
-FILES_${PN}-xentrace = "${datadir}/xentrace"
+FILES_${PN}-xentrace = "${datadir}/xentrace \
+                        ${bindir}/xentrace_format"
+RDEPENDS_${PN}-xentrace += "python"
 
 FILES_${PN}-staticdev += "${libdir}/*.a"
 FILES_${PN}-dbg += "${libdir}*/*/*/.debug           \
                     ${libdir}/*/*/.debug            \
                     ${libdir}/*/.debug"
-
 FILES_${PN}-xenpvnetboot = "${libdir}/xen/bin/xenpvnetboot"
+RDEPENDS_${PN}-xenpvnetboot += "python"
+FILES_${PN}-flask = "/boot/xenpolicy-${PV}"
+FILES_${PN}-misc = "${sbindir}/xen-ringwatch \
+                    ${bindir}/xencons \
+                    ${sbindir}/xen-bugtool \
+                    ${sbindir}/xencov \
+                    ${bindir}/xencov_split"
+RDEPENDS_${PN}-misc += "perl python"
 
 FILES_${PN} += "${datadir}/xen/qemu"
 RDEPENDS_${PN} += "${PN}-xenstore-utils"
@@ -62,6 +73,23 @@ INITSCRIPT_PARAMS_${PN} = "defaults 60"
 INITSCRIPT_NAME_${PN}-xenstored = "xenstored"
 INITSCRIPT_PARAMS_${PN}-xenstored = "defaults 05"
 
+EXTRA_OECONF += " \
+    --prefix=${prefix} \
+    --libexecdir=${libdir} \
+    --host=${HOST_SYS} \
+    --disable-xen \
+    --disable-stubdom \
+    --disable-ioemu-stubdom \
+    --disable-pv-grub \
+    --disable-xenstore-stubdom \
+    --disable-rombios \
+    --disable-ocamltools \
+    --with-initddir=${INIT_D_DIR} \
+    --with-sysconfig-leaf-dir=default \
+    --with-system-qemu=/usr/bin/qemu-system-i386 \
+    --disable-qemu-traditional \
+"
+
 EXTRA_OEMAKE += "CROSS_SYS_ROOT=${STAGING_DIR_HOST} CROSS_COMPILE=${HOST_PREFIX}"
 EXTRA_OEMAKE += "CONFIG_IOEMU=n"
 EXTRA_OEMAKE += "DESTDIR=${D}"
@@ -69,7 +97,7 @@ EXTRA_OEMAKE += "DESTDIR=${D}"
 TARGET_CC_ARCH += "${LDFLAGS}"
 
 do_configure() {
-	DESTDIR=${D} ./configure --prefix=${prefix}
+	oe_runconf 
 }
 
 do_compile() {

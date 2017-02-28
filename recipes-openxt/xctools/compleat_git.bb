@@ -15,6 +15,8 @@ SRC_URI = "git://${OPENXT_GIT_MIRROR}/xctools.git;protocol=${OPENXT_GIT_PROTOCOL
 
 S = "${WORKDIR}/git/compleat"
 
+FILES_${PN} += "${datadir}/${PN}*/compleat_setup"
+
 LDFLAGS += "-pthread"
 CFLAGS += "-pthread"
 
