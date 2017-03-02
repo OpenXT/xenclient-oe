@@ -12,7 +12,7 @@ SRC_URI[tarball.sha256sum] = "b85bc7aaf1a976627ca461b1ca7b0c4ddddff709f52fe44c9b
 
 S = "${WORKDIR}/dbus-python-${PV}"
 
-inherit distutils-base autotools_stage pkgconfig
+inherit distutils-base autotools pkgconfig
 
 export BUILD_SYS
 export HOST_SYS
