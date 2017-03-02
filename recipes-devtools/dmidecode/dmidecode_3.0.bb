@@ -1,17 +1,20 @@
-DESCRIPTION = "DMI (Desktop Management Interface) table related utilities"
-SECTION = "console/utils"
+SUMMARY = "DMI (Desktop Management Interface) table related utilities"
 HOMEPAGE = "http://www.nongnu.org/dmidecode/"
 LICENSE = "GPLv2"
-LIC_FILES_CHKSUM = "files://LICENSE;md5=b234ee4d69f5fce4486a80fdaf4a4263"
-PR = "r1"
+LIC_FILES_CHKSUM = "file://LICENSE;md5=b234ee4d69f5fce4486a80fdaf4a4263"
 
-SRC_URI = "http://savannah.nongnu.org/download/dmidecode/${P}.tar.gz"
+SRC_URI = "${SAVANNAH_NONGNU_MIRROR}/dmidecode/${BP}.tar.xz"
 
-COMPATIBLE_HOST = "(i.86|x86_64).*-linux"
+COMPATIBLE_HOST = "(i.86|x86_64|aarch64|arm|powerpc|powerpc64).*-linux"
 
 do_install() {
 	oe_runmake DESTDIR="${D}" install
 }
 
-SRC_URI[md5sum] = "be7501ad0f844e875976b96106afaa3c"
-SRC_URI[sha256sum] = "698d209ec81f88b2685e07943cd61e1ac125d8f4b3f3f22c777f318a56d94edf"
+do_unpack_extra() {
+	sed -i -e '/^prefix/s:/usr/local:${exec_prefix}:' ${S}/Makefile
+}
+addtask unpack_extra after do_unpack before do_patch
+
+SRC_URI[md5sum] = "281ee572d45c78eca73a14834c495ffd"
+SRC_URI[sha256sum] = "7ec35bb193729c1d593a1460b59d82d24b89102ab23fd0416e6cf4325d077e45"
