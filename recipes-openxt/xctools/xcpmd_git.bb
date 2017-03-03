@@ -1,7 +1,7 @@
 DESCRIPTION = "Power Management Daemon for OpenXT"
 LICENSE = "GPLv2"
 LIC_FILES_CHKSUM = "file://COPYING;md5=4641e94ec96f98fabc56ff9cc48be14b"
-DEPENDS = "xenclient-idl dbus xen-tools pciutils libxcdbus xenclient-rpcgen-native libxcxenstore udev libnl yajl"
+DEPENDS = "xenclient-idl dbus xen pciutils libxcdbus xenclient-rpcgen-native libxcxenstore udev libnl yajl"
 
 PV = "0+git${SRCPV}"
 

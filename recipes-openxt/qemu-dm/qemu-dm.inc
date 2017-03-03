@@ -1,7 +1,7 @@
 LICENSE = "GPLv2 & LGPLv2"
 LIC_FILES_CHKSUM = "file://COPYING;md5=441c28d2cf86e15a37fa47e15a72fbac  \
                     file://COPYING.LIB;md5=79ffa0ec772fa86740948cb7327a0cc7"
-DEPENDS = "xen-tools alsa-lib pciutils libpng xen-blktap libv4v openssl zlib libcap-ng libdmbus"
+DEPENDS = "xen alsa-lib pciutils libpng xen-blktap libv4v openssl zlib libcap-ng libdmbus"
 
 RDEPENDS_${PN} += "libusb1 nettle gnutls"
 

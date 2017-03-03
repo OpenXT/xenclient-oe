@@ -43,8 +43,8 @@ IMAGE_INSTALL = "\
     ${ANGSTROM_EXTRA_INSTALL} \
     xenclient-udev-force-discreet-net-to-eth0 \
     v4v-module \
-    xen-tools-libxenstore \
-    xen-tools-xenstore-utils \
+    xen-libxenstore \
+    xen-xenstore \
     wget \
     ethtool \
     carrier-detect \
