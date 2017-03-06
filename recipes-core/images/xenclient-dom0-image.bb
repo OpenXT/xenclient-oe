@@ -32,6 +32,7 @@ IMAGE_INSTALL = "\
     v4v-module \
     xenclient-preload-hs-libs \
     linux-firmware-i915 \
+    cdrom-daemon \
     ${ANGSTROM_EXTRA_INSTALL}"
 
 # IMAGE_PREPROCESS_COMMAND = "create_etc_timestamp"

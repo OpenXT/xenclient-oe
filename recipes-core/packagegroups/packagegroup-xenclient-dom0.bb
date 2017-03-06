@@ -113,6 +113,7 @@ RDEPENDS_${PN} = " \
     linuxfb-surfman-plugin \
     dm-agent \
     xenmgr \
+    cdrom-daemon \
 "
 
 # OE upgrade - temporarly disabled:
