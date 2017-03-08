@@ -1,13 +1,10 @@
-inherit xenclient
-
-# For deb-xenstore-client-tools and deb-libxenstore to pickup patches
-FILESEXTRAPATHS_prepend := "${THISDIR}/files:"
-
 PV = "${XEN_VERSION}"
 
-DEPENDS = "glib-2.0"
+SRC_URI := "${XEN_SRC_URI}"
+SRC_URI[md5sum] := "${XEN_SRC_MD5SUM}"
+SRC_URI[sha256sum] := "${XEN_SRC_SHA256SUM}"
 
-SRC_URI = "${XEN_SRC_URI};name=source \
+SRC_URI_append = " \
     file://config.patch \
     file://do-not-overwrite-cc-and-ld.patch \
     file://disable-xen-root-check.patch \
@@ -88,21 +85,9 @@ SRC_URI = "${XEN_SRC_URI};name=source \
     file://xsa-204-x86-mishandling-of-syscall-singlestep-during-emulation.patch \
 "
 
-SRC_URI[source.md5sum] := "${XEN_SRC_MD5SUM}"
-SRC_URI[source.sha256sum] := "${XEN_SRC_SHA256SUM}"
+COMPATIBLE_HOST = 'i686-oe-linux|(x86_64.*).*-linux|aarch64.*-linux'
 
-S = "${WORKDIR}/xen-${XEN_VERSION}"
+PACKAGECONFIG =+ "xsm"
+PACKAGECONFIG =+ "hvm"
 
-LICENSE = "GPLv2"
-LIC_FILES_CHKSUM = "file://COPYING;md5=a6260c12cd5de27e80d89ae18e48d20a"
-
-INC_PR = "r4"
-
-do_configure_prepend() {
-    # fixup AS/CC/CCP/etc variable within StdGNU.mk
-    for i in AS LD CC CPP AR RANLIB NM STRIP OBJCOPY OBJDUMP; do
-        sed -i "s/^\($i\s\s*\).*=/\1?=/" ${S}/config/StdGNU.mk
-    done
-    # fixup environment passing in some makefiles
-    sed -i 's#\(\w*\)=\(\$.\w*.\)#\1="\2"#' ${S}/tools/firmware/Makefile
-}
+S = "${WORKDIR}/xen-${PV}"

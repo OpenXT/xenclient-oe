@@ -6,10 +6,10 @@ COMPATIBLE_MACHINE = "(xenclient-stubdomain)"
 
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
-DEPENDS += "dialog"
+DEPENDS += "dialog xen"
  
 IMAGE_FSTYPES = "cpio.gz"
-IMAGE_INSTALL = "busybox bridge-utils initramfs-xenclient"
+IMAGE_INSTALL = "busybox bridge-utils initramfs-xenclient xen-xenstore"
 IMAGE_INSTALL += "qemu-dm-stubdom v4v-module dm-agent simple-poweroff rsyslog"
 IMAGE_LINGUAS = ""
 IMAGE_DEV_MANAGER = "busybox-mdev"

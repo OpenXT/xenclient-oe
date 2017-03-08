@@ -3,7 +3,7 @@ require recipes-devtools/ghc/ghc-xcprog.inc
 DESCRIPTION = "XenClient xenmgr"
 LICENSE = "GPLv2"
 LIC_FILES_CHKSUM = "file://../COPYING;md5=4641e94ec96f98fabc56ff9cc48be14b"
-DEPENDS = "libxenmgr-core libxchutils libxchv4v libxchxenstore libxchdb xenclient-rpcgen-native xenclient-idl xen-tools xen-libxl xenmgr-data ghc-native ghc-json ghc-hsyslog ghc-regex-posix ghc-network libxch-rpc ghc-attoparsec ghc-zlib ghc-parsec ghc-deepseq ghc-text ghc-mtl"
+DEPENDS = "libxenmgr-core libxchutils libxchv4v libxchxenstore libxchdb xenclient-rpcgen-native xenclient-idl xen xen-libxl xenmgr-data ghc-native ghc-json ghc-hsyslog ghc-regex-posix ghc-network libxch-rpc ghc-attoparsec ghc-zlib ghc-parsec ghc-deepseq ghc-text ghc-mtl"
 RDEPENDS_${PN} += "glibc-gconv-utf-32 xenclient-eula ghc-runtime xenclient-caps heimdallr"
 
 PV = "0+git${SRCPV}"

@@ -1,7 +1,7 @@
 PR .= ".1"
 
 DEPENDS += "libselinux"
-DEPENDS_${PN} += "libv4v xen-tools"
+DEPENDS_${PN} += "libv4v xen"
 RDEPENDS_${PN} += "libselinux"
 
 FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}-${PV}:"

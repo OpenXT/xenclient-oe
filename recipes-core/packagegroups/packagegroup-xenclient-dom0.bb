@@ -11,9 +11,20 @@ RDEPENDS_${PN} = " \
     openssh-sshd-tcp-init \
     util-linux-mount \
     util-linux-umount \
-    xen \
-    xen-tools \
-    xen-firmware \
+    xen-blktap \
+    xen-console \
+    xen-hvmloader \
+    xen-hypervisor \
+    xen-flask-tools \
+    xen-libblktapctl \
+    xen-libvhd \
+    xen-libxenctrl \
+    xen-libxenguest \
+    xen-libxenlight \
+    xen-libxenstat \
+    xen-libxlutil \
+    xen-xenstat \
+    xen-xl \
     xen-xsm-policy \
     grub \
     tboot \
@@ -61,8 +72,6 @@ RDEPENDS_${PN} = " \
     secure-vm \
     xenclient-sec-scripts \
     pmtools \
-    xen-blktap \
-    xen-libxl \
     svirt-interpose \
     selinux-load \
     ustr \
@@ -75,7 +84,6 @@ RDEPENDS_${PN} = " \
     xenclient-udev-force-discreet-net-to-eth0 \
     xenclient-nwd \
     wget \
-    xen-tools-xenconsoled \
     xenclient-repo-certs \
     gobi-loader \
     usb-modeswitch \
