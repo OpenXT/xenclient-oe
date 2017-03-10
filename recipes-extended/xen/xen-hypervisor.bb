@@ -1,6 +1,5 @@
 require recipes-extended/xen/xen.inc
 require xen-common.inc
-require xen-64bit-ugly.inc
 
 DESCRIPTION = "Xen hypervisor, 64-bit build"
 
@@ -61,6 +60,11 @@ EXTRA_OECONF_remove = " \
     --with-system-qemu=/usr/bin/qemu-system-i386 \
     --disable-qemu-traditional \
 "
+
+EXTRA_OEMAKE += " \
+    XEN_TARGET_ARCH=x86_64 \
+    XEN_VENDORVERSION=-xc \
+    "
 
 do_configure() {
     echo "debug := n" > .config
