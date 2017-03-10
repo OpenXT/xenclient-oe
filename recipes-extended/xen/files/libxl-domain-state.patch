@@ -114,7 +114,7 @@ Index: xen-4.6.4/tools/libxl/libxl_utils.c
 ===================================================================
 --- xen-4.6.4.orig/tools/libxl/libxl_utils.c
 +++ xen-4.6.4/tools/libxl/libxl_utils.c
-@@ -1195,6 +1195,59 @@ int libxl_domid_valid_guest(uint32_t dom
+@@ -1195,6 +1195,75 @@ int libxl_domid_valid_guest(uint32_t dom
      return domid > 0 && domid < DOMID_FIRST_RESERVED;
  }
  
@@ -131,6 +131,12 @@ Index: xen-4.6.4/tools/libxl/libxl_utils.c
 +        fprintf(stderr, "Failed to write the xenstore node: %s with state: %s\n", path, state);
 +    }
 +
++    if (!strcmp(state, "shutdown")){
++        memset(path, 0, sizeof(path));
++        sprintf(path, "/state/%s", uuid);
++        xs_rm(ctx->xsh, XBT_NULL, path);
++    }
++
 +    return 0;
 +
 +}
@@ -138,11 +144,14 @@ Index: xen-4.6.4/tools/libxl/libxl_utils.c
 +int libxl_update_state(libxl_ctx *ctx, uint32_t domid_in, const char *state)
 +{
 +    int nb_domains, i;
-+    uint32_t domid;
++    uint32_t domid, target_domid;
 +    char path[48];
 +    char uuid[37];
 +    libxl_dominfo *dominfo;
 +    libxl_uuid *xl_uuid = NULL;
++
++    if(libxl_is_stubdom(ctx, domid_in, &target_domid))
++        return 0;
 +
 +    dominfo = libxl_list_domain(ctx, &nb_domains);
 +
@@ -167,6 +176,13 @@ Index: xen-4.6.4/tools/libxl/libxl_utils.c
 +    {
 +        fprintf(stderr, "Failed to write the xenstore node: %s with state: %s\n", path, state);
 +    }
++
++    if (!strcmp(state, "shutdown")){
++        memset(path, 0, sizeof(path));
++        sprintf(path, "/state/%s", uuid);
++        xs_rm(ctx->xsh, XBT_NULL, path);
++    }
++
 +    free(dominfo);
 +    return 0;
 +}
