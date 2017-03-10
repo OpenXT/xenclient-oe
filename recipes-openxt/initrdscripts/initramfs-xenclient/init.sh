@@ -195,9 +195,10 @@ mount_root
 [ -n "$BOOT_DEVICE" ] && mount_boot
 
 maybe_break tpm
-
-echo "Setting up TPM..."
-tpm_setup
+if [ -e /root/boot/system/tpm/enabled ]; then
+    echo "Setting up TPM..."
+    tpm_setup
+fi
 
 maybe_break pivot
 boot_root
