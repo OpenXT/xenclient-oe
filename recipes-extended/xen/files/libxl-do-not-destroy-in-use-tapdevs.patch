@@ -40,15 +40,16 @@ Index: xen-4.6.4/tools/libxl/libxl_blktap2.c
 ===================================================================
 --- xen-4.6.4.orig/tools/libxl/libxl_blktap2.c
 +++ xen-4.6.4/tools/libxl/libxl_blktap2.c
-@@ -50,6 +50,37 @@ char *libxl__blktap_devpath(libxl__gc *g
+@@ -50,8 +50,44 @@ char *libxl__blktap_devpath(libxl__gc *g
      return NULL;
  }
  
-+static bool tapdev_is_shared(libxl__gc *gc, const char *params)
++static bool tapdev_is_shared(libxl__gc *gc, const char *params, uint32_t domain_domid)
 +{
 +    char **domids, **vbds;
 +    char *tp;
-+    char *type;
++    uint32_t t_domid;
++    char *target_domid;
 +    unsigned int count1, count2, i, j;
 +    unsigned int total = 0;
 +
@@ -56,14 +57,18 @@ Index: xen-4.6.4/tools/libxl/libxl_blktap2.c
 +    domids = libxl__xs_directory(gc, XBT_NULL, "backend/vbd", &count1);
 +    if (domids) {
 +        for (i = 0; i < count1; ++i) {
++            t_domid = 0;
 +            /* List all the vbds for that domid */
 +            vbds = libxl__xs_directory(gc, XBT_NULL, libxl__sprintf(gc, "backend/vbd/%s", domids[i]), &count2);
 +            if (vbds) {
 +                for (j = 0; j < count2; ++j) {
 +                    /* If the params are the same, we have a match */
 +                    tp = libxl__xs_read(gc, XBT_NULL, libxl__sprintf(gc, "backend/vbd/%s/%s/tapdisk-params", domids[i], vbds[j]));
-+                    type = libxl__xs_read(gc, XBT_NULL, libxl__sprintf(gc, "backend/vbd/%s/%s/device-type", domids[i], vbds[j]));
-+                    if (tp != NULL && type != NULL && !strcmp(tp, params) && !strcmp(type, "cdrom")) {
++                    target_domid = libxl__xs_read(gc, XBT_NULL, libxl__sprintf(gc, "/local/domain/%s/target", domids[i]));
++                    if(target_domid)
++                        t_domid = strtol(target_domid, NULL, 10);
++
++                    if (tp != NULL && !strcmp(tp, params) && (t_domid != domain_domid)) {
 +                        total++;
 +                        if (total == 2)
 +                            return true;
@@ -76,14 +81,17 @@ Index: xen-4.6.4/tools/libxl/libxl_blktap2.c
 +    return false;
 +}
  
- int libxl__device_destroy_tapdisk(libxl__gc *gc, const char *params)
+-int libxl__device_destroy_tapdisk(libxl__gc *gc, const char *params)
++int libxl__device_destroy_tapdisk(libxl__gc *gc, const char *params, uint32_t domid)
  {
-@@ -74,6 +105,12 @@ int libxl__device_destroy_tapdisk(libxl_
+     char *type, *disk;
+     int err;
+@@ -74,6 +110,12 @@ int libxl__device_destroy_tapdisk(libxl_
          return ERROR_FAIL;
      }
  
 +    /* We're using the tapdev. If anybody else also is, we can't destroy it! */
-+    if (tapdev_is_shared(gc, params)) {
++    if (tapdev_is_shared(gc, params, domid)) {
 +        LOG(DEBUG, "Not destroying tapdev%d, another VM uses it", tap.minor);
 +        return 0;
 +    }
@@ -91,3 +99,29 @@ Index: xen-4.6.4/tools/libxl/libxl_blktap2.c
      err = tap_ctl_destroy(tap.id, tap.minor);
      if (err < 0) {
          LOGEV(ERROR, -err, "Failed to destroy tap device id %d minor %d",
+Index: xen-4.6.4/tools/libxl/libxl_device.c
+===================================================================
+--- xen-4.6.4.orig/tools/libxl/libxl_device.c
++++ xen-4.6.4/tools/libxl/libxl_device.c
+@@ -680,7 +680,7 @@ int libxl__device_destroy(libxl__gc *gc,
+     }
+ 
+     if (tapdisk_params)
+-        rc = libxl__device_destroy_tapdisk(gc, tapdisk_params);
++        rc = libxl__device_destroy_tapdisk(gc, tapdisk_params, dev->domid);
+ 
+ out:
+     libxl__xs_transaction_abort(gc, &t);
+Index: xen-4.6.4/tools/libxl/libxl_internal.h
+===================================================================
+--- xen-4.6.4.orig/tools/libxl/libxl_internal.h
++++ xen-4.6.4/tools/libxl/libxl_internal.h
+@@ -1688,7 +1688,7 @@ _hidden char *libxl__blktap_devpath(libx
+  *   by be_path.
+  *   Always logs on failure.
+  */
+-_hidden int libxl__device_destroy_tapdisk(libxl__gc *gc, const char *params);
++_hidden int libxl__device_destroy_tapdisk(libxl__gc *gc, const char *params, uint32_t domid);
+ 
+ _hidden int libxl__device_from_disk(libxl__gc *gc, uint32_t domid,
+                                    libxl_device_disk *disk,
