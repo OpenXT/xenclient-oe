@@ -30,7 +30,6 @@ SRC_URI += "${KERNELORG_MIRROR}/linux/kernel/v${PV_MAJOR}.x/linux-${PV}.tar.xz;n
     file://xenbus-move-otherend-watches-on-relocate.patch;patch=1 \
     file://netfront-support-backend-relocate.patch;patch=1 \
     file://konrad-ioperm.patch;patch=1 \
-    file://konrad-microcode.patch;patch=1 \
     file://gem-foreign.patch;patch=1 \
     file://fbcon-do-not-drag-detect-primary-option.patch;patch=1 \
     file://usbback-base.patch;patch=1 \
@@ -47,8 +46,8 @@ SRC_URI += "${KERNELORG_MIRROR}/linux/kernel/v${PV_MAJOR}.x/linux-${PV}.tar.xz;n
     file://defconfig \
     "
 
-SRC_URI[kernel.md5sum] = "c23de77131c05a27e638026972ada85b"
-SRC_URI[kernel.sha256sum] = "30a90d0b63140073a5ec3ff1f917d58c792ed301723877731cd072a0f58903be"
+SRC_URI[kernel.md5sum] = "6f7f4cb7ceaac770eadf0c7a18ef5225"
+SRC_URI[kernel.sha256sum] = "e4944ca5bb0bdf63a7e97dc7fbdd38bcc820d8b3b57c4a3a7b3bf9c8a48216b7"
 
 LIC_FILES_CHKSUM = "file://COPYING;md5=d7810fab7487fb0aad327b76f1be7cd7"
 
