@@ -45,6 +45,7 @@ EXTRA_OECONF_remove = "--disable-ocamltools"
 SRC_URI_append = " \
     file://xen-init-dom0.initscript \
     file://xenstored.initscript \
+    file://oxenstored.conf \
     "
 
 PACKAGES = " \
@@ -119,4 +120,7 @@ do_install() {
     mv ${D}/usr/sbin/oxenstored ${D}/${sbindir}/xenstored
     install -m 0755 ${WORKDIR}/xenstored.initscript \
                     ${D}${sysconfdir}/init.d/xenstored
+    rm ${D}${sysconfdir}/xen/oxenstored.conf
+    install -m 0644 ${WORKDIR}/oxenstored.conf \
+                    ${D}${sysconfdir}/xen/oxenstored.conf
 }
