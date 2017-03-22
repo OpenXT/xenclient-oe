@@ -216,15 +216,17 @@ Index: xen-4.6.4/tools/libxl/xl_cmdimpl.c
      if (!paused)
          libxl_domain_unpause(ctx, domid);
  
-@@ -2992,6 +2996,7 @@ start:
+@@ -2992,6 +2996,9 @@ start:
                   * re-creation fails sometimes.
                   */
                  LOG("Done. Rebooting now");
-+                libxl_update_state_direct(ctx, d_config.c_info.uuid, "rebooted");
++                libxl_update_state_direct(ctx, d_config.c_info.uuid, "shutdown"); //Sleep here because daemons with an xs_watch on this node
++                sleep(2);                                                         //won't see the "shutdown" event, just the "rebooted" one.
++                libxl_update_state_direct(ctx, d_config.c_info.uuid, "rebooted"); //Once this is fixed in xenstore libs, sleep can be removed.
                  sleep(2);
                  goto start;
  
-@@ -2999,6 +3004,7 @@ start:
+@@ -2999,6 +3006,7 @@ start:
                  LOG("Done. Exiting now");
                  libxl_event_free(ctx, event);
                  ret = 0;
@@ -232,7 +234,7 @@ Index: xen-4.6.4/tools/libxl/xl_cmdimpl.c
                  goto out;
  
              default:
-@@ -3009,6 +3015,7 @@ start:
+@@ -3009,6 +3017,7 @@ start:
              LOG("Domain %d has been destroyed.", domid);
              libxl_event_free(ctx, event);
              ret = 0;
@@ -240,7 +242,7 @@ Index: xen-4.6.4/tools/libxl/xl_cmdimpl.c
              goto out;
  
          case LIBXL_EVENT_TYPE_DISK_EJECT:
-@@ -3030,6 +3037,7 @@ error_out:
+@@ -3030,6 +3039,7 @@ error_out:
      release_lock();
      if (libxl_domid_valid_guest(domid)) {
          libxl_domain_destroy(ctx, domid, 0);
@@ -248,7 +250,7 @@ Index: xen-4.6.4/tools/libxl/xl_cmdimpl.c
          domid = INVALID_DOMID;
      }
  
-@@ -3663,6 +3671,7 @@ static void destroy_domain(uint32_t domi
+@@ -3663,6 +3673,7 @@ static void destroy_domain(uint32_t domi
      }
      rc = libxl_domain_destroy(ctx, domid, 0);
      if (rc) { fprintf(stderr,"destroy failed (rc=%d)\n",rc); exit(-1); }
@@ -256,7 +258,7 @@ Index: xen-4.6.4/tools/libxl/xl_cmdimpl.c
  }
  
  static void wait_for_domain_deaths(libxl_evgen_domain_death **deathws, int nr)
-@@ -3705,6 +3714,7 @@ static void shutdown_domain(uint32_t dom
+@@ -3705,6 +3716,7 @@ static void shutdown_domain(uint32_t dom
      int rc;
  
      fprintf(stderr, "Shutting down domain %d\n", domid);
@@ -264,7 +266,7 @@ Index: xen-4.6.4/tools/libxl/xl_cmdimpl.c
      rc=libxl_domain_shutdown(ctx, domid);
      if (rc == ERROR_NOPARAVIRT) {
          if (fallback_trigger) {
-@@ -3737,6 +3747,7 @@ static void reboot_domain(uint32_t domid
+@@ -3737,6 +3749,7 @@ static void reboot_domain(uint32_t domid
      int rc;
  
      fprintf(stderr, "Rebooting domain %d\n", domid);
