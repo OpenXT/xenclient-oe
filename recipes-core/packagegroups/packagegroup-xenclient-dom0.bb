@@ -24,6 +24,7 @@ RDEPENDS_${PN} = " \
     xen-libxenstat \
     xen-libxlutil \
     xen-xenstat \
+    xen-xenstored \
     xen-xl \
     xen-xsm-policy \
     grub \
@@ -43,7 +44,6 @@ RDEPENDS_${PN} = " \
     xcpmd \
     vbetool-xc \
     xenclient-toolstack \
-    xenclient-toolstack-xenstored \
     xenclient-input-daemon \
     xenclient-dom0-tweaks \
     xenclient-splash-images \

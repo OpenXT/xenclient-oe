@@ -4,7 +4,6 @@ require xen-common.inc
 FILESEXTRAPATHS_prepend := "${THISDIR}/files:"
 
 SRC_URI_append = "\
-    file://xenstored.initscript \
     file://xenconsoled.initscript \
 "
 
@@ -25,6 +24,7 @@ PACKAGES_remove = " \
     ${PN}-libxlutil \
     ${PN}-libxlutil-dev \
     ${PN}-xl \
+    ${PN}-xenstored \
     "
 
 PROVIDES =+ "${PN}-toolstack-headers"
@@ -36,9 +36,7 @@ FILES_${PN}-staticdev_remove = " \
     ${libdir}/libvhd.a \
     "
 
-# OpenXT uses xenstored and xenconsoled init scripts
-# rather than systemd.
-FILES_${PN}-xenstored += "${sysconfdir}/init.d/xenstored"
+# OpenXT uses init scripts rather than systemd.
 FILES_${PN}-console += "${sysconfdir}/init.d/xenconsoled"
 
 # Export local headers for external toolstack
@@ -48,9 +46,7 @@ FILES_${PN}-toolstack-headers = "\
     ${includedir}/xen/libelf/elfstructs.h \
     "
 
-INITSCRIPT_PACKAGES =+ "${PN}-console ${PN}-xenstored"
-INITSCRIPT_NAME_${PN}-xenstored = "xenstored"
-INITSCRIPT_PARAMS_${PN}-xenstored = "defaults 05"
+INITSCRIPT_PACKAGES =+ "${PN}-console"
 INITSCRIPT_NAME_${PN}-console = "xenconsoled"
 INITSCRIPT_PARAMS_${PN}-console = "defaults 20"
 
@@ -81,8 +77,6 @@ do_install() {
     oe_runmake DESTDIR=${D} -C tools subdir-install-xenstat
     oe_runmake DESTDIR=${D} -C tools subdir-install-firmware
 
-    install -m 0755 ${WORKDIR}/xenstored.initscript \
-                    ${D}${sysconfdir}/init.d/xenstored
     install -m 0755 ${WORKDIR}/xenconsoled.initscript \
                     ${D}${sysconfdir}/init.d/xenconsoled
 
@@ -93,6 +87,11 @@ do_install() {
                     ${D}${includedir}/xen/libelf/libelf.h
     install -m 0755 ${S}/tools/include/xen/libelf/elfstructs.h \
                     ${D}${includedir}/xen/libelf/elfstructs.h
+
+    rm -f ${D}${sbindir}/xenstored
+    rmdir ${D}/var/lib/xenstored
+    rmdir ${D}/var/lib
+    rmdir ${D}/var
 }
 
 RDEPENDS_${PN}-base_remove = "\
