@@ -42,6 +42,9 @@ SRC_URI += " \
     file://policy/modules/services/vusb.fc \
     file://policy/modules/services/vusb.if \
     file://policy/modules/services/vusb.te \
+    file://policy/modules/services/cdrom.fc \
+    file://policy/modules/services/cdrom.if \
+    file://policy/modules/services/cdrom.te \
     file://policy/modules/services/dbd.fc \
     file://policy/modules/services/dbd.if \
     file://policy/modules/services/dbd.te \
