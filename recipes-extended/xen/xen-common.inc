@@ -75,6 +75,7 @@ SRC_URI_append = " \
     file://libxl-support-hvm-readonly-disks.patch \
     file://libxl-pci-passthrough-fixes.patch \
     file://libxl-vwif-support.patch \
+    file://libxl-atapi-pt.patch \
     file://xsa-191-x86-null-segments-not-always-treated-as-unusable.patch \
     file://xsa-192-x86-task-switch-to-vm86-mode-mis-handled.patch \
     file://xsa-193-x86-segment-base-write-emulation-lacking-canonical-address-checks.patch \

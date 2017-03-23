@@ -1,0 +1,130 @@
+################################################################################
+SHORT DESCRIPTION:
+################################################################################
+Add support for atapi-pt drives
+
+################################################################################
+LONG DESCRIPTION:
+################################################################################
+OpenXT has a concept of "atapi passthrough", which gives concurrent physical
+optical media access to VMs, even when they use a stubdomain.
+This patch adds "if=atapi-pt" as a disk configuration option.
+
+################################################################################
+CHANGELOG
+################################################################################
+Authors:
+Jed Lejosne <lejosnej@ainfosec.com>
+
+################################################################################
+REMOVAL
+################################################################################
+No
+
+################################################################################
+UPSTREAM PLAN
+################################################################################
+This would be part of upstreaming the whole atapi passthrough feature.
+
+################################################################################
+INTERNAL DEPENDENCIES
+################################################################################
+
+################################################################################
+PATCHES
+################################################################################
+Index: xen-4.6.4/tools/libxl/libxl_device.c
+===================================================================
+--- xen-4.6.4.orig/tools/libxl/libxl_device.c
++++ xen-4.6.4/tools/libxl/libxl_device.c
+@@ -255,6 +255,11 @@ static int disk_try_backend(disk_try_bac
+             return backend;
+         }
+ 
++        if (!strncmp(a->disk->vdev, "atapi-pt", 9)) {
++            LOG(DEBUG, "Defaulting to backend phy for an atapi-pt device");
++            return backend;
++        }
++
+         if (a->disk->script) {
+             LOG(DEBUG, "Disk vdev=%s, uses script=... assuming phy backend",
+                 a->disk->vdev);
+@@ -342,6 +347,7 @@ int libxl__device_disk_set_backend(libxl
+     } else if ((disk->backend == LIBXL_DISK_BACKEND_UNKNOWN ||
+                 disk->backend == LIBXL_DISK_BACKEND_PHY) &&
+                disk->backend_domid == LIBXL_TOOLSTACK_DOMID &&
++               strncmp(disk->vdev, "atapi-pt", 9) &&
+                !disk->script) {
+         if (stat(disk->pdev_path, &a.stab)) {
+             LOGE(ERROR, "Disk vdev=%s failed to stat: %s",
+@@ -460,6 +466,9 @@ int libxl__device_disk_dev_number(const
+     unsigned long ul;
+     int chrused;
+ 
++    if (!strncmp(virtpath, "atapi-pt", 9))
++        return 0;
++
+     chrused = -1;
+     if ((sscanf(virtpath, "d%ip%i%n", &disk, &partition, &chrused)  >= 2
+          && chrused == strlen(virtpath) && disk < (1<<20) && partition < 256)
+Index: xen-4.6.4/tools/libxl/libxl_dm.c
+===================================================================
+--- xen-4.6.4.orig/tools/libxl/libxl_dm.c
++++ xen-4.6.4/tools/libxl/libxl_dm.c
+@@ -1120,6 +1120,10 @@ static int libxl__build_device_model_arg
+                     drive = libxl__sprintf
+                         (gc, "if=ide,index=%d,readonly=%s,media=cdrom,cache=writeback,id=ide-%i",
+                          disk, disks[i].readwrite ? "off" : "on", dev_number);
++                else if (!strncmp(disks[i].vdev, "atapi-pt", 9))
++                    drive = libxl__sprintf
++                        (gc, "file=%s,if=atapi-pt,readonly=%s,media=cdrom,format=atapi-pt-fmt",
++                         disks[i].pdev_path, disks[i].readwrite ? "off" : "on");
+                 else if (b_info->stubdomain_version == LIBXL_STUBDOMAIN_VERSION_LINUX)
+                     drive = libxl__sprintf
+                         (gc, "file=%s,if=ide,index=%d,media=cdrom,cache=writeback,format=%s,id=ide-%i",
+@@ -1244,6 +1248,34 @@ static int libxl__build_device_model_arg
+     }
+ }
+ 
++/* Duplicate guest_config->disks to dm_config->disks, omiting atapi-pt ones */
++static void libxl__dm_disks_from_hvm_guest_config(libxl__gc *gc,
++                                    libxl_domain_config * const guest_config,
++                                    libxl_domain_config *dm_config)
++{
++    libxl_ctx *ctx = libxl__gc_owner(gc);
++    int i, nr = guest_config->num_disks;
++    int dm_nr = 0;
++    int dm_i = 0;
++
++    for (i = 0; i < nr; i++) {
++        if (strncmp(guest_config->disks[i].vdev, "atapi-pt", 9))
++            dm_nr++;
++    }
++
++    GCNEW_ARRAY(dm_config->disks, dm_nr);
++
++    for (i = 0; i < nr; i++) {
++        if (strncmp(guest_config->disks[i].vdev, "atapi-pt", 9)) {
++            libxl_device_disk_init(&dm_config->disks[dm_i]);
++            libxl_device_disk_copy(ctx, &dm_config->disks[dm_i], &guest_config->disks[i]);
++            dm_i++;
++        }
++    }
++
++    dm_config->num_disks = dm_nr;
++}
++
+ static void libxl__dm_vifs_from_hvm_guest_config(libxl__gc *gc,
+                                     libxl_domain_config * const guest_config,
+                                     libxl_domain_config *dm_config)
+@@ -1446,9 +1478,7 @@ void libxl__spawn_stub_dm(libxl__egc *eg
+     dm_config->b_info.extra_hvm = guest_config->b_info.extra_hvm;
+     dm_config->b_info.stubdom_cmdline = guest_config->b_info.stubdom_cmdline;
+ 
+-    dm_config->disks = guest_config->disks;
+-    dm_config->num_disks = guest_config->num_disks;
+-
++    libxl__dm_disks_from_hvm_guest_config(gc, guest_config, dm_config);
+     libxl__dm_vifs_from_hvm_guest_config(gc, guest_config, dm_config);
+ 
+     dm_config->c_info.run_hotplug_scripts =
