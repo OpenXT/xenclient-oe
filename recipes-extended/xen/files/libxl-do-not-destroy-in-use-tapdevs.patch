@@ -40,39 +40,28 @@ Index: xen-4.6.4/tools/libxl/libxl_blktap2.c
 ===================================================================
 --- xen-4.6.4.orig/tools/libxl/libxl_blktap2.c
 +++ xen-4.6.4/tools/libxl/libxl_blktap2.c
-@@ -50,8 +50,44 @@ char *libxl__blktap_devpath(libxl__gc *g
+@@ -50,8 +50,33 @@ char *libxl__blktap_devpath(libxl__gc *g
      return NULL;
  }
  
-+static bool tapdev_is_shared(libxl__gc *gc, const char *params, uint32_t domain_domid)
++static bool tapdev_is_shared(libxl__gc *gc, const char *params)
 +{
 +    char **domids, **vbds;
 +    char *tp;
-+    uint32_t t_domid;
-+    char *target_domid;
 +    unsigned int count1, count2, i, j;
-+    unsigned int total = 0;
 +
 +    /* List all the domids that have vhd backends */
 +    domids = libxl__xs_directory(gc, XBT_NULL, "backend/vbd", &count1);
 +    if (domids) {
 +        for (i = 0; i < count1; ++i) {
-+            t_domid = 0;
 +            /* List all the vbds for that domid */
 +            vbds = libxl__xs_directory(gc, XBT_NULL, libxl__sprintf(gc, "backend/vbd/%s", domids[i]), &count2);
 +            if (vbds) {
 +                for (j = 0; j < count2; ++j) {
 +                    /* If the params are the same, we have a match */
 +                    tp = libxl__xs_read(gc, XBT_NULL, libxl__sprintf(gc, "backend/vbd/%s/%s/tapdisk-params", domids[i], vbds[j]));
-+                    target_domid = libxl__xs_read(gc, XBT_NULL, libxl__sprintf(gc, "/local/domain/%s/target", domids[i]));
-+                    if(target_domid)
-+                        t_domid = strtol(target_domid, NULL, 10);
-+
-+                    if (tp != NULL && !strcmp(tp, params) && (t_domid != domain_domid)) {
-+                        total++;
-+                        if (total == 2)
-+                            return true;
-+                    }
++                    if (tp != NULL && !strcmp(tp, params))
++                        return true;
 +                }
 +            }
 +        }
@@ -86,12 +75,12 @@ Index: xen-4.6.4/tools/libxl/libxl_blktap2.c
  {
      char *type, *disk;
      int err;
-@@ -74,6 +110,12 @@ int libxl__device_destroy_tapdisk(libxl_
+@@ -74,6 +99,12 @@ int libxl__device_destroy_tapdisk(libxl_
          return ERROR_FAIL;
      }
  
 +    /* We're using the tapdev. If anybody else also is, we can't destroy it! */
-+    if (tapdev_is_shared(gc, params, domid)) {
++    if (tapdev_is_shared(gc, params)) {
 +        LOG(DEBUG, "Not destroying tapdev%d, another VM uses it", tap.minor);
 +        return 0;
 +    }
