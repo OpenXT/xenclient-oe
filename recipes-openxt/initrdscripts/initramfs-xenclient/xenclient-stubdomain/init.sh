@@ -65,7 +65,7 @@ mkdir -p /var/run
 export USE_INTEL_SB=1
 export INTEL_DBUS=1
 
-rsyslogd -f /etc/rsyslog.conf -c4
+rsyslogd -f /etc/rsyslog.conf
 
 # Agent cmdline parsing.
 KERNEL_CMDLINE=`cat /proc/cmdline`
