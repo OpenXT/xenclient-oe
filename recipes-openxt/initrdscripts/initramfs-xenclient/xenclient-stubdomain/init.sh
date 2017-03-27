@@ -99,9 +99,8 @@ case "$AGENT" in
             KERNEL_CMDLINE_STRIPPED="${KERNEL_CMDLINE##*openxt_qemu_args=\"}"
             # Remove the last quote of the qemu args and everything after
             QEMU_CMDLINE="${KERNEL_CMDLINE_STRIPPED%%\"*}"
-            DOMID=`echo $QEMU_CMDLINE | cut -d' ' -f2 `
-            echo "Invoking qemu wrapper with QEMU_CMDLINE = ${QEMU_CMDLINE}"
-            /usr/bin/qemu-dm-wrapper ${DOMID} ${QEMU_CMDLINE}
+            echo "Invoking qemu with QEMU_CMDLINE = ${QEMU_CMDLINE}"
+            /usr/bin/qemu-system-i386 ${QEMU_CMDLINE}
             poweroff
         fi
         ;;
