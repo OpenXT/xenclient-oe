@@ -43,7 +43,20 @@ mount -t proc proc /proc
 mount -t xenfs none /proc/xen
 mount -t sysfs sysfs /sys
 
-lsmod
+# Cmdline parsing.
+KERNEL_CMDLINE=`cat /proc/cmdline`
+for arg in $KERNEL_CMDLINE; do
+    case "$arg" in
+        guest_agent=*) AGENT=${arg##*=} ;;
+        guest_domid=*)  DOMID=${arg##*=} ;;
+        debug) LOGLVL="1";;
+        *) continue ;;
+    esac
+done
+
+if [ "${LOGLVL}" = "debug" ]; then
+    cut -f1,2,3,4,5 -d ' ' /proc/modules
+fi
 
 echo "0" > /sys/bus/pci/drivers_autoprobe
 for pci_dev in `ls /sys/bus/pci/devices/`
@@ -66,16 +79,6 @@ export USE_INTEL_SB=1
 export INTEL_DBUS=1
 
 rsyslogd -f /etc/rsyslog.conf
-
-# Agent cmdline parsing.
-KERNEL_CMDLINE=`cat /proc/cmdline`
-for arg in $KERNEL_CMDLINE; do
-    case "$arg" in
-        guest_agent=*) AGENT=${arg##*=} ;;
-        guest_domid=*)  DOMID=${arg##*=} ;;
-        *) continue ;;
-    esac
-done
 
 # Start requested agent.
 case "$AGENT" in
