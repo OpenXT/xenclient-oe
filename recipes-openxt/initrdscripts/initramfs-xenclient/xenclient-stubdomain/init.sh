@@ -63,14 +63,13 @@ for pci_dev in `ls /sys/bus/pci/devices/`
 do
  if [ -e /sys/bus/pci/devices/$pci_dev/driver/unbind ]
  then
-    echo pci device $pci_dev is bound, unbounding it!
+    echo "pci device $pci_dev is bound, unbind it!"
     echo "$pci_dev" > /sys/bus/pci/devices/$pci_dev/driver/unbind
  fi
 done
 
 ln -s /proc/self/fd/2 /dev/stderr
 
-echo $*
 echo 1 > /proc/sys/net/ipv4/ip_forward
 echo 0 > /proc/sys/net/ipv4/conf/all/rp_filter
 
