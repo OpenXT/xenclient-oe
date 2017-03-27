@@ -1,6 +1,7 @@
 PACKAGES =+ " \
 	     ${PN}-isohybrid \"
-             ${PN}-mboot \"
+             ${PN}-mboot \ 
+	    "
 
 do_install_append() {
    install -m 755 ${S}/bios/utils/isohybrid ${D}${bindir}/
