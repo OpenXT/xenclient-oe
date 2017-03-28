@@ -194,7 +194,7 @@ Index: xen-4.6.4/tools/libxl/libxl_dm.c
 ===================================================================
 --- xen-4.6.4.orig/tools/libxl/libxl_dm.c
 +++ xen-4.6.4/tools/libxl/libxl_dm.c
-@@ -1276,6 +1276,8 @@ static void libxl__dm_vifs_from_hvm_gues
+@@ -1257,6 +1257,8 @@ static void libxl__dm_vifs_from_hvm_gues
          libxl_device_nic_init(&dm_config->nics[i]);
          libxl_device_nic_copy(ctx, &dm_config->nics[i], &guest_config->nics[i]);
          dm_config->nics[i].nictype = LIBXL_NIC_TYPE_VIF;
@@ -203,3 +203,50 @@ Index: xen-4.6.4/tools/libxl/libxl_dm.c
          if (dm_config->nics[i].ifname)
              dm_config->nics[i].ifname = GCSPRINTF("%s" TAP_DEVICE_SUFFIX,
                                                    dm_config->nics[i].ifname);
+Index: xen-4.6.4/tools/libxl/libxl_linux.c
+===================================================================
+--- xen-4.6.4.orig/tools/libxl/libxl_linux.c
++++ xen-4.6.4/tools/libxl/libxl_linux.c
+@@ -105,7 +105,8 @@ static char **get_hotplug_env(libxl__gc
+     env[nr++] = "backend";
+     env[nr++] = "netdev";
+     env[nr++] = gatewaydev ? : "";
+-    if (dev->backend_kind == LIBXL__DEVICE_KIND_VIF) {
++    if (dev->backend_kind == LIBXL__DEVICE_KIND_VIF ||
++        dev->backend_kind == LIBXL__DEVICE_KIND_VWIF) {
+         if (libxl__nic_type(gc, dev, &nictype)) {
+             LOG(ERROR, "unable to get nictype");
+             return NULL;
+@@ -250,6 +251,7 @@ int libxl__get_hotplug_script_info(libxl
+         rc = libxl__hotplug_disk(gc, dev, args, env, action);
+         break;
+     case LIBXL__DEVICE_KIND_VIF:
++    case LIBXL__DEVICE_KIND_VWIF:
+         /*
+          * If domain has a stubdom we don't have to execute hotplug scripts
+          * for emulated interfaces
+Index: xen-4.6.4/tools/libxl/libxl_device.c
+===================================================================
+--- xen-4.6.4.orig/tools/libxl/libxl_device.c
++++ xen-4.6.4/tools/libxl/libxl_device.c
+@@ -671,7 +671,8 @@ int libxl__device_destroy(libxl__gc *gc,
+             libxl__xs_path_cleanup(gc, t, be_path);
+         }
+ 
+-        if (dev->kind == LIBXL__DEVICE_KIND_VIF) {
++        if (dev->kind == LIBXL__DEVICE_KIND_VIF ||
++            dev->kind == LIBXL__DEVICE_KIND_VWIF) {
+             libxl__xs_path_cleanup(gc, t, be_path);
+         }
+ 
+@@ -1185,7 +1186,9 @@ static void device_destroy_be_watch_cb(l
+      * in xenstore. NDVM doesn't do that, so let's not wait forever
+      * here. libxl will take care of the xenstore nodes later
+      */
+-    if (dir && aodev->dev->kind != LIBXL__DEVICE_KIND_VIF) {
++    if (dir &&
++        aodev->dev->kind != LIBXL__DEVICE_KIND_VIF &&
++        aodev->dev->kind != LIBXL__DEVICE_KIND_VWIF) {
+         /* backend path still exists, wait a little longer... */
+         return;
+     }
