@@ -59,6 +59,7 @@ FILES_${PN}-staticdev = " \
 
 EXTRA_OEMAKE += "CROSS_SYS_ROOT=${STAGING_DIR_HOST} CROSS_COMPILE=${HOST_PREFIX}"
 EXTRA_OEMAKE += "CONFIG_IOEMU=n"
+EXTRA_OEMAKE += "CONFIG_TESTS=n"
 EXTRA_OEMAKE += "DESTDIR=${D}"
 
 #Make sure we disable all compiler optimizations to avoid a nasty segfault in the 
