@@ -43,21 +43,33 @@ mount -t proc proc /proc
 mount -t xenfs none /proc/xen
 mount -t sysfs sysfs /sys
 
-lsmod
+# Cmdline parsing.
+KERNEL_CMDLINE=`cat /proc/cmdline`
+for arg in $KERNEL_CMDLINE; do
+    case "$arg" in
+        guest_agent=*) AGENT=${arg##*=} ;;
+        guest_domid=*)  DOMID=${arg##*=} ;;
+        debug) LOGLVL="1";;
+        *) continue ;;
+    esac
+done
+
+if [ "${LOGLVL}" = "debug" ]; then
+    cut -f1,2,3,4,5 -d ' ' /proc/modules
+fi
 
 echo "0" > /sys/bus/pci/drivers_autoprobe
 for pci_dev in `ls /sys/bus/pci/devices/`
 do
  if [ -e /sys/bus/pci/devices/$pci_dev/driver/unbind ]
  then
-    echo pci device $pci_dev is bound, unbounding it!
+    echo "pci device $pci_dev is bound, unbind it!"
     echo "$pci_dev" > /sys/bus/pci/devices/$pci_dev/driver/unbind
  fi
 done
 
 ln -s /proc/self/fd/2 /dev/stderr
 
-echo $*
 echo 1 > /proc/sys/net/ipv4/ip_forward
 echo 0 > /proc/sys/net/ipv4/conf/all/rp_filter
 
@@ -65,17 +77,7 @@ mkdir -p /var/run
 export USE_INTEL_SB=1
 export INTEL_DBUS=1
 
-rsyslogd -f /etc/rsyslog.conf -c4
-
-# Agent cmdline parsing.
-KERNEL_CMDLINE=`cat /proc/cmdline`
-for arg in $KERNEL_CMDLINE; do
-    case "$arg" in
-        guest_agent=*) AGENT=${arg##*=} ;;
-        guest_domid=*)  DOMID=${arg##*=} ;;
-        *) continue ;;
-    esac
-done
+rsyslogd -f /etc/rsyslog.conf
 
 # Start requested agent.
 case "$AGENT" in
@@ -97,9 +99,8 @@ case "$AGENT" in
             KERNEL_CMDLINE_STRIPPED="${KERNEL_CMDLINE##*openxt_qemu_args=\"}"
             # Remove the last quote of the qemu args and everything after
             QEMU_CMDLINE="${KERNEL_CMDLINE_STRIPPED%%\"*}"
-            DOMID=`echo $QEMU_CMDLINE | cut -d' ' -f2 `
-            echo "Invoking qemu wrapper with QEMU_CMDLINE = ${QEMU_CMDLINE}"
-            /usr/bin/qemu-dm-wrapper ${DOMID} ${QEMU_CMDLINE}
+            echo "Invoking qemu with QEMU_CMDLINE = ${QEMU_CMDLINE}"
+            /usr/bin/qemu-system-i386 ${QEMU_CMDLINE}
             poweroff
         fi
         ;;
