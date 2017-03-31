@@ -73,18 +73,35 @@ Index: xen-4.6.4/tools/libxl/libxl.c
  
      tmp = READ_LIBXLDEV(gc, "handle");
      if (tmp)
-@@ -3612,6 +3630,10 @@ int libxl_devid_to_device_nic(libxl_ctx
-     libxl_path = GCSPRINTF("%s/device/vif/%d", libxl_dom_path, devid);
- 
-     rc = libxl__device_nic_from_xenstore(gc, libxl_path, nic);
-+    if (rc) {
-+        libxl_path = GCSPRINTF("%s/device/vwif/%d", libxl_dom_path, devid);
-+        rc = libxl__device_nic_from_xenstore(gc, libxl_path, nic);
-+    }
+@@ -3559,6 +3577,9 @@ static int libxl__device_nic_from_xensto
+                                 GCSPRINTF("%s/backend", libxl_path), &tmp);
      if (rc) goto out;
  
-     rc = 0;
-@@ -3623,13 +3645,14 @@ out:
++    if (strstr(tmp, "vwif"))
++        libxl_defbool_set(&nic->wireless, true);
++
+     if (!tmp) {
+         LOG(ERROR, "nic %s does not exist (no backend path)", libxl_path);
+         rc = ERROR_FAIL;
+@@ -3603,6 +3624,7 @@ int libxl_devid_to_device_nic(libxl_ctx
+     GC_INIT(ctx);
+     char *libxl_dom_path, *libxl_path;
+     int rc = ERROR_FAIL;
++    const char *tmp;
+ 
+     libxl_device_nic_init(nic);
+     libxl_dom_path = libxl__xs_libxl_path(gc, domid);
+@@ -3610,6 +3632,9 @@ int libxl_devid_to_device_nic(libxl_ctx
+         goto out;
+ 
+     libxl_path = GCSPRINTF("%s/device/vif/%d", libxl_dom_path, devid);
++    rc = libxl__xs_read_checked(gc, XBT_NULL, libxl_path, &tmp);
++    if (tmp == NULL)
++        libxl_path = GCSPRINTF("%s/device/vwif/%d", libxl_dom_path, devid);
+ 
+     rc = libxl__device_nic_from_xenstore(gc, libxl_path, nic);
+     if (rc) goto out;
+@@ -3623,13 +3648,14 @@ out:
  static int libxl__append_nic_list(libxl__gc *gc,
                                             uint32_t domid,
                                             libxl_device_nic **nics,
@@ -101,7 +118,7 @@ Index: xen-4.6.4/tools/libxl/libxl.c
  
      libxl_dir_path = GCSPRINTF("%s/device/vif",
                                 libxl__xs_libxl_path(gc, domid));
-@@ -3650,9 +3673,14 @@ static int libxl__append_nic_list(libxl_
+@@ -3650,9 +3676,14 @@ static int libxl__append_nic_list(libxl_
          }
          *nnics += n;
      }
@@ -117,7 +134,7 @@ Index: xen-4.6.4/tools/libxl/libxl.c
      return rc;
  }
  
-@@ -3664,7 +3692,7 @@ libxl_device_nic *libxl_device_nic_list(
+@@ -3664,7 +3695,7 @@ libxl_device_nic *libxl_device_nic_list(
  
      *num = 0;
  
@@ -126,7 +143,7 @@ Index: xen-4.6.4/tools/libxl/libxl.c
      if (rc) goto out_err;
  
      GC_FREE;
-@@ -3691,9 +3719,15 @@ int libxl_device_nic_getinfo(libxl_ctx *
+@@ -3691,9 +3722,15 @@ int libxl_device_nic_getinfo(libxl_ctx *
      dompath = libxl__xs_get_dompath(gc, domid);
      nicinfo->devid = nic->devid;
  
@@ -145,7 +162,7 @@ Index: xen-4.6.4/tools/libxl/libxl.c
      nicinfo->backend = xs_read(ctx->xsh, XBT_NULL,
                                  GCSPRINTF("%s/backend", libxl_path), NULL);
      if (!nicinfo->backend) {
-@@ -4486,9 +4520,11 @@ static int add_device(libxl__egc *egc, l
+@@ -4486,9 +4523,11 @@ static int add_device(libxl__egc *egc, l
  
      switch(dev->backend_kind) {
      case LIBXL__DEVICE_KIND_VBD:
@@ -159,7 +176,7 @@ Index: xen-4.6.4/tools/libxl/libxl.c
  
          GCNEW(aodev);
          libxl__prepare_ao_device(ao, aodev);
-@@ -4529,9 +4565,11 @@ static int remove_device(libxl__egc *egc
+@@ -4529,9 +4568,11 @@ static int remove_device(libxl__egc *egc
  
      switch(ddev->dev->backend_kind) {
      case LIBXL__DEVICE_KIND_VBD:
