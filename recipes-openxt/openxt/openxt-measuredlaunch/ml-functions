@@ -38,8 +38,13 @@ parse_grub() {
     # Find any environment variables and bring them into current environment
     local IFS=$'\n'
     local lines=$(egrep -e "^[A-Z_]*=.*" $grub_conf)
+    env_list=""
     for line in $lines; do
-        eval $line
+        local key=$(echo $line|cut -f 1 -d'=')
+        local value=$(echo $line|cut -f 2- -d'='|cut -f 1 -d';'|tr -d \")
+
+        env_list="${env_list} ${key}"
+        declare "env_${key}=${value}"
     done
 
     # Find the default boot entry
@@ -63,12 +68,22 @@ parse_grub() {
     done
 
     # Parse through entry lines, expanding variables, and printing any multiboot modules
+    local IFS=' '
     while read -u 6 line; do
         echo $line | grep -q -e "^#" && continue
         echo $line | grep -q -e "^}" && break
 
         line=$(echo $line | sed -e 's/(/\\(/' -e 's/)/\\)/')
-        eval "echo $line" | awk '$1 ~ /multiboot|module/ { print substr($0, index($0,$2)) }'
+        line=$(echo $line | awk '$1 ~ /multiboot|module/ { print substr($0, index($0,$2)) }')
+        for e in $(echo "$env_list"); do
+            if echo $line|grep -q $e; then
+                local var=$(eval "echo env_${e}")
+                local sub=$(eval echo \$${var})
+                local match="s|\$${e}|${sub}|"
+                line=$(echo $line|sed -e "${match}")
+            fi
+        done
+        echo $line
     done
 
     exec 6<&-
