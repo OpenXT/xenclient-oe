@@ -2,7 +2,7 @@ inherit findlib
 DESCRIPTION = "UID - User Interface Daemon"
 LICENSE = "GPLv2"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/GPL-2.0;md5=801f80980d171dd6425610833a22dbe6"
-DEPENDS = "ocaml-cross ocaml-dbus xenclient-toolstack"
+DEPENDS = "ocaml-cross ocaml-dbus xen-libxl xenclient-toolstack"
 
 # Ocaml stuff is built with the native compiler with "-m32".
 
