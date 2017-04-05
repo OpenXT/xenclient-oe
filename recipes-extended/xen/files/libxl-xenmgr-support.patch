@@ -45,7 +45,25 @@ Index: xen-4.6.4/tools/libxl/libxl.c
          libxl__destroy_domid(egc, &dds->stubdom);
      } else {
          dds->stubdom_finished = 1;
-@@ -3525,6 +3527,8 @@ void libxl__device_nic_add(libxl__egc *e
+@@ -3396,6 +3398,7 @@ void libxl__device_nic_add(libxl__egc *e
+     flexarray_t *front;
+     flexarray_t *back;
+     libxl__device *device;
++    libxl_uuid uuid; 
+     int rc;
+     xs_transaction_t t = XBT_NULL;
+     libxl_domain_config d_config;
+@@ -3477,6 +3480,9 @@ void libxl__device_nic_add(libxl__egc *e
+     flexarray_append(front, "mac");
+     flexarray_append(front, libxl__sprintf(gc,
+                                     LIBXL_MAC_FMT, LIBXL_MAC_BYTES(nic->mac)));
++    libxl_domid_to_uuid(CTX, &uuid, nic->backend_domid);
++    flexarray_append(front, "backend-uuid");
++    flexarray_append(front, libxl__sprintf(gc, "%s", libxl__uuid2string(gc, uuid)));
+ 
+     if (aodev->update_json) {
+         lock = libxl__lock_domain_userdata(gc, domid);
+@@ -3525,6 +3531,8 @@ void libxl__device_nic_add(libxl__egc *e
      aodev->action = LIBXL__DEVICE_ACTION_ADD;
      libxl__wait_device_connection(egc, aodev);
  
@@ -54,7 +72,7 @@ Index: xen-4.6.4/tools/libxl/libxl.c
      rc = 0;
  out:
      libxl__xs_transaction_abort(gc, &t);
-@@ -4252,6 +4256,9 @@ int libxl__device_vfb_add(libxl__gc *gc,
+@@ -4252,6 +4260,9 @@ int libxl__device_vfb_add(libxl__gc *gc,
                                libxl__xs_kvs_of_flexarray(gc, back, back->count),
                                libxl__xs_kvs_of_flexarray(gc, front, front->count),
                                NULL);
@@ -64,7 +82,7 @@ Index: xen-4.6.4/tools/libxl/libxl.c
      rc = 0;
  out:
      return rc;
-@@ -6856,7 +6863,7 @@ int libxl_retrieve_domain_configuration(
+@@ -6856,7 +6867,7 @@ int libxl_retrieve_domain_configuration(
                      break;                                              \
              }                                                           \
                                                                          \
@@ -173,7 +191,7 @@ Index: xen-4.6.4/tools/libxl/libxl_dm.c
 ===================================================================
 --- xen-4.6.4.orig/tools/libxl/libxl_dm.c
 +++ xen-4.6.4/tools/libxl/libxl_dm.c
-@@ -639,7 +639,7 @@ static int libxl__build_device_model_arg
+@@ -620,7 +620,7 @@ static int libxl__build_device_model_arg
      }
      for (i = 0; b_info->extra && b_info->extra[i] != NULL; i++)
          flexarray_append(dm_args, b_info->extra[i]);
@@ -182,7 +200,7 @@ Index: xen-4.6.4/tools/libxl/libxl_dm.c
      switch (b_info->type) {
      case LIBXL_DOMAIN_TYPE_PV:
          flexarray_append(dm_args, "xenpv");
-@@ -1342,7 +1342,7 @@ static int libxl__write_stub_dmargs(libx
+@@ -1323,7 +1323,7 @@ static int libxl__write_stub_dmargs(libx
      while (args[i] != NULL) {
          if (linux_stubdom ||
              (strcmp(args[i], "-sdl") &&
@@ -191,7 +209,7 @@ Index: xen-4.6.4/tools/libxl/libxl_dm.c
              strcat(dmargs, " ");
              strcat(dmargs, args[i]);
          }
-@@ -1545,9 +1545,26 @@ void libxl__spawn_stub_dm(libxl__egc *eg
+@@ -1526,9 +1526,26 @@ void libxl__spawn_stub_dm(libxl__egc *eg
                               &stubdom_state->config);
      if (ret)
          goto out;
@@ -219,7 +237,7 @@ Index: xen-4.6.4/tools/libxl/libxl_dm.c
      /* OpenXT: Start the QMP helper */
      pid = fork();
      if (pid == -1)
-@@ -1592,10 +1609,6 @@ void libxl__spawn_stub_dm(libxl__egc *eg
+@@ -1573,10 +1590,6 @@ void libxl__spawn_stub_dm(libxl__egc *eg
      libxl__write_stub_dmargs(gc, dm_domid, guest_domid, args,
          guest_config->b_info.stubdomain_version == LIBXL_STUBDOMAIN_VERSION_LINUX);
      libxl__xs_write(gc, XBT_NULL,
@@ -377,7 +395,7 @@ Index: xen-4.6.4/tools/libxl/xl_cmdimpl.c
                  if (common_domname
                      && strcmp(d_config.c_info.name, common_domname)) {
                      d_config.c_info.name = strdup(common_domname);
-@@ -3696,13 +3674,17 @@ static void unpause_domain(uint32_t domi
+@@ -3698,13 +3676,17 @@ static void unpause_domain(uint32_t domi
  static void destroy_domain(uint32_t domid, int force)
  {
      int rc;
