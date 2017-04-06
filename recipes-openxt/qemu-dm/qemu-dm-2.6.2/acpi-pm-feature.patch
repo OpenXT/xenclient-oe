@@ -213,7 +213,7 @@ Index: qemu-2.6.2/hw/xen/xen_acpi_pm.c
 ===================================================================
 --- /dev/null
 +++ qemu-2.6.2/hw/xen/xen_acpi_pm.c
-@@ -0,0 +1,1057 @@
+@@ -0,0 +1,1127 @@
 +/*
 + * APCI PM feature for battery/AC/lid management for OpenXT guests.
 + *
@@ -295,6 +295,10 @@ Index: qemu-2.6.2/hw/xen/xen_acpi_pm.c
 +#define ACPI_PM_STATUS_NOT_PRESENT 0x80 /* Bit indicates AC/battery devices
 +                                           not present */
 +
++#define ACPI_POWER_BUTTON_PORT     0x200 /* SLP/WAK button status port */
++#define ACPI_SLP_BIT               0x01  /* SLP bit for status port (1 << 0) */
++#define ACPI_WAK_BIT               0x02  /* WAK bit for status port (1 << 1) */
++
 +/* GPE EN/STS bits for Xen ACPI PM */
 +#define ACPI_PM_SLEEP_BUTTON       0x05 /* _LO5 0x0020 is (1 << 5) */
 +#define ACPI_PM_POWER_BUTTON       0x06 /* _LO6 0x0040 is (1 << 6) */
@@ -351,6 +355,8 @@ Index: qemu-2.6.2/hw/xen/xen_acpi_pm.c
 +    uint8_t lid_state_open;          /* /pm/lid_state */
 +    uint8_t not_present_mode;        /* AC/battery not present mode */
 +    MemoryRegion mr;                 /* General ACPI MemoryRegion to register IO ops */
++    uint8_t button_status;           /* SLP/WAK status of button */
++    MemoryRegion bmr;                /* ACPI MemoryRegion for button ops */
 +} XenACPIPMState;
 +
 +#define XEN_ACPI_PM(obj) OBJECT_CHECK(XenACPIPMState, (obj), TYPE_XEN_ACPI_PM)
@@ -1029,7 +1035,71 @@ Index: qemu-2.6.2/hw/xen/xen_acpi_pm.c
 +    memory_region_add_subregion(s->space_io, ACPI_PM_STATUS_PORT, &s->mr);
 +}
 +
++/* -------/ Power Button Status /------------------------------------------- */
++
++/*
++ * Report SLP/WAK bits for power and sleep buttons.
++ *
++ * Returns bits set
++ */
++static uint64_t acpi_button_sts_read(void *opaque, hwaddr addr, uint32_t size)
++{
++    XenACPIPMState *s = opaque;
++    if (addr == 0) {
++        return s->button_status;
++    }
++
++    return 0xff;
++}
++
++/*
++ * Track state of SLP/WAK bits for power and sleep buttons.  The fields
++ * are WriteAsZero, writing 1 clears the bit.
++ */
++static void acpi_button_sts_write(void * opaque, hwaddr addr,
++                                  uint64_t val, uint32_t size)
++{
++    XenACPIPMState *s = opaque;
++
++    if (addr == 0) {
++        s->button_status &= ~val;
++    }
++}
++
++struct MemoryRegionOps port_button_sts_ops = {
++    .read = acpi_button_sts_read,
++    .write = acpi_button_sts_write,
++    .endianness = DEVICE_LITTLE_ENDIAN,
++    .impl = {
++        .min_access_size = 1,
++        .max_access_size = 1,
++    },
++};
++
++static void xen_acpi_register_button_ports(XenACPIPMState *s)
++{
++    memory_region_init_io(&s->bmr, OBJECT(s), &port_button_sts_ops, s,
++                          "acpi-button-status", 1);
++    memory_region_add_subregion(s->space_io, ACPI_POWER_BUTTON_PORT, &s->bmr);
++}
++
 +/* -------/ Xenstore watches /---------------------------------------------- */
++
++static void sleep_button_changed_cb(void *opaque)
++{
++    XenACPIPMState *s = opaque;
++
++    s->button_status |= ACPI_SLP_BIT;
++    piix4_pm_set_gpe_sts_raise_sci(s->piix4_dev, ACPI_PM_SLEEP_BUTTON);
++}
++
++static void power_button_changed_cb(void *opaque)
++{
++    XenACPIPMState *s = opaque;
++
++    s->button_status |= ACPI_SLP_BIT;
++    piix4_pm_set_gpe_sts_raise_sci(s->piix4_dev, ACPI_PM_POWER_BUTTON);
++}
 +
 +#define MAKE_ACPI_PM_CALLBACK(pfx, bit)                \
 +static void pfx##_changed_cb(void *opaque)             \
@@ -1038,8 +1108,6 @@ Index: qemu-2.6.2/hw/xen/xen_acpi_pm.c
 +    piix4_pm_set_gpe_sts_raise_sci(s->piix4_dev, bit); \
 +}
 +
-+MAKE_ACPI_PM_CALLBACK(sleep_button, ACPI_PM_SLEEP_BUTTON)
-+MAKE_ACPI_PM_CALLBACK(power_button, ACPI_PM_POWER_BUTTON)
 +MAKE_ACPI_PM_CALLBACK(lid_status, ACPI_PM_LID_STATUS)
 +MAKE_ACPI_PM_CALLBACK(ac_power_status, ACPI_PM_AC_POWER_STATUS)
 +MAKE_ACPI_PM_CALLBACK(battery_status, ACPI_PM_BATTERY_STATUS)
@@ -1213,6 +1281,8 @@ Index: qemu-2.6.2/hw/xen/xen_acpi_pm.c
 +    }
 +
 +    xen_acpi_pm_register_port(s);
++    xen_acpi_register_button_ports(s);
++    s->button_status = 0;
 +
 +    if (0 != xen_acpi_pm_init_gpe_watches(s)) {
 +        goto error_init;
