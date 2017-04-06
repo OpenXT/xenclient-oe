@@ -5,9 +5,13 @@ FILESEXTRAPATHS_prepend := "${THISDIR}/files:"
 
 SRC_URI_append = "\
     file://xenconsoled.initscript \
+    file://xenstored.initscript \
 "
 
-PACKAGES += "${PN}-toolstack-headers"
+PACKAGES += " \
+    ${PN}-toolstack-headers \
+    ${PN}-xenstored-c \
+    "
 
 PACKAGES_remove = " \
     ${PN}-efi \
@@ -30,6 +34,11 @@ PACKAGES_remove = " \
 PROVIDES =+ "${PN}-toolstack-headers"
 PROVIDES_${PN}-toolstack-headers = "${PN}-toolstack-headers"
 
+# OpenXT packages both the C and OCaml versions of XenStored.
+# This recipe packages the C daemon; xen-libxl packages the Ocaml one.
+PROVIDES =+ "${PN}-xenstored ${PN}-xenstored-c"
+RPROVIDES_${PN}-xenstored-c = "${PN}-xenstored ${PN}-xenstored-c"
+
 FILES_${PN}-staticdev_remove = " \
     ${libdir}/libblktapctl.a \
     ${libdir}/libblktap.a \
@@ -46,9 +55,27 @@ FILES_${PN}-toolstack-headers = "\
     ${includedir}/xen/libelf/elfstructs.h \
     "
 
-INITSCRIPT_PACKAGES =+ "${PN}-console"
+FILES_${PN}-xenstored-c = " \
+    ${sbindir}/xenstored.xen-xenstored-c \
+    ${localstatedir}/lib/xenstored \
+    ${sysconfdir}/init.d/xenstored.xen-xenstored-c \
+    ${sysconfdir}/xen/xenstored.conf \
+    "
+
+INITSCRIPT_PACKAGES =+ "${PN}-console ${PN}-xenstored-c"
 INITSCRIPT_NAME_${PN}-console = "xenconsoled"
 INITSCRIPT_PARAMS_${PN}-console = "defaults 20"
+INITSCRIPT_NAME_${PN}-xenstored-c = "xenstored"
+INITSCRIPT_PARAMS_${PN}-xenstored-c = "defaults 05"
+
+pkg_postinst_${PN}-xenstored-c () {
+    update-alternatives --install ${sbindir}/xenstored xenstored xenstored.${PN}-xenstored-c 200
+    update-alternatives --install ${sysconfdir}/init.d/xenstored xenstored-initscript xenstored.${PN}-xenstored-c 200
+}
+pkg_prerm_${PN}-xenstored-c () {
+    update-alternatives --remove xenstored xenstored.${PN}-xenstored-c
+    update-alternatives --remove xenstored-initscript xenstored.${PN}-xenstored-c
+}
 
 do_compile() {
     oe_runmake -C tools subdir-all-include
@@ -88,10 +115,13 @@ do_install() {
     install -m 0755 ${S}/tools/include/xen/libelf/elfstructs.h \
                     ${D}${includedir}/xen/libelf/elfstructs.h
 
-    rm -f ${D}${sbindir}/xenstored
-    rmdir ${D}/var/lib/xenstored
-    rmdir ${D}/var/lib
-    rmdir ${D}/var
+    mv ${D}${sbindir}/xenstored ${D}${sbindir}/xenstored.${PN}-xenstored-c
+    install -m 0755 ${WORKDIR}/xenstored.initscript \
+                    ${D}${sysconfdir}/init.d/xenstored.${PN}-xenstored-c
+
+    # The C xenstored uses one additional command line argument:
+    sed 's/EXECUTABLE --/EXECUTABLE --internal-db --/' \
+        -i ${D}${sysconfdir}/init.d/xenstored.${PN}-xenstored-c
 }
 
 RDEPENDS_${PN}-base_remove = "\

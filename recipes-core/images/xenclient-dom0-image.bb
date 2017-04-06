@@ -12,7 +12,8 @@ IMAGE_FSTYPES = "xc.ext3.gz"
 # Nor a collection of questionable CA certificates
 BAD_RECOMMENDATIONS += "xserver-xorg avahi-daemon avahi-autoipd ca-certificates"
 # The above seems to be broken and we *really* don't want avahi!
-PACKAGE_REMOVE = "avahi-daemon avahi-autoipd"
+# Also remove the unwanted version of xenstored
+PACKAGE_REMOVE = "avahi-daemon avahi-autoipd xen-xenstored-ocaml"
 
 ANGSTROM_EXTRA_INSTALL += " \
 			  " 
@@ -121,7 +122,13 @@ remove_initscripts() {
     fi
 }
 
-ROOTFS_POSTPROCESS_COMMAND += " post_rootfs_shell_commands; remove_initscripts; process_tmp_stubdomain_items; "
+# After ensuring that the correct number of xenstored daemon(s) are installed,
+# enforce that the init script is active:
+activate_xenstored_initscript() {
+    update-rc.d -r ${IMAGE_ROOTFS} xenstored defaults 05
+}
+
+ROOTFS_POSTPROCESS_COMMAND += " post_rootfs_shell_commands; remove_initscripts; activate_xenstored_initscript; process_tmp_stubdomain_items; "
 
 inherit openxt-selinux-image
 #inherit validate-package-versions
