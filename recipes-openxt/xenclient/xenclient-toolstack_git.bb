@@ -1,7 +1,7 @@
 DESCRIPTION = "XenClient toolstack"
 LICENSE = "LGPLv2.1"
 LIC_FILES_CHKSUM = "file://COPYING;md5=321bf41f280cf805086dd5a720b37785"
-DEPENDS += "ocaml-cross ocaml-dbus ocaml-camomile xen xz"
+DEPENDS += " ocaml-cross ocaml-dbus ocaml-camomile xen xen-libxl xz "
 RDEPENDS_${PN} = "xen-xenstore xen-xenstored"
 RDEPENDS_${PN}_xenclient-ndvm += " db-tools"
 
@@ -46,11 +46,16 @@ S = "${WORKDIR}/git"
 do_compile() {
         make V=1 XEN_DIST_ROOT="${STAGING_DIR}"
 }
-OCAML_INSTALL_LIBS  = "libs/uuid libs/stdext libs/mmap \
-                      libs/json libs/jsonrpc libs/http \
-                      libs/log libs/xc libs/eventchn \
-                      libs/xb libs/xs \
-		      libs/common"
+
+OCAML_INSTALL_LIBS = " \
+    libs/uuid \
+    libs/stdext \
+    libs/json \
+    libs/jsonrpc \
+    libs/http \
+    libs/log \
+    libs/common \
+    "
 
 do_configure_xenclient-nilfvm() {
         :
