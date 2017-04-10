@@ -1,7 +1,9 @@
 require recipes-extended/xen/xen.inc
 require xen-common.inc
 
-DESCRIPTION = "Xen hypervisor libxl and xenstore components"
+inherit findlib
+
+DESCRIPTION = "Xen hypervisor libxl, ocaml and xenstore components"
 
 # In OpenXT, multiple recipes are used to build Xen and its components:
 # a 32-bit build of tools ; a 64-bit hypervisor ; a separate blktap
@@ -21,17 +23,25 @@ python () {
                 'libxlutil',
                 'libxlutil-dev',
                 'libxenlight',
-                'libxenlight-dev',
-                'xenstored'
+                'libxenlight-dev'
                 ]:
         d.renameVar("FILES_xen-libxl-" + PKG, "FILES_xen-" + PKG)
 
     # After renaming a variable, it is simpler to append to it here:
     d.appendVar("FILES_xen-xl", " /etc/init.d/xen-init-dom0")
-    # OpenXT uses init scripts rather than systemd.
-    d.appendVar("FILES_xen-xenstored", " /etc/init.d/xenstored")
-    d.appendVar("FILES_xen-xenstored", " /etc/xen/oxenstored.conf")
 }
+
+# OpenXT packages both the C and OCaml versions of XenStored.
+# This recipe packages the OCaml daemon; xen.bb packages the C one.
+FILES_xen-xenstored-ocaml = " \
+    ${sbindir}/xenstored.xen-xenstored-ocaml \
+    ${localstatedir}/lib/xenstored \
+    ${sysconfdir}/init.d/xenstored.xen-xenstored-ocaml \
+    ${sysconfdir}/xen/oxenstored.conf \
+    "
+
+PROVIDES =+ "xen-xenstored xen-xenstored-ocaml"
+RPROVIDES_xen-xenstored-ocaml = "xen-xenstored xen-xenstored-ocaml"
 
 DEPENDS += " \
     util-linux \
@@ -49,7 +59,6 @@ SRC_URI_append = " \
     "
 
 PACKAGES = " \
-    ${PN}-dbg \
     xen-xl \
     xen-libxl-dev \
     xen-libxlutil \
@@ -57,13 +66,23 @@ PACKAGES = " \
     xen-libxenlight \
     xen-libxenlight-dev \
     xen-libxl-staticdev \
-    xen-xenstored \
+    xen-xenstored-ocaml \
+    xen-ocaml-libs-dev \
+    xen-ocaml-libs-dbg \
+    xen-ocaml-libs-staticdev \
+    xen-ocaml-libs \
+    ${PN}-dbg \
     "
 
 FILES_${PN}-staticdev = " \
     ${libdir}/libxlutil.a \
     ${libdir}/libxenlight.a \
     "
+
+FILES_xen-ocaml-libs-dev = "${ocamllibdir}/*/*.so"
+FILES_xen-ocaml-libs-dbg = "${ocamllibdir}/*/.debug/*"
+FILES_xen-ocaml-libs-staticdev = "${ocamllibdir}/*/*.a"
+FILES_xen-ocaml-libs = "${ocamllibdir}/*"
 
 EXTRA_OEMAKE += "CROSS_SYS_ROOT=${STAGING_DIR_HOST} CROSS_COMPILE=${HOST_PREFIX}"
 EXTRA_OEMAKE += "CONFIG_IOEMU=n"
@@ -80,11 +99,21 @@ FULL_OPTIMIZATION = "-pipe ${DEBUG_FLAGS}"
 TARGET_CC_ARCH += "${LDFLAGS}"
 CC_FOR_OCAML="i686-oe-linux-gcc"
 
-INITSCRIPT_PACKAGES = "xen-xl xen-xenstored"
+INITSCRIPT_PACKAGES = "xen-xl xen-xenstored-ocaml"
 INITSCRIPT_NAME_xen-xl = "xen-init-dom0"
 INITSCRIPT_PARAMS_xen-xl = "defaults 21"
-INITSCRIPT_NAME_xen-xenstored = "xenstored"
-INITSCRIPT_PARAMS_xen-xenstored = "defaults 05"
+INITSCRIPT_NAME_xen-xenstored-ocaml = "xenstored"
+INITSCRIPT_PARAMS_xen-xenstored-ocaml = "defaults 05"
+
+pkg_postinst_xen-xenstored-ocaml () {
+    update-alternatives --install ${sbindir}/xenstored xenstored xenstored.xen-xenstored-ocaml 100
+    update-alternatives --install ${sysconfdir}/init.d/xenstored xenstored-initscript xenstored.xen-xenstored-ocaml 100
+}
+
+pkg_prerm_xen-xenstored-ocaml () {
+    update-alternatives --remove xenstored xenstored.xen-xenstored-ocaml
+    update-alternatives --remove xenstored-initscript xenstored.xen-xenstored-ocaml
+}
 
 do_configure_prepend() {
 	#remove optimizations in the config files
@@ -116,10 +145,11 @@ do_install() {
     install -m 0755 ${WORKDIR}/xen-init-dom0.initscript \
                     ${D}${sysconfdir}/init.d/xen-init-dom0
 
-    oe_runmake DESTDIR=${D} -C tools/ocaml/xenstored install
-    mv ${D}/usr/sbin/oxenstored ${D}/${sbindir}/xenstored
+    oe_runmake DESTDIR=${D} -C tools/ocaml install
+
+    mv ${D}/usr/sbin/oxenstored ${D}/${sbindir}/xenstored.xen-xenstored-ocaml
     install -m 0755 ${WORKDIR}/xenstored.initscript \
-                    ${D}${sysconfdir}/init.d/xenstored
+                    ${D}${sysconfdir}/init.d/xenstored.xen-xenstored-ocaml
     rm ${D}${sysconfdir}/xen/oxenstored.conf
     install -m 0644 ${WORKDIR}/oxenstored.conf \
                     ${D}${sysconfdir}/xen/oxenstored.conf
