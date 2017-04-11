@@ -3,7 +3,7 @@ require xen-common.inc
 
 inherit findlib
 
-DESCRIPTION = "Xen hypervisor libxl, ocaml and xenstore components"
+DESCRIPTION = "Xen hypervisor libxl components"
 
 # In OpenXT, multiple recipes are used to build Xen and its components:
 # a 32-bit build of tools ; a 64-bit hypervisor ; a separate blktap
@@ -31,31 +31,14 @@ python () {
     d.appendVar("FILES_xen-xl", " /etc/init.d/xen-init-dom0")
 }
 
-# OpenXT packages both the C and OCaml versions of XenStored.
-# This recipe packages the OCaml daemon; xen.bb packages the C one.
-FILES_xen-xenstored-ocaml = " \
-    ${sbindir}/xenstored.xen-xenstored-ocaml \
-    ${localstatedir}/lib/xenstored \
-    ${sysconfdir}/init.d/xenstored.xen-xenstored-ocaml \
-    ${sysconfdir}/xen/oxenstored.conf \
-    "
-
-PROVIDES =+ "xen-xenstored xen-xenstored-ocaml"
-RPROVIDES_xen-xenstored-ocaml = "xen-xenstored xen-xenstored-ocaml"
-
 DEPENDS += " \
     util-linux \
     xen \
     xen-blktap \
     libnl \
-    ocaml-cross \
     "
-EXTRA_OECONF_remove = "--disable-ocamltools"
-
 SRC_URI_append = " \
     file://xen-init-dom0.initscript \
-    file://xenstored.initscript \
-    file://oxenstored.conf \
     "
 
 PACKAGES = " \
@@ -66,11 +49,6 @@ PACKAGES = " \
     xen-libxenlight \
     xen-libxenlight-dev \
     xen-libxl-staticdev \
-    xen-xenstored-ocaml \
-    xen-ocaml-libs-dev \
-    xen-ocaml-libs-dbg \
-    xen-ocaml-libs-staticdev \
-    xen-ocaml-libs \
     ${PN}-dbg \
     "
 
@@ -78,11 +56,6 @@ FILES_${PN}-staticdev = " \
     ${libdir}/libxlutil.a \
     ${libdir}/libxenlight.a \
     "
-
-FILES_xen-ocaml-libs-dev = "${ocamllibdir}/*/*.so"
-FILES_xen-ocaml-libs-dbg = "${ocamllibdir}/*/.debug/*"
-FILES_xen-ocaml-libs-staticdev = "${ocamllibdir}/*/*.a"
-FILES_xen-ocaml-libs = "${ocamllibdir}/*"
 
 EXTRA_OEMAKE += "CROSS_SYS_ROOT=${STAGING_DIR_HOST} CROSS_COMPILE=${HOST_PREFIX}"
 EXTRA_OEMAKE += "CONFIG_IOEMU=n"
@@ -105,16 +78,6 @@ INITSCRIPT_PARAMS_xen-xl = "defaults 21"
 INITSCRIPT_NAME_xen-xenstored-ocaml = "xenstored"
 INITSCRIPT_PARAMS_xen-xenstored-ocaml = "defaults 05"
 
-pkg_postinst_xen-xenstored-ocaml () {
-    update-alternatives --install ${sbindir}/xenstored xenstored xenstored.xen-xenstored-ocaml 100
-    update-alternatives --install ${sysconfdir}/init.d/xenstored xenstored-initscript xenstored.xen-xenstored-ocaml 100
-}
-
-pkg_prerm_xen-xenstored-ocaml () {
-    update-alternatives --remove xenstored xenstored.xen-xenstored-ocaml
-    update-alternatives --remove xenstored-initscript xenstored.xen-xenstored-ocaml
-}
-
 do_configure_prepend() {
 	#remove optimizations in the config files
 	sed -i 's/-O2//g' ${WORKDIR}/xen-${XEN_VERSION}/Config.mk
@@ -128,15 +91,6 @@ do_compile() {
 		       LDLIBS_libblktapctl='-lblktapctl' \
 		       LDLIBS_libxenguest='-lxenguest' \
 		       -C tools subdir-all-libxl
-    oe_runmake V=1 \
-       CC="${CC_FOR_OCAML}" \
-       EXTRA_CFLAGS_XEN_TOOLS="${TARGET_CC_ARCH} --sysroot=${STAGING_DIR_TARGET}" \
-       LDFLAGS="${TARGET_CC_ARCH} --sysroot=${STAGING_DIR_TARGET}" \
-       LDLIBS_libxenctrl='-lxenctrl' \
-       LDLIBS_libxenstore='-lxenstore' \
-       LDLIBS_libblktapctl='-lblktapctl' \
-       LDLIBS_libxenguest='-lxenguest' \
-       -C tools subdir-all-ocaml
 }
 
 do_install() {
@@ -144,13 +98,4 @@ do_install() {
     install -d ${D}${sysconfdir}/init.d
     install -m 0755 ${WORKDIR}/xen-init-dom0.initscript \
                     ${D}${sysconfdir}/init.d/xen-init-dom0
-
-    oe_runmake DESTDIR=${D} -C tools/ocaml install
-
-    mv ${D}/usr/sbin/oxenstored ${D}/${sbindir}/xenstored.xen-xenstored-ocaml
-    install -m 0755 ${WORKDIR}/xenstored.initscript \
-                    ${D}${sysconfdir}/init.d/xenstored.xen-xenstored-ocaml
-    rm ${D}${sysconfdir}/xen/oxenstored.conf
-    install -m 0644 ${WORKDIR}/oxenstored.conf \
-                    ${D}${sysconfdir}/xen/oxenstored.conf
 }

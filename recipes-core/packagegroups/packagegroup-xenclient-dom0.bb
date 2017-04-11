@@ -114,6 +114,8 @@ RDEPENDS_${PN} = " \
     linuxfb-surfman-plugin \
     dm-agent \
     xenmgr \
+    xen-xenstore \
+    xen-xenstored-c \
 "
 
 # OE upgrade - temporarly disabled:
