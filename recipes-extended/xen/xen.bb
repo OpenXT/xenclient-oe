@@ -29,6 +29,9 @@ PACKAGES_remove = " \
     ${PN}-libxlutil-dev \
     ${PN}-xl \
     ${PN}-xenstored \
+    ${PN}-xencommons \
+    ${PN}-base \
+    ${PN}-devd \
     "
 
 PROVIDES =+ "${PN}-toolstack-headers"
