@@ -48,14 +48,6 @@ EXTRA_OEMAKE += "CROSS_SYS_ROOT=${STAGING_DIR_HOST} CROSS_COMPILE=${HOST_PREFIX}
 EXTRA_OEMAKE += "CONFIG_IOEMU=n"
 EXTRA_OEMAKE += "DESTDIR=${D}"
 
-#Make sure we disable all compiler optimizations to avoid a nasty segfault in the 
-#reboot case.
-BUILD_LDFLAGS += " -Wl,-O0 -O0"
-BUILDSDK_LDFLAGS += " -Wl,-O0 -O0"
-TARGET_LDFLAGS += " -Wl,-O0 -O0"
-BUILD_OPTIMIZATION = "-pipe"
-FULL_OPTIMIZATION = "-pipe ${DEBUG_FLAGS}"
-
 TARGET_CC_ARCH += "${LDFLAGS}"
 CC_FOR_OCAML="i686-oe-linux-gcc"
 
@@ -71,12 +63,6 @@ pkg_postinst_xen-xenstored-ocaml () {
 pkg_prerm_xen-xenstored-ocaml () {
     update-alternatives --remove xenstored xenstored.xen-xenstored-ocaml
     update-alternatives --remove xenstored-initscript xenstored.xen-xenstored-ocaml
-}
-
-do_configure_prepend() {
-	#remove optimizations in the config files
-	sed -i 's/-O2//g' ${WORKDIR}/xen-${XEN_VERSION}/Config.mk
-	sed -i 's/-O2//g' ${WORKDIR}/xen-${XEN_VERSION}/config/StdGNU.mk
 }
 
 do_compile() {
