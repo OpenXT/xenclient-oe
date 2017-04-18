@@ -39,6 +39,7 @@ SRC_URI += "file://compile-time-stubdom-flag.patch \
             file://use-relative-xenstore-nodes.patch \
             file://exit-mainloop-on-reset.patch \
             file://write-acpi-state-to-xenstore.patch \
+            file://set-blockdev-ro.patch \
             file://xsa-197-qemu-incautious-about-shared-ring-processing.patch \
             "
 
