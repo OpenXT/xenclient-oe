@@ -186,6 +186,7 @@ PACKAGES =+ "${PN}-ralink-license ${PN}-ralink \
              ${PN}-iwlwifi \
              ${PN}-iwlwifi-7260-12 ${PN}-iwlwifi-7260-13 \
              ${PN}-iwlwifi-8000c \
+             ${PN}-iwlwifi-misc \
              ${PN}-i915-license ${PN}-i915 \
              ${PN}-check-whence \
              ${PN}-license \
