@@ -13,6 +13,8 @@ S = "${WORKDIR}/git/libv4v"
 
 inherit autotools-brokensep pkgconfig lib_package xenclient
 
+EXTRA_OECONF += "--with-pic"
+
 do_install_append(){
     install -d ${D}/etc
     install -d ${D}/etc/udev
