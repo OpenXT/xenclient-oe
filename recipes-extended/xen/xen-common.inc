@@ -48,6 +48,7 @@ SRC_URI_append = " \
     file://increase-ap-startup-time.patch;patch=1 \
     file://openxt-xen-xsmv4vuse.patch \
     file://xenstat-disable-tmem-use.patch;patch=1 \
+    file://acpi-slic-support.patch \
     file://libxl-do-not-destroy-in-use-tapdevs.patch \
     file://libxl-syslog.patch \
     file://libxl-RFC-4of7-Add-stubdomain-version-tools-domain-build-info.patch \
