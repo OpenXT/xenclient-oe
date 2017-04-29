@@ -93,3 +93,19 @@ PACKAGECONFIG =+ "xsm"
 PACKAGECONFIG =+ "hvm"
 
 S = "${WORKDIR}/xen-${PV}"
+
+#--
+# Modifications to the meta-virtualiation configuration (ref: OXT-1016)
+
+# iproute2 on OpenXT is currently a MACHINE-specific recipe
+# which causes all recipes that DEPEND upon it to be rebuilt for each MACHINE.
+# Drop that apparently-unnecessary dependency here to avoid that.
+
+DEPENDS_remove = "iproute2"
+
+# The stubs and deploy tasks are detected as MACHINE-specific due to the
+# variables that they use. Those tasks are not required here so drop them.
+
+deltask stubs
+deltask deploy
+#--
