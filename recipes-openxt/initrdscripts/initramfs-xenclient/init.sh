@@ -38,7 +38,7 @@ dev_setup()
     mount -t devtmpfs none /dev
 
     echo "initramfs: Configuring LVM"
-    lvm vgscan
+    lvm vgscan --mknodes
     lvm vgchange -a y
 }
 
