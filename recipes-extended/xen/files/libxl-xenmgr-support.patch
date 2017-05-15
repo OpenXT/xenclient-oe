@@ -36,7 +36,21 @@ Index: xen-4.6.4/tools/libxl/libxl.c
 ===================================================================
 --- xen-4.6.4.orig/tools/libxl/libxl.c
 +++ xen-4.6.4/tools/libxl/libxl.c
-@@ -1546,6 +1546,8 @@ void libxl__domain_destroy(libxl__egc *e
+@@ -1142,6 +1142,13 @@ static int libxl__domain_pvcontrol(libxl
+     return libxl__domain_pvcontrol_write(gc, XBT_NULL, domid, cmd);
+ }
+ 
++int libxl_hard_shutdown(libxl_ctx *ctx, uint32_t domid)
++{
++    int ret;
++    ret = xc_domain_shutdown(ctx->xch, domid, SHUTDOWN_poweroff);
++    return ret;
++}
++
+ int libxl_domain_shutdown(libxl_ctx *ctx, uint32_t domid)
+ {
+     GC_INIT(ctx);
+@@ -1546,6 +1553,8 @@ void libxl__domain_destroy(libxl__egc *e
          dds->stubdom.ao = ao;
          dds->stubdom.domid = stubdomid;
          dds->stubdom.callback = stubdom_destroy_callback;
@@ -45,7 +59,7 @@ Index: xen-4.6.4/tools/libxl/libxl.c
          libxl__destroy_domid(egc, &dds->stubdom);
      } else {
          dds->stubdom_finished = 1;
-@@ -3396,6 +3398,7 @@ void libxl__device_nic_add(libxl__egc *e
+@@ -3396,6 +3405,7 @@ void libxl__device_nic_add(libxl__egc *e
      flexarray_t *front;
      flexarray_t *back;
      libxl__device *device;
@@ -53,7 +67,7 @@ Index: xen-4.6.4/tools/libxl/libxl.c
      int rc;
      xs_transaction_t t = XBT_NULL;
      libxl_domain_config d_config;
-@@ -3477,6 +3480,9 @@ void libxl__device_nic_add(libxl__egc *e
+@@ -3477,6 +3487,9 @@ void libxl__device_nic_add(libxl__egc *e
      flexarray_append(front, "mac");
      flexarray_append(front, libxl__sprintf(gc,
                                      LIBXL_MAC_FMT, LIBXL_MAC_BYTES(nic->mac)));
@@ -63,7 +77,7 @@ Index: xen-4.6.4/tools/libxl/libxl.c
  
      if (aodev->update_json) {
          lock = libxl__lock_domain_userdata(gc, domid);
-@@ -3525,6 +3531,8 @@ void libxl__device_nic_add(libxl__egc *e
+@@ -3525,6 +3538,8 @@ void libxl__device_nic_add(libxl__egc *e
      aodev->action = LIBXL__DEVICE_ACTION_ADD;
      libxl__wait_device_connection(egc, aodev);
  
@@ -72,7 +86,7 @@ Index: xen-4.6.4/tools/libxl/libxl.c
      rc = 0;
  out:
      libxl__xs_transaction_abort(gc, &t);
-@@ -4252,6 +4260,9 @@ int libxl__device_vfb_add(libxl__gc *gc,
+@@ -4252,6 +4267,9 @@ int libxl__device_vfb_add(libxl__gc *gc,
                                libxl__xs_kvs_of_flexarray(gc, back, back->count),
                                libxl__xs_kvs_of_flexarray(gc, front, front->count),
                                NULL);
@@ -82,7 +96,7 @@ Index: xen-4.6.4/tools/libxl/libxl.c
      rc = 0;
  out:
      return rc;
-@@ -6856,7 +6867,7 @@ int libxl_retrieve_domain_configuration(
+@@ -6856,7 +6874,7 @@ int libxl_retrieve_domain_configuration(
                      break;                                              \
              }                                                           \
                                                                          \
@@ -434,6 +448,88 @@ Index: xen-4.6.4/tools/libxl/xl_cmdimpl.c
      rc = libxl_domain_destroy(ctx, domid, 0);
      if (rc) { fprintf(stderr,"destroy failed (rc=%d)\n",rc); exit(-1); }
      libxl_update_state_direct(ctx, uuid, "shutdown");
+@@ -3778,7 +3760,8 @@ static void hibernate_domain(uint32_t do
+ static void shutdown_domain(uint32_t domid,
+                             libxl_evgen_domain_death **deathw,
+                             libxl_ev_user for_user,
+-                            int fallback_trigger)
++                            int fallback_trigger,
++                            int hyper)
+ {
+     int rc;
+ 
+@@ -3786,7 +3769,11 @@ static void shutdown_domain(uint32_t dom
+     libxl_update_state(ctx, domid, "shutdowning");
+     rc=libxl_domain_shutdown(ctx, domid);
+     if (rc == ERROR_NOPARAVIRT) {
+-        if (fallback_trigger) {
++        if (hyper) {
++            fprintf(stderr, "PV control interface not available:"
++                    " asking for hard shutdown.\n");
++            rc = libxl_hard_shutdown(ctx, domid);
++        } else if (fallback_trigger) {
+             fprintf(stderr, "PV control interface not available:"
+                     " sending ACPI power button event.\n");
+             rc = libxl_send_trigger(ctx, domid, LIBXL_TRIGGER_POWER, 0);
+@@ -3811,7 +3798,7 @@ static void shutdown_domain(uint32_t dom
+ }
+ 
+ static void reboot_domain(uint32_t domid, libxl_evgen_domain_death **deathw,
+-                          libxl_ev_user for_user, int fallback_trigger)
++                          libxl_ev_user for_user, int fallback_trigger, int hyper)
+ {
+     int rc;
+ 
+@@ -4903,10 +4890,10 @@ static int main_shutdown_or_reboot(int d
+ {
+     const char *what = do_reboot ? "reboot" : "shutdown";
+     void (*fn)(uint32_t domid,
+-               libxl_evgen_domain_death **, libxl_ev_user, int) =
++               libxl_evgen_domain_death **, libxl_ev_user, int, int) =
+         do_reboot ? &reboot_domain : &shutdown_domain;
+     int opt, i, nb_domain;
+-    int wait_for_it = 0, all =0;
++    int wait_for_it = 0, all =0, hyper = 0;
+     int fallback_trigger = 0;
+     static struct option opts[] = {
+         {"all", 0, 0, 'a'},
+@@ -4914,7 +4901,7 @@ static int main_shutdown_or_reboot(int d
+         COMMON_LONG_OPTS
+     };
+ 
+-    SWITCH_FOREACH_OPT(opt, "awF", opts, what, 0) {
++    SWITCH_FOREACH_OPT(opt, "awFc", opts, what, 0) {
+     case 'a':
+         all = 1;
+         break;
+@@ -4924,6 +4911,9 @@ static int main_shutdown_or_reboot(int d
+     case 'F':
+         fallback_trigger = 1;
+         break;
++    case 'c':
++        hyper = 1;
++        break;
+     }
+ 
+     if (!argv[optind] && !all) {
+@@ -4946,7 +4936,7 @@ static int main_shutdown_or_reboot(int d
+             if (dominfo[i].domid == 0)
+                 continue;
+             fn(dominfo[i].domid, deathws ? &deathws[i] : NULL, i,
+-               fallback_trigger);
++               fallback_trigger, hyper);
+         }
+ 
+         if (wait_for_it) {
+@@ -4959,7 +4949,7 @@ static int main_shutdown_or_reboot(int d
+         libxl_evgen_domain_death *deathw = NULL;
+         uint32_t domid = find_domain(argv[optind]);
+ 
+-        fn(domid, wait_for_it ? &deathw : NULL, 0, fallback_trigger);
++        fn(domid, wait_for_it ? &deathw : NULL, 0, fallback_trigger, hyper);
+ 
+         if (wait_for_it)
+             wait_for_domain_deaths(&deathw, 1);
 Index: xen-4.6.4/tools/libxl/libxl_internal.h
 ===================================================================
 --- xen-4.6.4.orig/tools/libxl/libxl_internal.h
@@ -463,3 +559,15 @@ Index: xen-4.6.4/tools/libxl/libxl_qmp.c
  int libxl__qmp_save(libxl__gc *gc, int domid, const char *filename)
  {
      libxl__json_object *args = NULL;
+Index: xen-4.6.4/tools/libxl/libxl.h
+===================================================================
+--- xen-4.6.4.orig/tools/libxl/libxl.h
++++ xen-4.6.4/tools/libxl/libxl.h
+@@ -1169,6 +1169,7 @@ int libxl_domain_remus_start(libxl_ctx *
+                              const libxl_asyncop_how *ao_how)
+                              LIBXL_EXTERNAL_CALLERS_ONLY;
+ 
++int libxl_hard_shutdown(libxl_ctx *ctx, uint32_t domid);
+ int libxl_domain_shutdown(libxl_ctx *ctx, uint32_t domid);
+ int libxl_domain_reboot(libxl_ctx *ctx, uint32_t domid);
+ int libxl_domain_sleep(libxl_ctx *ctx, uint32_t domid);
