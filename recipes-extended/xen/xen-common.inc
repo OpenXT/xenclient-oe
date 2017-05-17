@@ -78,15 +78,10 @@ SRC_URI_append = " \
     file://libxl-vwif-support.patch \
     file://libxl-atapi-pt.patch \
     file://libxl-iso-hotswap.patch \
-    file://xsa-191-x86-null-segments-not-always-treated-as-unusable.patch \
-    file://xsa-192-x86-task-switch-to-vm86-mode-mis-handled.patch \
-    file://xsa-193-x86-segment-base-write-emulation-lacking-canonical-address-checks.patch \
-    file://xsa-195-x86-64-bit-bit-test-instruction-emulation-broken.patch \
-    file://xsa-196-x86-software-interrupt-injection-mis-handled.patch \
-    file://xsa-200-x86-cmpxchg8b-emulation-fails-to-ignore-operand-size-override.patch \
-    file://xsa-202-x86-pv-guests-may-be-able-to-mask-interrupts.patch \
-    file://xsa-203-x86-missing-null-pointer-check-in-vmfunc-emulation.patch \
-    file://xsa-204-x86-mishandling-of-syscall-singlestep-during-emulation.patch \
+    file://xsa-212-x86-broken-check-in-memory_exchange.patch \
+    file://xsa-213-x86-64bit-PV-guest-breakout-via-pagetable-use-after-mode-change.patch \
+    file://xsa-214-grant-transfer-allows-pv-guest-to-elevate-privileges.patch \
+    file://xsa-215-possible-memory-corruption-via-failsafe-callback.patch \
 "
 
 COMPATIBLE_HOST = 'i686-oe-linux|(x86_64.*).*-linux|aarch64.*-linux'
