@@ -1,9 +1,7 @@
 LICENSE = "GPLv2 & LGPLv2"
 LIC_FILES_CHKSUM = "file://COPYING;md5=441c28d2cf86e15a37fa47e15a72fbac  \
                     file://COPYING.LIB;md5=79ffa0ec772fa86740948cb7327a0cc7"
-DEPENDS = "xen alsa-lib pciutils libpng xen-blktap libv4v openssl zlib libcap-ng libdmbus"
-
-RDEPENDS_${PN} += "libusb1 nettle gnutls"
+DEPENDS = "xen alsa-lib pciutils libpng xen-blktap libv4v zlib libcap-ng libdmbus"
 
 # Leave this in it's own definition so that it can be replaced with a local
 # tarball (the QEMU download speed is terrible). If this is combined with the
@@ -80,13 +78,28 @@ EXTRA_OECONF += " \
     --disable-kvm \
     --disable-tools \
     --disable-fdt \
+    --disable-uuid \
+    --disable-vhdx \
+    --disable-qom-cast-debug \
+    --disable-tcg-interpreter \
+    --disable-vhost-net \
+    --disable-vhost-scsi \
+    --disable-bzip2 \
+    --disable-libusb \
+    --disable-usb-redir \
+    --disable-lzo \
+    --disable-gnutls \
+    --disable-nettle \
+    --disable-gcrypt \
+    --disable-tpm \
     --enable-pie \
     --enable-werror \
     --enable-surfman \
     --enable-atapi-pt \
     --enable-atapi-pt-v4v \
     --enable-readonly-ide \
-    --enable-debug \
+    --enable-debug-info \
+    --enable-trace-backends=nop \
 "
 
 do_configure(){
