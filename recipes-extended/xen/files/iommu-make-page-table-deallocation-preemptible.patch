@@ -1,0 +1,236 @@
+From cedfdd43a9798e535a05690bb6f01394490d26bb Mon Sep 17 00:00:00 2001
+From: Jan Beulich <jbeulich@suse.com>
+Date: Tue, 7 Jan 2014 16:01:14 +0100
+Subject: [PATCH] IOMMU: make page table deallocation preemptible
+
+This too can take an arbitrary amount of time.
+
+In fact, the bulk of the work is being moved to a tasklet, as handling
+the necessary preemption logic in line seems close to impossible given
+that the teardown may also be invoked on error paths.
+
+Signed-off-by: Jan Beulich <jbeulich@suse.com>
+Reviewed-by: Andrew Cooper <andrew.cooper3@citrix.com>
+Acked-by: Xiantao Zhang <xiantao.zhang@intel.com>
+---
+ xen/drivers/passthrough/amd/pci_amd_iommu.c | 15 +++++++--
+ xen/drivers/passthrough/iommu.c             | 51 ++++++++++++++++++++---------
+ xen/drivers/passthrough/vtd/iommu.c         | 18 ++++++++--
+ xen/include/xen/iommu.h                     |  5 +++
+ 4 files changed, 68 insertions(+), 21 deletions(-)
+
+Index: xen-4.3.4/xen/drivers/passthrough/amd/pci_amd_iommu.c
+===================================================================
+--- xen-4.3.4.orig/xen/drivers/passthrough/amd/pci_amd_iommu.c
++++ xen-4.3.4/xen/drivers/passthrough/amd/pci_amd_iommu.c
+@@ -447,11 +447,21 @@ static int amd_iommu_assign_device(struc
+     return reassign_device(dom0, d, devfn, pdev);
+ }
+ 
+-static void deallocate_next_page_table(struct page_info* pg, int level)
++static void deallocate_next_page_table(struct page_info *pg, int level)
++{
++    PFN_ORDER(pg) = level;
++    spin_lock(&iommu_pt_cleanup_lock);
++    page_list_add_tail(pg, &iommu_pt_cleanup_list);
++    spin_unlock(&iommu_pt_cleanup_lock);
++}
++
++static void deallocate_page_table(struct page_info *pg)
+ {
+     void *table_vaddr, *pde;
+     u64 next_table_maddr;
+-    int index, next_level;
++    unsigned int index, level = PFN_ORDER(pg), next_level;
++
++    PFN_ORDER(pg) = 0;
+ 
+     if ( level <= 1 )
+     {
+@@ -641,6 +651,7 @@ const struct iommu_ops amd_iommu_ops = {
+     .teardown = amd_iommu_domain_destroy,
+     .map_page = amd_iommu_map_page,
+     .unmap_page = amd_iommu_unmap_page,
++    .free_page_table = deallocate_page_table,
+     .reassign_device = reassign_device,
+     .get_device_group_id = amd_iommu_group_id,
+     .update_ire_from_apic = amd_iommu_ioapic_update_ire,
+Index: xen-4.3.4/xen/drivers/passthrough/iommu.c
+===================================================================
+--- xen-4.3.4.orig/xen/drivers/passthrough/iommu.c
++++ xen-4.3.4/xen/drivers/passthrough/iommu.c
+@@ -58,6 +58,10 @@ bool_t __read_mostly amd_iommu_perdev_in
+ 
+ DEFINE_PER_CPU(bool_t, iommu_dont_flush_iotlb);
+ 
++DEFINE_SPINLOCK(iommu_pt_cleanup_lock);
++PAGE_LIST_HEAD(iommu_pt_cleanup_list);
++static struct tasklet iommu_pt_cleanup_tasklet;
++
+ static struct keyhandler iommu_p2m_table = {
+     .diagnostic = 0,
+     .u.fn = iommu_dump_p2m_table,
+@@ -235,6 +239,15 @@ int iommu_remove_device(struct pci_dev *
+     return hd->platform_ops->remove_device(pdev->devfn, pdev);
+ }
+ 
++static void iommu_teardown(struct domain *d)
++{
++    const struct hvm_iommu *hd = domain_hvm_iommu(d);
++
++    d->need_iommu = 0;
++    hd->platform_ops->teardown(d);
++    tasklet_schedule(&iommu_pt_cleanup_tasklet);
++}
++
+ /*
+  * If the device isn't owned by dom0, it means it already
+  * has been assigned to other domain, or it doesn't exist.
+@@ -309,10 +322,7 @@ static int assign_device(struct domain *
+ 
+  done:
+     if ( !has_arch_pdevs(d) && need_iommu(d) )
+-    {
+-        d->need_iommu = 0;
+-        hd->platform_ops->teardown(d);
+-    }
++        iommu_teardown(d);
+     spin_unlock(&pcidevs_lock);
+ 
+     return rc;
+@@ -377,10 +387,7 @@ static int iommu_populate_page_table(str
+     if ( !rc )
+         iommu_iotlb_flush_all(d);
+     else if ( rc != -ERESTART )
+-    {
+-        d->need_iommu = 0;
+-        hd->platform_ops->teardown(d);
+-    }
++        iommu_teardown(d);
+ 
+     return rc;
+ }
+@@ -396,10 +403,7 @@ void iommu_domain_destroy(struct domain
+         return;
+ 
+     if ( need_iommu(d) )
+-    {
+-        d->need_iommu = 0;
+-        hd->platform_ops->teardown(d);
+-    }
++        iommu_teardown(d);
+ 
+     list_for_each_safe ( ioport_list, tmp, &hd->g2m_ioport_list )
+     {
+@@ -430,6 +434,23 @@ int iommu_unmap_page(struct domain *d, u
+     return hd->platform_ops->unmap_page(d, gfn);
+ }
+ 
++static void iommu_free_pagetables(unsigned long unused)
++{
++    do {
++        struct page_info *pg;
++
++        spin_lock(&iommu_pt_cleanup_lock);
++        pg = page_list_remove_head(&iommu_pt_cleanup_list);
++        spin_unlock(&iommu_pt_cleanup_lock);
++        if ( !pg )
++            return;
++        iommu_get_ops()->free_page_table(pg);
++    } while ( !softirq_pending(smp_processor_id()) );
++
++    tasklet_schedule_on_cpu(&iommu_pt_cleanup_tasklet,
++                            cpumask_cycle(smp_processor_id(), &cpu_online_map));
++}
++
+ void iommu_iotlb_flush(struct domain *d, unsigned long gfn, unsigned int page_count)
+ {
+     struct hvm_iommu *hd = domain_hvm_iommu(d);
+@@ -492,10 +513,7 @@ int deassign_device(struct domain *d, u1
+     pdev->fault.count = 0;
+ 
+     if ( !has_arch_pdevs(d) && need_iommu(d) )
+-    {
+-        d->need_iommu = 0;
+-        hd->platform_ops->teardown(d);
+-    }
++        iommu_teardown(d);
+ 
+     return ret;
+ }
+@@ -534,6 +552,7 @@ int __init iommu_setup(void)
+                iommu_passthrough ? "Passthrough" :
+                iommu_dom0_strict ? "Strict" : "Relaxed");
+         printk("Interrupt remapping %sabled\n", iommu_intremap ? "en" : "dis");
++        tasklet_init(&iommu_pt_cleanup_tasklet, iommu_free_pagetables, 0);
+     }
+ 
+     return rc;
+Index: xen-4.3.4/xen/drivers/passthrough/vtd/iommu.c
+===================================================================
+--- xen-4.3.4.orig/xen/drivers/passthrough/vtd/iommu.c
++++ xen-4.3.4/xen/drivers/passthrough/vtd/iommu.c
+@@ -650,13 +650,24 @@ static void dma_pte_clear_one(struct dom
+ 
+ static void iommu_free_pagetable(u64 pt_maddr, int level)
+ {
+-    int i;
+-    struct dma_pte *pt_vaddr, *pte;
+-    int next_level = level - 1;
++    struct page_info *pg = maddr_to_page(pt_maddr);
+ 
+     if ( pt_maddr == 0 )
+         return;
+ 
++    PFN_ORDER(pg) = level;
++    spin_lock(&iommu_pt_cleanup_lock);
++    page_list_add_tail(pg, &iommu_pt_cleanup_list);
++    spin_unlock(&iommu_pt_cleanup_lock);
++}
++
++static void iommu_free_page_table(struct page_info *pg)
++{
++    unsigned int i, next_level = PFN_ORDER(pg) - 1;
++    u64 pt_maddr = page_to_maddr(pg);
++    struct dma_pte *pt_vaddr, *pte;
++
++    PFN_ORDER(pg) = 0;
+     pt_vaddr = (struct dma_pte *)map_vtd_domain_page(pt_maddr);
+ 
+     for ( i = 0; i < PTE_NUM; i++ )
+@@ -2539,6 +2550,7 @@ const struct iommu_ops intel_iommu_ops =
+     .teardown = iommu_domain_teardown,
+     .map_page = intel_iommu_map_page,
+     .unmap_page = intel_iommu_unmap_page,
++    .free_page_table = iommu_free_page_table,
+     .reassign_device = reassign_device_ownership,
+     .get_device_group_id = intel_iommu_group_id,
+     .update_ire_from_apic = io_apic_write_remap_rte,
+Index: xen-4.3.4/xen/include/xen/iommu.h
+===================================================================
+--- xen-4.3.4.orig/xen/include/xen/iommu.h
++++ xen-4.3.4/xen/include/xen/iommu.h
+@@ -88,6 +88,7 @@ bool_t pt_irq_need_timer(uint32_t flags)
+ 
+ struct msi_desc;
+ struct msi_msg;
++struct page_info;
+ 
+ struct iommu_ops {
+     int (*init)(struct domain *d);
+@@ -100,6 +101,7 @@ struct iommu_ops {
+     int (*map_page)(struct domain *d, unsigned long gfn, unsigned long mfn,
+                     unsigned int flags);
+     int (*unmap_page)(struct domain *d, unsigned long gfn);
++    void (*free_page_table)(struct page_info *);
+     int (*reassign_device)(struct domain *s, struct domain *t,
+ 			   u8 devfn, struct pci_dev *);
+     int (*get_device_group_id)(u16 seg, u8 bus, u8 devfn);
+@@ -152,4 +154,7 @@ int adjust_vtd_irq_affinities(void);
+  */
+ DECLARE_PER_CPU(bool_t, iommu_dont_flush_iotlb);
+ 
++extern struct spinlock iommu_pt_cleanup_lock;
++extern struct page_list_head iommu_pt_cleanup_list;
++
+ #endif /* _IOMMU_H_ */

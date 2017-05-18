@@ -1,0 +1,51 @@
+################################################################################
+SHORT DESCRIPTION:
+################################################################################
+XSA-207 http://xenbits.xen.org/xsa/advisory-207.html
+memory leak when destroying guest without PT devices
+
+################################################################################
+LONG DESCRIPTION:
+################################################################################
+From: Oleksandr Tyshchenko <olekstysh@gmail.com>
+Subject: IOMMU: always call teardown callback
+
+There is a possible scenario when (d)->need_iommu remains unset
+during guest domain execution. For example, when no devices
+were assigned to it. Taking into account that teardown callback
+is not called when (d)->need_iommu is unset we might have unreleased
+resourses after destroying domain.
+
+So, always call teardown callback to roll back actions
+that were performed in init callback.
+
+This is XSA-207.
+
+Signed-off-by: Oleksandr Tyshchenko <olekstysh@gmail.com>
+Reviewed-by: Jan Beulich <jbeulich@suse.com>
+Tested-by: Jan Beulich <jbeulich@suse.com>
+Tested-by: Julien Grall <julien.grall@arm.com>
+
+################################################################################
+REQUIRES
+################################################################################
+iommu-make-page-table-population-preemptible.patch
+iommu-make-page-table-deallocation-preemptible.patch
+
+################################################################################
+PATCHES
+################################################################################
+Index: xen-4.3.4/xen/drivers/passthrough/iommu.c
+===================================================================
+--- xen-4.3.4.orig/xen/drivers/passthrough/iommu.c
++++ xen-4.3.4/xen/drivers/passthrough/iommu.c
+@@ -402,8 +402,7 @@ void iommu_domain_destroy(struct domain
+     if ( !iommu_enabled || !hd->platform_ops )
+         return;
+ 
+-    if ( need_iommu(d) )
+-        iommu_teardown(d);
++    iommu_teardown(d);
+ 
+     list_for_each_safe ( ioport_list, tmp, &hd->g2m_ioport_list )
+     {

@@ -1,0 +1,187 @@
+From f0dbdc628a0ecdc44d6afab28a9d5a52c996eec5 Mon Sep 17 00:00:00 2001
+From: Ian Campbell <ian.campbell@citrix.com>
+Date: Thu, 17 Apr 2014 13:57:24 +0100
+Subject: [PATCH] xen: arm: fully implement multicall interface.
+
+I'm not sure what I was smoking at the time of 5d74ad1a082e "xen: arm:
+implement do_multicall_call for both 32 and 64-bit" but it is obviously
+insufficient since it doesn't actually wire up the hypercall.
+
+Before doing so we need to make the usual adjustments for ARM and turn the
+unsigned longs into xen_ulong_t. There is no difference in the resulting
+structure for x86.
+
+There are knock on changes to the trace interface, but again they are nops on
+x86.
+
+For 32-bit ARM guests we require that the arguments which they pass to a
+hypercall via a multicall do not use the upper bits of xen_ulong_t and kill
+them if they violate this. This should ensure that no ABI surprises can be
+silently lurking when running on a 32-bit hypervisor waiting to pounce when the
+same kernel is run on a 64-bit hypervisor. Killing the guest is harsh but it
+will be far easier to relax the restriction if it turns out to cause problems
+than to tighten it up if we were lax to begin with.
+
+In the interests of clarity and always using explicitly sized types change the
+unsigned int in the hypercall arguments to a uint32_t. There is no actual
+change here on any platform.
+
+We should consider backporting this to 4.4.1 in case a guest decides they want
+to use a multicall in common code e.g. I suggested such a thing while
+reviewing a netback change recently.
+
+Signed-off-by: Ian Campbell <ian.campbell@citrix.com>
+Cc: keir@xen.org
+Reviewed-by: Jan Beulich <jbeulich@suse.com>
+Acked-by: George Dunlap <george.dunlap@eu.citrix.com>
+Acked-by: Julien Grall <julien.grall@linaro.org>
+---
+ xen/arch/arm/traps.c          | 28 ++++++++++++++++++++++++++--
+ xen/common/compat/multicall.c |  2 +-
+ xen/common/multicall.c        |  4 ++--
+ xen/common/trace.c            |  2 +-
+ xen/include/public/xen.h      | 10 ++++++----
+ xen/include/xen/trace.h       |  2 +-
+ 6 files changed, 37 insertions(+), 11 deletions(-)
+
+Index: xen-4.3.4/xen/arch/arm/traps.c
+===================================================================
+--- xen-4.3.4.orig/xen/arch/arm/traps.c
++++ xen-4.3.4/xen/arch/arm/traps.c
+@@ -17,6 +17,7 @@
+  */
+ 
+ #include <xen/config.h>
++#include <xen/stdbool.h>
+ #include <xen/init.h>
+ #include <xen/string.h>
+ #include <xen/version.h>
+@@ -689,6 +690,7 @@ static arm_hypercall_t arm_hypercall_tab
+     HYPERCALL(sysctl, 2),
+     HYPERCALL(hvm_op, 2),
+     HYPERCALL(grant_table_op, 3),
++    HYPERCALL(multicall, 2),
+     HYPERCALL_ARM(vcpu_op, 3),
+ };
+ 
+@@ -809,6 +811,24 @@ static void do_trap_hypercall(struct cpu
+ #endif
+ }
+ 
++static bool_t check_multicall_32bit_clean(struct multicall_entry *multi)
++{
++    int i;
++
++    for ( i = 0; i < arm_hypercall_table[multi->op].nr_args; i++ )
++    {
++        if ( unlikely(multi->args[i] & 0xffffffff00000000ULL) )
++        {
++            printk("%pv: multicall argument %d is not 32-bit clean %"PRIx64"\n",
++                   current, i, multi->args[i]);
++            domain_crash(current->domain);
++            return false;
++        }
++    }
++
++    return true;
++}
++
+ void do_multicall_call(struct multicall_entry *multi)
+ {
+     arm_hypercall_fn_t call = NULL;
+@@ -826,9 +846,13 @@ void do_multicall_call(struct multicall_
+         return;
+     }
+ 
++    if ( is_32bit_domain(current->domain) &&
++         !check_multicall_32bit_clean(multi) )
++        return;
++
+     multi->result = call(multi->args[0], multi->args[1],
+-                        multi->args[2], multi->args[3],
+-                        multi->args[4]);
++                         multi->args[2], multi->args[3],
++                         multi->args[4]);
+ }
+ 
+ static void do_cp15_32(struct cpu_user_regs *regs,
+Index: xen-4.3.4/xen/common/compat/multicall.c
+===================================================================
+--- xen-4.3.4.orig/xen/common/compat/multicall.c
++++ xen-4.3.4/xen/common/compat/multicall.c
+@@ -29,7 +29,7 @@ DEFINE_XEN_GUEST_HANDLE(multicall_entry_
+ 
+ static void __trace_multicall_call(multicall_entry_t *call)
+ {
+-    unsigned long args[6];
++    xen_ulong_t args[6];
+     int i;
+ 
+     for ( i = 0; i < ARRAY_SIZE(args); i++ )
+Index: xen-4.3.4/xen/common/multicall.c
+===================================================================
+--- xen-4.3.4.orig/xen/common/multicall.c
++++ xen-4.3.4/xen/common/multicall.c
+@@ -35,10 +35,10 @@ static void trace_multicall_call(multica
+ 
+ ret_t
+ do_multicall(
+-    XEN_GUEST_HANDLE_PARAM(multicall_entry_t) call_list, unsigned int nr_calls)
++    XEN_GUEST_HANDLE_PARAM(multicall_entry_t) call_list, uint32_t nr_calls)
+ {
+     struct mc_state *mcs = &current->mc_state;
+-    unsigned int     i;
++    uint32_t         i;
+     int              rc = 0;
+ 
+     if ( unlikely(__test_and_set_bit(_MCSF_in_multicall, &mcs->flags)) )
+Index: xen-4.3.4/xen/common/trace.c
+===================================================================
+--- xen-4.3.4.orig/xen/common/trace.c
++++ xen-4.3.4/xen/common/trace.c
+@@ -817,7 +817,7 @@ unlock:
+ }
+ 
+ void __trace_hypercall(uint32_t event, unsigned long op,
+-                       const unsigned long *args)
++                       const xen_ulong_t *args)
+ {
+     struct {
+         uint32_t op;
+Index: xen-4.3.4/xen/include/public/xen.h
+===================================================================
+--- xen-4.3.4.orig/xen/include/public/xen.h
++++ xen-4.3.4/xen/include/public/xen.h
+@@ -541,13 +541,15 @@ DEFINE_XEN_GUEST_HANDLE(mmu_update_t);
+ /*
+  * ` enum neg_errnoval
+  * ` HYPERVISOR_multicall(multicall_entry_t call_list[],
+- * `                      unsigned int nr_calls);
++ * `                      uint32_t nr_calls);
+  *
+- * NB. The fields are natural register size for this architecture.
++ * NB. The fields are logically the natural register size for this
++ * architecture. In cases where xen_ulong_t is larger than this then
++ * any unused bits in the upper portion must be zero.
+  */
+ struct multicall_entry {
+-    unsigned long op, result;
+-    unsigned long args[6];
++    xen_ulong_t op, result;
++    xen_ulong_t args[6];
+ };
+ typedef struct multicall_entry multicall_entry_t;
+ DEFINE_XEN_GUEST_HANDLE(multicall_entry_t);
+Index: xen-4.3.4/xen/include/xen/trace.h
+===================================================================
+--- xen-4.3.4.orig/xen/include/xen/trace.h
++++ xen-4.3.4/xen/include/xen/trace.h
+@@ -45,7 +45,7 @@ static inline void trace_var(u32 event,
+ }
+ 
+ void __trace_hypercall(uint32_t event, unsigned long op,
+-                       const unsigned long *args);
++                       const xen_ulong_t *args);
+ 
+ /* Convenience macros for calling the trace function. */
+ #define TRACE_0D(_e)                            \

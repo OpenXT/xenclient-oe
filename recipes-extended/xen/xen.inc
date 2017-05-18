@@ -135,6 +135,15 @@ SRC_URI = "${XEN_SRC_URI};name=source \
     file://xsa-200-x86-cmpxchg8b-emulation-fails-to-ignore-operand-size-override.patch \
     file://xsa-202-x86-pv-guests-may-be-able-to-mask-interrupts.patch \
     file://xsa-204-x86-mishandling-of-syscall-singlestep-during-emulation.patch \
+    file://gcc6-compilation.patch \
+    file://iommu-make-page-table-population-preemptible.patch \
+    file://iommu-make-page-table-deallocation-preemptible.patch \
+    file://xsa-207-memory-leak-when-destroying-guest-without-PT-devices.patch \
+    file://xsa-212-x86-broken-check-in-memory_exchange.patch \
+    file://xen-arm-fully-implement-multicall-interface.patch \
+    file://xsa-213-x86-64bit-PV-guest-breakout-via-pagetable-use-after-mode-change.patch \
+    file://xsa-214-grant-transfer-allows-pv-guest-to-elevate-privileges.patch \
+    file://xsa-215-possible-memory-corruption-via-failsafe-callback.patch \
 "
 
 SRC_URI[source.md5sum] := "${XEN_SRC_MD5SUM}"
