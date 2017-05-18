@@ -12,6 +12,12 @@
     exit 1
 }
 
+. /usr/lib/openxt/key-functions
+[ $? -eq 0 ] || {
+    echo "failed to load key-functions"
+    exit 1
+}
+
 err() {
     echo "seal-system: $1" >&2
     exit 1
@@ -19,6 +25,9 @@ err() {
 
 # Globals
 TPM_DEV="$(find /sys/class -name tpm0)/device"
+
+is_tpm_2_0
+tpm2=$?
 
 # Configurables
 operation="seal"
@@ -61,21 +70,53 @@ done
 
 case $operation in
 seal)
-    sealout=$(tpm_sealdata_sa -i ${config_key} \
-        -o ${sealed_key} -z $(cat ${pcr_list}) 2>&1)
-    sealerr=$?
+    local file_exists=1
+    if [ "${tpm2}" -eq 0 ];
+    then
+        sealerr=0
+        seal_file=${config_key}
+        clean_old_tpm_files
+        if pcr_bank_exists "TPM_ALG_SHA1"; then
+            sealout=$(tpm2_sealdata -H 0x81000001 -I ${seal_file} -O ${sealed_key}.sha1 -o ${sealed_key}.pub.sha1 -g 0x4 -G 8 -b 0x492 $(cat /config/config.pcrs) 2>&1)
+            sealerr=$?
+        fi
+        if pcr_bank_exists "TPM_ALG_SHA256" && [ ${sealerr} -eq 0 ]; then
+            sealout=$(tpm2_sealdata -H 0x81000000 -I ${seal_file} -O ${sealed_key}.sha256 -o ${sealed_key}.pub.sha256 -g 0xB -G 8 -b 0x492 $(cat /config/config.pcrs) 2>&1)
+            sealerr=$?
+        fi
+    else
+        sealout=$(tpm_sealdata_sa -i ${config_key} \
+            -o ${sealed_key} -z $(cat ${pcr_list}) 2>&1)
+        sealerr=$?
+    fi
 
-    if [ $sealerr -eq 0 ]; then
+    if [ -e ${sealed_key} ]; then
+        file_exists=0
+    elif [ -e ${sealed_key}.sha1 ]; then
+        file_exists=0
+    elif [ -e ${sealed_key}.sha256 ]; then
+        file_exists=0
+    else
+        file_exists=1
+    fi
+
+    if [ $sealerr -eq 0 ] && [ $file_exists -eq 0 ]; then
         # store PCR hints for recovery
         if [ -d "${TPM_DEV}" ]; then
             [ -f "${bad_pcrs}" ] && rm "${bad_pcrs}"
-            cat "${TPM_DEV}/pcrs" > "${good_pcrs}"
+            if [ "${tpm2}" -eq 0 ];
+            then
+                tpm2_listpcrs > "${good_pcrs}"
+            else
+                cat "${TPM_DEV}/pcrs" > "${good_pcrs}"
+            fi
         fi
 
         exit 0
     fi
 ;;
 forward)
+
     pcrs=$(calculate_pcrs "/" /boot/system/grub/grub.cfg) ||
         err "failed to calculate pcrs"
 
@@ -83,16 +124,28 @@ forward)
     pcr18=$(echo $pcrs | awk '{ print $2 }')
     pcr19=$(echo $pcrs | awk '{ print $3 }')
 
+    if [ "${tpm2}" -eq 0 ]; then
+        shaalg="sha256sum"
+    else
+        shaalg="sha1sum"
+    fi
     # During early init, rootfs is hashed and is given to
     # tpm_extend which hashes the rootfs hash and hands that value
     # to the TPM to be extended into PCR 15
-    root_hash=$(sha1sum ${root_dev}|cut -f1 -d' ')
-    pcr15=$(hash_extend 0 $(echo -n ${root_hash}|sha1sum|cut -f1 -d' ')) ||
+    root_hash=$(${shaalg} ${root_dev}|cut -f1 -d' ')
+    pcr15=$(hash_extend 0 $(echo -n ${root_hash}|${shaalg}|cut -f1 -d' ')) ||
         err "failed to hash root device"
 
     if [ -e "${sealed_key}" ]; then
         mv ${sealed_key} ${sealed_key}.old
     fi
+    if [ -e "${sealed_key}.sha1" ]; then
+        mv ${sealed_key}.sha1 ${sealed_key}.sha1.old
+    fi
+    if [ -e "${sealed_key}.sha256" ]; then
+        mv ${sealed_key}.sha256 ${sealed_key}.sha256.old
+    fi
+
     tpm_forward_seal -r/ -p15:${pcr15} -p17:${pcr17} -p18:${pcr18} \
         -p19:${pcr19} ${config_key} ${sealed_key}
     [ $? -eq 0 ] || err "forward seal of key failed"
