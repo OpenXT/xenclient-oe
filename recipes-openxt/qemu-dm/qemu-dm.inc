@@ -151,9 +151,7 @@ do_configure_append() {
 	dev_disable CONFIG_HYPERV_TESTDEV
 	dev_disable CONFIG_VIRTIO_PCI
 	dev_disable CONFIG_VIRTIO
-	dev_disable CONFIG_USB_UHCI
 	dev_disable CONFIG_USB_OHCI
-	dev_disable CONFIG_USB_EHCI
 	dev_disable CONFIG_USB_XHCI
 	dev_disable CONFIG_NE2000_PCI
 	dev_disable CONFIG_EEPRO100_PCI
