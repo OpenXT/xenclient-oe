@@ -43,6 +43,7 @@ SRC_URI += "file://compile-time-stubdom-flag.patch \
             file://xsa-197-qemu-incautious-about-shared-ring-processing.patch \
             file://CVE-2016-8669-char-serial-check-divider-value-against-baud-base.patch \
             file://CVE-2016-8910-net-rtl8139-limit-processing-of-ring-descriptors.patch \
+            file://CVE-2016-9923-char-Fix-Possible-use-after-free.patch \
             file://CVE-2017-5525-audio-ac97-add-exit-function.patch \
             file://CVE-2017-5579-serial-fix-memory-leak-in-serial-exit.patch \
             file://CVE-2017-8284-tcg-i386-Check-the-size-of-instruction-being-transla.patch \
