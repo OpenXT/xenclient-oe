@@ -178,6 +178,9 @@ do_configure_append() {
 	dev_disable CONFIG_ADLIB
 	dev_disable CONFIG_GUS
 	dev_disable CONFIG_CS4231A
+	dev_disable CONFIG_USB_STORAGE_BOT
+	dev_disable CONFIG_USB_STORAGE_UAS
+	dev_disable CONFIG_USB_STORAGE_MTP
 	dev_disable CONFIG_USB_SMARTCARD
 	dev_disable CONFIG_USB_AUDIO
 	dev_disable CONFIG_USB_SERIAL
