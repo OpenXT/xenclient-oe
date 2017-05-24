@@ -115,14 +115,15 @@ CFLAGS_append = " -Wno-unused-parameter -Wno-unused-local-typedefs --param ssp-b
 INC_PR = "r17"
 
 do_configure_append() {
-
 	sed -i -s '/^CONFIG_L2TPV3=y/d' config-host.mak
+}
+
+do_compile_prepend() {
+	rm -f i386-softmmu/config-devices.mak
+	oe_runmake i386-softmmu/config-devices.mak
 
 	dev_disable() {
-		sed -i -e 's/\('$1'=\).*$/\1n/' default-configs/pci.mak \
-						default-configs/usb.mak \
-						default-configs/sound.mak \
-						default-configs/i386-softmmu.mak
+		sed -i -e 's/\('$1'=\).*$/\1n/' i386-softmmu/config-devices.mak
 	}
 
 	dev_disable CONFIG_VGA_ISA
