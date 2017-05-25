@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 #
 # Copyright (c) 2013 Citrix Systems, Inc.
 # 
@@ -23,14 +23,29 @@
 # A return status of 1 indicates the TPM driver is not loaded.
 # In this state the TPM is disabled ... or the platform doesn't have one :)
 
-. /usr/lib/openxt/key-functions
-
 clean_old_tpm_files () {
     [ -e /boot/system/tpm/config.tss ] && rm /boot/system/tpm/config.tss
     [ -e /boot/system/tpm/config.tss.sha1 ] && rm /boot/system/tpm/config.tss.sha1
     [ -e /boot/system/tpm/config.tss.pub.sha1 ] && rm /boot/system/tpm/config.tss.pub.sha1
     [ -e /boot/system/tpm/config.tss.sha256 ] && rm /boot/system/tpm/config.tss.sha256
     [ -e /boot/system/tpm/config.tss.pub.sha256 ] && rm /boot/system/tpm/config.tss.pub.sha256
+}
+
+is_tpm_2_0 () {
+   [ -e /sys/class/tpm/tpm0/device/description ] && cat /sys/class/tpm/tpm0/device/description | grep "2.0" &>/dev/null
+}
+
+pcr_bank_exists () {
+    local alg_in=$1
+
+    banks=$(tpm2_listpcrs -s | cut -d ':' -f 2)
+    for bank in $banks; do
+        alg=$(echo $bank | cut -d '(' -f 1)
+        if [ "$alg" = $alg_in ]; then
+            return 0
+        fi
+    done
+    return 1
 }
 
 alg_to_handle () {
