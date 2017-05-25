@@ -41,8 +41,8 @@ EXTRA_INITRAMFS_LIBS = "\
     lib/libc.so.6 \
     lib/libdl.so.2 \
     lib/libnss_files.so.2 \
-    lib/libcrypto.so.1.0.0 \
-    usr/lib/libssl.so.1.0.0 \
+    usr/lib/libcrypto.so.1.0.2 \
+    usr/lib/libssl.so.1.0.2 \
     usr/lib/libtspi_sa.so.1"
 
 post_rootfs_shell_commands() {
