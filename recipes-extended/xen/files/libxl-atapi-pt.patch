@@ -57,16 +57,21 @@ Index: xen-4.6.4/tools/libxl/libxl_device.c
                 !disk->script) {
          if (stat(disk->pdev_path, &a.stab)) {
              LOGE(ERROR, "Disk vdev=%s failed to stat: %s",
-@@ -460,6 +466,9 @@ int libxl__device_disk_dev_number(const
+@@ -459,6 +465,14 @@ int libxl__device_disk_dev_number(const
+     char *ep;
      unsigned long ul;
      int chrused;
- 
-+    if (!strncmp(virtpath, "atapi-pt", 9))
-+        return 0;
++    static int atapi_pt_minor = 1;
 +
++    /* atapi-pt disks don't use a standard virtpath, so we need a custom
++     * way to generate a dev number. Since the math below always produces
++     * high numbers (the non-zero disk ID gets <<ed), 1 and 2 sounds good
++     * (more atapi-pt devices would blow up the ide controller) */
++    if (!strncmp(virtpath, "atapi-pt", 9))
++        return atapi_pt_minor++;
+ 
      chrused = -1;
      if ((sscanf(virtpath, "d%ip%i%n", &disk, &partition, &chrused)  >= 2
-          && chrused == strlen(virtpath) && disk < (1<<20) && partition < 256)
 Index: xen-4.6.4/tools/libxl/libxl_dm.c
 ===================================================================
 --- xen-4.6.4.orig/tools/libxl/libxl_dm.c
