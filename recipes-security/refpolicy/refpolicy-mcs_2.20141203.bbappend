@@ -178,6 +178,7 @@ SRC_URI += " \
     file://patches/xen4.6-uprev.patch;patch=1 \
     file://patches/openxt-init-spec-domtrans.patch;patch=1 \
     file://patches/busybox-mmap-read-execute-checks-from-new-domain.patch \
+    file://patches/tpm2util.patch;patch=1 \
     "
     
 def get_poltype(f):

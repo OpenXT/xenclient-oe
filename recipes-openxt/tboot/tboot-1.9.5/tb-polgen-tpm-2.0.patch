@@ -1,0 +1,131 @@
+Index: tboot-1.9.5/tb_polgen/commands.c
+===================================================================
+--- tboot-1.9.5/tb_polgen/commands.c
++++ tboot-1.9.5/tb_polgen/commands.c
+@@ -127,7 +127,7 @@ bool do_create(const param_data_t *param
+ 
+     /* if file does not exist then create empty policy */
+     if ( !existing_policy )
+-        new_policy(params->policy_type, params->policy_control);
++        new_policy(params->policy_type, params->policy_control, params->hash_alg);
+     else
+         modify_policy(params->policy_type, params->policy_control);
+ 
+Index: tboot-1.9.5/tb_polgen/param.c
+===================================================================
+--- tboot-1.9.5/tb_polgen/param.c
++++ tboot-1.9.5/tb_polgen/param.c
+@@ -50,6 +50,7 @@
+ 
+ static const char *help[] = {
+     "tb_polgen --create --type        nonfatal|warn|halt\n",
++    "                   --alg         sha1|sha256\n",
+     "                   [--ctrl       <policy control value>]\n",
+     "                   [--verbose]\n",
+     "                   <policy file name>\n",
+@@ -99,6 +100,7 @@ static struct option long_options[] =
+     {"image",          required_argument,    NULL,    'i'},
+     {"pos",            required_argument,    NULL,    'o'},
+     {"elt",            required_argument,    NULL,    'e'},
++    {"alg",            required_argument,    NULL,    'a'},
+ 
+     {"verbose",        no_argument,          (int*)&verbose, true},
+     {0, 0, 0, 0}
+@@ -122,6 +124,12 @@ static option_table_t hash_type_opts[] =
+     {NULL}
+ };
+ 
++static option_table_t hash_alg_opts[] = {
++    {"sha1",            int_opt : TB_HALG_SHA1},
++    {"sha256",          int_opt : TB_HALG_SHA256},
++    {NULL}
++};
++
+ static option_table_t mod_num_opts[] = {
+     {"any",          int_opt : TB_POL_MOD_NUM_ANY},
+     {""},
+@@ -190,6 +198,7 @@ void print_params(param_data_t *params)
+     info_msg("\t image_file = %s\n", params->image_file);
+     info_msg("\t elt_file = %s\n", params->elt_file);
+     info_msg("\t policy_file = %s\n", params->policy_file);
++    info_msg("\t hash_alg = 0x%x\n", params->hash_alg);
+ }
+ 
+ static bool validate_params(param_data_t *params)
+@@ -215,6 +224,10 @@ static bool validate_params(param_data_t
+                 msg = "Invalid --ctrl value\n";
+                 goto error;
+             }
++            if ( params->hash_alg == -1 ) {
++                msg = "Missing --alg option\n";
++                goto error;
++            }
+             return true;
+ 
+         case POLGEN_CMD_ADD:
+@@ -321,9 +334,10 @@ bool parse_input_params(int argc, char *
+     params->cmdline[0] = '\0';
+     params->image_file[0] = '\0';
+     params->elt_file[0] = '\0';
++    params->hash_alg = -1;
+ 
+     while ( true ) {
+-        c = getopt_long_only(argc, argv, "HCADUSt:c:n:p:h:l:i:o:e:",
++        c = getopt_long_only(argc, argv, "HCADUSt:c:n:p:h:l:i:o:e:a:",
+                              long_options, &option_index);
+         if ( c == -1 )     /* no more args */
+             break;
+@@ -428,6 +442,13 @@ bool parse_input_params(int argc, char *
+                 strncpy(params->elt_file, optarg, sizeof(params->elt_file));
+                 params->elt_file[sizeof(params->elt_file)-1] = '\0';
+                 break;
++            case 'a':
++                if ( !parse_int_option(hash_alg_opts, optarg,
++                                       (int *) &params->hash_alg) ) {
++                    error_msg("Unknown --alg option\n");
++                    return false;
++                }
++                break;
+             default:
+                 break;
+         }
+Index: tboot-1.9.5/tb_polgen/policy.c
+===================================================================
+--- tboot-1.9.5/tb_polgen/policy.c
++++ tboot-1.9.5/tb_polgen/policy.c
+@@ -146,12 +146,12 @@ bool write_policy_file(const char *polic
+     return true;
+ }
+ 
+-void new_policy(int policy_type, int policy_control)
++void new_policy(int policy_type, int policy_control, uint8_t hash_alg)
+ {
+     /* current version is 2 */
+     g_policy->version = 2;
+ 
+-    g_policy->hash_alg = TB_HALG_SHA1;
++    g_policy->hash_alg = hash_alg;
+ 
+     g_policy->num_entries = 0;
+ 
+Index: tboot-1.9.5/tb_polgen/tb_polgen.h
+===================================================================
+--- tboot-1.9.5/tb_polgen/tb_polgen.h
++++ tboot-1.9.5/tb_polgen/tb_polgen.h
+@@ -55,6 +55,7 @@ typedef struct {
+     int            mod_num;
+     int            pcr;
+     int            hash_type;
++    int            hash_alg;
+     int            pos;
+     char           cmdline[TBOOT_KERNEL_CMDLINE_SIZE];
+     char           image_file[FILENAME_MAX];
+@@ -78,7 +79,7 @@ extern bool do_show(const param_data_t *
+ extern void *read_elt_file(const char *elt_filename, size_t *length);
+ extern bool read_policy_file(const char *policy_filename, bool *file_exists);
+ extern bool write_policy_file(const char *policy_filename);
+-extern void new_policy(int policy_type, int policy_control);
++extern void new_policy(int policy_type, int policy_control, uint8_t hash_alg);
+ extern void modify_policy(int policy_type, int policy_control);
+ extern tb_policy_entry_t *add_pol_entry(uint8_t mod_num, uint8_t pcr,
+                                         uint8_t hash_type);

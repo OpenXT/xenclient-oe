@@ -68,6 +68,10 @@ RDEPENDS_${PN} = " \
     openxt-measuredlaunch \
     ncurses \
     intel-microcode \
+    libtss2 \
+    libtctidevice \
+    libtctisocket \
+    tpm2.0-tools \
 "
 
 # open-iscsi-user \
