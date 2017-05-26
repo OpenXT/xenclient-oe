@@ -1,4 +1,4 @@
-#! /bin/sh
+#!/bin/sh
 #
 # Copyright (c) 2014 Citrix Systems, Inc.
 # Copyright (c) 2016 Daniel P. Smith, Apertus Solutions, LLC
@@ -24,6 +24,7 @@
 
 . /etc/init.d/functions
 . /usr/lib/openxt/key-functions
+. /usr/lib/tpm-scripts/tpm-functions
 
 CONFIG_LV=xenclient-config
 STORAGE_LV=xenclient-storage
@@ -169,19 +170,54 @@ fail_first_seal()
     exit 1
 }
 
+#For TPM2.0, we perform 'parallel' sealing. For each supported pcr bank hash type, we seal
+#our config key. This approach addresses a deficiency with firmware that is inconsistent in
+#how its measurements are performed. For example, the Intel Computestick only extends pcr 0-4
+#in SHA1. With this approach, we can catch BIOS measurement changes on a variety of platforms
+#without coding edge cases for each one.
 seal()
 {
     local tss_file=${1}
-
+    local sealerr=0
+    local file_exists=1
+    local sealout=""
+    local seal_file="/config/keys/config.key"
     maybe_break "seal"
     dialog --colors --backtitle "${BACK_TITLE}" --mixedgauge \
         "  Sealing..." 0 0 20
 
-    local sealout=$(tpm_sealdata_sa -i /config/keys/config.key \
-        -o ${tss_file} -z $(cat /config/config.pcrs) 2>&1)
-    local sealerr=$?
+    is_tpm_2_0
+    local tpm2=$?
 
-    if [ $sealerr -eq 0 ]; then
+    if [ "${tpm2}" -eq 0 ];
+    then
+        clean_old_tpm_files
+        if pcr_bank_exists "TPM_ALG_SHA1"; then
+            sealout=$(tpm2_sealdata -H 0x81000001 -I ${seal_file} -O ${tss_file}.sha1 -o ${tss_file}.pub.sha1 -g 0x4 -G 0x8 -b 0x492 $(cat /config/config.pcrs) 2>&1 )
+            sealerr=$?
+        fi
+        if pcr_bank_exists "TPM_ALG_SHA256" && [ $sealerr -eq 0 ]; then
+            sealout=$(tpm2_sealdata -H 0x81000000 -I ${seal_file} -O ${tss_file}.sha256 -o ${tss_file}.pub.sha256 -g 0xB -G 0x8 -b 0x492 $(cat /config/config.pcrs) 2>&1 )
+            sealerr=$?
+        fi
+    else
+        sealout=$(tpm_sealdata_sa -i /config/keys/config.key \
+            -o ${tss_file} -z $(cat /config/config.pcrs) 2>&1)
+        sealerr=$?
+    fi
+
+    if [ -e ${tss_file} ]; then
+        file_exists=0
+    elif [ -e ${tss_file}.sha1 ]; then
+        file_exists=0
+    elif [ -e ${tss_file}.sha256 ]; then
+        file_exists=0
+    else
+        file_exists=1
+    fi
+
+
+    if [ $sealerr -eq 0 ] && [ $file_exists -eq 0 ]; then
         dialog --colors --backtitle "${BACK_TITLE}" --mixedgauge \
             "  Sealing: Done" 0 0 100
 
@@ -189,7 +225,12 @@ seal()
         #  do PCR quote
         if [ "${PCR_DEV}" ]; then
             [ -f "${PCRS_BAD}" ] && rm "${PCRS_BAD}"
-            cat "${PCR_DEV}/device/pcrs" > "${PCRS_GOOD}"
+            if [ "${tpm2}" -eq 0 ];
+            then
+                tpm2_listpcrs > "${PCRS_GOOD}"
+            else
+                cat "${PCR_DEV}/device/pcrs" > "${PCRS_GOOD}"
+            fi
         fi
 
         poweroff -r
@@ -225,6 +266,8 @@ unlock_config()
     local measured_flag="/config/tpm/measured-boot"
 
     local sig=$(dd if="${lv_path}" bs=4 count=1 2>/dev/null)
+    is_tpm_2_0
+    local tpm2=$?
     case "$sig" in
     LUKS)
         if [ -e /boot/system/tpm/enabled ]; then
@@ -260,12 +303,16 @@ unlock_config()
                 touch ${measured_flag}
                 return 0
             }
-
             maybe_break "measure-fail"
 
             # store PCR hints for recovery
             #  do PCR quote
-            [ -d "${PCR_DEV}" ] && cat "${PCR_DEV}/device/pcrs" > "${PCRS_BAD}"
+            if [ "${tpm2}" -eq 0 ];
+            then
+                [ -d "${PCR_DEV}" ] && tpm2_listpcrs > "${PCRS_BAD}"
+            else
+                [ -d "${PCR_DEV}" ] && cat "${PCR_DEV}/device/pcrs" > "${PCRS_BAD}"
+            fi
 
             recovery
             [ -f ${measured_flag} ] && rm -f ${measured_flag}
@@ -366,6 +413,9 @@ restore_firstboot -r ${STORAGE_MNT}
 is_launch_measured
 measured=$?
 
+is_tpm_2_0
+tpm2=$?
+
 # Copy trousers data file to /boot/system.
 if [ ! -s ${PS_FILE} ]; then
     install -m 700 -o ${TSS_USER} -g ${TSS_USER} -d ${PS_DIR}
@@ -381,7 +431,15 @@ unlock_config
 
 restore_firstboot -r /config
 
-echo -n "MEASUREDLAUNCHCLOSED" | TCSD_LOG_OFF=yes tpm_extendpcr_sa -p 15
+if [ "${tpm2}" -eq 0 ];
+then
+    #cap pcr 15 in all available banks. This is a cheap operation and works for all cases
+    pcr_bank_exists "TPM_ALG_SHA256" && tpm2_extendpcr -c 15 -g 0xB -s "MEASUREDLAUNCHCLOSED"
+    pcr_bank_exists "TPM_ALG_SHA1" && tpm2_extendpcr -c 15 -g 0x4 -s "MEASUREDLAUNCHCLOSED"
+else
+    echo -n "MEASUREDLAUNCHCLOSED" | TCSD_LOG_OFF=yes tpm_extendpcr_sa -p 15
+fi
+
 
 unload_modules
 

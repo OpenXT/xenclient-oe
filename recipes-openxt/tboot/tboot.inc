@@ -6,16 +6,17 @@ DEPENDS = "trousers"
 
 do_compile() {
 	oe_runmake SUBDIRS="tboot" CC="${HOST_PREFIX}gcc ${TOOLCHAIN_OPTIONS}" CPP="${HOST_PREFIX}cpp ${TOOLCHAIN_OPTIONS}" LDFLAGS="" CFLAGS=""
-	oe_runmake SUBDIRS="lcptools tb_polgen utils pcr-calc" CFLAGS+="-std=c99" TARGET_ARCH="x86_32"
+	oe_runmake SUBDIRS="lcptools lcptools-v2 tb_polgen utils pcr-calc" CFLAGS+="-std=c99" TARGET_ARCH="x86_32"
 }
 
 do_install() {
-	oe_runmake SUBDIRS="tboot lcptools tb_polgen utils pcr-calc" DISTDIR="${D}${base_prefix}" install
+	oe_runmake SUBDIRS="tboot lcptools lcptools-v2 tb_polgen utils pcr-calc" DISTDIR="${D}${base_prefix}" install
 }
 
 PACKAGES += " \
     ${PN}-grub \
     ${PN}-lcptools \
+    ${PN}-lcptools-v2 \
     ${PN}-tbpolgen \
     ${PN}-utils \
     ${PN}-pcr-calc \
@@ -46,6 +47,14 @@ FILES_${PN}-lcptools = " \
     ${sbindir}/tpmnv_lock \
     ${sbindir}/tpmnv_relindex \
 "
+
+FILES_${PN}-lcptools-v2 = " \
+    ${sbindir}/lcp2_mlehash \
+    ${sbindir}/lcp2_crtpol \
+    ${sbindir}/lcp2_crtpollist \
+    ${sbindir}/lcp2_crtpolelt \
+"
+
 FILES_${PN}-utils = " \
     ${sbindir}/txt-stat \
     ${sbindir}/parse_err \

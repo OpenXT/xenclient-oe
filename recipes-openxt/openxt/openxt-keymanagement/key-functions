@@ -17,6 +17,8 @@
 # Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 #
 
+. /usr/lib/tpm-scripts/tpm-functions
+
 # LUKS Key Slots 
 RSLOT=0
 ESLOT=1
@@ -72,7 +74,7 @@ password_prompt() {
 
     while [ 0 ] ; do
         local capture="${KEYDIR}/${key}"
-        dialog --cancel-label Previous --insecure --passwordbox \
+        dialog --no-cancel --insecure --passwordbox \
             "Please enter a new password for ${request}" 0 50 "" 2>${capture} 1>&3
 
         local ret=$?
@@ -83,7 +85,7 @@ password_prompt() {
         fi
 
         local repeat=$(mktemp -p ${KEYDIR})
-        dialog --cancel-label Previous --insecure --passwordbox \
+        dialog --no-cancel --insecure --passwordbox \
             "Please enter the same password to confirm" 0 50 "" 2>${repeat} 1>&3
 
         local ret=$?
@@ -115,6 +117,17 @@ password_prompt() {
     done
 
     exec 3>&-
+    echo ${capture}
+}
+
+get_tpm_passwd () {
+    if ! keystore_ready; then
+        setup_keystore
+    fi
+    local capture="${KEYDIR}/own"
+    local well_known="00000000000000000000000000000000"
+
+    echo ${well_known} > ${capture}
     echo ${capture}
 }
 
@@ -309,7 +322,9 @@ gen_device_key() {
 get_own_key() {
     local key_file=""
 
-    key_file=$(password_prompt "TPM Own")
+    show_cursor
+    key_file=$(get_tpm_passwd)
+    hide_cursor
 
     echo ${key_file}
 }
@@ -502,15 +517,49 @@ platform_unlock() {
     return $?
 }
 
+#For TPM 2.0, we try to perform a 'parallel' unseal.  First, for each supported pcr bank, we unseal
+#the corresponding sealed blob, redirecting the output to /dev/null. This step verifies that all 
+#pcrs are known-good. If any one blob fails to unseal, the whole operation returns failure.
+#Once we verify pcr state, we unseal any one blob and pass the output to cryptsetup to unlock
+#the config partition. If this fails, return failure, otherwise, return success.
 encrypted_unlock() {
     local part="${1}"
     local name="${2}"
     local key_file="${3}"
+    local ret=0
 
-    tpm_unsealdata_sa -z -i $key_file | \
-        cryptsetup -q -d - -S ${ESLOT} luksOpen "${part}" "${name}" >/dev/null 2>&1
+    is_tpm_2_0
+    local tpm2=$?
+    if [ "${tpm2}" -eq 0 ];
+    then
+        local unseal_file=${key_file}
+        #try unsealing for all pcr banks
+        if pcr_bank_exists "TPM_ALG_SHA256"; then
+            tpm2_unsealdata -H 0x81000000 -n "${unseal_file}.sha256" -u "${key_file}.pub.sha256" -g 0xB -r 0 -r 1 -r 2 -r 3 -r 15 -r 17 -r 18 -r 19 >/dev/null 2>&1
+            ret=$?
+        fi
+        if pcr_bank_exists "TPM_ALG_SHA1" && [ ${ret} -eq 0 ]; then
+            tpm2_unsealdata -H 0x81000001 -n "${unseal_file}.sha1" -u "${key_file}.pub.sha1" -g 0x4 -r 0 -r 1 -r 2 -r 3 -r 15 -r 17 -r 18 -r 19 >/dev/null 2>&1
+            ret=$?
+        fi
+        #unsealing failed, return the error
+        [ ${ret} -ne 0 ] && echo "Unsealing failed" && return ${ret}
 
-    return $?
+        #now try to unlock the config partition, only need to unseal one blob
+        if [ -e ${unseal_file}.sha256 ]; then
+            tpm2_unsealdata -H 0x81000000 -n "${unseal_file}.sha256" -u "${key_file}.pub.sha256" -g 0xB -r 0 -r 1 -r 2 -r 3 -r 15 -r 17 -r 18 -r 19 | cryptsetup -q -d - -S ${ESLOT} luksOpen "${part}" "${name}" >/dev/null 2>&1
+            ret=$?
+        elif [ -e ${unseal_file}.sha1 ]; then
+            tpm2_unsealdata -H 0x81000001 -n "${unseal_file}.sha1" -u "${key_file}.pub.sha1" -g 0x4 -r 0 -r 1 -r 2 -r 3 -r 15 -r 17 -r 18 -r 19 | cryptsetup -q -d - -S ${ESLOT} luksOpen "${part}" "${name}" >/dev/null 2>&1
+            ret=$?
+        fi
+    else
+        tpm_unsealdata_sa -z -i $key_file | \
+            cryptsetup -q -d - -S ${ESLOT} luksOpen "${part}" "${name}" >/dev/null 2>&1
+        ret=$?
+    fi
+
+    return $ret
 }
 
 # Clear the recovery key on a cryptdisk

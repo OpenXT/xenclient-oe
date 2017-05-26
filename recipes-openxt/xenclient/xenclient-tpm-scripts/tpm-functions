@@ -22,14 +22,57 @@
 #        1 otherwise
 # A return status of 1 indicates the TPM driver is not loaded.
 # In this state the TPM is disabled ... or the platform doesn't have one :)
+
+clean_old_tpm_files () {
+    [ -e /boot/system/tpm/config.tss ] && rm /boot/system/tpm/config.tss
+    [ -e /boot/system/tpm/config.tss.sha1 ] && rm /boot/system/tpm/config.tss.sha1
+    [ -e /boot/system/tpm/config.tss.pub.sha1 ] && rm /boot/system/tpm/config.tss.pub.sha1
+    [ -e /boot/system/tpm/config.tss.sha256 ] && rm /boot/system/tpm/config.tss.sha256
+    [ -e /boot/system/tpm/config.tss.pub.sha256 ] && rm /boot/system/tpm/config.tss.pub.sha256
+}
+
+is_tpm_2_0 () {
+   [ -e /sys/class/tpm/tpm0/device/description ] && cat /sys/class/tpm/tpm0/device/description | grep "2.0" &>/dev/null
+}
+
+pcr_bank_exists () {
+    local alg_in=$1
+
+    banks=$(tpm2_listpcrs -s | cut -d ':' -f 2)
+    for bank in $banks; do
+        alg=$(echo $bank | cut -d '(' -f 1)
+        if [ "$alg" = $alg_in ]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+alg_to_handle () {
+    alg=$1
+    case $alg in
+        0x000b)
+            echo "0x81000000"
+            ;;
+        0x0004)
+            echo "0x81000001"
+            ;;
+    esac
+}
+
 tcsd_start() {
-    local ret=1
-    /etc/init.d/trousers status > /dev/null
-    if [ $? -ne 0 ]; then
-        /etc/init.d/trousers start > /dev/null
-        sleep 1
+    is_tpm_2_0
+    local tpm2=$?
+    if [ "${tpm2}" -ne 0 ];
+    then
+        local ret=1
         /etc/init.d/trousers status > /dev/null
-        [ $? -ne 0 ] && return 1
+        if [ $? -ne 0 ]; then
+            /etc/init.d/trousers start > /dev/null
+            sleep 1
+            /etc/init.d/trousers status > /dev/null
+            [ $? -ne 0 ] && return 1
+        fi
     fi
     return 0
 }
@@ -41,12 +84,26 @@ tpm_is_active() {
     local tpm="$(find /sys/class -name tpm0 2>/dev/null)/device"
     local state=""
 
-    state=$(cat ${tpm}/active)
-    if [ $? -ne 0 ]; then
-        return 2
+    is_tpm_2_0
+    local tpm2=$?
+    if [ "${tpm2}" -eq 0 ];
+    then
+        msg=$(tpm2_dump_capability --capability=properties-fixed 2>&1)
+        if [ $? -ne 0 ]; then
+            case "$msg" in
+                *Invalid) state=1 ;;
+                *) state=0 ;;
+            esac
+        else
+            state=0
+        fi
+    else
+        state=$(cat ${tpm}/active)
+        if [ $? -ne 0 ]; then
+            return 2
+        fi
+        [ $state -eq 1 ] && state=0 || state=1
     fi
-
-    [ $state -eq 1 ] && state=0 || state=1
 
     return $state
 }
@@ -58,9 +115,22 @@ tpm_is_enabled() {
     local tpm="$(find /sys/class -name tpm0 2>/dev/null)/device"
     local state=""
 
-    state=$(cat ${tpm}/enabled)
-    if [ $? -ne 0 ]; then
-        return 2
+    is_tpm_2_0
+    local tpm2=$?
+    if [ "${tpm2}" -eq 0 ];
+    then
+        msg=$(tpm2_getcapabilities 2>&1)
+        if [ $? -ne 0 ]; then
+            case "$msg" in
+                *Failed\ to\ get) state=1 ;;
+                *) state=0 ;;
+            esac
+        fi
+    else
+        state=$(cat ${tpm}/enabled)
+        if [ $? -ne 0 ]; then
+            return 2
+        fi
     fi
 
     [ $state -eq 1 ] && state=0 || state=1
@@ -75,9 +145,20 @@ tpm_is_owned() {
     local tpm="$(find /sys/class -name tpm0 2>/dev/null)/device"
     local state=""
 
-    state=$(cat ${tpm}/owned)
-    if [ $? -ne 0 ]; then
-        return 2
+    is_tpm_2_0
+    local tpm2=$?
+    if [ "${tpm2}" -eq 0 ];
+    then
+        tpm2_dump_capability --capability=properties-variable | grep -q 'ownerAuthSet:[[:space:]]\+set'
+        ret=$?
+        if [ "${ret}" -eq 0 ]; then
+            state=0
+        fi
+    else
+        state=$(cat ${tpm}/owned)
+        if [ $? -ne 0 ]; then
+            return 2
+        fi
     fi
 
     [ $state -eq 1 ] && state=0 || state=1
@@ -92,6 +173,13 @@ tpm_is_owned() {
 tpm_is_owner_wks() {
     local ret=0
     local msg=""
+
+    is_tpm_2_0
+    local tpm2=$?
+    if [ "${tpm2}" -eq 0 ];
+    then
+        return $ret
+    fi
 
     msg=$(tpm_setenable -z -s 2>&1)
     if [ $? -ne 0 ]; then
@@ -113,6 +201,14 @@ tpm_is_owner_wks() {
 tpm_is_srk_wks() {
     local ret=0
     local msg=""
+
+    is_tpm_2_0
+    local tpm2=$?
+    if [ "${tpm2}" -eq 0 ];
+    then
+        return $ret
+    fi
+
     msg=$(echo "data" | tpm_sealdata -z 2>&1)
     if [ $? -ne 0 ]; then
         case "$msg" in
@@ -136,18 +232,54 @@ tpm_has_ek() {
     local ret=0
     local msg=""
 
-    msg=$(echo "data" | tpm_sealdata -z 2>&1)
-    if [ $? -ne 0 ]; then
-        case "$msg" in
-            *TPM\ is\ deactivated) ret=2 ;;
-            *TPM\ is\ disabled) ret=2 ;;
-            *No\ SRK | *Authentication\ failed | *Handle\ is\ incorrect) ;;
-            *No\ EK)  ret=1 ;;
-            *) ret=2 ;;
-        esac
+    #tpm2.0 most likely has EK. TODO: figure out if I need to verify this.
+    is_tpm_2_0
+    local tpm2=$?
+    if [ "${tpm2}" -eq 0 ];
+    then
+        ret=0
+    else
+        msg=$(echo "data" | tpm_sealdata -z 2>&1)
+        if [ $? -ne 0 ]; then
+            case "$msg" in
+                *TPM\ is\ deactivated) ret=2 ;;
+                *TPM\ is\ disabled) ret=2 ;;
+                *No\ SRK | *Authentication\ failed | *Handle\ is\ incorrect) ;;
+                *No\ EK)  ret=1 ;;
+                *) ret=2 ;;
+            esac
+        fi
     fi
     return $ret
 }
+
+#Taking ownership for tpm2 is slightly more complicated. Encapsulate this process
+#in its own function, checking err after each critical operation.
+tpm2_ownership () {
+    passwd=$1
+
+    #Taking endoresement password AND lockout password to fully own tpm
+    err=$(tpm2_takeownership -o "${passwd}" -e "${passwd}" 2>&1)
+    ret=$?
+    [ ${ret} -ne 0 ] && echo ${err} && return ${ret}
+
+    banks=$(tpm2_listpcrs -s | cut -d ':' -f 2)
+    ret=$?
+    [ ${ret} -ne 0 ] && echo "Failed to list pcr banks" && return ${ret}
+    #Create our primary object
+    for bank in $banks; do
+        alg=$(echo $bank | cut -d '(' -f 2 | cut -d ')' -f 1)
+        handle=$(echo -n "${passwd}" | tpm2_createprimary -A o -g ${alg} -G 0x1 -P | grep Handle | cut -d ':' -f 2)
+        ret=$?
+        [ ${ret} -ne 0 ] && echo "Failed to create primary" && return ${ret}
+        #Make it permanent for this measured install
+        err=$(tpm2_evictcontrol -A o -H ${handle} -S $(alg_to_handle ${alg}) -P "${passwd}" 2>&1)
+        ret=$?
+        [ ${ret} -ne 0 ] && echo ${err} && return ${ret}
+    done
+    return 0
+}
+
 # Function to take ownership of the TPM.  Wraps some common functionality to
 #   create an EK and check that we can seal with the well-known SRK.
 # parameter 0: password
@@ -157,6 +289,9 @@ tpm_has_ek() {
 tpm_take_ownership() {
     local passwd="$1"
     local has_ek="${2:-false}"
+
+    is_tpm_2_0
+    local tpm2=$?
 
     # create EK if necessary
     case ${has_ek} in
@@ -172,18 +307,30 @@ tpm_take_ownership() {
             echo "invalid parameter for EK: ${has_ek}" >&2
             return 1
     esac
-    # take ownership of TPM
-    err=$(cat "${passwd}" | tpm_takeownership --srk-well-known --stdin 2>&1)
+
+    if [ "${tpm2}" -eq 0 ];
+    then
+        err=$(tpm2_ownership ${passwd})
+    else
+        # take ownership of TPM
+        err=$(cat "${passwd}" | tpm_takeownership --srk-well-known --stdin 2>&1)
+    fi
+
     if [ $? -ne 0 ]; then
         echo "error taking ownership of TPM: ${err}" >&2
         return 1
     fi
-    # check to be sure we can seal data with the well-known-key
-    err=$(echo data | tpm_sealdata -z 2>&1 >/dev/null)
-    [ $? -ne 0 ] && {
-        echo "Test to seal data with well-known SRK failed with error: ${err}" >&2
-        return 1
-    }
+
+    #sealing data with wks is tpm 1.2 only
+    if [ "${tpm2}" -eq 1 ];
+    then
+        # check to be sure we can seal data with the well-known-key
+        err=$(echo data | tpm_sealdata -z 2>&1 >/dev/null)
+        [ $? -ne 0 ] && {
+            echo "Test to seal data with well-known SRK failed with error: ${err}" >&2
+            return 1
+        }
+    fi
     return 0
 }
 tpm_forward_seal() {
@@ -192,6 +339,8 @@ tpm_forward_seal() {
     local OPTIND
     local opt
     local p
+    is_tpm_2_0
+    local tpm2=$?
 
     while getopts ":r:p:" opt; do
         case "${opt}" in
@@ -212,19 +361,41 @@ tpm_forward_seal() {
     for p in ${forward_values}; do
         i=$(echo ${p} | cut -f 1 -d :)
         echo ${pcrs} | egrep -q -e "\s${i}\s*" || {
-            pcrs="${pcrs} -p ${p}"
+            if [[ "${tpm2}" -eq 0 ]]; then
+                pcrs="${pcrs} -r ${p}"
+            else
+                pcrs="${pcrs} -p ${p}"
+            fi
             continue
         }
         pcrs=$(echo ${pcrs}|sed -e "s/\s${i}\s*/ ${p} /")
     done
 
-    /etc/init.d/trousers status > /dev/null 2>&1
-    if [ $? -ne 0 ]; then
-        tpm_sealdata_sa -i ${key} -o ${tss} -z ${pcrs} 2>&1
-        return $?
+    if [ "${tpm2}" -eq 0 ];
+    then
+        seal_file=${key}
+        clean_old_tpm_files
+        if pcr_bank_exists "TPM_ALG_SHA1"; then
+            tpm2_sealdata -H 0x81000001 -I ${seal_file} -O ${tss}.sha1 -o ${tss}.pub.sha1 -g 0x4 -G 8 -b 0x492 ${pcrs} 2>&1
+            err=$?
+            if [ $err -ne 0 ]; then return $err; fi
+        fi
+        if pcr_bank_exists "TPM_ALG_SHA256"; then
+            tpm2_sealdata -H 0x81000000 -I ${seal_file} -O ${tss}.sha256 -o ${tss}.pub.sha256 -g 0xB -G 8 -b 0x492 ${pcrs} 2>&1
+            err=$?
+            if [ $err -ne 0 ]; then return $err; fi
+        fi
+        [ -e ${tss} ] || [ -e ${tss}.sha1 ] || [ -e ${tss}.sha256 ] && return 0
+        return 1
     else
-        tpm_sealdata -i ${key} -o ${tss} -z ${pcrs} 2>&1
-        return $?
+        /etc/init.d/trousers status > /dev/null 2>&1
+        if [ $? -ne 0 ]; then
+            tpm_sealdata_sa -i ${key} -o ${tss} -z ${pcrs} 2>&1
+            return $?
+        else
+            tpm_sealdata -i ${key} -o ${tss} -z ${pcrs} 2>&1
+            return $?
+        fi
     fi
 }
 

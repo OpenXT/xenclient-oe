@@ -27,6 +27,26 @@ ROOT_READONLY=
 DEFINIT=/sbin/init
 FIRSTBOOT_FLAG=/boot/system/firstboot
 
+is_tpm_2_0 () {
+    [ -e /sys/class/tpm/tpm0/device/description ] && cat /sys/class/tpm/tpm0/device/description | grep "2.0" &>/dev/null
+}
+
+#listpcrs sample output:
+#Supported Bank/Algorithm: TPM_ALG_SHA1(0x0004) TPM_ALG_SHA256(0x000b)
+#Cuts and for loop isolate "TPM_ALG_<hash_type>" and compare against input
+pcr_bank_exists () {
+    local alg_in=$1
+
+    banks=$(tpm2_listpcrs -s | cut -d ':' -f 2)
+    for bank in $banks; do
+        alg=$(echo $bank | cut -d '(' -f 1)
+        if [ "$alg" = $alg_in ]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
 early_setup() {
     mkdir -p /proc /sys /mnt /tmp
     mount -t proc proc /proc
@@ -165,11 +185,31 @@ fatal() {
 tpm_setup() {
     CMDLINE="ro measured" read_args
     modprobe tpm_tis
-    echo -n "initramfs measuring $ROOT_DEVICE ...  "
-    s=$(sha1sum $ROOT_DEVICE)
-    echo "done"
-    echo -n ${s:0:40} | TCSD_LOG_OFF=yes tpm_extendpcr_sa -p 15
-    [ $? -ne 0 ] && fatal "PCR-15 extend failed"
+    is_tpm_2_0
+    if [ $? -eq 0 ];
+    then
+        echo "Measuring for tpm 2.0"
+        #Prefer the more secure alg, but try sha1 as a last resort since most
+        #platforms support it for legacy.
+        if pcr_bank_exists "TPM_ALG_SHA256"; then
+            s=$(sha256sum $ROOT_DEVICE)
+            echo $s
+            DIGEST=$(echo -n ${s:0:64})
+            tpm2_extendpcr -c 15 -g 0xB -s $DIGEST
+            return $?
+        else
+            s=$(sha1sum $ROOT_DEVICE)
+            echo $s
+            DIGEST=$(echo -n ${s:0:40})
+            tpm2_extendpcr -c 15 -g 0x4 -s $DIGEST
+            return $?
+        fi
+    else
+        s=$(sha1sum $ROOT_DEVICE)
+        echo "done"
+        echo -n ${s:0:40} | TCSD_LOG_OFF=yes tpm_extendpcr_sa -p 15
+        [ $? -ne 0 ] && fatal "PCR-15 extend failed"
+    fi
 }
 
 

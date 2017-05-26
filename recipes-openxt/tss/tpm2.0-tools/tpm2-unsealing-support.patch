@@ -1,0 +1,361 @@
+commit db7ca9bf62ff03db81767701e6541deed025fbe2
+Author: Chris Rogers <rogersc@ainfosec.com>
+Date:   Thu May 18 14:39:15 2017 -0400
+
+    [tpm2.0-tools] Unseal support for OpenXT
+    
+      Implement new tool "tpm2_unsealdata" to unseal a blob sealed with
+      tpm2_sealdata. Contains platform specific changes to load and
+      unseal.
+    
+    Signed-off-by: Chris Rogers <rogersc@ainfosec.com>
+
+diff --git a/tools/tpm2_unsealdata.c b/tools/tpm2_unsealdata.c
+new file mode 100644
+index 0000000..747e2d0
+--- /dev/null
++++ b/tools/tpm2_unsealdata.c
+@@ -0,0 +1,343 @@
++//**********************************************************************;
++// Copyright (c) 2015, Intel Corporation
++// Copyright (c) 2017, Assured Information Security
++// All rights reserved.
++//
++// Redistribution and use in source and binary forms, with or without
++// modification, are permitted provided that the following conditions are met:
++//
++// 1. Redistributions of source code must retain the above copyright notice,
++// this list of conditions and the following disclaimer.
++//
++// 2. Redistributions in binary form must reproduce the above copyright notice,
++// this list of conditions and the following disclaimer in the documentation
++// and/or other materials provided with the distribution.
++//
++// 3. Neither the name of Intel Corporation nor the names of its contributors
++// may be used to endorse or promote products derived from this software without
++// specific prior written permission.
++//
++// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++// ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
++// LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++// CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++// SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++// INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++// CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++// ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
++// THE POSSIBILITY OF SUCH DAMAGE.
++//**********************************************************************;
++
++#include <stdarg.h>
++
++#include <stdlib.h>
++#include <stdio.h>
++#include <stdbool.h>
++#include <string.h>
++#include <limits.h>
++#include <ctype.h>
++#include <getopt.h>
++
++#include <sapi/tpm20.h>
++#include <tcti/tcti_socket.h>
++#include "pcr.h"
++#include "log.h"
++#include "options.h"
++#include "tpm_session.h"
++#include "string-bytes.h"
++#include "shared.h"
++#include "files.h"
++
++TPMS_AUTH_COMMAND sessionData;
++int hexPasswd = false;
++TPM_HANDLE handle2048rsa;
++int debugLevel = 0;
++
++UINT32 load(TSS2_SYS_CONTEXT *sapi_context, TPMI_DH_OBJECT itemHandle, TPM2B_PUBLIC *inPublic, TPM2B_PRIVATE *inPrivate, int P_flag)
++{
++    UINT32 rval;
++    TPMS_AUTH_RESPONSE sessionDataOut;
++    TSS2_SYS_CMD_AUTHS sessionsData;
++    TSS2_SYS_RSP_AUTHS sessionsDataOut;
++    TPMS_AUTH_COMMAND *sessionDataArray[1];
++    TPMS_AUTH_RESPONSE *sessionDataOutArray[1];
++
++    TPM2B_NAME nameExt = TPM2B_TYPE_INIT(TPM2B_NAME, name);
++
++    sessionDataArray[0] = &sessionData;
++    sessionDataOutArray[0] = &sessionDataOut;
++
++    sessionsDataOut.rspAuths = &sessionDataOutArray[0];
++    sessionsData.cmdAuths = &sessionDataArray[0];
++
++    sessionsDataOut.rspAuthsCount = 1;
++    sessionsData.cmdAuthsCount = 1;
++
++    sessionData.sessionHandle = TPM_RS_PW;
++    sessionData.nonce.t.size = 0;
++    *((UINT8 *)((void *)&sessionData.sessionAttributes)) = 0;
++    sessionData.sessionAttributes.continueSession = 1;
++    if(P_flag == 0)
++        sessionData.hmac.t.size = 0;
++    if (sessionData.hmac.t.size > 0 && hexPasswd)
++    {
++        sessionData.hmac.t.size = sizeof(sessionData.hmac) - 2;
++        if (hex2ByteStructure((char *)sessionData.hmac.t.buffer,
++                              &sessionData.hmac.t.size,
++                              sessionData.hmac.t.buffer) != 0)
++        {
++            printf( "Failed to convert Hex format password for item Passwd.\n");
++            return -1;
++        }
++    }
++
++    rval = Tss2_Sys_Load(sapi_context, itemHandle, &sessionsData, inPrivate , inPublic, &handle2048rsa, &nameExt, &sessionsDataOut);
++    if(rval != TPM_RC_SUCCESS)
++    {
++        printf("\nLoad Object Failed ! ErrorCode: 0x%0x\n\n",rval);
++        return rval;
++    }
++
++    return 0;
++
++}
++
++UINT32 unseal(TSS2_SYS_CONTEXT *sapi_context, TPMI_DH_OBJECT itemHandle, int P_flag, TPM2B_PUBLIC *inPublic, TPM2B_PRIVATE *inPrivate, TPMI_ALG_HASH nameAlg,
++                pcr_struct **pcrList, INT32 pcrCount)
++{
++    UINT32 rval;
++    SESSION *policySession;
++    TPM2B_DIGEST policyDigest; //unused for now here but build_policy_external needs to return the policy for sealdata.
++
++    rval = build_policy_external(sapi_context, &policySession, false, pcrList, pcrCount, &policyDigest, nameAlg);  //Build real policy, don't write to file
++    if(rval != TPM_RC_SUCCESS)
++    {
++        printf("build_policy() failed, ec: 0x%x\n", rval);
++        Tss2_Sys_FlushContext( sapi_context, policySession->sessionHandle);
++         
++        if(tpm_session_auth_end(policySession) != TPM_RC_SUCCESS)
++            printf("tpm2_session_auth_end failed: ec: 0x%x\n", rval);
++
++        return rval;
++    }
++
++    rval = load(sapi_context, itemHandle, inPublic, inPrivate, P_flag);
++    if(rval != TPM_RC_SUCCESS)
++    {
++        printf("load() failed, ec: 0x%x\n", rval);
++        Tss2_Sys_FlushContext( sapi_context, policySession->sessionHandle);
++
++        if(tpm_session_auth_end(policySession) != TPM_RC_SUCCESS)
++            printf("tpm2_session_auth_end failed\n");
++
++        return rval;
++    }
++
++    TPMS_AUTH_RESPONSE sessionDataOut;
++    TSS2_SYS_CMD_AUTHS sessionsData;
++    TSS2_SYS_RSP_AUTHS sessionsDataOut;
++    TPMS_AUTH_COMMAND *sessionDataArray[1];
++    TPMS_AUTH_RESPONSE *sessionDataOutArray[1];
++
++    TPM2B_SENSITIVE_DATA outData = TPM2B_TYPE_INIT(TPM2B_SENSITIVE_DATA, buffer);
++
++    sessionDataArray[0] = &sessionData;
++    sessionDataOutArray[0] = &sessionDataOut;
++
++    sessionsDataOut.rspAuths = &sessionDataOutArray[0];
++    sessionsData.cmdAuths = &sessionDataArray[0];
++
++    sessionsDataOut.rspAuthsCount = 1;
++    sessionsData.cmdAuthsCount = 1;
++
++    sessionData.sessionHandle = TPM_RS_PW;
++    sessionData.nonce.t.size = 0;
++    *((UINT8 *)((void *)&sessionData.sessionAttributes)) = 0;
++
++    sessionData.sessionHandle = policySession->sessionHandle;
++    rval = Tss2_Sys_Unseal(sapi_context, handle2048rsa, &sessionsData, &outData, &sessionsDataOut);
++    if(rval != TPM_RC_SUCCESS)
++    {
++        printf("unseal() failed. ec: 0x%x\n", rval);
++        Tss2_Sys_FlushContext( sapi_context, policySession->sessionHandle);
++
++        if(tpm_session_auth_end(policySession) != TPM_RC_SUCCESS)
++            printf("tpm2_session_auth_end failed\n");
++
++        return rval;
++    }
++
++    //Write data directly to stdout, to be consumed by the caller
++    fwrite(outData.t.buffer, 1, outData.t.size, stdout);
++
++    Tss2_Sys_FlushContext( sapi_context, policySession->sessionHandle);
++
++    rval = tpm_session_auth_end(policySession);
++    if(rval != TPM_RC_SUCCESS)
++    {
++        printf("tpm2_session_auth_end failed: ec: 0x%x\n", rval);
++        return -4;
++    }
++
++    return 0;
++}
++
++int
++execute_tool(int               argc,
++             char              *argv[],
++             char              *envp[],
++             common_opts_t     *opts,
++             TSS2_SYS_CONTEXT  *sapi_context)
++{
++    (void) envp;
++    (void) opts;
++    TPMI_ALG_HASH nameAlg;
++    TPMI_DH_OBJECT itemHandle;
++    TPM2B_PUBLIC  inPublic;
++    TPM2B_PRIVATE inPrivate;
++    UINT16 size;
++    UINT32 pcr = -1;
++    INT32 pcrCount = 0;
++    pcr_struct * pcrList[24];
++    BYTE forwardHash[32] = {0};
++
++    setbuf(stdout, NULL);
++    setvbuf (stdout, NULL, _IONBF, BUFSIZ);
++
++    memset(&inPublic,0,sizeof(TPM2B_PUBLIC));
++    memset(&inPrivate,0,sizeof(TPM2B_SENSITIVE));
++    int opt = -1;
++    const char *optstring = "H:P:r:u:g:n:X";
++    static struct option long_options[] = {
++      {"item",1,NULL,'H'},
++      {"pwdi",1,NULL,'P'},
++      {"pubfile",1,NULL,'u'},
++      {"privfile",1,NULL,'n'},
++      {"halg",1,NULL,'g'},
++      {"pcr",1,NULL,'r'},
++      {"loadContext",1,NULL,'C'},
++      {"passwdInHex",0,NULL,'X'},
++      {0,0,0,0}
++    };
++
++    int returnVal = 0;
++    int flagCnt = 0;
++    int H_flag = 0,
++        P_flag = 0,
++        u_flag = 0,
++        r_flag = 0,
++        g_flag = 0,
++        n_flag = 0;
++
++    while((opt = getopt_long(argc,argv,optstring,long_options,NULL)) != -1)
++    {
++        switch(opt)
++        {
++        case 'H':
++            if(!string_bytes_get_uint32(optarg, &itemHandle))
++            {
++                returnVal = -2;
++                break;
++            }
++            H_flag = 1;
++            break;
++        case 'P':
++            sessionData.hmac.t.size = sizeof(sessionData.hmac.t) - 2;
++            if(str2ByteStructure(optarg,&sessionData.hmac.t.size,sessionData.hmac.t.buffer) != 0)
++            {
++                returnVal = -3;
++                break;
++            }
++            P_flag = 1;
++            break;
++        case 'u':
++            size = sizeof(inPublic);
++            if(!files_load_bytes_from_file(optarg, (UINT8 *)&inPublic, &size))
++            {
++                returnVal = -9;
++                break;
++            }
++            u_flag = 1;
++            break;
++        case 'n':
++            size = sizeof(inPrivate);
++            if(!files_load_bytes_from_file(optarg, (UINT8 *)&inPrivate, &size))
++            {
++                returnVal = -10;
++                break;
++            }
++            n_flag = 1;
++            break;
++        case 'g':
++            if(!string_bytes_get_uint16(optarg,&nameAlg))
++            {
++                showArgError(optarg, argv[0]);
++                returnVal = -11;
++                break;
++            }
++            g_flag = 1;
++            break;
++        case 'r':
++            if (pcr_parse_arg(optarg, &pcr, forwardHash))
++            {
++                printf("Invalid pcr value.\n");
++                returnVal = -10;
++                break;
++            }
++            r_flag = 1;
++            pcr_struct *new_pcr = (pcr_struct *) malloc(sizeof(pcr_struct));
++            new_pcr->pcr = pcr;
++            memcpy(new_pcr->forwardHash, forwardHash, 32);
++            memset(forwardHash, 0, 32);
++            pcrList[pcrCount] = new_pcr;
++            pcrCount++;
++            break;
++        case 'X':
++            hexPasswd = true;
++            break;
++        case ':':
++            returnVal = -13;
++            break;
++        case '?':
++            returnVal = -13;
++            break;
++        }
++        if(returnVal)
++            break;
++    };
++
++    if(returnVal != 0)
++        return returnVal;
++
++    flagCnt = H_flag + n_flag + u_flag + g_flag + r_flag;
++    if(flagCnt == 1)
++    {
++        showArgMismatch(argv[0]);
++        return -14;
++    }
++    else if(flagCnt >= 4 && H_flag == 1 && n_flag == 1 && u_flag == 1 && r_flag == 1)
++    {
++        if (returnVal == 0)
++            returnVal = unseal(sapi_context, itemHandle, P_flag, &inPublic, &inPrivate, nameAlg, pcrList, pcrCount);
++
++        //clean up pcr objects
++        for(int i = 0; i < pcrCount; i++)
++            free(pcrList[i]);
++
++        Tss2_Sys_FlushContext(sapi_context, itemHandle);
++
++        //make sure handle2048 rsa is always cleaned
++        Tss2_Sys_FlushContext(sapi_context, handle2048rsa);
++        if(returnVal)
++            return -15;
++    }
++    else
++    {
++        showArgMismatch(argv[0]);
++        return -16;
++    }
++
++    return 0;
++}
