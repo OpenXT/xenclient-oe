@@ -7,6 +7,7 @@ DEPENDS = "webkit-gtk"
 inherit autotools-brokensep pkgconfig
 
 SRC_URI = "http://dl.suckless.org/surf/surf-${PV}.tar.gz \
+           file://reload-on-sighup.patch \
            file://config.mk \
           "
 
