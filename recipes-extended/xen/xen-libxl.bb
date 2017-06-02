@@ -39,6 +39,7 @@ DEPENDS += " \
     "
 SRC_URI_append = " \
     file://xen-init-dom0.initscript \
+    file://xl.conf \
     "
 
 PACKAGES = " \
@@ -56,6 +57,9 @@ FILES_${PN}-staticdev = " \
     ${libdir}/libxlutil.a \
     ${libdir}/libxenlight.a \
     "
+FILES_xen-libxlutil += " \
+    ${sysconfdir}/xen/xl.conf \
+"
 
 EXTRA_OEMAKE += "CROSS_SYS_ROOT=${STAGING_DIR_HOST} CROSS_COMPILE=${HOST_PREFIX}"
 EXTRA_OEMAKE += "CONFIG_IOEMU=n"
