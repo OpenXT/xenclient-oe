@@ -92,7 +92,16 @@ post_rootfs_shell_commands() {
 	touch ${IMAGE_ROOTFS}/etc/xenclient-host-installer;
 }
 
-ROOTFS_POSTPROCESS_COMMAND += " post_rootfs_shell_commands; "
+# packagegroup-xenclient-dom0 provides lvm2, so have lvmetad running as lvm2
+# utilities try to use it and warn in its absence.
+activate_lvmetad_initscript() {
+    update-rc.d -r ${IMAGE_ROOTFS} lvm2-lvmetad defaults 06
+}
+
+ROOTFS_POSTPROCESS_COMMAND += " \
+    activate_lvmetad_initscript; \
+    post_rootfs_shell_commands; \
+"
 
 do_post_rootfs_items() {
 	install -d ${DEPLOY_DIR_IMAGE}/${IMAGE_LINK_NAME}/netboot
