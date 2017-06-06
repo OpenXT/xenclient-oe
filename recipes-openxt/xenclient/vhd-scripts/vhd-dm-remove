@@ -1,0 +1,177 @@
+#!/bin/bash
+#
+# Copyright (c) 2013 Citrix Systems, Inc.
+#
+
+set -e
+set -o pipefail
+
+readonly TAPDEV_NAME="tapdev"
+readonly SYSFS_PATH="/sys/class/block"
+readonly MAPPER_DIR="/dev/mapper"
+readonly DMSETUP_BIN="/usr/sbin/dmsetup"
+readonly TAPDISK_CTL="/sys/class/blktap2/blktap"
+readonly FDISK_BIN="/sbin/fdisk"
+
+usage()
+{
+    cat <<EOF >&2
+usage: $0 [options] dm-device
+
+This script removes the given dm device and deactivates the underlying tapdisk
+devices.
+
+OPTIONS:
+    --partitions          Remove dm nodes for partitions as well as base device.
+
+    --preserve-tapdisks   Do not deactivate underlying tapdisk devices.
+EOF
+}
+
+die()
+{
+    echo "$@" >&2
+    logger -s -t "vhd-dm-remove[$$]" -p user.error "$@" || :
+    exit 1
+}
+
+tapdev_major()
+{
+    grep "$TAPDEV_NAME" /proc/devices | cut -d' ' -f1
+}
+
+tapdev_minor_to_letter()
+{
+    local minor="$1"
+    local map="abcdefghijklmnopqrstuvwxyz"
+    if [ $minor -lt 26 ] ; then
+	echo "${map:$minor:1}"
+    else
+	echo "${map:$((($minor / 26) - 1)):1}${map:$((($minor % 26))):1}"
+    fi
+    return 0
+}
+
+vhd_dm_to_tapdev_minors()
+{
+    local minors=""
+    local tap_major=$(tapdev_major) || die "error parsing tapdev major"
+
+    local minors=$("$DMSETUP_BIN" deps "$DEV" |
+	sed 's/[(),]/ /g' | awk '{ print $5, $6 }' |
+	while read major minor ; do
+	    [ "$major" = "$tap_major" ] && echo $minor
+	done
+    )
+
+    echo "$minors" | sed 's/ /\n/g' | sort -u
+}
+
+vhd_dm_partition_name()
+{
+    local partition="$1"
+    case "${DEV}" in
+	*[1-9]) echo "${DEV}p${partition}";;
+	*) echo "${DEV}${partition}";;
+    esac
+    return 0
+}
+
+vhd_dm_remove_partitions()
+{
+    local partition=1
+    "$FDISK_BIN" -lu "$DEV" | grep -A5 Device | tail -n+2 | sed 's/\*/ /g' |
+    egrep -v 'Partition [1-9] does not end on cylinder boundary' |
+    while read dev start end id type ; do
+	local dev=$(vhd_dm_partition_name $partition)
+	[ -e "$dev" ] && {
+	    "$DMSETUP_BIN" remove -f "$dev" 2>/dev/null || \
+		die "error removing device $dev"
+	}
+	partition=$(($partition + 1))
+    done
+    return 0
+}
+
+vhd_dm_holders()
+{
+    local letter="$1"
+    local sysfs="${SYSFS_PATH}/${TAPDEV_NAME}${letter}"
+    [ -d "$sysfs" ] || sysfs="${SYSFS_PATH}/td${letter}"
+    local holders="${sysfs}/holders"
+    [ -d "$holders" ] && ls "$holders/"
+    return 0
+}
+
+vhd_dm_remove()
+{
+    local minors=""
+    [ "$DEACTIVATE_TAPDISKS" = "true" ] && {
+	minors=$(vhd_dm_to_tapdev_minors "$DEV") || \
+	    die "error parsing tapdev minor"
+    }
+
+    [ "$REMOVE_PARTITIONS" = "yes" ] && {
+	vhd_dm_remove_partitions || die "error removing partitions"
+    }
+
+    "$DMSETUP_BIN" remove -f "$DEV" 2>/dev/null || \
+	die "error removing device $DEV"
+
+    [ "$DEACTIVATE_TAPDISKS" = "true" ] && {
+	for minor in $(echo "$minors" | sed 's/ /\n/g'); do
+	    local letter="$(tapdev_minor_to_letter $minor)" || \
+		die "error parsing minor $minor"
+
+	    [ -n "$(vhd_dm_holders $letter)" ] && die \
+		"tapdev $minor still in use (are there dm partitions?)"
+
+	    echo > "${TAPDISK_CTL}${minor}/remove" || \
+		die "error deactivating tapdev $minor"
+	done
+    }
+
+    return 0
+}
+
+ARGS=()
+DEACTIVATE_TAPDISKS=true
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+	--preserve-tapdisks)
+	    DEACTIVATE_TAPDISKS=false
+	    ;;
+	--partitions)
+	    REMOVE_PARTITIONS=yes
+	    ;;
+	-h|--help)
+	    usage
+	    exit 0
+	    ;;
+	--*)
+	    usage
+	    exit 1
+	    ;;
+	*)
+	    ARGS+=("$1")
+	    ;;
+    esac
+    shift
+done
+
+TGT="${ARGS[0]}"
+[ -z "$TGT" ] && { usage; exit 1; }
+
+if [ "$TGT" = "$(basename $TGT)" ] ; then
+    NAME="$TGT"
+    DEV="${MAPPER_DIR}/$NAME"
+elif [ "$(dirname $TGT)" = "$MAPPER_DIR" ] ; then
+    DEV="$TGT"
+    NAME="$(basename $DEV)"
+else
+    die "invalid device name $TGT"
+fi
+
+[ -e "$DEV" ] || die "$NAME ($DEV) does not exist"
+
+vhd_dm_remove
