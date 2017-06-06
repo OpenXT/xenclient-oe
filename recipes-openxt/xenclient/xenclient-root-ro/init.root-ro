@@ -170,11 +170,6 @@ fail_first_seal()
     exit 1
 }
 
-#For TPM2.0, we perform 'parallel' sealing. For each supported pcr bank hash type, we seal
-#our config key. This approach addresses a deficiency with firmware that is inconsistent in
-#how its measurements are performed. For example, the Intel Computestick only extends pcr 0-4
-#in SHA1. With this approach, we can catch BIOS measurement changes on a variety of platforms
-#without coding edge cases for each one.
 seal()
 {
     local tss_file=${1}
@@ -192,11 +187,7 @@ seal()
     if [ "${tpm2}" -eq 0 ];
     then
         clean_old_tpm_files
-        if pcr_bank_exists "TPM_ALG_SHA1"; then
-            sealout=$(tpm2_sealdata -H 0x81000001 -I ${seal_file} -O ${tss_file}.sha1 -o ${tss_file}.pub.sha1 -g 0x4 -G 0x8 -b 0x492 $(cat /config/config.pcrs) 2>&1 )
-            sealerr=$?
-        fi
-        if pcr_bank_exists "TPM_ALG_SHA256" && [ $sealerr -eq 0 ]; then
+        if pcr_bank_exists "TPM_ALG_SHA256"; then
             sealout=$(tpm2_sealdata -H 0x81000000 -I ${seal_file} -O ${tss_file}.sha256 -o ${tss_file}.pub.sha256 -g 0xB -G 0x8 -b 0x492 $(cat /config/config.pcrs) 2>&1 )
             sealerr=$?
         fi
@@ -207,8 +198,6 @@ seal()
     fi
 
     if [ -e ${tss_file} ]; then
-        file_exists=0
-    elif [ -e ${tss_file}.sha1 ]; then
         file_exists=0
     elif [ -e ${tss_file}.sha256 ]; then
         file_exists=0
