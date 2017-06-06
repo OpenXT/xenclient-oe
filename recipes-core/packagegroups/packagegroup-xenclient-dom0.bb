@@ -69,7 +69,7 @@ RDEPENDS_${PN} = " \
     openssl \
     ntpdate \
     dd-buffered \
-    vhd-copy \
+    vhd-scripts \
     secure-vm \
     xenclient-sec-scripts \
     pmtools \
