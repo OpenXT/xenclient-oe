@@ -4,7 +4,7 @@ require recipes-devtools/ghc/ghc-pkg.inc
 DESCRIPTION = "XenClient database daemon"
 LICENSE = "GPLv2"
 LIC_FILES_CHKSUM = "file://../COPYING;md5=4641e94ec96f98fabc56ff9cc48be14b"
-DEPENDS = "xenclient-idl ocaml-cross ocaml-dbus xen-ocaml-libs xenclient-rpcgen-native"
+DEPENDS = "xenclient-idl ocaml-cross ocaml-dbus ocaml-libs xen-ocaml-libs xenclient-rpcgen-native"
 
 # Ocaml stuff is built with the native compiler with "-m32".
 
