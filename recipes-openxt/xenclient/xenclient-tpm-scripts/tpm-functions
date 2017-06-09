@@ -25,8 +25,6 @@
 
 clean_old_tpm_files () {
     [ -e /boot/system/tpm/config.tss ] && rm /boot/system/tpm/config.tss
-    [ -e /boot/system/tpm/config.tss.sha1 ] && rm /boot/system/tpm/config.tss.sha1
-    [ -e /boot/system/tpm/config.tss.pub.sha1 ] && rm /boot/system/tpm/config.tss.pub.sha1
     [ -e /boot/system/tpm/config.tss.sha256 ] && rm /boot/system/tpm/config.tss.sha256
     [ -e /boot/system/tpm/config.tss.pub.sha256 ] && rm /boot/system/tpm/config.tss.pub.sha256
 }
@@ -263,20 +261,14 @@ tpm2_ownership () {
     ret=$?
     [ ${ret} -ne 0 ] && echo ${err} && return ${ret}
 
-    banks=$(tpm2_listpcrs -s | cut -d ':' -f 2)
-    ret=$?
-    [ ${ret} -ne 0 ] && echo "Failed to list pcr banks" && return ${ret}
     #Create our primary object
-    for bank in $banks; do
-        alg=$(echo $bank | cut -d '(' -f 2 | cut -d ')' -f 1)
-        handle=$(echo -n "${passwd}" | tpm2_createprimary -A o -g ${alg} -G 0x1 -P | grep Handle | cut -d ':' -f 2)
-        ret=$?
-        [ ${ret} -ne 0 ] && echo "Failed to create primary" && return ${ret}
-        #Make it permanent for this measured install
-        err=$(tpm2_evictcontrol -A o -H ${handle} -S $(alg_to_handle ${alg}) -P "${passwd}" 2>&1)
-        ret=$?
-        [ ${ret} -ne 0 ] && echo ${err} && return ${ret}
-    done
+    handle=$(echo -n "${passwd}" | tpm2_createprimary -A o -g 0xB -G 0x1 -P | grep Handle | cut -d ':' -f 2)
+    ret=$?
+    [ ${ret} -ne 0 ] && echo "Failed to create primary" && return ${ret}
+    #Make it permanent for this measured install
+    err=$(tpm2_evictcontrol -A o -H ${handle} -S $(alg_to_handle "0x000b") -P "${passwd}" 2>&1)
+    ret=$?
+    [ ${ret} -ne 0 ] && echo ${err} && return ${ret}
     return 0
 }
 
@@ -375,17 +367,12 @@ tpm_forward_seal() {
     then
         seal_file=${key}
         clean_old_tpm_files
-        if pcr_bank_exists "TPM_ALG_SHA1"; then
-            tpm2_sealdata -H 0x81000001 -I ${seal_file} -O ${tss}.sha1 -o ${tss}.pub.sha1 -g 0x4 -G 8 -b 0x492 ${pcrs} 2>&1
-            err=$?
-            if [ $err -ne 0 ]; then return $err; fi
-        fi
         if pcr_bank_exists "TPM_ALG_SHA256"; then
             tpm2_sealdata -H 0x81000000 -I ${seal_file} -O ${tss}.sha256 -o ${tss}.pub.sha256 -g 0xB -G 8 -b 0x492 ${pcrs} 2>&1
             err=$?
             if [ $err -ne 0 ]; then return $err; fi
         fi
-        [ -e ${tss} ] || [ -e ${tss}.sha1 ] || [ -e ${tss}.sha256 ] && return 0
+        [ -e ${tss} ] || [ -e ${tss}.sha256 ] && return 0
         return 1
     else
         /etc/init.d/trousers status > /dev/null 2>&1
