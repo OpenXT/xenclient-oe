@@ -24,3 +24,11 @@ do_install() {
         rm -rf ${D}${sysconfdir}/rc.d
     fi
 }
+
+pkg_postinst_${PN}_append () {
+#! /bin/sh
+install -d /config/etc/lvm
+
+RESTORECON="/sbin/restorecon"
+[ -x "${RESTORECON}" ] && ${RESTORECON} -R -F /config/etc/lvm
+}
