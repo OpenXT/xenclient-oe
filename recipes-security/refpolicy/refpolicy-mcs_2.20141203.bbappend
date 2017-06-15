@@ -179,8 +179,9 @@ SRC_URI += " \
     file://patches/openxt-init-spec-domtrans.patch;patch=1 \
     file://patches/busybox-mmap-read-execute-checks-from-new-domain.patch \
     file://patches/tpm2util.patch;patch=1 \
+    file://patches/lvmetad-add-rules.patch \
     "
-    
+
 def get_poltype(f):
     import re
     config = open (f, "r")

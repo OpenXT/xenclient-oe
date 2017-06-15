@@ -128,7 +128,19 @@ activate_xenstored_initscript() {
     update-rc.d -r ${IMAGE_ROOTFS} xenstored defaults 05
 }
 
-ROOTFS_POSTPROCESS_COMMAND += " post_rootfs_shell_commands; remove_initscripts; activate_xenstored_initscript; process_tmp_stubdomain_items; "
+# packagegroup-xenclient-dom0 provides lvm2, so have lvmetad running as lvm2
+# utilities try to use it and warn in its absence.
+activate_lvmetad_initscript() {
+    update-rc.d -r ${IMAGE_ROOTFS} lvm2-lvmetad defaults 06
+}
+
+ROOTFS_POSTPROCESS_COMMAND += " \
+    post_rootfs_shell_commands; \
+    remove_initscripts; \
+    activate_xenstored_initscript; \
+    activate_lvmetad_initscript; \
+    process_tmp_stubdomain_items; \
+"
 
 inherit openxt-selinux-image
 #inherit validate-package-versions
