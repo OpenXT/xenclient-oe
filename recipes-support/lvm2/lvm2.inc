@@ -7,7 +7,7 @@ INC_PR = "r0"
 
 
 S = "${WORKDIR}/LVM2.${PV}"
-SRC_URI = "ftp://sources.redhat.com/pub/lvm2/old/LVM2.${PV}.tgz \
+SRC_URI = "http://sources.redhat.com/pub/lvm2/old/LVM2.${PV}.tgz \
            file://lvm.conf"
 
 # Unset user/group to unbreak install.
