@@ -20,8 +20,6 @@ do_install() {
         # Use Yocto compatible initscripts instead of the RHEL ones provided by
         # the tarball.
         oe_runmake 'DESTDIR=${D}' install install_initscripts_yocto
-        mv ${D}${sysconfdir}/rc.d/init.d ${D}${sysconfdir}/init.d
-        rm -rf ${D}${sysconfdir}/rc.d
     fi
 }
 
