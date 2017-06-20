@@ -40,7 +40,7 @@ Index: xen-4.6.5/tools/libxl/libxl_utils.c
  
 +int libxl_read_reboot(libxl_ctx *ctx, uint32_t domid, char **state)
 +{
-+    char path[49];
++    char path[sizeof("/state/00000000-0000-0000-0000-000000000000/reboot")];
 +    char uuid[37];
 +    libxl_dominfo domain;
 +
@@ -56,7 +56,7 @@ Index: xen-4.6.5/tools/libxl/libxl_utils.c
 +
 +int libxl_set_reboot(libxl_ctx *ctx, uint32_t domid, bool reboot)
 +{
-+    char path[49];
++    char path[sizeof("/state/00000000-0000-0000-0000-000000000000/reboot")];
 +    char uuid[37];
 +    libxl_dominfo domain;
 +
@@ -64,7 +64,7 @@ Index: xen-4.6.5/tools/libxl/libxl_utils.c
 +    uuid_unparse(domain.uuid.uuid, uuid);
 +
 +    sprintf(path, "/state/%s/reboot", uuid);
-+    if(reboot)
++    if (reboot)
 +        xs_write(ctx->xsh, XBT_NULL, path, "1", strlen("1"));
 +    else
 +        xs_rm(ctx->xsh, XBT_NULL, path);
@@ -74,7 +74,7 @@ Index: xen-4.6.5/tools/libxl/libxl_utils.c
 +
  int libxl_update_state_direct(libxl_ctx *ctx, libxl_uuid xl_uuid, const char * state)
  {
-     char path[48];
+     char path[sizeof("/state/00000000-0000-0000-0000-000000000000/state")];
 Index: xen-4.6.5/tools/libxl/libxl_utils.h
 ===================================================================
 --- xen-4.6.5.orig/tools/libxl/libxl_utils.h
@@ -92,7 +92,7 @@ Index: xen-4.6.5/tools/libxl/xl_cmdimpl.c
 ===================================================================
 --- xen-4.6.5.orig/tools/libxl/xl_cmdimpl.c
 +++ xen-4.6.5/tools/libxl/xl_cmdimpl.c
-@@ -2437,11 +2437,24 @@ static int handle_domain_death(uint32_t
+@@ -2437,11 +2437,21 @@ static int handle_domain_death(uint32_t
  
  {
      int restart = 0;
@@ -101,17 +101,15 @@ Index: xen-4.6.5/tools/libxl/xl_cmdimpl.c
  
      switch (event->u.domain_shutdown.shutdown_reason) {
      case LIBXL_SHUTDOWN_REASON_POWEROFF:
-         action = d_config->on_poweroff;
+-        action = d_config->on_poweroff;
 +        libxl_read_reboot(ctx, *r_domid, &reboot);
-+        if(reboot)
++        if ((reboot) && (strncmp(reboot, "1", 2) == 0))
 +        {
-+            if(strcmp(reboot, "1") == 0)
-+            {
-+                LOG("Setting domain action to reboot");
-+                action = d_config->on_reboot;
-+                libxl_update_state(ctx, *r_domid, "rebooting");
-+            }
++            LOG("Setting domain action to reboot");
++            action = d_config->on_reboot;
++            libxl_update_state(ctx, *r_domid, "rebooting");
 +        } else {
++            action = d_config->on_poweroff;
 +            libxl_update_state(ctx, *r_domid, "shutdowning");
 +        }
          break;
