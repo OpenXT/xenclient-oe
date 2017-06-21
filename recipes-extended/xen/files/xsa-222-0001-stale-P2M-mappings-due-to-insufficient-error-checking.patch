@@ -1,0 +1,129 @@
+################################################################################
+SHORT DESCRIPTION: 
+################################################################################
+XSA-222 (http://xenbits.xen.org/xsa/advisory-222.html)
+stale P2M mappings due to insufficient error checking.
+
+################################################################################
+LONG DESCRIPTION: 
+################################################################################
+Source: http://xenbits.xen.org/xsa/advisory-222.html
+Patches: xsa222-1-4.6.patch
+
+From: Andrew Cooper <andrew.cooper3@citrix.com>
+Subject: xen/memory: Fix return value handing of guest_remove_page()
+
+Despite the description in mm.h, guest_remove_page() previously returned 0 for
+paging errors.
+
+Switch guest_remove_page() to having regular 0/-error semantics, and propagate
+the return values from clear_mmio_p2m_entry() and mem_sharing_unshare_page()
+to the callers (although decrease_reservation() is the only caller which
+currently cares).
+
+This is part of XSA-222.
+
+Reported-by: Julien Grall <julien.grall@arm.com>
+Signed-off-by: Andrew Cooper <andrew.cooper3@citrix.com>
+Reviewed-by: Jan Beulich <jbeulich@suse.com>
+
+################################################################################
+PATCHES 
+################################################################################
+Index: xen-4.3.4/xen/common/memory.c
+===================================================================
+--- xen-4.3.4.orig/xen/common/memory.c
++++ xen-4.3.4/xen/common/memory.c
+@@ -159,6 +159,7 @@ int guest_remove_page(struct domain *d,
+     p2m_type_t p2mt;
+ #endif
+     unsigned long mfn;
++    int rc;
+ 
+ #ifdef CONFIG_X86
+     mfn = mfn_x(get_gfn_query(d, gmfn, &p2mt)); 
+@@ -176,7 +177,8 @@ int guest_remove_page(struct domain *d,
+                 put_page(page);
+         }
+         p2m_mem_paging_drop_page(d, gmfn, p2mt);
+-        return 1;
++
++        return 0;
+     }
+ #else
+     mfn = gmfn_to_mfn(d, gmfn);
+@@ -186,21 +188,25 @@ int guest_remove_page(struct domain *d,
+         put_gfn(d, gmfn);
+         gdprintk(XENLOG_INFO, "Domain %u page number %lx invalid\n",
+                 d->domain_id, gmfn);
+-        return 0;
++
++        return -EINVAL;
+     }
+             
+ #ifdef CONFIG_X86
+     if ( p2m_is_shared(p2mt) )
+     {
+-        /* Unshare the page, bail out on error. We unshare because 
+-         * we might be the only one using this shared page, and we
+-         * need to trigger proper cleanup. Once done, this is 
+-         * like any other page. */
+-        if ( mem_sharing_unshare_page(d, gmfn, 0) )
++        /*
++         * Unshare the page, bail out on error. We unshare because we
++         * might be the only one using this shared page, and we need to
++         * trigger proper cleanup. Once done, this is like any other page.
++         */
++        rc = mem_sharing_unshare_page(d, gmfn, 0);
++        if ( rc )
+         {
+             put_gfn(d, gmfn);
+             (void)mem_sharing_notify_enomem(d, gmfn, 0);
+-            return 0;
++
++            return rc;
+         }
+         /* Maybe the mfn changed */
+         mfn = mfn_x(get_gfn_query_unlocked(d, gmfn, &p2mt));
+@@ -213,7 +219,8 @@ int guest_remove_page(struct domain *d,
+     {
+         put_gfn(d, gmfn);
+         gdprintk(XENLOG_INFO, "Bad page free for domain %u\n", d->domain_id);
+-        return 0;
++
++        return -ENXIO;
+     }
+ 
+     if ( test_and_clear_bit(_PGT_pinned, &page->u.inuse.type_info) )
+@@ -227,7 +234,7 @@ int guest_remove_page(struct domain *d,
+     put_page(page);
+     put_gfn(d, gmfn);
+ 
+-    return 1;
++    return 0;
+ }
+ 
+ static void decrease_reservation(struct memop_args *a)
+@@ -271,7 +278,7 @@ static void decrease_reservation(struct
+             continue;
+ 
+         for ( j = 0; j < (1 << a->extent_order); j++ )
+-            if ( !guest_remove_page(a->domain, gmfn + j) )
++            if ( guest_remove_page(a->domain, gmfn + j) )
+                 goto out;
+     }
+ 
+Index: xen-4.3.4/xen/include/xen/mm.h
+===================================================================
+--- xen-4.3.4.orig/xen/include/xen/mm.h
++++ xen-4.3.4/xen/include/xen/mm.h
+@@ -356,8 +356,7 @@ static inline unsigned int get_order_fro
+ 
+ void scrub_one_page(struct page_info *);
+ 
+-/* Returns 1 on success, 0 on error, negative if the ring
+- * for event propagation is full in the presence of paging */
++/* Returns 0 on success, or negative on error. */
+ int guest_remove_page(struct domain *d, unsigned long gmfn);
+ 
+ #define RAM_TYPE_CONVENTIONAL 0x00000001

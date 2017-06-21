@@ -1,0 +1,47 @@
+################################################################################
+SHORT DESCRIPTION: 
+################################################################################
+XSA-218 (http://xenbits.xen.org/xsa/advisory-218.html)
+Races in the grant table unmap code.
+
+################################################################################
+LONG DESCRIPTION: 
+################################################################################
+Source: http://xenbits.xen.org/xsa/advisory-218.html
+Patches: xsa218-4.5/0004-gnttab-correct-maptrack-table-accesses.patch
+
+From 1b0cf99d046286c601a28af0ef7c1a17eb3eb2cb Mon Sep 17 00:00:00 2001
+From: Jan Beulich <jbeulich@suse.com>
+Date: Thu, 15 Jun 2017 12:05:29 +0100
+Subject: [PATCH 4/4] gnttab: correct maptrack table accesses
+
+In order to observe a consistent (limit,pointer-table) pair, the reader
+needs to either hold the grant table lock or both sides need to order
+their accesses suitably (the writer side barrier is already there). Add
+the missing barrier.
+
+This is part of XSA-218.
+
+Signed-off-by: Jan Beulich <jbeulich@suse.com>
+Reviewed-by: George Dunlap <george.dunlap@citrix.com>
+---
+ xen/common/grant_table.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+################################################################################
+PATCHES 
+################################################################################
+Index: xen-4.3.4/xen/common/grant_table.c
+===================================================================
+--- xen-4.3.4.orig/xen/common/grant_table.c
++++ xen-4.3.4/xen/common/grant_table.c
+@@ -852,7 +852,9 @@ __gnttab_unmap_common(
+         return;
+     }
+ 
++    smp_rmb();
+     map = &maptrack_entry(lgt, op->handle);
++
+     spin_lock(&lgt->lock);
+ 
+     if ( unlikely(!map->flags) )

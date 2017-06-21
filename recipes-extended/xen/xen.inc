@@ -144,6 +144,19 @@ SRC_URI = "${XEN_SRC_URI};name=source \
     file://xsa-213-x86-64bit-PV-guest-breakout-via-pagetable-use-after-mode-change.patch \
     file://xsa-214-grant-transfer-allows-pv-guest-to-elevate-privileges.patch \
     file://xsa-215-possible-memory-corruption-via-failsafe-callback.patch \
+    file://xsa-217-page-transfer-may-allow-PV-guest-to-elevate-privilege.patch \
+    file://xsa-218-0001-races-in-the-grant-table-unmap-code.patch \
+    file://xsa-218-0002-races-in-the-grant-table-unmap-code.patch \
+    file://xsa-218-0003-races-in-the-grant-table-unmap-code.patch \
+    file://xsa-218-0004-races-in-the-grant-table-unmap-code.patch \
+    file://xsa-219-insufficient-reference-counts-during-shadow-emulation.patch \
+    file://x86-P2M-pass-on-errors-from-p2m_set_entry.patch \
+    file://xsa-222-0001-stale-P2M-mappings-due-to-insufficient-error-checking.patch \
+    file://xsa-222-0002-stale-P2M-mappings-due-to-insufficient-error-checking.patch \
+    file://xsa-224-0001-grant-table-operations-mishandle-reference-counts.patch \
+    file://xsa-224-0002-grant-table-operations-mishandle-reference-counts.patch \
+    file://xsa-224-0003-grant-table-operations-mishandle-reference-counts.patch \
+    file://xsa-224-0004-grant-table-operations-mishandle-reference-counts.patch \
 "
 
 SRC_URI[source.md5sum] := "${XEN_SRC_MD5SUM}"
