@@ -47,6 +47,11 @@ pcr_bank_exists () {
     return 1
 }
 
+hex2bin() {
+    read hex
+    echo -n $hex | sed 's/\([0-9A-F]\{2\}\)/\\\\\\x\1/gI' | xargs printf
+}
+
 early_setup() {
     mkdir -p /proc /sys /mnt /tmp
     mount -t proc proc /proc
@@ -194,14 +199,16 @@ tpm_setup() {
         if pcr_bank_exists "TPM_ALG_SHA256"; then
             s=$(sha256sum $ROOT_DEVICE)
             echo $s
-            DIGEST=$(echo -n ${s:0:64})
-            tpm2_extendpcr -c 15 -g 0xB -s $DIGEST
+            # tpm2_extendpcr takes in binary not ascii, must convert.
+            DIGEST="$(echo -n ${s:0:64}|hex2bin)"
+            tpm2_extendpcr -c 15 -g 0xB -s "$DIGEST"
             return $?
         else
             s=$(sha1sum $ROOT_DEVICE)
             echo $s
-            DIGEST=$(echo -n ${s:0:40})
-            tpm2_extendpcr -c 15 -g 0x4 -s $DIGEST
+            # tpm2_extendpcr takes in binary not ascii, must convert.
+            DIGEST="$(echo -n ${s:0:40}|hex2bin)"
+            tpm2_extendpcr -c 15 -g 0x4 -s "$DIGEST"
             return $?
         fi
     else
