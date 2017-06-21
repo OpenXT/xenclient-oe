@@ -85,6 +85,20 @@ SRC_URI_append = " \
     file://xsa-213-x86-64bit-PV-guest-breakout-via-pagetable-use-after-mode-change.patch \
     file://xsa-214-grant-transfer-allows-pv-guest-to-elevate-privileges.patch \
     file://xsa-215-possible-memory-corruption-via-failsafe-callback.patch \
+    file://xsa217.patch \
+    file://xsa218-4.6/0001-IOMMU-handle-IOMMU-mapping-and-unmapping-failures.patch \
+    file://xsa218-4.6/0002-gnttab-fix-unmap-pin-accounting-race.patch \
+    file://xsa218-4.6/0003-gnttab-Avoid-potential-double-put-of-maptrack-entry.patch \
+    file://xsa218-4.6/0004-gnttab-correct-maptrack-table-accesses.patch \
+    file://xsa219-4.6.patch \
+    file://xsa220-4.6.patch \
+    file://xsa221.patch \
+    file://xsa222-1-4.6.patch \
+    file://xsa222-2-4.6.patch \
+    file://xsa224-4.6/0001-gnttab-Fix-handling-of-dev_bus_addr-during-unmap.patch \
+    file://xsa224-4.6/0002-gnttab-never-create-host-mapping-unless-asked-to.patch \
+    file://xsa224-4.6/0003-gnttab-correct-logic-to-get-page-references-during-m.patch \
+    file://xsa224-4.6/0004-gnttab-__gnttab_unmap_common_complete-is-all-or-noth.patch \
 "
 
 COMPATIBLE_HOST = 'i686-oe-linux|(x86_64.*).*-linux|aarch64.*-linux'
