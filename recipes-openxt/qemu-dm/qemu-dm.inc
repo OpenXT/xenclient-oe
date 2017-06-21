@@ -41,6 +41,7 @@ SRC_URI += "file://compile-time-stubdom-flag.patch \
             file://block-remove-unused-block-format-support.patch \
             file://net-Remove-unused-network-options.patch \
             file://xsa-197-qemu-incautious-about-shared-ring-processing.patch \
+            file://xsa216-qemuu-4.7.patch \
             file://CVE-2016-8669-char-serial-check-divider-value-against-baud-base.patch \
             file://CVE-2016-8909-audio-intel-hda-check-stream-entry-count-during-tran.patch \
             file://CVE-2016-8910-net-rtl8139-limit-processing-of-ring-descriptors.patch \
