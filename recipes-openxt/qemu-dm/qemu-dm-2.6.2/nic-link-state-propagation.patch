@@ -77,7 +77,7 @@ Index: qemu-2.6.2/hw/xen/xen_backend.c
  
  #include <xen/grant_table.h>
  
-@@ -607,6 +608,209 @@ static int xenstore_scan(const char *typ
+@@ -607,6 +608,214 @@ static int xenstore_scan(const char *typ
      return 0;
  }
  
@@ -126,17 +126,17 @@ Index: qemu-2.6.2/hw/xen/xen_backend.c
 + * @param base is able to store at least XEN_BUFSIZE bytes.
 + * @return 0 on success, -ERRNO else.
 + */
-+static int xenstore_get_nic_path(const NICInfo *ni, char *base)
++static int xenstore_get_nic_path(const struct NetClientState *ncs, char *base)
 +{
 +    char *dompath;
 +    char type[XENSTORE_NET_TYPE_LEN];
 +    char id[XENSTORE_NET_ID_LEN];
 +
-+    assert(ni);
++    assert(ncs);
 +    assert(base);
 +
-+    if (xenstore_nic_parse_name(ni->name, type, id)) {
-+        fprintf(stderr, "failed to parse nic backend xenstore name `%s'.\n", ni->name);
++    if (xenstore_nic_parse_name(ncs->name, type, id)) {
++        fprintf(stderr, "failed to parse nic backend xenstore name `%s'.\n", ncs->name);
 +        return -EINVAL;
 +    }
 +    dompath = xs_get_domain_path(xenstore, xen_domid);
@@ -157,15 +157,24 @@ Index: qemu-2.6.2/hw/xen/xen_backend.c
 + * @param conf a valid pointer to a NICConf.
 + * @return a pointer to the corresponding NICInfo, NULL else.
 + */
-+static NICInfo *qemu_find_nicinfo(const NICConf *conf)
++static struct NetClientState *qemu_find_netclientstate(const NICConf *conf)
 +{
 +    size_t i;
++    NetClientState *ncs[MAX_QUEUE_NUM];
++    NICState *tstate;
++    NICConf  *tconf;
++    int count;
 +
 +    assert(conf);
 +
-+    for (i = 0; i < MAX_NICS; ++i) {
-+        if (!memcmp(&nd_table[i].macaddr.a[0], &conf->macaddr.a[0], 6)) {
-+            return &nd_table[i];
++    count = qemu_find_net_clients_except(NULL, ncs,
++                                         NET_CLIENT_OPTIONS_KIND_TAP,
++                                         MAX_QUEUE_NUM);
++    for (i = 0; i < count; ++i) {
++        tstate = qemu_get_nic(ncs[i]);
++        tconf = tstate->conf;
++        if (!memcmp(&tconf->macaddr.a, &conf->macaddr.a, 6)) {
++            return ncs[i];
 +        }
 +    }
 +    return NULL;
@@ -178,17 +187,14 @@ Index: qemu-2.6.2/hw/xen/xen_backend.c
 + */
 +static void xenstore_update_nic(void *opaque)
 +{
-+    const NICInfo *ni = opaque;
++    const struct NetClientState *ncs = opaque;
 +    char base[XEN_BUFSIZE];
 +    int val;
 +
 +    assert(opaque);
-+    assert(ni->used);
-+    assert(ni->netdev);
-+    assert(ni->netdev->peer);
 +
-+    if (xenstore_get_nic_path(ni, base)) {
-+        fprintf(stderr, "Could not find xenstore path for dom%d NIC `%s'.\n", xen_domid, ni->name);
++    if (xenstore_get_nic_path(ncs, base)) {
++        fprintf(stderr, "Could not find xenstore path for dom%d NIC `%s'.\n", xen_domid, ncs->name);
 +        return;
 +    }
 +    if (xenstore_read_int(base, "disconnect", &val)) {
@@ -196,14 +202,13 @@ Index: qemu-2.6.2/hw/xen/xen_backend.c
 +        return;
 +    }
 +
-+    NetClientState *ncs = ni->netdev->peer;
 +    if (ncs->link_down != !!val) {
 +        /* notify the emulation through qmp.
 +         * note that qmp_set_link boolean is "link-up?",
 +         * not nc->link_down "link-down?". */
 +        qmp_set_link(ncs->name, !val, NULL);
 +        fprintf(stderr, "%s (%s): link status is now %s.\n",
-+                ncs->name, ni->name, !!val ? "down" : "up");
++                ncs->name, ncs->name, !!val ? "down" : "up");
 +    }
 +}
 +
@@ -229,24 +234,24 @@ Index: qemu-2.6.2/hw/xen/xen_backend.c
 +int xenstore_register_nic(NICConf *conf)
 +{
 +    char base[XEN_BUFSIZE];
-+    NICInfo *ni;
++    struct NetClientState *ncs;
 +
 +    assert(conf);
 +
-+    ni = qemu_find_nicinfo(conf);
-+    if (!ni) {
++    ncs = qemu_find_netclientstate(conf);
++    if (!ncs) {
 +        fprintf(stderr, "Failed to find backend device for emulated NIC conf %p\n", conf);
 +        return -ENODEV;
 +    }
-+    if (xenstore_get_nic_path(ni, base)) {
-+        fprintf(stderr, "Could not find xenstore path for dom%d NIC `%s'.\n", xen_domid, ni->name);
++    if (xenstore_get_nic_path(ncs, base)) {
++        fprintf(stderr, "Could not find xenstore path for dom%d NIC `%s'.\n", xen_domid, ncs->name);
 +        return -ENOENT;
 +    }
-+    if (xenstore_add_watch(base, "disconnect", xenstore_update_nic, ni)) {
++    if (xenstore_add_watch(base, "disconnect", xenstore_update_nic, ncs)) {
 +        fprintf(stderr, "Could not install xenstore watch on path `%s/disconnect'.\n", base);
 +        return -1;
 +    }
-+    xenstore_update_nic(ni);
++    xenstore_update_nic(ncs);
 +
 +    qemu_mac_printf("Registered xenstore watch for NIC addr:",
 +                    &conf->macaddr.a[0]);
@@ -264,20 +269,20 @@ Index: qemu-2.6.2/hw/xen/xen_backend.c
 +int xenstore_unregister_nic(NICConf *conf)
 +{
 +    char base[XEN_BUFSIZE];
-+    NICInfo *ni;
++    struct NetClientState *ncs;
 +
 +    assert(conf);
 +
-+    ni = qemu_find_nicinfo(conf);
-+    if (!ni) {
++    ncs = qemu_find_netclientstate(conf);
++    if (!ncs) {
 +        fprintf(stderr, "Failed to find backend device for emulated NIC conf %p\n", conf);
 +        return -ENODEV;
 +    }
-+    if (xenstore_get_nic_path(ni, base)) {
-+        fprintf(stderr, "Could not find xenstore path for dom%d NIC `%s'.\n", xen_domid, ni->name);
++    if (xenstore_get_nic_path(ncs, base)) {
++        fprintf(stderr, "Could not find xenstore path for dom%d NIC `%s'.\n", xen_domid, ncs->name);
 +        return -ENOENT;
 +    }
-+    if (xenstore_remove_watch(base, "disconnect", xenstore_update_nic, ni)) {
++    if (xenstore_remove_watch(base, "disconnect", xenstore_update_nic, ncs)) {
 +        fprintf(stderr, "Could not install xenstore watch on path `%s/disconnect'.\n", base);
 +        return -1;
 +    }
