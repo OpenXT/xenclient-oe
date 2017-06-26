@@ -7,19 +7,17 @@ SRC_URI += " \
 
 CACHED_CONFIGUREVARS += "MODPROBE_CMD=${base_sbindir}/modprobe"
 
-do_install() {
-    autotools_do_install
-
-    # Install machine specific configuration file
-    install -m 0644 ${WORKDIR}/lvm.conf ${D}${sysconfdir}/lvm/lvm.conf
-    sed -i -e 's:@libdir@:${libdir}:g' ${D}${sysconfdir}/lvm/lvm.conf
-    if ${@base_contains('DISTRO_FEATURES','systemd','true','false',d)}; then
-        oe_runmake 'DESTDIR=${D}' install install_systemd_units
-        sed -i -e 's:/usr/bin/true:${base_bindir}/true:g' ${D}${systemd_system_unitdir}/blk-availability.service
-    else
+# meta-oe recipe will already _append the autotools do_install(), and
+# do_<something>_append() cannot be overridden...
+# So instead, overwrite the files since this is a bbappend it should be done
+# after the initial do_install_append()
+do_install_append() {
+    if ! ${@base_contains('DISTRO_FEATURES','systemd','true','false',d)}; then
         # Use Yocto compatible initscripts instead of the RHEL ones provided by
         # the tarball.
         oe_runmake 'DESTDIR=${D}' install install_initscripts_yocto
+        mv -f ${D}${sysconfdir}/rc.d/init.d/* ${D}${sysconfdir}/init.d/
+        rm -rf ${D}${sysconfdir}/rc.d
     fi
 }
 
