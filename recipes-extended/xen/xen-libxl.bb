@@ -103,4 +103,7 @@ do_install() {
     install -d ${D}${sysconfdir}/init.d
     install -m 0755 ${WORKDIR}/xen-init-dom0.initscript \
                     ${D}${sysconfdir}/init.d/xen-init-dom0
+    install -d ${D}${sysconfdir}/xen
+    install -m 0644 ${WORKDIR}/xl.conf \
+                    ${D}${sysconfdir}/xen/xl.conf
 }
