@@ -1,4 +1,4 @@
-From 7792dba2820b497780c2087c3043c5697ac5e3a5 Mon Sep 17 00:00:00 2001
+From 1621e6f3d1242dd11b9697a713bfcde0ae9a3299 Mon Sep 17 00:00:00 2001
 From: "Daniel P. Smith" <dpsmith@apertussolutions.com>
 Date: Wed, 7 Jun 2017 14:34:49 -0400
 Subject: [PATCH] pcr-calc: adding the pcr calculator
@@ -12,7 +12,7 @@ Signed-off-by: Daniel P. Smith <dpsmith@apertussolutions.com>
  pcr-calc/hash.c        | 210 ++++++++++++++++++++++++
  pcr-calc/heap.h        | 354 ++++++++++++++++++++++++++++++++++++++++
  pcr-calc/module_hash.c | 427 +++++++++++++++++++++++++++++++++++++++++++++++++
- pcr-calc/pcr-calc.c    | 311 +++++++++++++++++++++++++++++++++++
+ pcr-calc/pcr-calc.c    | 330 ++++++++++++++++++++++++++++++++++++++
  pcr-calc/tb_policy.c   |  82 ++++++++++
  pcr-calc/tb_policy.h   |  43 +++++
  pcr-calc/tpm.c         | 373 ++++++++++++++++++++++++++++++++++++++++++
@@ -20,7 +20,7 @@ Signed-off-by: Daniel P. Smith <dpsmith@apertussolutions.com>
  pcr-calc/util.c        | 134 ++++++++++++++++
  pcr-calc/util.h        |  45 ++++++
  pcr-calc/uuid.h        |  53 ++++++
- 15 files changed, 2420 insertions(+), 1 deletion(-)
+ 15 files changed, 2439 insertions(+), 1 deletion(-)
  create mode 100644 pcr-calc/Makefile
  create mode 100644 pcr-calc/eventlog.c
  create mode 100644 pcr-calc/eventlog.h
@@ -1309,10 +1309,10 @@ index 0000000..4cf1579
 +}
 diff --git a/pcr-calc/pcr-calc.c b/pcr-calc/pcr-calc.c
 new file mode 100644
-index 0000000..2eba6fe
+index 0000000..93bdfb1
 --- /dev/null
 +++ b/pcr-calc/pcr-calc.c
-@@ -0,0 +1,311 @@
+@@ -0,0 +1,330 @@
 +/*
 + *
 + * Copyright (c) 2017 Daniel P. Smith
@@ -1367,9 +1367,11 @@ index 0000000..2eba6fe
 +
 +
 +/* flags */
-+#define FLAG_TPM12 1
-+#define FLAG_TPM20 1<<1
-+#define FLAG_DA    1<<2
++#define FLAG_TPM12	1
++#define FLAG_TPM20	1<<1
++#define FLAG_DA		1<<2
++#define FLAG_LOG	1<<3
++#define FLAG_VERBOSE	1<<4
 +
 +#define TPM12_LOG "/sys/kernel/security/txt/tpm12_binary_evtlog"
 +#define TPM20_LOG "/sys/kernel/security/txt/tpm20_binary_evtlog"
@@ -1382,6 +1384,8 @@ index 0000000..2eba6fe
 +		"\t-h Help: will print out this help message.\n"
 +		"\t-2 TPM 2.0.\n"
 +		"\t-d D/A mode.\n"
++		"\t-l Print TPM eventlog.\n"
++		"\t-v Print calculated TPM eventlog.\n"
 +		"\t-a alg Alogrithm: select what hash alogrithm to use.\n"
 +		"\t-p policy_file Tboot Policy: the policy that was/will be used.\n"
 +		"\t-m hash_str Multiboot Module: include module hash (MLE first).\n");
@@ -1510,7 +1514,7 @@ index 0000000..2eba6fe
 +
 +	flags = FLAG_TPM12;
 +
-+	while ((opt = getopt(argc, (char ** const)argv, "h2da:p:m:")) != -1) {
++	while ((opt = getopt(argc, (char ** const)argv, "h2dlva:p:m:")) != -1) {
 +		switch (opt) {
 +			case 'm':
 +				if (mb_count > 20) {
@@ -1554,6 +1558,12 @@ index 0000000..2eba6fe
 +			case 'd':
 +				flags |= FLAG_DA;
 +			break;
++			case 'l':
++				flags |= FLAG_LOG;
++			break;
++			case 'v':
++				flags |= FLAG_VERBOSE;
++			break;
 +			case 'h':
 +				print_help();
 +				ret = 1;
@@ -1562,12 +1572,6 @@ index 0000000..2eba6fe
 +			break;
 +		}
 +	}
-+	if (!policy_file) {
-+		error_msg("the policy file must be provided!\n");
-+		ret = 1;
-+		goto out;
-+	}
-+
 +	if (flags & FLAG_TPM12) {
 +		char *buffer;
 +		size_t size = read_file(TPM12_LOG, &buffer);
@@ -1602,6 +1606,17 @@ index 0000000..2eba6fe
 +		t->alg = alg_override != 0 ? alg_override : policy_file->hash_alg;
 +	}
 +
++	if (flags & FLAG_LOG) {
++		tpm_dump(t, t->alg);
++		return 0;
++	}
++
++	if (!policy_file) {
++		error_msg("the policy file must be provided!\n");
++		ret = 1;
++		goto out;
++	}
++
 +	if (flags & FLAG_DA) {
 +		if (!apply_da_policy(t, policy_file, pol_size, mb, mb_count)) {
 +			error_msg("failed applying DA policy.\n");
@@ -1616,7 +1631,11 @@ index 0000000..2eba6fe
 +		}
 +	}
 +
-+	tpm_print(t, t->alg);
++	if (flags & FLAG_VERBOSE)
++		tpm_dump(t, t->alg);
++	else
++		tpm_print(t, t->alg);
++
 +	return 0;
 +
 +out_destroy:
