@@ -33,13 +33,21 @@ tpm2=$?
 operation="seal"
 config_key="/config/keys/config.key"
 sealed_key="/boot/system/tpm/config.tss"
-pcr_list="/config/config.pcrs"
+static_pcrs="0 1 2 3"
+dynamic_pcrs="15 17 18 19"
+hashalg="sha1"
 good_pcrs="/config/good.pcrs"
 bad_pcrs="/boot/system/tpm/bad.pcrs"
 root_dev="/dev/mapper/xenclient-root"
 
-while getopts ":fc:t:p:g:b:r:" opt; do
+while getopts ":sufc:t:p:g:b:r:" opt; do
     case $opt in
+    s)
+        operation="seal"
+    ;;
+    u)
+        operation="unseal"
+    ;;
     f)
         operation="forward"
     ;;
@@ -67,10 +75,9 @@ while getopts ":fc:t:p:g:b:r:" opt; do
     esac
 done
 
-
 case $operation in
 seal)
-    local file_exists=1
+    file_exists=1
     if [ "${tpm2}" -eq 0 ];
     then
         sealerr=0
@@ -94,12 +101,11 @@ seal)
         file_exists=1
     fi
 
-    if [ $sealerr -eq 0 ] && [ $file_exists -eq 0 ]; then
+    if [ $sealerr -eq 0 ] && [ -e ${sealed_key} ]; then
         # store PCR hints for recovery
         if [ -d "${TPM_DEV}" ]; then
             [ -f "${bad_pcrs}" ] && rm "${bad_pcrs}"
-            if [ "${tpm2}" -eq 0 ];
-            then
+            if [ "${tpm2}" -eq 0 ]; then
                 tpm2_listpcrs > "${good_pcrs}"
             else
                 cat "${TPM_DEV}/pcrs" > "${good_pcrs}"
@@ -110,25 +116,31 @@ seal)
     fi
 ;;
 forward)
+    [ "${tpm2}" -eq 0 ] && hashalg="sha256"
 
-    pcrs=$(calculate_pcrs "/" /boot/system/grub/grub.cfg) ||
+    for p in ${static_pcrs}; do
+        pcr_params="${pcr_params} -p ${p}"
+    done
+
+    # During early init, rootfs is hashed and is given to
+    # tpm_extend which for tpm1.2 hashes the rootfs hash again and
+    # hands that value to the TPM to be extended into PCR 15
+    root_hash=$(${hashalg}sum ${root_dev}|cut -f1 -d' ')
+    [ "${tpm2}" -ne 0 ] && root_hash=$(echo -n ${root_hash}|${hashalg}sum|cut -f1 -d' ')
+    pcr15=$(hash_extend 0 ${root_hash} ${hashalg}) ||
+        err "failed to hash root device"
+
+    pcr_params="${pcr_params} -p 15:${pcr15}"
+
+    pcrs=$(calculate_pcrs "/" /boot/system/grub/grub.cfg ${hashalg}) ||
         err "failed to calculate pcrs"
 
     pcr17=$(echo $pcrs | awk '{ print $1 }')
     pcr18=$(echo $pcrs | awk '{ print $2 }')
     pcr19=$(echo $pcrs | awk '{ print $3 }')
 
-    if [ "${tpm2}" -eq 0 ]; then
-        shaalg="sha256sum"
-    else
-        shaalg="sha1sum"
-    fi
-    # During early init, rootfs is hashed and is given to
-    # tpm_extend which hashes the rootfs hash and hands that value
-    # to the TPM to be extended into PCR 15
-    root_hash=$(${shaalg} ${root_dev}|cut -f1 -d' ')
-    pcr15=$(hash_extend 0 $(echo -n ${root_hash}|${shaalg}|cut -f1 -d' ')) ||
-        err "failed to hash root device"
+    pcr_params="${pcr_params} -p 17:${pcr17} -p 18:${pcr18} -p 19:${pcr19}"
+    echo "$pcr_params" > /boot/system/tpm/forward_pcr.lst
 
     if [ -e "${sealed_key}" ]; then
         mv ${sealed_key} ${sealed_key}.old
@@ -140,11 +152,22 @@ forward)
         mv ${sealed_key}.sha256 ${sealed_key}.sha256.old
     fi
 
-    tpm_forward_seal -r/ -p15:${pcr15} -p17:${pcr17} -p18:${pcr18} \
-        -p19:${pcr19} ${config_key} ${sealed_key}
+    tpm_forward_seal -a ${hashalg} ${pcr_params} ${config_key} ${sealed_key}
     [ $? -eq 0 ] || err "forward seal of key failed"
 
     exit 0
+;;
+unseal)
+    for p in ${static_pcrs} ${dynamic_pcrs}; do
+        pcr_params="${pcr_params} -p ${p}"
+    done
+
+    [ -e "${sealed_key}.${hashalg}" ] || err "sealed key file missing"
+    [ "${tpm2}" -eq 0 ] && [ -e "${sealed_key}.pub.${hashalg}" ] ||
+        err "sealed pub key file missing"
+
+    tpm_unseal -a ${hashalg} ${pcr_params} ${sealed_key}
+    [ $? -eq 0 ] || err "unseal failed"
 ;;
 esac
 
