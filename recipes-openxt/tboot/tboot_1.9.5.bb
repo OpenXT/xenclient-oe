@@ -14,11 +14,11 @@ SRC_URI = "http://downloads.sourceforge.net/tboot/tboot-${PV}.tar.gz \
            file://tboot-adjust-grub2-modules.patch \
            file://warn-on-failure-policy.patch \
            file://tpm-reserve-mmio-region.patch \
-           file://add-a-PCR-calculator-to-predict-measurements.patch \
+           file://pcr-calc-adding-the-pcr-calculator.patch \
            file://tb-polgen-tpm-2.0.patch \
            file://tpm2-extpol-sha256.patch \
-           file://tpm2-pcr-calc.patch \
            file://tpm2-orderly-shutdown.patch \
+           file://tboot-export-of-tpm-event-log.patch \
            "
 
 SRC_URI[md5sum] = "7946ed861628fab1e6d5e35fbcc5d614"
