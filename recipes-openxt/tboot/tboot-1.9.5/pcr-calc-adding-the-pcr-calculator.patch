@@ -1,0 +1,2576 @@
+From 1621e6f3d1242dd11b9697a713bfcde0ae9a3299 Mon Sep 17 00:00:00 2001
+From: "Daniel P. Smith" <dpsmith@apertussolutions.com>
+Date: Wed, 7 Jun 2017 14:34:49 -0400
+Subject: [PATCH] pcr-calc: adding the pcr calculator
+
+Signed-off-by: Daniel P. Smith <dpsmith@apertussolutions.com>
+---
+ Makefile               |   2 +-
+ pcr-calc/Makefile      |  70 ++++++++
+ pcr-calc/eventlog.c    | 119 ++++++++++++++
+ pcr-calc/eventlog.h    |  42 +++++
+ pcr-calc/hash.c        | 210 ++++++++++++++++++++++++
+ pcr-calc/heap.h        | 354 ++++++++++++++++++++++++++++++++++++++++
+ pcr-calc/module_hash.c | 427 +++++++++++++++++++++++++++++++++++++++++++++++++
+ pcr-calc/pcr-calc.c    | 330 ++++++++++++++++++++++++++++++++++++++
+ pcr-calc/tb_policy.c   |  82 ++++++++++
+ pcr-calc/tb_policy.h   |  43 +++++
+ pcr-calc/tpm.c         | 373 ++++++++++++++++++++++++++++++++++++++++++
+ pcr-calc/tpm.h         | 156 ++++++++++++++++++
+ pcr-calc/util.c        | 134 ++++++++++++++++
+ pcr-calc/util.h        |  45 ++++++
+ pcr-calc/uuid.h        |  53 ++++++
+ 15 files changed, 2439 insertions(+), 1 deletion(-)
+ create mode 100644 pcr-calc/Makefile
+ create mode 100644 pcr-calc/eventlog.c
+ create mode 100644 pcr-calc/eventlog.h
+ create mode 100644 pcr-calc/hash.c
+ create mode 100644 pcr-calc/heap.h
+ create mode 100644 pcr-calc/module_hash.c
+ create mode 100644 pcr-calc/pcr-calc.c
+ create mode 100644 pcr-calc/tb_policy.c
+ create mode 100644 pcr-calc/tb_policy.h
+ create mode 100644 pcr-calc/tpm.c
+ create mode 100644 pcr-calc/tpm.h
+ create mode 100644 pcr-calc/util.c
+ create mode 100644 pcr-calc/util.h
+ create mode 100644 pcr-calc/uuid.h
+
+diff --git a/Makefile b/Makefile
+index efb17e3..0e85e73 100644
+--- a/Makefile
++++ b/Makefile
+@@ -14,7 +14,7 @@ export ROOTDIR=$(CURDIR)
+ include Config.mk
+ 
+ # (txt-test is not included because it requires pathing to Linux src)
+-SUBDIRS := tboot lcptools lcptools-v2 tb_polgen utils docs
++SUBDIRS := tboot lcptools lcptools-v2 tb_polgen utils pcr-calc docs
+ 
+ #
+ # build rules
+diff --git a/pcr-calc/Makefile b/pcr-calc/Makefile
+new file mode 100644
+index 0000000..25e0591
+--- /dev/null
++++ b/pcr-calc/Makefile
+@@ -0,0 +1,70 @@
++# Copyright (c) 2006-2010, Intel Corporation
++# All rights reserved.
++
++# -*- mode: Makefile; -*-
++
++#
++# utils makefile
++#
++
++ROOTDIR ?= $(CURDIR)/..
++
++include $(ROOTDIR)/Config.mk
++
++TARGETS := pcr-calc module_hash
++
++CFLAGS += -D_LARGEFILE64_SOURCE
++
++LIBS += -lcrypto -lz
++
++ifdef HAVE_BZIP
++BZIP_LIB := -lbz2
++else
++BZIP_LIB :=
++endif
++
++#
++# universal targets
++#
++build : $(TARGETS)
++
++
++dist : install
++
++
++install :
++	@set -e; for i in $(TARGETS);\
++	do \
++		$(MAKE) DISTDIR=$(DISTDIR) INST_TARGET=$(DISTDIR)/usr/sbin/$$i do_install; \
++	done
++
++.PHONY: do_install
++do_install : $(INST_TARGET)
++
++$(INST_TARGET) : $(notdir $(INST_TARGET))
++	[ -d $(DISTDIR)/usr/sbin ] || $(INSTALL_DIR) $(DISTDIR)/usr/sbin
++	$(INSTALL_PROG) -t $(DISTDIR)/usr/sbin $^
++
++
++clean :
++	rm -f $(TARGETS) *~ *.o *.mod.* *.symvers
++
++
++distclean : clean
++
++
++#
++# dependencies
++#
++
++BUILD_DEPS := $(ROOTDIR)/Config.mk $(CURDIR)/Makefile
++
++
++pcr-calc : eventlog.o pcr-calc.o tpm.o util.o hash.o tb_policy.o
++	$(CC) $(CFLAGS) $(LDFLAGS) $^ $(LIBS) -o $@
++
++module_hash : module_hash.o hash.o
++	$(CC) $(CFLAGS) $(LDFLAGS) $^ $(LIBS) $(BZIP_LIB) -o $@
++
++%.o : %.c $(BUILD_DEPS)
++	$(CC) $(CFLAGS) -DNO_TBOOT_LOGLVL -c $< -o $@
+diff --git a/pcr-calc/eventlog.c b/pcr-calc/eventlog.c
+new file mode 100644
+index 0000000..b232449
+--- /dev/null
++++ b/pcr-calc/eventlog.c
+@@ -0,0 +1,119 @@
++/*
++ *
++ * Copyright (c) 2017 Daniel P. Smith
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ *
++ *   * Redistributions of source code must retain the above copyright
++ *     notice, this list of conditions and the following disclaimer.
++ *   * Redistributions in binary form must reproduce the above
++ *     copyright notice, this list of conditions and the following
++ *     disclaimer in the documentation and/or other materials provided
++ *     with the distribution.
++ *   * Neither the name of the Intel Corporation nor the names of its
++ *     contributors may be used to endorse or promote products derived
++ *     from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
++ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
++ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
++ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
++ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
++ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
++ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
++ * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED
++ * OF THE POSSIBILITY OF SUCH DAMAGE.
++ *
++ */
++
++#include <stdio.h>
++#include <stdint.h>
++#include <stdbool.h>
++
++#include "uuid.h"
++#include "heap.h"
++#include "tpm.h"
++
++
++#define error_msg(fmt, ...)         fprintf(stderr, fmt, ##__VA_ARGS__)
++
++struct tpm *parse_tpm12_log(char *buffer, size_t size)
++{
++	struct tpm *t;
++	tpm12_pcr_event_t *c, *n;
++	event_log_container_t *log = (event_log_container_t *) buffer;
++
++	t = new_tpm(TPM12);
++	if (!t){
++		goto out;
++	}
++	/* TODO: check for signature */
++
++	c = (tpm12_pcr_event_t *)((void*)log + log->pcr_events_offset);
++	n = (tpm12_pcr_event_t *)((void*)log + log->next_event_offset);
++
++	if ((char *) n > (buffer + size)){
++		goto out_free;
++	}
++
++	while (c < n) {
++		if (!tpm_record_event(t, TB_HALG_SHA1, (void *) c)) {
++			goto out_free;
++		}
++		c = (void *)c + sizeof(*c) + c->data_size;
++	}
++
++	return t;
++out_free:
++	destroy_tpm(t);
++out:
++	return NULL;
++}
++
++struct tpm *parse_tpm20_log(char *buffer, size_t size)
++{
++	struct tpm *t;
++	void *c, *n;
++	uint32_t hash_size, data_size;
++	heap_event_log_descr_t *log = (heap_event_log_descr_t *) buffer;
++
++	t = new_tpm(TPM20);
++	if (!t)
++		goto out;
++
++	hash_size = get_hash_size(log->alg);
++
++	/* point at start of log */
++	buffer += sizeof(heap_event_log_descr_t);
++	c = buffer + log->pcr_events_offset;
++	n = buffer + log->next_event_offset;
++
++	if ((char *) n > (buffer + size))
++		goto out_free;
++
++	/* non-sha1 logs first entry is a no-op sha1 entry,
++	 * so skip the first event
++	 */
++	if (log->alg != TB_HALG_SHA1){
++		c += sizeof(tpm12_pcr_event_t) + sizeof(tpm20_log_descr_t);
++	}
++
++	while (c < n) {
++		if (!tpm_record_event(t, log->alg, c))
++			goto out_free;
++		data_size = *(uint32_t *)(c + 2*sizeof(uint32_t) + hash_size);
++		c += 3*sizeof(uint32_t) + hash_size + data_size;
++	}
++
++	return t;
++out_free:
++	destroy_tpm(t);
++out:
++	return NULL;
++}
+diff --git a/pcr-calc/eventlog.h b/pcr-calc/eventlog.h
+new file mode 100644
+index 0000000..7329125
+--- /dev/null
++++ b/pcr-calc/eventlog.h
+@@ -0,0 +1,42 @@
++/*
++ * eventlog.h: TXT TPM event log definitions
++ *
++ * Copyright (c) 2017 Daniel P. Smith
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ *
++ *   * Redistributions of source code must retain the above copyright
++ *     notice, this list of conditions and the following disclaimer.
++ *   * Redistributions in binary form must reproduce the above
++ *     copyright notice, this list of conditions and the following
++ *     disclaimer in the documentation and/or other materials provided
++ *     with the distribution.
++ *   * Neither the name of the Intel Corporation nor the names of its
++ *     contributors may be used to endorse or promote products derived
++ *     from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
++ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
++ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
++ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
++ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
++ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
++ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
++ * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED
++ * OF THE POSSIBILITY OF SUCH DAMAGE.
++ *
++ */
++
++#ifndef __EVENTLOG_H__
++#define __EVENTLOG_H__
++
++struct tpm *parse_tpm12_log(char *buffer, size_t size);
++struct tpm *parse_tpm20_log(char *buffer, size_t size);
++
++#endif
+diff --git a/pcr-calc/hash.c b/pcr-calc/hash.c
+new file mode 100644
+index 0000000..fafaade
+--- /dev/null
++++ b/pcr-calc/hash.c
+@@ -0,0 +1,210 @@
++/*
++ * hash.c: support functions for tb_hash_t type
++ *
++ * Copyright (c) 2014, Intel Corporation
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ *
++ *   * Redistributions of source code must retain the above copyright
++ *     notice, this list of conditions and the following disclaimer.
++ *   * Redistributions in binary form must reproduce the above
++ *     copyright notice, this list of conditions and the following
++ *     disclaimer in the documentation and/or other materials provided
++ *     with the distribution.
++ *   * Neither the name of the Intel Corporation nor the names of its
++ *     contributors may be used to endorse or promote products derived
++ *     from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
++ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
++ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
++ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
++ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
++ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
++ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
++ * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED
++ * OF THE POSSIBILITY OF SUCH DAMAGE.
++ *
++ */
++
++#include <stdio.h>
++#include <stdlib.h>
++#include <stdint.h>
++#include <stdbool.h>
++#include <string.h>
++#include <openssl/evp.h>
++#define PRINT   printf
++#include "../include/config.h"
++#include "../include/hash.h"
++
++/*
++ * are_hashes_equal
++ *
++ * compare whether two hash values are equal.
++ *
++ */
++bool are_hashes_equal(const tb_hash_t *hash1, const tb_hash_t *hash2,
++		      uint16_t hash_alg)
++{
++    if ( ( hash1 == NULL ) || ( hash2 == NULL ) )
++        return false;
++
++    if ( hash_alg == TB_HALG_SHA1 )
++        return (memcmp(hash1, hash2, SHA1_LENGTH) == 0);
++    else if ( hash_alg == TB_HALG_SHA256 )
++        return (memcmp(hash1, hash2, SHA256_LENGTH) == 0);
++    else if ( hash_alg == TB_HALG_SM3 )
++        return (memcmp(hash1, hash2, SM3_LENGTH) == 0);
++    else if ( hash_alg == TB_HALG_SHA384 )
++        return (memcmp(hash1, hash2, SHA384_LENGTH) == 0);
++    else if ( hash_alg == TB_HALG_SHA512 )
++        return (memcmp(hash1, hash2, SHA512_LENGTH) == 0);
++    else
++        return false;
++}
++
++/*
++ * hash_buffer
++ *
++ * hash the buffer according to the algorithm
++ *
++ */
++bool hash_buffer(const unsigned char* buf, size_t size, tb_hash_t *hash,
++		 uint16_t hash_alg)
++{
++    if ( hash == NULL )
++        return false;
++
++    if ( hash_alg == TB_HALG_SHA1 ) {
++        EVP_MD_CTX ctx;
++        const EVP_MD *md;
++
++        md = EVP_sha1();
++        EVP_DigestInit(&ctx, md);
++        EVP_DigestUpdate(&ctx, buf, size);
++        EVP_DigestFinal(&ctx, hash->sha1, NULL);
++        return true;
++    }
++    else if (hash_alg == TB_HALG_SHA256) {
++        EVP_MD_CTX ctx;
++        const EVP_MD *md;
++
++        md = EVP_sha256();
++        EVP_DigestInit(&ctx, md);
++        EVP_DigestUpdate(&ctx, buf, size);
++        EVP_DigestFinal(&ctx, hash->sha256, NULL);
++        return true;
++    }
++    else if (hash_alg == TB_HALG_SHA384) {
++        EVP_MD_CTX ctx;
++        const EVP_MD *md;
++
++        md = EVP_sha384();
++        EVP_DigestInit(&ctx, md);
++        EVP_DigestUpdate(&ctx, buf, size);
++        EVP_DigestFinal(&ctx, hash->sha384, NULL);
++        return true;
++    }
++    else
++        return false;
++}
++
++/*
++ * extend_hash
++ *
++ * perform "extend" of two hashes (i.e. hash1 = SHA(hash1 || hash2)
++ *
++ */
++bool extend_hash(tb_hash_t *hash1, const tb_hash_t *hash2, uint16_t hash_alg)
++{
++    uint8_t buf[2*sizeof(tb_hash_t)];
++
++    if ( hash1 == NULL || hash2 == NULL )
++        return false;
++
++    if ( hash_alg == TB_HALG_SHA1 ) {
++        EVP_MD_CTX ctx;
++        const EVP_MD *md;
++
++        memcpy(buf, &(hash1->sha1), sizeof(hash1->sha1));
++        memcpy(buf + sizeof(hash1->sha1), &(hash2->sha1), sizeof(hash1->sha1));
++        md = EVP_sha1();
++        EVP_DigestInit(&ctx, md);
++        EVP_DigestUpdate(&ctx, buf, 2*sizeof(hash1->sha1));
++        EVP_DigestFinal(&ctx, hash1->sha1, NULL);
++        return true;
++    }
++    else if (hash_alg == TB_HALG_SHA256) {
++        EVP_MD_CTX ctx;
++        const EVP_MD *md;
++
++        memcpy(buf, &(hash1->sha256), sizeof(hash1->sha256));
++        memcpy(buf + sizeof(hash1->sha256), &(hash2->sha256), sizeof(hash1->sha256));
++        md = EVP_sha256();
++        EVP_DigestInit(&ctx, md);
++        EVP_DigestUpdate(&ctx, buf, 2*sizeof(hash1->sha256));
++        EVP_DigestFinal(&ctx, hash1->sha256, NULL);
++        return true;
++    }
++    else
++        return false;
++}
++
++void print_hash(const tb_hash_t *hash, uint16_t hash_alg)
++{
++    if ( hash == NULL )
++        return;
++
++    if ( hash_alg == TB_HALG_SHA1 ) {
++        for ( unsigned int i = 0; i < SHA1_LENGTH; i++ ) {
++            printf("%02x", hash->sha1[i]);
++            if ( i < SHA1_LENGTH-1 )
++                printf(" ");
++        }
++        printf("\n");
++    }
++    else if ( hash_alg == TB_HALG_SHA256 ) {
++        for ( unsigned int i = 0; i < SHA256_LENGTH; i++ ) {
++            printf("%02x", hash->sha256[i]);
++            if ( i < SHA256_LENGTH-1 )
++                printf(" ");
++        }
++        printf("\n");
++    }
++    else
++        return;
++}
++
++void copy_hash(tb_hash_t *dest_hash, const tb_hash_t *src_hash,
++               uint16_t hash_alg)
++{
++    unsigned int len;
++
++    if ( dest_hash == NULL || src_hash == NULL ) {
++        printf("hash copy: hashes are NULL\n");
++        return;
++    }
++
++    len = get_hash_size(hash_alg);
++    if ( len > 0 )
++        memcpy(dest_hash, src_hash, len);
++    else
++        printf("unsupported hash alg (%u)\n", hash_alg);
++}
++
++
++/*
++ * Local variables:
++ * mode: C
++ * c-set-style: "BSD"
++ * c-basic-offset: 4
++ * tab-width: 4
++ * indent-tabs-mode: nil
++ * End:
++ */
+diff --git a/pcr-calc/heap.h b/pcr-calc/heap.h
+new file mode 100644
+index 0000000..c7bf9b7
+--- /dev/null
++++ b/pcr-calc/heap.h
+@@ -0,0 +1,354 @@
++/*
++ * heap.h: Intel(r) TXT heap definitions
++ *
++ * Copyright (c) 2003-2011, Intel Corporation
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ *
++ *   * Redistributions of source code must retain the above copyright
++ *     notice, this list of conditions and the following disclaimer.
++ *   * Redistributions in binary form must reproduce the above
++ *     copyright notice, this list of conditions and the following
++ *     disclaimer in the documentation and/or other materials provided
++ *     with the distribution.
++ *   * Neither the name of the Intel Corporation nor the names of its
++ *     contributors may be used to endorse or promote products derived
++ *     from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
++ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
++ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
++ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
++ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
++ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
++ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
++ * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED
++ * OF THE POSSIBILITY OF SUCH DAMAGE.
++ *
++ */
++
++#ifndef __TXT_HEAP_H__
++#define __TXT_HEAP_H__
++
++#include "../include/mle.h"
++#include "../include/hash.h"
++
++#ifndef __packed
++#define __packed   __attribute__ ((packed))
++#endif
++
++/*
++ * Extensible TXT heap data structure
++ */
++
++typedef struct __packed {
++    uint32_t   type;
++    uint32_t   size;
++    uint8_t    data[];
++} heap_ext_data_element_t;
++
++/*
++ * HEAP_END_ELEMENT
++ */
++#define HEAP_EXTDATA_TYPE_END             0
++
++/* size == 8; there is no data[] */
++
++/*
++ * HEAP_BIOS_SPEC_VER_ELEMENT
++ */
++#define HEAP_EXTDATA_TYPE_BIOS_SPEC_VER   1
++
++typedef struct __packed {
++    uint16_t   spec_ver_major;
++    uint16_t   spec_ver_minor;
++    uint16_t   spec_ver_rev;
++} heap_bios_spec_ver_elt_t;
++
++/*
++ * HEAP_ACM_ELEMENT
++ */
++#define HEAP_EXTDATA_TYPE_ACM             2
++
++typedef struct __packed {
++    uint32_t   num_acms;
++    uint64_t   acm_addrs[];
++} heap_acm_elt_t;
++
++/*
++ * HEAP_CUSTOM_ELEMENT
++ */
++#define HEAP_EXTDATA_TYPE_CUSTOM          4
++
++typedef struct __packed {
++    uuid_t     uuid;
++    uint8_t    data[];
++} heap_custom_elt_t;
++
++/*
++ * HEAP_EVENT_LOG_POINTER_ELEMENT
++ */
++#define HEAP_EXTDATA_TYPE_TPM_EVENT_LOG_PTR   5
++
++typedef struct __packed {
++    uint64_t   event_log_phys_addr;
++} heap_event_log_ptr_elt_t;
++
++typedef struct __packed {
++    uint32_t pcr_index;
++    uint32_t type;
++    sha1_hash_t digest;
++    uint32_t data_size;
++    uint8_t data[];
++} tpm12_pcr_event_t;
++
++#define EVTLOG_SIGNATURE "TXT Event Container\0"
++#define EVTLOG_CNTNR_MAJOR_VER 1
++#define EVTLOG_CNTNR_MINOR_VER 0
++#define EVTLOG_EVT_MAJOR_VER 1
++#define EVTLOG_EVT_MINOR_VER 0
++typedef struct __packed {
++    uint8_t signature[20];
++    uint8_t reserved[12];
++    uint8_t container_ver_major;
++    uint8_t container_ver_minor;
++    uint8_t pcr_event_ver_major;
++    uint8_t pcr_event_ver_minor;
++    uint32_t size;
++    uint32_t pcr_events_offset;
++    uint32_t next_event_offset;
++    tpm12_pcr_event_t pcr_events[];
++} event_log_container_t;
++
++/*
++ * HEAP_EVENT_LOG_POINTER_ELEMENT2
++ */
++#define HEAP_EXTDATA_TYPE_TPM_EVENT_LOG_PTR_2  7
++
++#define DIGEST_ALG_ID_SHA_1       0x00000001
++#define DIGEST_ALG_ID_SHA_256     0x00000002
++#define DIGEST_ALG_ID_SHA_384     0x00000003
++#define DIGEST_ALG_ID_SHA_512     0x00000004
++#define DIGEST_ALG_ID_SM3         0x00000005
++static inline unsigned int get_evtlog_digest_id(uint16_t hash_alg)
++{
++    if ( hash_alg == TB_HALG_SHA1 )
++        return DIGEST_ALG_ID_SHA_1;
++    else if ( hash_alg == TB_HALG_SHA256 )
++        return DIGEST_ALG_ID_SHA_256;
++    else if ( hash_alg == TB_HALG_SM3 )
++        return DIGEST_ALG_ID_SM3;
++    else if ( hash_alg == TB_HALG_SHA384 )
++        return DIGEST_ALG_ID_SHA_384;
++    else if ( hash_alg == TB_HALG_SHA512 )
++        return DIGEST_ALG_ID_SHA_512;
++    else
++        return 0;
++}
++
++typedef struct __packed {
++    uint8_t    signature[16];
++    uint32_t   revision;
++    uint32_t   digest_id;
++    uint32_t   digest_size;
++} tpm20_log_descr_t;
++
++typedef struct __packed {
++    uint16_t   alg;
++    uint16_t   reserved;
++    uint64_t   phys_addr;
++    uint32_t   size;
++    uint32_t   pcr_events_offset;
++    uint32_t   next_event_offset;
++} heap_event_log_descr_t;
++
++typedef struct __packed {
++    uint32_t   count;
++    heap_event_log_descr_t event_log_descr[];
++} heap_event_log_ptr_elt2_t;
++
++/*
++ * data-passing structures contained in TXT heap:
++ *   - BIOS
++ *   - OS/loader to MLE
++ *   - OS/loader to SINIT
++ *   - SINIT to MLE
++ */
++
++/*
++ * BIOS structure
++ */
++typedef struct __packed {
++    uint32_t  version;              /* currently 2-4 */
++    uint32_t  bios_sinit_size;
++    uint64_t  lcp_pd_base;
++    uint64_t  lcp_pd_size;
++    uint32_t  num_logical_procs;
++    /* versions >= 3 */
++    uint64_t  flags;
++    /* versions >= 4 */
++    heap_ext_data_element_t  ext_data_elts[];
++} bios_data_t;
++
++/*
++ * OS/loader to MLE structure
++ *   - private to tboot (so can be any format we need)
++ */
++#define MAX_LCP_PO_DATA_SIZE     64*1024  /* 64k */
++#define MAX_EVENT_LOG_SIZE       4*1024   /* 4k */
++
++
++#define MIN_OS_SINIT_DATA_VER    4
++#define MAX_OS_SINIT_DATA_VER    6
++/*
++ * OS/loader to SINIT structure
++ */
++typedef struct __packed {
++    uint32_t    version;           /* currently 4-6 */
++    uint32_t    reserved;
++    uint64_t    mle_ptab;
++    uint64_t    mle_size;
++    uint64_t    mle_hdr_base;
++    uint64_t    vtd_pmr_lo_base;
++    uint64_t    vtd_pmr_lo_size;
++    uint64_t    vtd_pmr_hi_base;
++    uint64_t    vtd_pmr_hi_size;
++    uint64_t    lcp_po_base;
++    uint64_t    lcp_po_size;
++    txt_caps_t  capabilities;
++    /* versions >= 5 */
++    uint64_t    efi_rsdt_ptr;
++    /* versions >= 6 */
++    heap_ext_data_element_t  ext_data_elts[];
++} os_sinit_data_t;
++
++/*
++ * SINIT to MLE structure
++ */
++#define MDR_MEMTYPE_GOOD                0x00
++#define MDR_MEMTYPE_SMM_OVERLAY         0x01
++#define MDR_MEMTYPE_SMM_NONOVERLAY      0x02
++#define MDR_MEMTYPE_PCIE_CONFIG_SPACE   0x03
++#define MDR_MEMTYPE_PROTECTED           0x04
++
++typedef struct __packed {
++    uint64_t  base;
++    uint64_t  length;
++    uint8_t   mem_type;
++    uint8_t   reserved[7];
++} sinit_mdr_t;
++
++typedef struct __packed {
++    uint32_t     version;             /* currently 6-8 */
++    sha1_hash_t  bios_acm_id;
++    uint32_t     edx_senter_flags;
++    uint64_t     mseg_valid;
++    sha1_hash_t  sinit_hash;
++    sha1_hash_t  mle_hash;
++    sha1_hash_t  stm_hash;
++    sha1_hash_t  lcp_policy_hash;
++    uint32_t     lcp_policy_control;
++    uint32_t     rlp_wakeup_addr;
++    uint32_t     reserved;
++    uint32_t     num_mdrs;
++    uint32_t     mdrs_off;
++    uint32_t     num_vtd_dmars;
++    uint32_t     vtd_dmars_off;
++    /* versions >= 8 */
++    uint32_t     proc_scrtm_status;
++} sinit_mle_data_t;
++
++
++/*
++ * TXT heap data format and field accessor fns
++ */
++
++/*
++ * offset                 length                      field
++ * ------                 ------                      -----
++ *  0                      8                          bios_data_size
++ *  8                      bios_data_size - 8      bios_data
++ *
++ *  bios_data_size      8                          os_mle_data_size
++ *  bios_data_size +    os_mle_data_size - 8       os_mle_data
++ *   8
++ *
++ *  bios_data_size +    8                          os_sinit_data_size
++ *   os_mle_data_size
++ *  bios_data_size +    os_sinit_data_size - 8     os_sinit_data
++ *   os_mle_data_size +
++ *   8
++ *
++ *  bios_data_size +    8                          sinit_mle_data_size
++ *   os_mle_data_size +
++ *   os_sinit_data_size
++ *  bios_data_size +    sinit_mle_data_size - 8    sinit_mle_data
++ *   os_mle_data_size +
++ *   os_sinit_data_size +
++ *   8
++ */
++
++typedef void   txt_heap_t;
++
++
++static inline uint64_t get_bios_data_size(const txt_heap_t *heap)
++{
++    return *(uint64_t *)heap;
++}
++
++static inline bios_data_t *get_bios_data_start(const txt_heap_t *heap)
++{
++    return (bios_data_t *)((char*)heap + sizeof(uint64_t));
++}
++
++static inline uint64_t get_os_mle_data_size(const txt_heap_t *heap)
++{
++    return *(uint64_t *)(heap + get_bios_data_size(heap));
++}
++
++static inline uint64_t get_os_sinit_data_size(const txt_heap_t *heap)
++{
++    return *(uint64_t *)(heap + get_bios_data_size(heap) +
++                         get_os_mle_data_size(heap));
++}
++
++static inline os_sinit_data_t *get_os_sinit_data_start(const txt_heap_t *heap)
++{
++    return (os_sinit_data_t *)(heap + get_bios_data_size(heap) +
++                               get_os_mle_data_size(heap) +
++                               sizeof(uint64_t));
++}
++
++static inline uint64_t get_sinit_mle_data_size(const txt_heap_t *heap)
++{
++    return *(uint64_t *)(heap + get_bios_data_size(heap) +
++                         get_os_mle_data_size(heap) +
++                         get_os_sinit_data_size(heap));
++}
++
++static inline sinit_mle_data_t *get_sinit_mle_data_start(const txt_heap_t *heap)
++{
++    return (sinit_mle_data_t *)(heap + get_bios_data_size(heap) +
++                                get_os_mle_data_size(heap) +
++                                get_os_sinit_data_size(heap) +
++                                sizeof(uint64_t));
++}
++
++
++#endif      /* __TXT_HEAP_H__ */
++
++
++/*
++ * Local variables:
++ * mode: C
++ * c-basic-offset: 4
++ * tab-width: 4
++ * indent-tabs-mode: nil
++ * End:
++ */
+diff --git a/pcr-calc/module_hash.c b/pcr-calc/module_hash.c
+new file mode 100644
+index 0000000..4cf1579
+--- /dev/null
++++ b/pcr-calc/module_hash.c
+@@ -0,0 +1,427 @@
++/*
++ *
++ * Copyright (c) 2015-2017 Daniel P. Smith
++ * Copyright (c) 2017 Chris Rogers
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ *
++ *   * Redistributions of source code must retain the above copyright
++ *     notice, this list of conditions and the following disclaimer.
++ *   * Redistributions in binary form must reproduce the above
++ *     copyright notice, this list of conditions and the following
++ *     disclaimer in the documentation and/or other materials provided
++ *     with the distribution.
++ *   * Neither the name of the Intel Corporation nor the names of its
++ *     contributors may be used to endorse or promote products derived
++ *     from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
++ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
++ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
++ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
++ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
++ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
++ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
++ * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED
++ * OF THE POSSIBILITY OF SUCH DAMAGE.
++ *
++ */
++
++#include <stdio.h>
++#include <stdlib.h>
++#include <memory.h>
++#include <stdbool.h>
++#include <stdint.h>
++#include <stdarg.h>
++#include <getopt.h>
++#include <zlib.h>
++#include <sys/stat.h>
++#include <openssl/evp.h>
++#include "../include/hash.h"
++
++#if HAVE_BZIP
++#include <bzlib.h>
++#endif
++
++#define error_msg(fmt, ...)         fprintf(stderr, fmt, ##__VA_ARGS__)
++
++#define BUFFER_SIZE 1024
++
++#define NO_COMPRESSION 1
++#define GZ_COMPRESSION 1<<1
++#if HAVE_BZIP
++#define BZ_COMPRESSION 1<<2
++#endif
++
++
++#if HAVE_BZIP
++static bool read_bzip2(const char *path, FILE *dest_fd, size_t *len)
++{
++	FILE *fd;
++	BZFILE *bzfd;
++	char buf[BUFFER_SIZE];
++	size_t bytes;
++	int bzerror;
++
++	*len = 0;
++	if (!dest_fd)
++		goto fail;
++
++	fd = fopen(path, "r");
++	if (!fd) {
++		goto fail;
++	}
++
++	bzfd = BZ2_bzReadOpen(&bzerror, fd, 0, 0, NULL, 0 );
++	if (bzerror != BZ_OK) {
++		goto fail_bzfd;
++	}
++
++	bzerror = BZ_OK;
++	while (bzerror == BZ_OK) {
++		bytes = BZ2_bzRead(&bzerror, bzfd, buf, BUFFER_SIZE);
++		if (bzerror == BZ_OK || bzerror == BZ_STREAM_END) {
++			*len += bytes;
++			if (fwrite(buf, 1, bytes, dest_fd) != bytes)
++				goto fail_bzfd;
++		} else {
++			goto fail_bzfd;
++		}
++	}
++
++	BZ2_bzReadClose(&bzerror, bzfd);
++	fclose(fd);
++	return true;
++
++fail_bzfd:
++	BZ2_bzReadClose(&bzerror, bzfd);
++	fclose(fd);
++fail:
++	return false;
++}
++#endif
++
++static bool read_gzip(const char *path, FILE *dest_fd, size_t *len)
++{
++	gzFile gzfd = NULL;
++	char buf[BUFFER_SIZE];
++	size_t bytes;
++
++	*len = 0;
++
++	gzfd = gzopen(path, "rb");
++	if (!gzfd)
++		goto fail;
++
++	while (!gzeof(gzfd)) {
++		bytes = gzread(gzfd, buf, BUFFER_SIZE);
++		*len += bytes;
++		if (fwrite(buf, 1, bytes, dest_fd) != bytes)
++			goto fail_gz;
++	}
++
++	gzclose(gzfd);
++	return true;
++
++fail_gz:
++	gzclose(gzfd);
++fail:
++	return false;
++}
++
++static bool read_module(const char *path, char **buffer, size_t *len, uint8_t flag)
++{
++	FILE *tmpfd = NULL;
++	struct stat st;
++
++	*len = 0;
++	*buffer = NULL;
++
++	if (stat(path, &st))
++		goto fail;
++
++	tmpfd = tmpfile();
++	if (!tmpfd)
++		goto fail;
++
++	if ((flag & NO_COMPRESSION) || (flag & GZ_COMPRESSION)) {
++		if (read_gzip(path, tmpfd, len) == false)
++			goto fail_tmp;
++#if HAVE_BZIP
++	} else if (flag & BZ_COMPRESSION) {
++		if (read_bzip2(path, tmpfd, len) == false)
++			goto fail_tmp;
++#endif
++	} else {
++		goto fail_tmp;
++	}
++
++	if (*len > 0)
++		fseek(tmpfd, 0, SEEK_SET);
++	else
++		goto fail_tmp;
++
++	*buffer = malloc(*len);
++	if (*buffer == NULL)
++		goto fail_tmp;
++	memset(*buffer, 0, *len);
++
++	if (fread(*buffer, 1, *len, tmpfd) != *len)
++		goto fail_buf;
++
++	fclose(tmpfd);
++	return true;
++
++fail_buf:
++	free(*buffer);
++fail_tmp:
++	fclose(tmpfd);
++fail:
++	return false;
++}
++
++static bool hash_module(tb_hash_t *hash, const char* cmdline, const char *module,
++	         size_t size, uint16_t hash_alg)
++{
++	tb_hash_t img_hash;
++
++	if (cmdline == NULL)
++		cmdline = "";
++
++	if (module == NULL) {
++		error_msg("passed an empty module for hashing\n");
++		return false;
++	}
++
++	if (!hash_buffer((const unsigned char *)cmdline, strlen(cmdline), hash,
++	      hash_alg)) {
++		error_msg("failed to hash cmdline\n");
++		return false;
++	}
++
++	/* hash image and extend into cmdline hash */
++	if (!hash_buffer((const unsigned char *)module, size, &img_hash, hash_alg)) {
++		error_msg("failed to hash module\n");
++		return false;
++	}
++	if (!extend_hash(hash, &img_hash, hash_alg)) {
++		error_msg("failed to extend cmdline hash with  module hash\n");
++		return false;
++	}
++
++	return true;
++}
++
++static void print_sha256(tb_hash_t *hash)
++{
++	int i;
++
++	if (hash == NULL)
++		return;
++
++	for (i = 0; i < SHA256_LENGTH; i++)
++		printf("%02x", hash->sha256[i]);
++
++	printf("\n");
++}
++
++static void print_sha1(tb_hash_t *hash)
++{
++	int i;
++
++	if (hash == NULL)
++		return;
++
++	for (i = 0; i < SHA1_LENGTH; i++)
++		printf("%02x", hash->sha1[i]);
++
++	printf("\n");
++}
++
++static void print_hash_val(tb_hash_t *hash, uint16_t hash_alg)
++{
++
++	switch (hash_alg) {
++		case TB_HALG_SHA1:
++			print_sha1(hash);
++			break;
++		case TB_HALG_SHA256:
++			print_sha256(hash);
++			break;
++		default:
++			printf("Error: Unsupported hash algorithm\n");
++			break;
++	}
++}
++
++static bool read_hash(const char *hexstr, tb_hash_t *hash, uint16_t hash_alg)
++{
++	int len = strlen(hexstr);
++	int i = 0, j = 0;
++	int hash_length = 0;
++	unsigned char *buf = NULL;
++
++	switch (hash_alg) {
++		case TB_HALG_SHA1:
++			hash_length = SHA1_LENGTH;
++			buf = (unsigned char *)hash->sha1;
++			break;
++		case TB_HALG_SHA256:
++			hash_length = SHA256_LENGTH;
++			buf = (unsigned char *)hash->sha256;
++			break;
++		default:
++			hash_length = SHA1_LENGTH;
++			buf = (unsigned char *)hash->sha1;
++			break;
++	}
++
++	if (len == 1 && hexstr[0] == '0') {
++		memset(buf, 0, hash_length);
++		return true;
++	}
++
++	if (len/2 != hash_length)
++		return false;
++
++	if (len % 2 == 1) {
++		if (sscanf(&(hexstr[0]), "%1hhx", &(buf[0])) != 1)
++			return false;
++
++		i = j = 1;
++	}
++
++	for (; i < len; i+=2, j++) {
++		if (sscanf(&(hexstr[i]), "%2hhx", &(buf[j])) != 1)
++			return false;
++	}
++
++	return true;
++}
++
++static void print_help(void)
++{
++	error_msg("module_hash [-hjz] [-e hash_str] -c cmd_line module_file\n"
++		"\t-h Help: will print out this help message.\n"
++		"\t-j module is compressed with BZip2\n"
++		"\t-z module is compressed with GZip\n"
++		"\t-e hash_str Extend Hash: has to be extended with module hash.\n"
++		"\t-c cmd_line Command Line: the command line passed.\n"
++		"\t-a hash algorithm to use.\n"
++		"\tmodule_file: file name of module to hash.\n");
++}
++
++int main(int argc, char *argv[])
++{
++	extern int optind;
++	int opt;
++	size_t mod_len;
++	char *module_path = NULL;
++	char *cmdline = NULL;
++	char *ext_str = NULL;
++	char *mod_buf = NULL;
++	uint16_t hash_alg = TB_HALG_SHA1;
++	uint8_t flags = NO_COMPRESSION;
++	tb_hash_t mod_hash, ext_hash;
++
++	while ((opt = getopt(argc, (char ** const)argv, "he:c:a:jz")) != -1) {
++		switch (opt) {
++			case 'c':
++				cmdline = malloc(strlen(optarg) + 1);
++				if ( cmdline == NULL ) {
++					printf("Out of memory\n");
++					return 1;
++				}
++				strcpy(cmdline, optarg);
++			break;
++			case 'e':
++				ext_str = malloc(strlen(optarg) + 1);
++				if ( ext_str == NULL ) {
++					printf("Out of memory\n");
++					return 1;
++				}
++				strcpy(ext_str, optarg);
++			break;
++#ifdef HAVE_BZIP
++			case 'j':
++				if (flags & GZ_COMPRESSION) {
++					print_help();
++					error_msg("Error: -j cannot be used inconjunction with -z");
++					return 1;
++				} else {
++					flags = BZ_COMPRESSION;
++				}
++			break;
++#endif
++			case 'z':
++#ifdef HAVE_BZIP
++				if (flags & BZ_COMPRESSION) {
++					print_help();
++					error_msg("Error: -z cannot be used inconjunction with -j");
++					return 1;
++				} else {
++					flags = GZ_COMPRESSION;
++				}
++#else
++				flags = GZ_COMPRESSION;
++#endif
++			break;
++			case 'h':
++				print_help();
++				free(cmdline);
++				return 1;
++			case 'a':
++				if (!strcmp(optarg, "sha1")) {
++					hash_alg = TB_HALG_SHA1;
++				} else if(!strcmp(optarg, "sha256")) {
++					hash_alg = TB_HALG_SHA256;
++				} else {
++					hash_alg = TB_HALG_SHA1;
++				}
++			break;
++			default:
++			break;
++		}
++	}
++
++	module_path = argv[optind];
++
++	if(read_module(module_path, &mod_buf, &mod_len, flags) == false) {
++		error_msg("failed to read in the module\n");
++		goto fail;
++	}
++
++	if (hash_module(&mod_hash, cmdline, mod_buf, mod_len, hash_alg) == false) {
++		error_msg("failed to hash the module\n");
++		goto fail;
++	}
++
++	if (ext_str != NULL) {
++		if (read_hash(ext_str, &ext_hash, hash_alg) == false) {
++			error_msg("failed to pass valid hash to -e\n");
++			goto fail;
++		}
++		if (extend_hash(&ext_hash, &mod_hash, hash_alg) == false) {
++			error_msg("failed to extend hash\n");
++			goto fail;
++		}
++
++		print_hash_val(&ext_hash, hash_alg);
++	} else {
++		print_hash_val(&mod_hash, hash_alg);
++	}
++
++	if (ext_str != NULL) free(ext_str);
++	if (cmdline != NULL) free(cmdline);
++	return 0;
++fail:
++	if (ext_str != NULL) free(ext_str);
++	if (cmdline != NULL) free(cmdline);
++	return 1;
++}
+diff --git a/pcr-calc/pcr-calc.c b/pcr-calc/pcr-calc.c
+new file mode 100644
+index 0000000..93bdfb1
+--- /dev/null
++++ b/pcr-calc/pcr-calc.c
+@@ -0,0 +1,330 @@
++/*
++ *
++ * Copyright (c) 2017 Daniel P. Smith
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ *
++ *   * Redistributions of source code must retain the above copyright
++ *     notice, this list of conditions and the following disclaimer.
++ *   * Redistributions in binary form must reproduce the above
++ *     copyright notice, this list of conditions and the following
++ *     disclaimer in the documentation and/or other materials provided
++ *     with the distribution.
++ *   * Neither the name of the Intel Corporation nor the names of its
++ *     contributors may be used to endorse or promote products derived
++ *     from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
++ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
++ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
++ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
++ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
++ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
++ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
++ * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED
++ * OF THE POSSIBILITY OF SUCH DAMAGE.
++ *
++ */
++
++#include <stdio.h>
++#include <stdlib.h>
++#include <memory.h>
++#include <stdbool.h>
++#include <stdint.h>
++#include <stdarg.h>
++#include <getopt.h>
++#include <zlib.h>
++#include <sys/stat.h>
++#include <openssl/evp.h>
++
++#include "../include/hash.h"
++#include "uuid.h"
++#include "tb_policy.h"
++#include "util.h"
++#include "eventlog.h"
++#include "tpm.h"
++
++
++/* flags */
++#define FLAG_TPM12	1
++#define FLAG_TPM20	1<<1
++#define FLAG_DA		1<<2
++#define FLAG_LOG	1<<3
++#define FLAG_VERBOSE	1<<4
++
++#define TPM12_LOG "/sys/kernel/security/txt/tpm12_binary_evtlog"
++#define TPM20_LOG "/sys/kernel/security/txt/tpm20_binary_evtlog"
++
++#define error_msg(fmt, ...)         fprintf(stderr, fmt, ##__VA_ARGS__)
++
++
++static void print_help(void) {
++	error_msg("pcr-calc [-h2d] -p policy_file -m hash_str\n"
++		"\t-h Help: will print out this help message.\n"
++		"\t-2 TPM 2.0.\n"
++		"\t-d D/A mode.\n"
++		"\t-l Print TPM eventlog.\n"
++		"\t-v Print calculated TPM eventlog.\n"
++		"\t-a alg Alogrithm: select what hash alogrithm to use.\n"
++		"\t-p policy_file Tboot Policy: the policy that was/will be used.\n"
++		"\t-m hash_str Multiboot Module: include module hash (MLE first).\n");
++}
++
++static bool apply_lg_policy(struct tpm *t, tb_policy_t *policy, size_t pol_size,
++		     tb_hash_t *mb, int mb_count)
++{
++	tb_hash_t *pol_hash;
++	struct pcr *p;
++	struct pcr_event *pe;
++	int i, bnum, pnum;
++
++	if (!tpm_clear_all_event(t, policy->hash_alg, TPM_EVT_TBOOT_HASH))
++		goto out;
++
++	pe = tpm_find_event(t, policy->hash_alg, TPM_EVT_MLE_HASH, 1);
++	pe->digest = mb[0];
++
++	if (!tpm_recalculate(t))
++		goto out;
++
++	pol_hash = tb_policy_hash(policy, pol_size, policy->hash_alg);
++	if (!pol_hash)
++		goto out;
++
++	bnum = alg_to_bank(policy->hash_alg);
++
++	p = &t->banks[bnum].pcrs[17];
++	if (!pcr_record_event(p, policy->hash_alg, TPM_EVT_TBOOT_HASH, pol_hash))
++		goto out_pol;
++
++	p = &t->banks[bnum].pcrs[18];
++	if (!pcr_record_event(p, policy->hash_alg, TPM_EVT_TBOOT_HASH, &mb[1]))
++		goto out_pol;
++
++	for (i = 1; i < mb_count; i++) {
++		tb_policy_entry_t *e = find_policy_entry(policy, i-1);
++
++		pnum = (e == NULL) ? 18 : e->pcr;
++		if (pnum == TB_POL_PCR_NONE)
++			continue;
++
++		p = &t->banks[bnum].pcrs[pnum];
++		if (!pcr_record_event(p, policy->hash_alg,
++		    TPM_EVT_TBOOT_HASH, &mb[i]))
++			goto out_pol;
++	}
++
++	free(pol_hash);
++	return true;
++
++out_pol:
++	free(pol_hash);
++out:
++	return false;
++}
++
++static bool apply_da_policy(struct tpm *t, tb_policy_t *policy, size_t pol_size,
++		     tb_hash_t *mb, int mb_count) {
++	tb_hash_t *pol_hash;
++	struct pcr *p;
++	struct pcr_event *pe;
++	int i, bnum, pnum;
++	uint16_t hash_alg;
++
++	hash_alg = t->alg == 0 ? policy->hash_alg : t->alg;
++
++	if (!tpm_clear_all_event(t, hash_alg, TPM_EVT_TBOOT_HASH))
++		goto out;
++
++	pe = tpm_find_event(t, hash_alg, TPM_EVT_MLE_HASH, 1);
++	pe->digest = mb[0];
++
++	if (!tpm_recalculate(t))
++		goto out;
++
++	pol_hash = tb_policy_hash(policy, pol_size, hash_alg);
++	if (!pol_hash)
++		goto out;
++
++	bnum = alg_to_bank(hash_alg);
++
++	p = &t->banks[bnum].pcrs[17];
++	if (!pcr_record_event(p, hash_alg, TPM_EVT_TBOOT_HASH, pol_hash))
++		goto out_pol;
++
++	p = &t->banks[bnum].pcrs[18];
++	if (!pcr_record_event(p, hash_alg, TPM_EVT_TBOOT_HASH, pol_hash))
++		goto out_pol;
++
++	p = &t->banks[bnum].pcrs[17];
++	if (!pcr_record_event(p, hash_alg, TPM_EVT_TBOOT_HASH, &mb[1]))
++		goto out_pol;
++
++	for (i = 1; i < mb_count; i++) {
++		tb_policy_entry_t *e = find_policy_entry(policy, i - 1);
++
++		pnum = (e == NULL) ? 17 : e->pcr;
++		if (pnum == TB_POL_PCR_NONE)
++			continue;
++
++		p = &t->banks[bnum].pcrs[pnum];
++		if (!pcr_record_event(p, hash_alg,
++		    TPM_EVT_TBOOT_HASH, &mb[i]))
++			goto out_pol;
++	}
++
++	free(pol_hash);
++	return true;
++
++out_pol:
++	free(pol_hash);
++out:
++	return false;
++}
++
++int main(int argc, char *argv[]) {
++	extern int optind;
++	int opt, flags, mb_count = 0, ret = 0;
++	tb_hash_t mb[20];
++	struct tpm *t = NULL;
++	uint16_t alg_override = 0;
++	size_t pol_size = 0;
++	tb_policy_t *policy_file = NULL;
++
++	flags = FLAG_TPM12;
++
++	while ((opt = getopt(argc, (char ** const)argv, "h2dlva:p:m:")) != -1) {
++		switch (opt) {
++			case 'm':
++				if (mb_count > 20) {
++					error_msg("passed max number of hashes to -m\n");
++					ret = 1;
++					goto out;
++				}
++				if (read_hash(optarg, &mb[mb_count]) == false) {
++					error_msg("failed to pass valid hash to -m\n");
++					ret = 1;
++					goto out;
++				}
++				mb_count++;
++			break;
++			case 'p':
++				pol_size = read_file((char *) optarg,
++						     (char **) &policy_file);
++				if ( pol_size == 0 ) {
++					error_msg("failed to read in policy file\n");
++					ret = 1;
++					goto out;
++				}
++			break;
++			case 'a':
++				if (strcmp(optarg, "sha1") == 0) {
++					alg_override = TB_HALG_SHA1;
++				} else if (strcmp(optarg, "sha256") == 0) {
++					alg_override = TB_HALG_SHA256;
++				} else {
++					error_msg("unsupported hash algorithm\n");
++					ret = 1;
++					goto out;
++				}
++
++			break;
++			case '2':
++				flags &= ~FLAG_TPM12;
++				flags |= FLAG_TPM20;
++				flags |= FLAG_DA;
++			break;
++			case 'd':
++				flags |= FLAG_DA;
++			break;
++			case 'l':
++				flags |= FLAG_LOG;
++			break;
++			case 'v':
++				flags |= FLAG_VERBOSE;
++			break;
++			case 'h':
++				print_help();
++				ret = 1;
++				goto out;
++			default:
++			break;
++		}
++	}
++	if (flags & FLAG_TPM12) {
++		char *buffer;
++		size_t size = read_file(TPM12_LOG, &buffer);
++
++		if (size > 0) {
++			t = parse_tpm12_log(buffer, size);
++			free(buffer);
++		}
++
++		if (!t) {
++			error_msg("failed to parse TPM 1.2 event log.\n");
++			ret = 1;
++			goto out;
++		}
++
++		t->alg = TB_HALG_SHA1;
++	} else {
++		char *buffer;
++		size_t size = read_file(TPM20_LOG, &buffer);
++
++		if (size > 0) {
++			t = parse_tpm20_log(buffer, size);
++			free(buffer);
++		}
++
++		if (!t) {
++			error_msg("failed to parse TPM 2.0 event log.\n");
++			ret = 1;
++			goto out;
++		}
++
++		t->alg = alg_override != 0 ? alg_override : policy_file->hash_alg;
++	}
++
++	if (flags & FLAG_LOG) {
++		tpm_dump(t, t->alg);
++		return 0;
++	}
++
++	if (!policy_file) {
++		error_msg("the policy file must be provided!\n");
++		ret = 1;
++		goto out;
++	}
++
++	if (flags & FLAG_DA) {
++		if (!apply_da_policy(t, policy_file, pol_size, mb, mb_count)) {
++			error_msg("failed applying DA policy.\n");
++			ret = 1;
++			goto out_destroy;
++		}
++	} else {
++		if (!apply_lg_policy(t, policy_file, pol_size, mb, mb_count)) {
++			error_msg("failed applying LG policy.\n");
++			ret = 1;
++			goto out_destroy;
++		}
++	}
++
++	if (flags & FLAG_VERBOSE)
++		tpm_dump(t, t->alg);
++	else
++		tpm_print(t, t->alg);
++
++	return 0;
++
++out_destroy:
++	destroy_tpm(t);
++out:
++	return ret;
++}
+diff --git a/pcr-calc/tb_policy.c b/pcr-calc/tb_policy.c
+new file mode 100644
+index 0000000..4f39ae6
+--- /dev/null
++++ b/pcr-calc/tb_policy.c
+@@ -0,0 +1,82 @@
++/*
++ * Copyright (c) 2015-2017, Daniel P. Smith
++ * Copyright (c) 2006-2008, Intel Corporation
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ *
++ *   * Redistributions of source code must retain the above copyright
++ *     notice, this list of conditions and the following disclaimer.
++ *   * Redistributions in binary form must reproduce the above
++ *     copyright notice, this list of conditions and the following
++ *     disclaimer in the documentation and/or other materials provided
++ *     with the distribution.
++ *   * Neither the name of the Intel Corporation nor the names of its
++ *     contributors may be used to endorse or promote products derived
++ *     from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
++ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
++ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
++ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
++ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
++ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
++ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
++ * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED
++ * OF THE POSSIBILITY OF SUCH DAMAGE.
++ *
++ */
++
++
++#include <stdio.h>
++#include <stdint.h>
++#include <stdbool.h>
++#include <stdlib.h>
++#include <string.h>
++#include <sys/types.h>
++#include <sys/stat.h>
++#include <fcntl.h>
++#include <unistd.h>
++#include <sys/mman.h>
++
++#include "uuid.h"
++#include "../include/hash.h"
++#include "../include/tb_policy.h"
++
++tb_hash_t *tb_policy_hash(tb_policy_t *pol, size_t size, uint16_t alg)
++{
++	tb_hash_t *hash;
++	uint8_t buf[sizeof(pol->policy_control) + sizeof(tb_hash_t)];
++	uint32_t hash_size = get_hash_size(alg);
++
++	if (pol == NULL)
++		goto out;
++
++	hash = (tb_hash_t *) malloc(sizeof(tb_hash_t));
++	if (!hash)
++		goto out;
++
++	memset(buf, 0, sizeof(buf));
++	memcpy(buf, &pol->policy_control, sizeof(pol->policy_control));
++
++	if ( pol->policy_control & TB_POLCTL_EXTEND_PCR17 )
++		if ( !hash_buffer((unsigned char *)pol, size,
++                     (tb_hash_t *)&buf[sizeof(pol->policy_control)],
++		     alg))
++			goto out_free;
++
++	if ( !hash_buffer(buf, hash_size + sizeof(pol->policy_control),
++	     hash, alg) )
++		goto out_free;
++
++	return hash;
++out_free:
++	free(hash);
++out:
++	return NULL;
++}
+diff --git a/pcr-calc/tb_policy.h b/pcr-calc/tb_policy.h
+new file mode 100644
+index 0000000..cc23f2f
+--- /dev/null
++++ b/pcr-calc/tb_policy.h
+@@ -0,0 +1,43 @@
++/*
++ *
++ * Copyright (c) 2017 Daniel P. Smith
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ *
++ *   * Redistributions of source code must retain the above copyright
++ *     notice, this list of conditions and the following disclaimer.
++ *   * Redistributions in binary form must reproduce the above
++ *     copyright notice, this list of conditions and the following
++ *     disclaimer in the documentation and/or other materials provided
++ *     with the distribution.
++ *   * Neither the name of the Intel Corporation nor the names of its
++ *     contributors may be used to endorse or promote products derived
++ *     from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
++ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
++ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
++ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
++ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
++ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
++ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
++ * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED
++ * OF THE POSSIBILITY OF SUCH DAMAGE.
++ *
++ */
++
++#ifndef __CALC_TB_POLICY_H__
++#define __CALC_TB_POLICY_H__
++
++#include "../include/hash.h"
++#include "../include/tb_policy.h"
++
++tb_hash_t *tb_policy_hash(tb_policy_t *pol, size_t size, uint16_t alg);
++
++#endif
+diff --git a/pcr-calc/tpm.c b/pcr-calc/tpm.c
+new file mode 100644
+index 0000000..9071d0f
+--- /dev/null
++++ b/pcr-calc/tpm.c
+@@ -0,0 +1,373 @@
++/*
++ *
++ * Copyright (c) 2017 Daniel P. Smith
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ *
++ *   * Redistributions of source code must retain the above copyright
++ *     notice, this list of conditions and the following disclaimer.
++ *   * Redistributions in binary form must reproduce the above
++ *     copyright notice, this list of conditions and the following
++ *     disclaimer in the documentation and/or other materials provided
++ *     with the distribution.
++ *   * Neither the name of the Intel Corporation nor the names of its
++ *     contributors may be used to endorse or promote products derived
++ *     from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
++ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
++ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
++ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
++ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
++ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
++ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
++ * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED
++ * OF THE POSSIBILITY OF SUCH DAMAGE.
++ *
++ */
++
++#include <stdio.h>
++#include <stdlib.h>
++#include <memory.h>
++#include <stdbool.h>
++#include <stdint.h>
++#include <stdarg.h>
++#include <sys/stat.h>
++#include <openssl/evp.h>
++
++#include "../include/hash.h"
++#include "uuid.h"
++#include "tpm.h"
++
++
++#define error_msg(fmt, ...)         fprintf(stderr, fmt, ##__VA_ARGS__)
++
++void pcr_print(struct pcr *p, uint16_t alg)
++{
++	int i;
++
++	if (!p) {
++		return;
++	}
++
++	printf("log: \n");
++	for (i = 0; i < p->log_idx; i++) {
++		printf("[%02d] %03x: ",i, p->log[i].type);
++		print_hash(&p->log[i].digest, alg);
++	}
++	printf("value: ");
++	print_hash(&p->value, alg);
++}
++
++bool pcr_recalculate(struct pcr *p, uint16_t alg)
++{
++	int i;
++
++	if (!p) {
++		return false;
++	}
++
++	if (p->log_idx == 0)
++		return true;
++
++	memset(&p->value, 0, sizeof(tb_hash_t));
++
++	for (i = 0; i < p->log_idx; i++) {
++		struct pcr_event *e = &p->log[i];
++		if (e->type == 0)
++			continue;
++		if (e->type == TPM_EVT_HASH_START)
++			memcpy(&p->value, &e->digest, sizeof(tb_hash_t));
++		else if (!extend_hash(&p->value, &e->digest, alg))
++				return false;
++	}
++
++	return true;
++}
++
++bool pcr_record_event(struct pcr *p, uint16_t alg, uint32_t type,
++		      tb_hash_t *hash)
++{
++	struct pcr_event *evt;
++
++	if (!p || !hash) {
++		return false;
++	}
++
++	if (p->log_idx == MAX_LOG) {
++		error_msg("PCR%d log is full!\n", p->num);
++		return false;
++	}
++
++	if (type == TPM_EVT_HASH_START) {
++		memcpy(&p->value, hash, sizeof(tb_hash_t));
++	} else if (!extend_hash(&p->value, hash, alg)) {
++		error_msg("failed to extend PCR%d with hash\n", p->num);
++		return false;
++	}
++
++	evt = &p->log[p->log_idx];
++	evt->type = type;
++	memcpy(&evt->digest, hash, sizeof(tb_hash_t));
++	p->log_idx++;
++
++	return true;
++}
++
++struct tpm *new_tpm(uint8_t version)
++{
++	int i, j, banks;
++	struct tpm *t;
++
++	switch (version) {
++		case TPM12: banks = TPM12_BANKS;
++			    break;
++		case TPM20: banks = TPM20_BANKS;
++			    break;
++		default:
++			    return NULL;
++	}
++
++	t = malloc(sizeof(*t));
++	if (!t) {
++		return NULL;
++	}
++
++	t->version = version;
++	t->banks = malloc(banks * sizeof(struct pcr_bank));
++	if (!t->banks) {
++		free(t);
++		return NULL;
++	}
++
++	for (i = 0; i < banks; i++) {
++		for (j = 0; j < MAX_PCR; j++)
++			t->banks[i].pcrs[j].num = j;
++	}
++
++	return t;
++}
++
++void destroy_tpm(struct tpm *t)
++{
++	free(t->banks);
++	free(t);
++}
++
++bool tpm_record_event(struct tpm *t, uint16_t alg, void *e)
++{
++	int bnum = alg_to_bank(alg);
++	struct pcr_bank *bank;
++	struct pcr *p;
++	uint32_t type;
++	tb_hash_t *evt_hash;
++
++	if (!t || !e) {
++		return false;
++	}
++
++	bank = &t->banks[bnum];
++
++	if (t->version == TPM12) {
++		tpm12_pcr_event_t *event = e;
++
++		if (event->pcr_index == 255)
++			return true;
++
++		if (event->pcr_index > 23)
++			return false;
++
++		p = &bank->pcrs[event->pcr_index];
++
++		type = event->type;
++		evt_hash = (tb_hash_t *) event->digest;
++	} else {
++		uint32_t pcr_num;
++
++		pcr_num = *((uint32_t *) e);
++		if (pcr_num > 23) {
++			if (pcr_num == 255)
++				return true;
++			else
++				return false;
++		}
++
++		p = &bank->pcrs[pcr_num];
++
++		e += sizeof(uint32_t);
++		type = *((uint32_t *) e);
++
++		e += sizeof(uint32_t);
++		evt_hash = (tb_hash_t *) e;
++	}
++
++	if (!pcr_record_event(p, alg, type, evt_hash))
++		return false;
++
++	t->active_banks |= alg_to_mask(alg);
++	return true;
++}
++
++int tpm_count_event(struct tpm *t, uint16_t alg, uint32_t evt_type)
++{
++	int i,j,bank,count = 0;
++	struct pcr_bank *b;
++
++	if (!t) {
++		return false;
++	}
++
++	if (!(t->active_banks & alg_to_mask(alg)))
++		return 0;
++
++	bank = alg_to_bank(alg);
++	b = &t->banks[bank];
++
++	for (i = 0; i < MAX_PCR; i++) {
++		struct pcr *p = &b->pcrs[i];
++
++		for (j = 0; j < p->log_idx; j++) {
++			if (p->log[j].type == evt_type)
++				count++;
++		}
++	}
++
++	return count;
++
++}
++
++struct pcr_event *tpm_find_event(struct tpm *t, uint16_t alg,
++				uint32_t evt_type, int n)
++{
++	int i,j,bank,count = 1;
++	struct pcr_bank *b;
++
++	if (!t) {
++		return false;
++	}
++
++	if (!(t->active_banks & alg_to_mask(alg)))
++		return NULL;
++
++	bank = alg_to_bank(alg);
++	b = &t->banks[bank];
++
++	for (i = 0; i < MAX_PCR; i++) {
++		struct pcr *p = &b->pcrs[i];
++
++		for (j = 0; j < p->log_idx; j++) {
++			if (p->log[j].type == evt_type) {
++				if (count == n)
++					return &p->log[j];
++				else
++					count++;
++			}
++		}
++	}
++
++	return NULL;
++}
++
++bool tpm_clear_all_event(struct tpm *t, uint16_t alg, uint32_t evt_type)
++{
++	int i,j,bank;
++	struct pcr_bank *b;
++
++	if (!t) {
++		return false;
++	}
++
++	if (!(t->active_banks & alg_to_mask(alg)))
++		return false;
++
++	bank = alg_to_bank(alg);
++	b = &t->banks[bank];
++
++	for (i = 0; i < MAX_PCR; i++) {
++		struct pcr *p = &b->pcrs[i];
++
++		for (j = 0; j < p->log_idx; j++) {
++			if (p->log[j].type == evt_type)
++				memset(&p->log[j], 0, sizeof(struct pcr_event));
++		}
++	}
++
++	return true;
++}
++
++bool tpm_recalculate(struct tpm *t)
++{
++	int i,j;
++	struct pcr_bank *b;
++
++	if (!t) {
++		return false;
++	}
++
++	for (i = 0; 1<<i < ALG_MASK_LAST; i++) {
++		if (!(t->active_banks & 1<<i))
++			continue;
++
++		b = &t->banks[i];
++
++		for (j=0; j<MAX_PCR; j++) {
++			if (!pcr_recalculate(&b->pcrs[j], bank_to_alg(i)))
++				return false;
++		}
++	}
++
++	return true;
++}
++
++void tpm_print(struct tpm *t, uint16_t alg)
++{
++	int i,bnum = alg_to_bank(alg);
++	struct pcr_bank *bank;
++	tb_hash_t null_hash;
++
++	if (!t) {
++		return;
++	}
++
++	bank = &(t->banks[bnum]);
++
++	memset(&null_hash, 0, sizeof(tb_hash_t));
++
++	for (i = 0; i < MAX_PCR; i++) {
++		if (memcmp(&(bank->pcrs[i].value),
++		    &null_hash, sizeof(tb_hash_t)) == 0)
++			continue;
++
++		printf("%02d:",bank->pcrs[i].num);
++		print_hash(&bank->pcrs[i].value, alg);
++	}
++}
++
++void tpm_dump(struct tpm *t, uint16_t alg)
++{
++	int i,bnum = alg_to_bank(alg);
++	struct pcr_bank *bank;
++	tb_hash_t null_hash;
++
++	if (!t) {
++		return;
++	}
++
++	bank = &(t->banks[bnum]);
++
++	memset(&null_hash, 0, sizeof(tb_hash_t));
++
++	for (i = 0; i < MAX_PCR; i++) {
++		if (memcmp(&bank->pcrs[i].value,
++		    &null_hash, sizeof(tb_hash_t)) == 0)
++			continue;
++
++		pcr_print(&bank->pcrs[i], alg);
++	}
++}
+diff --git a/pcr-calc/tpm.h b/pcr-calc/tpm.h
+new file mode 100644
+index 0000000..75b2be2
+--- /dev/null
++++ b/pcr-calc/tpm.h
+@@ -0,0 +1,156 @@
++/*
++ * pcr.h: pcr definitions
++ *
++ * Copyright (c) 2017 Daniel P. Smith
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ *
++ *   * Redistributions of source code must retain the above copyright
++ *     notice, this list of conditions and the following disclaimer.
++ *   * Redistributions in binary form must reproduce the above
++ *     copyright notice, this list of conditions and the following
++ *     disclaimer in the documentation and/or other materials provided
++ *     with the distribution.
++ *   * Neither the name of the Intel Corporation nor the names of its
++ *     contributors may be used to endorse or promote products derived
++ *     from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
++ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
++ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
++ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
++ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
++ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
++ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
++ * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED
++ * OF THE POSSIBILITY OF SUCH DAMAGE.
++ *
++ */
++
++#ifndef __PCR_H__
++#define __PCR_H__
++
++#include <stdint.h>
++#include <stdio.h>
++#include <string.h>
++#include <stdbool.h>
++#include "../include/config.h"
++#include "../include/hash.h"
++#include "heap.h"
++
++
++#define TPM_EVT_HASH_START	0x402
++#define TPM_EVT_MLE_HASH	0x404
++#define TPM_EVT_TBOOT_HASH	0x501
++
++struct pcr_event {
++	uint32_t type;
++	tb_hash_t digest;
++};
++
++#define MAX_PCR 24
++#define MAX_LOG 50
++struct pcr {
++	uint8_t num;
++	uint8_t log_idx;
++	tb_hash_t value;
++	struct pcr_event log[MAX_LOG];
++};
++
++#define SHA1_BANK 0
++#define SHA256_BANK 1
++#define SM3_BANK 2
++#define SHA384_BANK 3
++#define SHA512_BANK 4
++
++struct pcr_bank {
++	struct pcr pcrs[MAX_PCR];
++};
++
++#define TPM12 0x12
++#define TPM20 0x20
++#define TPM12_BANKS 1
++#define TPM20_BANKS 5
++
++struct tpm {
++	uint8_t version;
++	uint16_t alg;
++	uint8_t num_banks;
++	uint8_t active_banks;
++	struct pcr_bank *banks;
++};
++
++static inline int alg_to_bank(uint16_t alg)
++{
++	if ( alg == TB_HALG_SHA1 )
++		return SHA1_BANK;
++	else if ( alg == TB_HALG_SHA256 )
++		return SHA256_BANK;
++	else if ( alg == TB_HALG_SM3 )
++		return SM3_BANK;
++	else if ( alg == TB_HALG_SHA384 )
++		return SHA384_BANK;
++	else if ( alg == TB_HALG_SHA512 )
++		return SHA512_BANK;
++	else
++		return -1;
++}
++
++static inline int bank_to_alg(int bank)
++{
++	if ( bank == SHA1_BANK )
++		return TB_HALG_SHA1 ;
++	else if ( bank == SHA256_BANK )
++		return TB_HALG_SHA256;
++	else if ( bank == SM3_BANK )
++		return TB_HALG_SM3 ;
++	else if ( bank == SHA384_BANK )
++		return TB_HALG_SHA384 ;
++	else if ( bank == SHA512_BANK )
++		return TB_HALG_SHA512;
++	else
++		return -1;
++}
++
++#define ALG_MASK_SHA1	1
++#define ALG_MASK_SHA256 1<<1
++#define ALG_MASK_SM3	1<<2
++#define ALG_MASK_SHA384 1<<3
++#define ALG_MASK_SHA512 1<<4
++#define ALG_MASK_LAST	1<<5
++
++static inline int alg_to_mask(uint16_t alg)
++{
++	if ( alg == TB_HALG_SHA1 )
++		return ALG_MASK_SHA1;
++	else if ( alg == TB_HALG_SHA256 )
++		return ALG_MASK_SHA256;
++	else if ( alg == TB_HALG_SM3 )
++		return ALG_MASK_SM3;
++	else if ( alg == TB_HALG_SHA384 )
++		return ALG_MASK_SHA384;
++	else if ( alg == TB_HALG_SHA512 )
++		return ALG_MASK_SHA512;
++	else
++		return 0;
++}
++
++struct tpm *new_tpm(uint8_t version);
++void destroy_tpm(struct tpm *t);
++bool tpm_record_event(struct tpm *t, uint16_t alg, void *e);
++int tpm_count_event(struct tpm *t, uint16_t alg, uint32_t evt_type);
++struct pcr_event *tpm_find_event(struct tpm *t, uint16_t alg,
++				uint32_t evt_type, int n);
++bool tpm_clear_all_event(struct tpm *t, uint16_t alg, uint32_t evt_type);
++bool tpm_recalculate(struct tpm *t);
++void tpm_print(struct tpm *t, uint16_t alg);
++void tpm_dump(struct tpm *t, uint16_t alg);
++bool pcr_record_event(struct pcr *p, uint16_t alg, uint32_t type, tb_hash_t *hash);
++
++#endif
+diff --git a/pcr-calc/util.c b/pcr-calc/util.c
+new file mode 100644
+index 0000000..65c8064
+--- /dev/null
++++ b/pcr-calc/util.c
+@@ -0,0 +1,134 @@
++/*
++ *
++ * Copyright (c) 2017 Daniel P. Smith
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ *
++ *   * Redistributions of source code must retain the above copyright
++ *     notice, this list of conditions and the following disclaimer.
++ *   * Redistributions in binary form must reproduce the above
++ *     copyright notice, this list of conditions and the following
++ *     disclaimer in the documentation and/or other materials provided
++ *     with the distribution.
++ *   * Neither the name of the Intel Corporation nor the names of its
++ *     contributors may be used to endorse or promote products derived
++ *     from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
++ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
++ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
++ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
++ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
++ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
++ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
++ * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED
++ * OF THE POSSIBILITY OF SUCH DAMAGE.
++ *
++ */
++
++#include <stdint.h>
++#include <stdlib.h>
++#include <string.h>
++#include <stdio.h>
++#include <stdbool.h>
++#include <sys/types.h>
++#include <sys/stat.h>
++#include <fcntl.h>
++#include <unistd.h>
++
++#include "../include/hash.h"
++
++#define error_msg(fmt, ...)         fprintf(stderr, fmt, ##__VA_ARGS__)
++
++bool read_hash(const char *hexstr, tb_hash_t *hash)
++{
++	size_t len = strlen(hexstr);
++	int i, j;
++	unsigned char *buf = (unsigned char *)hash;
++
++	if (len == 1 && hexstr[0] == '0') {
++		memset(hash, 0, sizeof(tb_hash_t));
++		return true;
++	}
++
++	if (len / 2 >= sizeof(tb_hash_t))
++		return false;
++	if (len % 2 == 1)
++		return false;
++
++	for (i=0, j=0; i < (int) len; i+=2, j++) {
++		if (sscanf(&(hexstr[i]), "%2hhx", &(buf[j])) != 1)
++			return false;
++	}
++
++	return true;
++}
++
++#define BLOCK_SIZE 1024
++size_t read_file(const char *path, char **buffer)
++{
++	char *top, *insert;
++	int fd, count;
++	size_t allocated = 0, total = 0;
++
++	if (access(path, F_OK) == -1) {
++		error_msg("no access to file: %s\n",path);
++		goto out;
++	}
++
++	allocated += 4*BLOCK_SIZE;
++	*buffer = (char *) malloc(allocated);
++	if (!*buffer) {
++		error_msg("unable to allocate memory\n");
++		goto out;
++	}
++
++	top = *buffer;
++	insert = *buffer;
++
++	fd = open(path, O_RDONLY);
++	if (fd == -1) {
++		error_msg("unable to open file: %s\n",path);
++		goto out_free;
++	}
++
++	while ((count = read(fd, insert, BLOCK_SIZE)) != 0) {
++		if (count == -1) {
++			error_msg("read failed\n");
++			goto out_fd;
++		}
++
++		total += count;
++		insert += count;
++
++		if ((total + BLOCK_SIZE) > allocated) {
++			allocated += BLOCK_SIZE;
++			*buffer = realloc(*buffer, allocated);
++			if (! *buffer) {
++				error_msg("failed to resize buffer\n");
++				/* reset buffer to free original */
++				*buffer = top;
++				goto out_fd;
++			}
++			top = *buffer;
++			insert = top + total;
++		}
++	}
++
++	close(fd);
++	return total;
++
++out_fd:
++	close(fd);
++out_free:
++	free(*buffer);
++out:
++	return 0;
++}
++
+diff --git a/pcr-calc/util.h b/pcr-calc/util.h
+new file mode 100644
+index 0000000..6a7e998
+--- /dev/null
++++ b/pcr-calc/util.h
+@@ -0,0 +1,45 @@
++/*
++ *
++ * Copyright (c) 2017 Daniel P. Smith
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ *
++ *   * Redistributions of source code must retain the above copyright
++ *     notice, this list of conditions and the following disclaimer.
++ *   * Redistributions in binary form must reproduce the above
++ *     copyright notice, this list of conditions and the following
++ *     disclaimer in the documentation and/or other materials provided
++ *     with the distribution.
++ *   * Neither the name of the Intel Corporation nor the names of its
++ *     contributors may be used to endorse or promote products derived
++ *     from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
++ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
++ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
++ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
++ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
++ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
++ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
++ * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED
++ * OF THE POSSIBILITY OF SUCH DAMAGE.
++ *
++ */
++
++#ifndef __UTIL_H__
++#define __UTIL_H__
++
++#include <stdbool.h>
++#include <sys/types.h>
++
++
++bool read_hash(const char *hexstr, tb_hash_t *hash);
++size_t read_file(const char *path, char **buffer);
++
++#endif
+diff --git a/pcr-calc/uuid.h b/pcr-calc/uuid.h
+new file mode 100644
+index 0000000..7cd7e28
+--- /dev/null
++++ b/pcr-calc/uuid.h
+@@ -0,0 +1,53 @@
++/*
++ * heap.h: Intel(r) TXT heap definitions
++ *
++ * Copyright (c) 2003-2011, Intel Corporation
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ *
++ *   * Redistributions of source code must retain the above copyright
++ *     notice, this list of conditions and the following disclaimer.
++ *   * Redistributions in binary form must reproduce the above
++ *     copyright notice, this list of conditions and the following
++ *     disclaimer in the documentation and/or other materials provided
++ *     with the distribution.
++ *   * Neither the name of the Intel Corporation nor the names of its
++ *     contributors may be used to endorse or promote products derived
++ *     from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
++ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
++ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
++ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
++ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
++ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
++ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
++ * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED
++ * OF THE POSSIBILITY OF SUCH DAMAGE.
++ *
++ */
++
++#ifndef __UUID_H__
++#define __UUID_H__
++
++#ifndef __packed
++#define __packed   __attribute__ ((packed))
++#endif
++
++/* define uuid_t here in case uuid.h wasn't pre-included */
++/* (i.e. so tboot.h can be self-sufficient) */
++typedef struct __packed {
++  uint32_t    data1;
++  uint16_t    data2;
++  uint16_t    data3;
++  uint16_t    data4;
++  uint8_t     data5[6];
++} uuid_t;
++
++#endif
+-- 
+1.9.1
+
