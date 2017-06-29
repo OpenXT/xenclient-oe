@@ -28,6 +28,7 @@
     echo "failed to load tpm-functions"
     exit 1
 }
+
 get_preferred_alg () {
     pcr_bank_exists "TPM_ALG_SHA256" && echo "sha256" && return 0
     pcr_bank_exists "TPM_ALG_SHA1" && echo "sha1" && return 0
@@ -100,24 +101,6 @@ parse_grub() {
     exec 6<&-
 }
 
-# Function to calulate sinit hash and return the resulting hash
-# parameter 0: path to TXT AC module
-# return 0 on success
-# return 1 if passed invalid hashes
-hash_sinit() {
-    local acmod=$1
-    local policy="/tmp/.policy"
-    local tboot_idx='0x20000001'
-
-    lcp_readpol -i $tboot_idx -f $policy 2>&1 >/dev/null
-
-    tb_polgen --show $policy 2>&1 >/dev/null
-    [[ $? -ne 0 ]] && return 1
-
-    echo $(sinit_hash -p $policy $acmod|tr -d ' ')
-    rm $policy 2>&1 >/dev/null
-}
-
 # Function to perform a TPM hash extended
 # parameter 0: hash to extend
 # parameter 1: extending hash
@@ -126,28 +109,28 @@ hash_sinit() {
 hash_extend() {
     local first=$1
     local second=$2
+    local hashalg=${3:-"sha1"}
     local buffer="/tmp/.buffer"
 
-    is_tpm_2_0
-    local tpm2=$?
+    case $hashalg in
+        "sha1")
+            [[ $first == 0 ]] && first="0000000000000000000000000000000000000000"
+            [[ $(echo -n $first|wc -c) -ne 40 ]] && return 1
+            [[ $(echo -n $second|wc -c) -ne 40 ]] && return 1
+        ;;
+        "sha256")
+            [[ $first == 0 ]] && \
+                first="0000000000000000000000000000000000000000000000000000000000000000"
+            [[ $(echo -n $first|wc -c) -ne 64 ]] && return 1
+            [[ $(echo -n $second|wc -c) -ne 64 ]] && return 1
+        ;;
+    esac
 
-    if [ "${tpm2}" -eq 0 ]; then
-        default_first="0000000000000000000000000000000000000000000000000000000000000000"
-        shaalg="sha256sum"
-        size=64
-    else
-        default_first="0000000000000000000000000000000000000000"
-        shaalg="sha1sum"
-        size=40
-    fi
-
-    [[ $first == 0 ]] && first=${default_first}
-    [[ $(echo -n $first|wc -c) -ne ${size} ]] && return 1
-    [[ $(echo -n $second|wc -c) -ne ${size} ]] && return 1
     echo -n $first | hex2bin >$buffer
     echo -n $second | hex2bin >>$buffer
 
-    echo $(${shaalg} $buffer | awk '{ print $1 }')
+    echo $(${hashalg}sum $buffer | awk '{ print $1 }')
+
     rm $buffer
 }
 
@@ -155,19 +138,14 @@ hash_extend() {
 # return 0 on success
 # return 1 on failure
 pcr17() {
-    is_tpm_2_0
-    local tpm2=$?
+    local root="${1:-/}"
+    local pcr17=''
 
-    if [ "${tpm2}" -eq 0 ]; then
-        pcr17=$(tpm2_listpcrs -g 0xb | grep PCR_17 | cut -f2 -d: | tr -d ' ' | tr -d '\n')
-    else
-        local root="${1:-/}"
-        local pcr17=''
+    local tpm_dir=$(find /sys/class -name tpm0)
 
-        local tpm_dir=$(find /sys/class -name tpm0)
-        [[ ! -d $tpm_dir ]] && return 1
-        pcr17=$(grep PCR-17 ${tpm_dir}/device/pcrs | cut -f2 -d: | tr -d ' ')
-    fi
+    [[ ! -d $tpm_dir ]] && return 1
+
+    pcr17=$(grep PCR-17 ${tpm_dir}/device/pcrs | cut -f2 -d: | tr -d ' ')
 
     echo "${pcr17}"
     return 0
@@ -182,12 +160,9 @@ pcr18() {
     local root="${1:-/}"
     local modules="${2}"
     local pcr18=''
-    is_tpm_2_0
-    local tpm2=$?
-    local IFS=$'\n'
-    local hash_alg="sha1" #default to sha1 for legacy
-    mod_num=0
 
+    local IFS=$'\n'
+    mod_num=0
     for  modline in $modules; do
         args=""
         module=$(echo ${modline} | awk '{ print $1 }')
@@ -204,13 +179,7 @@ pcr18() {
         case ${mod_num} in
         0)
             cmdline=$(echo ${cmdline} | sed -e 's/FIXME\s*//')
-            if [ "${tpm2}" -eq 0 ]; then
-                hash_alg=$(get_preferred_alg)
-                [ $? -ne 0 ] && echo "No valid algs available" && return 1
-                mlehash=$(lcp2_mlehash --create --cmdline "${cmdline}" --alg $hash_alg ${root}/${module} | tr -d ' ')
-            else
-                mlehash=$(lcp_mlehash -c "${cmdline}" ${root}/${module}|tr -d ' ')
-            fi
+            mlehash=$(lcp_mlehash -c "${cmdline}" ${root}/${module}|tr -d ' ')
             pcr18=$(hash_extend 0 ${mlehash})
             [[ $? -ne 0 ]] && return 1
         ;;
@@ -222,7 +191,7 @@ pcr18() {
 
             [[ -n "${cmdline}" ]] && args="-c '${cmdline}'"
             $(echo ${module}|egrep -q -e'\.gz$') && args="${args} -z"
-            pcr18=$(eval "module_hash -a ${hash_alg} -e ${pcr18} ${args} ${root}/${module}")
+            pcr18=$(eval "module_hash -e ${pcr18} ${args} ${root}/${module}")
         ;;
         *)
             break
@@ -249,16 +218,7 @@ pcr19() {
     local root="${1:-/}"
     local modules="${2}"
     local pcr19=''
-    is_tpm_2_0
-    local tpm2=$?
-    local hash_alg=''
 
-    if [ "${tpm2}" -eq 0 ]; then
-        hash_alg="sha256"
-    else
-        hash_alg="sha1"
-    fi
- 
     local IFS=$'\n'
     mod_num=0
     for  modline in $modules; do
@@ -270,12 +230,10 @@ pcr19() {
             cmdline=""
         fi
 
+        # ACMs have a binary fingerprint, hash first 8 bytes of every .bin file
+        # and if it matches hash of fingerprint, skip. 
         if $(echo ${module} | egrep -q -e '\.bin$|\.BIN$'); then
-            if [ "${tpm2}" -eq 0 ]; then
-                finger=$(head -c 8 ${root}/${module}|sha256sum|head -c 7)
-            else
-                finger=$(head -c 8 ${root}/${module}|sha1sum|head -c 7)
-            fi
+            finger=$(head -c 8 ${root}/${module}|sha1sum|head -c 7)
             if [ "$finger" = "c22c443" ]; then
                 continue
             fi
@@ -295,7 +253,7 @@ pcr19() {
 
             [[ -n "${cmdline}" ]] && args="-c '${cmdline}'"
             $(echo ${module}|egrep -q -e'\.gz$') && args="${args} -z"
-            pcr19=$(eval "module_hash -a ${hash_alg} -e ${pcr19} ${args} ${root}/${module}")
+            pcr19=$(eval "module_hash -e ${pcr19} ${args} ${root}/${module}")
         ;;
         esac
 
@@ -310,22 +268,127 @@ pcr19() {
     return 1
 }
 
+
+# Hash all multiboot modules
+# parameter 1: multiboot modules
+# return 0 on success
+# return 1 on failure
+hash_modules() {
+    local root="${1:-/}"
+    local hashalg="${2:-'sha1'}"
+    local modules="${3}"
+    local hash_list=''
+    local mod_num=0
+    local args=''
+
+    local IFS=$'\n'
+    for  modline in $modules; do
+        args="-a ${hashalg}"
+        module=$(echo ${modline} | awk '{ print $1 }')
+        if [[ $(echo ${modline} | wc -w) -gt 2 ]]; then
+            cmdline=$(echo ${modline} | awk '{ print substr($0, index($0,$2)) }')
+        else
+            cmdline=""
+        fi
+
+        # ACMs have a binary fingerprint, hash first 8 bytes of every .bin file
+        # and if it matches hash of fingerprint, skip. 
+        if $(echo ${module} | egrep -q -e '\.bin$|\.BIN$'); then
+            finger=$(head -c 8 ${root}/${module}|sha1sum|head -c 7)
+            [ "$finger" = "c22c443" ] && continue
+        fi
+
+
+        if [[ ${mod_num} -eq 0 ]]; then
+            cmdline=$(echo ${cmdline} | sed -e 's/FIXME\s*//')
+            hash_list=$(lcp2_mlehash --create --alg $hashalg \
+                    --cmdline "${cmdline}" ${root}/${module}|tr -d ' ')
+            [[ $? -ne 0 ]] && return 1
+        else
+            if [[ -z "${hash_list}" ]]; then
+                echo "failed to hash MLE"
+                return 1
+            fi
+
+            [[ -n "${cmdline}" ]] && args="${args} -c '${cmdline}'"
+            $(echo ${module}|egrep -q -e'\.gz$') && args="${args} -z"
+            local h=$(eval "module_hash ${args} ${root}/${module}")
+            hash_list="${hash_list} ${h}"
+        fi
+
+        mod_num=$(( ${mod_num} + 1 ))
+    done
+
+    [ -n ${hash_list} ] && {
+        echo "${hash_list}"
+        return 0
+    }
+
+    return 1
+}
+
 calculate_pcrs() {
     local root="${1:-/}"
     local grub_conf=${2}
+    local hashalg="${3:-'sha1'}"
+    local args=''
     local p17=''
     local p18=''
     local p19=''
+    local modules=''
 
-    local modules=$(parse_grub ${root}/$grub_conf)
+    modules=$(parse_grub ${root}/$grub_conf)
+    [[ $? -ne 0 ]] && return 1
 
+    # Would like to test for the presence of the txt eventlog export and
+    # use the newer pcr calculator but to support upgrade path from
+    # stable-6 where we did not control the VL policy, it is not possible
+    # to know what policy is in use to calculate its hash. For now only
+    # applying to TPM2 which implicitly implies initial install was stable-7.
+    is_tpm_2_0
     if [[ $? -eq 0 ]]; then
+        local modhashes=''
+        local policy=''
+        local pcrs=''
+
+        modhashes=$(hash_modules ${root} ${hashalg} "${modules}")
+        [[ $? -ne 0 ]] && return 1
+
+        # get a tmp file name to store policy
+        policy=$(mktemp -qu)
+        [[ $? -ne 0 ]] && return 1
+
+        is_tpm_2_0
+        [[ $? -eq 0 ]] && args="-2 -a sha256"
+
+        create_policy ${policy} ${hashalg}
+        [[ $? -ne 0 ]] && return 1
+
+        args="${args} -p ${policy}"
+
+        for m in $modhashes; do
+            args="${args} -m ${m}"
+        done
+
+        pcrs=$(pcr-calc ${args}|tr -d ' ')
+        [[ $? -ne 0 ]] && return 1
+
+        for l in $pcrs; do
+            for p in 17 18 19; do
+                [[ -z "${l##$p*}" ]] || continue
+
+                eval "p${p}=$(echo $l|cut -f2 -d:)"
+            done
+        done
+    else
         p17=$(pcr17 ${root} "${modules}" "true") || return 1
         p18=$(pcr18 ${root} "${modules}") || return 1
         p19=$(pcr19 ${root} "${modules}") || return 1
     fi
 
-	echo "${p17} ${p18} ${p19}"
+    echo "${p17} ${p18} ${p19}"
+
+    return 0
 }
 
 # Function to generate the tboot verified launch policy
@@ -339,11 +402,11 @@ generate_policy() {
     local hash_alg="sha1" #default to sha1 for legacy support
 
     is_tpm_2_0
-    tpm2=$?
+    local tpm2=$?
 
-    if [ "${tpm2}" -eq 0 ]; then
+    if [[ "${tpm2}" -eq 0 ]]; then
         hash_alg=$(get_preferred_alg)
-        [ $? -ne 0 ] && echo "No valid algs available" && return 1
+        [[ $? -ne 0 ]] && echo "No valid algs available" && return 1
         #Two possible nv index locations on tpm2.0 that tboot checks
         local tboot_idx='0x01200001'
         local tboot_idx2='0x01c10131'
@@ -351,37 +414,56 @@ generate_policy() {
         local tboot_idx='0x20000001'
     fi
 
-    [ -f $policy ] && rm -f $policy
+    create_policy $policy $hash_alg
+    [[ $? -ne 0 ]] && echo "failed to create Verified Launch policy" && return 1
 
-    tb_polgen --create --type nonfatal --ctrl 1 --alg $hash_alg $policy 2>&1 1>/dev/null && \
-    tb_polgen --add --num 0 --pcr none --hash any $policy 2>&1 1>/dev/null && \
-    tb_polgen --add --num any --pcr 19 --hash any $policy 2>&1 1>/dev/null
+    local polsize=$(cat $policy | wc -c)
+    if [[ "${tpm2}" -eq 0 ]]; then
+        tpm2_nvdefine -x $tboot_idx -s $polsize -a 0x40000001 -P "$password" -t 0x60006 1>/dev/null 2>&1 && \
+        tpm2_nvwrite -x $tboot_idx -f $policy -a 0x40000001 -P "$password" 1>/dev/null 2>&1
+        if [[ $? -ne 0 ]]; then
+            echo "failed to write tboot Verified Launch policy to TPM" >&2
+            return 2
+        fi
+        tpm2_nvdefine -x $tboot_idx2 -s $polsize -a 0x40000001 -P "$password" -t 0x60006 1>/dev/null 2>&1 && \
+        tpm2_nvwrite -x $tboot_idx2 -f $policy -a 0x40000001 -P "$password" 1>/dev/null 2>&1
+    else
+        tpmnv_defindex -i $tboot_idx -s $polsize -pv 0x02 -p "$password" 1>/dev/null 2>&1 && \
+        lcp_writepol -i $tboot_idx -f $policy -p "$password" 1>/dev/null 2>&1
+    fi
+
+    if [[ $? -ne 0 ]]; then
+        echo "failed to write tboot Verified Launch policy to TPM" >&2
+        return 2
+    fi
+
+    [[ -f $policy ]] && rm -f $policy
+}
+
+# Function to create policy and store into a file
+# parameter 0: path where policy file should be written
+# parameter 1: hash algorithm to use, either sha1 or sha256
+# return 0 on success
+# return 1 if fails to read
+create_policy() {
+    local policy=$1
+    local hash_alg=${2:-"sha1"}
+
+    if [[ "${hash_alg}" != "sha1" ]] && [[ "${hash_alg}" != "sha256" ]]; then
+        echo "invalid algorithm" && return 1
+    fi
+
+    [[ -f $policy ]] && rm -f $policy
+
+    tb_polgen --create --type nonfatal --ctrl 1 --alg $hash_alg $policy 1>/dev/null 2>&1 && \
+    tb_polgen --add --num 0 --pcr none --hash any $policy 1>/dev/null 2>&1 && \
+    tb_polgen --add --num any --pcr 19 --hash any $policy 1>/dev/null 2>&1
     if [ $? -ne 0 ]; then
         echo "failed to generate tboot Verified Launch policy" >&2
         return 1
     fi
 
-    local polsize=$(cat $policy | wc -c)
-    if [ "${tpm2}" -eq 0 ]; then
-        tpm2_nvdefine -x $tboot_idx -s $polsize -a 0x40000001 -P "$password" -t 0x60006 2>&1 1>/dev/null && \
-        tpm2_nvwrite -x $tboot_idx -f $policy -a 0x40000001 -P "$password" 2>&1 1>/dev/null
-        if [ $? -ne 0 ]; then
-            echo "failed to write tboot Verified Launch policy to TPM" >&2
-            return 2
-        fi
-        tpm2_nvdefine -x $tboot_idx2 -s $polsize -a 0x40000001 -P "$password" -t 0x60006 2>&1 1>/dev/null && \
-        tpm2_nvwrite -x $tboot_idx2 -f $policy -a 0x40000001 -P "$password" 2>&1 1>/dev/null
-    else
-        tpmnv_defindex -i $tboot_idx -s $polsize -pv 0x02 -p "$password" 2>&1 1>/dev/null && \
-        lcp_writepol -i $tboot_idx -f $policy -p "$password" 2>&1 1>/dev/null
-    fi
-
-    if [ $? -ne 0 ]; then
-        echo "failed to write tboot Verified Launch policy to TPM" >&2
-        return 2
-    fi
-
-    [ -f $policy ] && rm -f $policy
+    return 0
 }
 
 # Function to determine whether or not tboot was able to setup an MLE
