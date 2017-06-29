@@ -325,42 +325,106 @@ tpm_take_ownership() {
     fi
     return 0
 }
+
+tpm_seal() {
+    local root=""
+    local hashalg="sha1"
+    local pcrs=""
+    local pcr_params=""
+    local OPTIND
+    local opt
+
+    while getopts ":a:r:p:" opt; do
+        case "${opt}" in
+            a)
+                hashalg=${OPTARG}
+            ;;
+            r)
+                root=${OPTARG}
+            ;;
+            p)
+                pcrs="${pcrs} ${OPTARG}"
+            ;;
+        esac
+    done
+    shift $((OPTIND-1))
+
+    local secret="${root}/${1}"
+    local tss="${root}/${2}"
+
+    for p in ${pcrs}; do
+        if [[ "${tpm2}" -eq 0 ]]; then
+            pcr_params="${pcr_params} -r ${p}"
+        else
+            pcr_params="${pcr_params} -p ${p}"
+        fi
+    done
+
+    is_tpm_2_0
+    if [ $? -eq 0 ]; then
+        pcr_bank_exists "TPM_ALG_$(echo $hashalg|tr [a-z] [A-Z])"
+        [ $? -eq 0 ] || return 1
+
+        case $hashalg in
+        sha1)
+            sealout=$(tpm2_sealdata -H 0x81000001 -I ${secret} \
+                -O ${tss}.sha1 -o ${tss}.pub.sha1 -g 0x4 \
+                -G 8 -b 0x492 ${pcr_params} 2>&1)
+            return $?
+        ;;
+        sha256)
+            sealout=$(tpm2_sealdata -H 0x81000000 -I ${secret} \
+                -O ${tss}.sha256 -o ${tss}.pub.sha256 -g 0xB \
+                -G 8 -b 0x492 ${pcr_params} 2>&1)
+            return $?
+        ;;
+        *)
+            return 1
+        ;;
+        esac
+    else
+        sealout=$(tpm_sealdata_sa -i ${secret} -o ${tss}.sha1 \
+            -z ${pcr_params} 2>&1)
+        return $?
+    fi
+}
+
 tpm_forward_seal() {
     local root=""
     local forward_values=""
+    local hashalg="sha1"
+    local pcrs=""
+    local pcr_params=""
     local OPTIND
     local opt
     local p
     is_tpm_2_0
     local tpm2=$?
 
-    while getopts ":r:p:" opt; do
+    while getopts ":a:r:p:" opt; do
         case "${opt}" in
+            a)
+                hashalg=${OPTARG}
+            ;;
             r)
                 root=${OPTARG}
-			;;
+            ;;
             p)
-                forward_values="${forward_values} ${OPTARG}"
+                pcrs="${pcrs} ${OPTARG}"
             ;;
         esac
     done
     shift $((OPTIND-1))
 
-    local pcrs=$(cat ${root}/config/config.pcrs)
     local key="${root}/${1}"
     local tss="${root}/${2}"
 
-    for p in ${forward_values}; do
-        i=$(echo ${p} | cut -f 1 -d :)
-        echo ${pcrs} | egrep -q -e "\s${i}\s*" || {
-            if [[ "${tpm2}" -eq 0 ]]; then
-                pcrs="${pcrs} -r ${p}"
-            else
-                pcrs="${pcrs} -p ${p}"
-            fi
-            continue
-        }
-        pcrs=$(echo ${pcrs}|sed -e "s/\s${i}\s*/ ${p} /")
+    for p in ${pcrs}; do
+        if [[ "${tpm2}" -eq 0 ]]; then
+            pcr_params="${pcr_params} -r ${p}"
+        else
+            pcr_params="${pcr_params} -p ${p}"
+        fi
     done
 
     if [ "${tpm2}" -eq 0 ];
@@ -368,7 +432,7 @@ tpm_forward_seal() {
         seal_file=${key}
         clean_old_tpm_files
         if pcr_bank_exists "TPM_ALG_SHA256"; then
-            tpm2_sealdata -H 0x81000000 -I ${seal_file} -O ${tss}.sha256 -o ${tss}.pub.sha256 -g 0xB -G 8 -b 0x492 ${pcrs} 2>&1
+            tpm2_sealdata -H 0x81000000 -I ${seal_file} -O ${tss}.sha256 -o ${tss}.pub.sha256 -g 0xB -G 8 -b 0x492 ${pcr_params} 2>&1
             err=$?
             if [ $err -ne 0 ]; then return $err; fi
         fi
@@ -377,13 +441,69 @@ tpm_forward_seal() {
     else
         /etc/init.d/trousers status > /dev/null 2>&1
         if [ $? -ne 0 ]; then
-            tpm_sealdata_sa -i ${key} -o ${tss} -z ${pcrs} 2>&1
+            tpm_sealdata_sa -i ${key} -o ${tss} -z ${pcr_params} 2>&1
             return $?
         else
-            tpm_sealdata -i ${key} -o ${tss} -z ${pcrs} 2>&1
+            tpm_sealdata -i ${key} -o ${tss} -z ${pcr_params} 2>&1
             return $?
         fi
     fi
+}
+
+tpm_unseal() {
+    local root=""
+    local hashalg="sha1"
+    local pcrs=""
+    local pcr_params=""
+    local OPTIND
+    local opt
+
+    while getopts ":a:r:p:" opt; do
+        case "${opt}" in
+            a)
+                hashalg=${OPTARG}
+            ;;
+            r)
+                root=${OPTARG}
+            ;;
+            p)
+                pcrs="${pcrs} ${OPTARG}"
+            ;;
+        esac
+    done
+    shift $((OPTIND-1))
+
+    local tss="${root}/${1}"
+
+    is_tpm_2_0
+    if [ $? -eq 0 ]; then
+        for p in ${pcrs}; do
+            pcr_params="${pcr_params} -r ${p}"
+        done
+
+        pcr_bank_exists "TPM_ALG_$(echo $hashalg|tr [a-z] [A-Z])"
+        [ $? -eq 0 ] || return 1
+
+        case $hashalg in
+        sha1)
+            tpm2_unsealdata -H 0x81000001 -n "${tss}.sha1" \
+                -u "${tss}.pub.sha1" -g 0x4 ${pcr_params} 2>/dev/null
+            return $?
+        ;;
+        sha256)
+            tpm2_unsealdata -H 0x81000000 -n "${tss}.sha256" \
+                -u "${tss}.pub.sha256" -g 0xB ${pcr_params} 2>/dev/null
+            return $?
+        ;;
+        *)
+            return 1
+        ;;
+        esac
+    else
+        tpm_unsealdata_sa -z -i $tss 2>/dev/null
+        ret=$?
+    fi
+
 }
 
 QUIRK_D="/usr/lib/tpm-scripts/quirks.d"
