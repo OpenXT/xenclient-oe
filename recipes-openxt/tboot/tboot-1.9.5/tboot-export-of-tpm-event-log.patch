@@ -1,0 +1,218 @@
+From a11a64e1ac9b465ec1fe0a38db1aed54befd78ba Mon Sep 17 00:00:00 2001
+From: "Daniel P. Smith" <dpsmith@apertussolutions.com>
+Date: Tue, 16 May 2017 12:59:33 -0400
+Subject: [PATCH 1/2] tboot: export of tpm event log
+
+This will create a copy of the TPM event log outside of the TXT heap for
+the Xen use case to safe past the log down to a VM.
+
+Signed-off-by: Daniel P. Smith <dpsmith@apertussolutions.com>
+---
+ include/tboot.h         |   4 ++
+ tboot/common/tboot.c    |   5 ++
+ tboot/include/txt/txt.h |   1 +
+ tboot/txt/txt.c         | 124 ++++++++++++++++++++++++++++++++++++++++++++++++
+ 4 files changed, 134 insertions(+)
+
+diff --git a/include/tboot.h b/include/tboot.h
+index abb1ca4..4e7c7be 100644
+--- a/include/tboot.h
++++ b/include/tboot.h
+@@ -109,6 +109,8 @@ typedef struct __packed {
+     uint32_t  flags;
+     uint64_t  ap_wake_addr;      /* phys addr of kernel/VMM SIPI vector */
+     uint32_t  ap_wake_trigger;   /* kernel/VMM writes APIC ID to wake AP */
++    uint64_t  evt_log_size;      /* size of e820 TPM event log(s) region */
++    uint64_t  evt_log_region;    /* e820 region containing TPM event log(s) */
+ } tboot_shared_t;
+ 
+ #define TB_SHUTDOWN_REBOOT      0
+@@ -163,6 +165,8 @@ static inline void print_tboot_shared(const tboot_shared_t *tboot_shared)
+     printk(TBOOT_DETA"\t flags: 0x%8.8x\n", tboot_shared->flags);
+     printk(TBOOT_DETA"\t ap_wake_addr: 0x%08x\n", (uint32_t)tboot_shared->ap_wake_addr);
+     printk(TBOOT_DETA"\t ap_wake_trigger: %u\n", tboot_shared->ap_wake_trigger);
++    printk(TBOOT_DETA"\t evt_log_region: 0x%llx\n", tboot_shared->evt_log_region);
++    printk(TBOOT_DETA"\t evt_log_size: 0x%llx\n", tboot_shared->evt_log_size);
+ }
+ 
+ #endif    /* __TBOOT_H__ */
+diff --git a/tboot/common/tboot.c b/tboot/common/tboot.c
+index ebb93a3..c060a82 100644
+--- a/tboot/common/tboot.c
++++ b/tboot/common/tboot.c
+@@ -251,6 +251,11 @@ static void post_launch(void)
+         printk(TBOOT_ERR"ap_wake_mwait specified but the CPU doesn't support it.\n");
+     }
+ 
++    /*
++     * export tpm event log
++     */
++    export_evtlog(&_tboot_shared.evt_log_region, &_tboot_shared.evt_log_size);
++    replace_e820_map(g_ldr_ctx);
+     print_tboot_shared(&_tboot_shared);
+ 
+     launch_kernel(true);
+diff --git a/tboot/include/txt/txt.h b/tboot/include/txt/txt.h
+index 293fad8..eb8380c 100644
+--- a/tboot/include/txt/txt.h
++++ b/tboot/include/txt/txt.h
+@@ -53,6 +53,7 @@ extern bool txt_s3_launch_environment(void);
+ extern void txt_shutdown(void);
+ extern bool txt_is_powercycle_required(void);
+ extern void ap_wait(unsigned int cpuid);
++void export_evtlog(uint64_t *log, uint64_t *size);
+ 
+ extern uint32_t g_using_da;
+ #endif      /* __TXT_TXT_H__ */
+diff --git a/tboot/txt/txt.c b/tboot/txt/txt.c
+index 0eaaccb..3f71224 100644
+--- a/tboot/txt/txt.c
++++ b/tboot/txt/txt.c
+@@ -319,6 +319,42 @@ bool evtlog_append_tpm12(uint8_t pcr, tb_hash_t *hash, uint32_t type)
+     return true;
+ }
+ 
++void export_evtlog_tpm12(uint64_t *log, uint64_t *size)
++{
++    uint64_t reserve;
++    void *src, *dst;
++
++    if ( g_elog == NULL )
++        goto fail;
++
++    src = (void *) g_elog;
++
++    *size = sizeof(event_log_container_t) +
++        (g_elog->next_event_offset - g_elog->pcr_events_offset);
++    if (*size < sizeof(event_log_container_t))
++        goto fail;
++
++    reserve = PAGE_UP(*size);
++    get_highest_sized_ram(reserve, 0x100000000ULL, log, &reserve);
++    if (*log == 0)
++        goto fail;
++
++    dst = (void *)(uint32_t) *log;
++
++    memcpy(dst, src, *size);
++
++    reserve = PAGE_UP(*size);
++    if (! e820_reserve_ram(*log, reserve))
++        goto fail;
++
++    return;
++
++fail:
++    *log = 0;
++    *size = 0;
++    return;
++}
++
+ void dump_event_2(void)
+ {
+     heap_event_log_descr_t *log_descr;
+@@ -393,6 +429,78 @@ bool evtlog_append_tpm20(uint8_t pcr, uint16_t alg, tb_hash_t *hash, uint32_t ty
+     return true;
+ }
+ 
++void export_evtlog_tpm20(uint64_t *log, uint64_t *size)
++{
++    size_t copied = 0;
++    size_t count = 0;
++    uint64_t reserve;
++    void *curr = NULL;
++    heap_event_log_descr_t *log_desc = NULL;
++
++    if ( g_elog_2 == NULL )
++        goto fail;
++
++    *size = 0;
++    for ( unsigned int i=0; i<g_elog_2->count; i++ ) {
++        log_desc = &g_elog_2->event_log_descr[i];
++
++        *size += sizeof(heap_event_log_descr_t) +
++            (log_desc->next_event_offset - log_desc->pcr_events_offset);
++    }
++
++    if ( *size < sizeof(heap_event_log_descr_t) )
++        goto fail;
++
++    reserve = PAGE_UP(*size);
++    get_highest_sized_ram(reserve, 0x100000000ULL, log, &reserve);
++    if (*log == 0)
++        goto fail;
++
++    curr = (void *)(uint32_t) *log;
++
++    for ( unsigned int i=0; i<g_elog_2->count; i++ ) {
++        void *src;
++
++        log_desc = &g_elog_2->event_log_descr[i];
++
++        /* copy the log descriptor */
++        count = sizeof(heap_event_log_descr_t);
++        if ( *size < (copied + count) )
++            goto fail;
++        memcpy(curr, log_desc, count);
++
++        curr += count;
++        copied += count;
++
++        /* copy the log */
++        count = log_desc->next_event_offset - log_desc->pcr_events_offset;
++        if ( *size < (copied + count) )
++            goto fail;
++        src = (void *)(uint32_t)(log_desc->phys_addr +
++                log_desc->pcr_events_offset);
++        if ( count > 0 ) {
++            memcpy(curr, src, count);
++            curr += count;
++            copied += count;
++        }
++    }
++
++    if ( copied == 0 )
++        goto fail;
++
++    reserve = PAGE_UP(*size);
++    if (! e820_reserve_ram(*log, reserve) )
++        goto fail;
++
++
++    return;
++
++fail:
++    *log = 0;
++    *size = 0;
++    return;
++}
++
+ bool evtlog_append(uint8_t pcr, hash_list_t *hl, uint32_t type)
+ {
+     switch (g_tpm->major) {
+@@ -411,6 +519,22 @@ bool evtlog_append(uint8_t pcr, hash_list_t *hl, uint32_t type)
+     return true;
+ }
+ 
++void export_evtlog(uint64_t *log, uint64_t *size)
++{
++    switch (g_tpm->major) {
++    case TPM12_VER_MAJOR:
++        export_evtlog_tpm12(log, size);
++        break;
++    case TPM20_VER_MAJOR:
++        export_evtlog_tpm20(log, size);
++        break;
++    default:
++        *log = 0;
++        *size = 0;
++        return;
++    }
++}
++
+ __data uint32_t g_using_da = 0;
+ __data acm_hdr_t *g_sinit = 0;
+ 
+-- 
+1.9.1
+
