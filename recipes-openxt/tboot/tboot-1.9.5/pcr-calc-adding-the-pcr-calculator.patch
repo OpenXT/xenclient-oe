@@ -1,4 +1,4 @@
-From 1621e6f3d1242dd11b9697a713bfcde0ae9a3299 Mon Sep 17 00:00:00 2001
+From 39f8c3d04a77452fa631e982e184b53ffe262021 Mon Sep 17 00:00:00 2001
 From: "Daniel P. Smith" <dpsmith@apertussolutions.com>
 Date: Wed, 7 Jun 2017 14:34:49 -0400
 Subject: [PATCH] pcr-calc: adding the pcr calculator
@@ -12,15 +12,15 @@ Signed-off-by: Daniel P. Smith <dpsmith@apertussolutions.com>
  pcr-calc/hash.c        | 210 ++++++++++++++++++++++++
  pcr-calc/heap.h        | 354 ++++++++++++++++++++++++++++++++++++++++
  pcr-calc/module_hash.c | 427 +++++++++++++++++++++++++++++++++++++++++++++++++
- pcr-calc/pcr-calc.c    | 330 ++++++++++++++++++++++++++++++++++++++
+ pcr-calc/pcr-calc.c    | 352 ++++++++++++++++++++++++++++++++++++++++
  pcr-calc/tb_policy.c   |  82 ++++++++++
  pcr-calc/tb_policy.h   |  43 +++++
- pcr-calc/tpm.c         | 373 ++++++++++++++++++++++++++++++++++++++++++
- pcr-calc/tpm.h         | 156 ++++++++++++++++++
+ pcr-calc/tpm.c         | 391 ++++++++++++++++++++++++++++++++++++++++++++
+ pcr-calc/tpm.h         | 167 +++++++++++++++++++
  pcr-calc/util.c        | 134 ++++++++++++++++
  pcr-calc/util.h        |  45 ++++++
  pcr-calc/uuid.h        |  53 ++++++
- 15 files changed, 2439 insertions(+), 1 deletion(-)
+ 15 files changed, 2490 insertions(+), 1 deletion(-)
  create mode 100644 pcr-calc/Makefile
  create mode 100644 pcr-calc/eventlog.c
  create mode 100644 pcr-calc/eventlog.h
@@ -1309,10 +1309,10 @@ index 0000000..4cf1579
 +}
 diff --git a/pcr-calc/pcr-calc.c b/pcr-calc/pcr-calc.c
 new file mode 100644
-index 0000000..93bdfb1
+index 0000000..e51c3d9
 --- /dev/null
 +++ b/pcr-calc/pcr-calc.c
-@@ -0,0 +1,330 @@
+@@ -0,0 +1,352 @@
 +/*
 + *
 + * Copyright (c) 2017 Daniel P. Smith
@@ -1370,22 +1370,26 @@ index 0000000..93bdfb1
 +#define FLAG_TPM12	1
 +#define FLAG_TPM20	1<<1
 +#define FLAG_DA		1<<2
-+#define FLAG_LOG	1<<3
-+#define FLAG_VERBOSE	1<<4
++#define FLAG_CURRENT	1<<3
++#define FLAG_LOG	1<<4
++#define FLAG_VERBOSE	1<<5
 +
 +#define TPM12_LOG "/sys/kernel/security/txt/tpm12_binary_evtlog"
 +#define TPM20_LOG "/sys/kernel/security/txt/tpm20_binary_evtlog"
 +
 +#define error_msg(fmt, ...)         fprintf(stderr, fmt, ##__VA_ARGS__)
 +
++bool __hash_start_use_extend = false;
 +
 +static void print_help(void) {
-+	error_msg("pcr-calc [-h2d] -p policy_file -m hash_str\n"
++	error_msg("pcr-calc [-h2dclvq] [-a sha1|sha256] -p policy_file -m hash_str\n"
 +		"\t-h Help: will print out this help message.\n"
 +		"\t-2 TPM 2.0.\n"
 +		"\t-d D/A mode.\n"
++		"\t-c Calculate from TPM eventlog.\n"
 +		"\t-l Print TPM eventlog.\n"
 +		"\t-v Print calculated TPM eventlog.\n"
++		"\t-q Hash start quirk mode.\n"
 +		"\t-a alg Alogrithm: select what hash alogrithm to use.\n"
 +		"\t-p policy_file Tboot Policy: the policy that was/will be used.\n"
 +		"\t-m hash_str Multiboot Module: include module hash (MLE first).\n");
@@ -1514,7 +1518,7 @@ index 0000000..93bdfb1
 +
 +	flags = FLAG_TPM12;
 +
-+	while ((opt = getopt(argc, (char ** const)argv, "h2dlva:p:m:")) != -1) {
++	while ((opt = getopt(argc, (char ** const)argv, "h2dclvqa:p:m:")) != -1) {
 +		switch (opt) {
 +			case 'm':
 +				if (mb_count > 20) {
@@ -1558,11 +1562,17 @@ index 0000000..93bdfb1
 +			case 'd':
 +				flags |= FLAG_DA;
 +			break;
++			case 'c':
++				flags |= FLAG_CURRENT;
++			break;
 +			case 'l':
 +				flags |= FLAG_LOG;
 +			break;
 +			case 'v':
 +				flags |= FLAG_VERBOSE;
++			break;
++			case 'q':
++				set_hash_start_extend();
 +			break;
 +			case 'h':
 +				print_help();
@@ -1572,6 +1582,18 @@ index 0000000..93bdfb1
 +			break;
 +		}
 +	}
++	if (!policy_file) {
++		if (!(flags & FLAG_CURRENT) && !(flags & FLAG_LOG)) {
++			error_msg("the policy file must be provided!\n");
++			ret = 1;
++			goto out;
++		} else if (alg_override == 0) {
++			error_msg("an hash algorithm must be provided!\n");
++			ret = 1;
++			goto out;
++		}
++	}
++
 +	if (flags & FLAG_TPM12) {
 +		char *buffer;
 +		size_t size = read_file(TPM12_LOG, &buffer);
@@ -1603,18 +1625,18 @@ index 0000000..93bdfb1
 +			goto out;
 +		}
 +
++// broken as you need to override if there is no policy file, fix!!!
 +		t->alg = alg_override != 0 ? alg_override : policy_file->hash_alg;
++	}
++
++	if (flags & FLAG_CURRENT) {
++		tpm_print(t, t->alg);
++		return 0;
 +	}
 +
 +	if (flags & FLAG_LOG) {
 +		tpm_dump(t, t->alg);
 +		return 0;
-+	}
-+
-+	if (!policy_file) {
-+		error_msg("the policy file must be provided!\n");
-+		ret = 1;
-+		goto out;
 +	}
 +
 +	if (flags & FLAG_DA) {
@@ -1782,10 +1804,10 @@ index 0000000..cc23f2f
 +#endif
 diff --git a/pcr-calc/tpm.c b/pcr-calc/tpm.c
 new file mode 100644
-index 0000000..9071d0f
+index 0000000..478fcee
 --- /dev/null
 +++ b/pcr-calc/tpm.c
-@@ -0,0 +1,373 @@
+@@ -0,0 +1,391 @@
 +/*
 + *
 + * Copyright (c) 2017 Daniel P. Smith
@@ -1870,10 +1892,18 @@ index 0000000..9071d0f
 +		struct pcr_event *e = &p->log[i];
 +		if (e->type == 0)
 +			continue;
-+		if (e->type == TPM_EVT_HASH_START)
-+			memcpy(&p->value, &e->digest, sizeof(tb_hash_t));
-+		else if (!extend_hash(&p->value, &e->digest, alg))
-+				return false;
++
++		if (e->type == TPM_EVT_HASH_START) {
++			if (extend_hash_start()) {
++				memset(&p->value, 0, sizeof(tb_hash_t));
++				if (!extend_hash(&p->value, &e->digest, alg))
++					return false;
++			} else {
++				memcpy(&p->value, &e->digest, sizeof(tb_hash_t));
++			}
++		} else if (!extend_hash(&p->value, &e->digest, alg)) {
++			return false;
++		}
 +	}
 +
 +	return true;
@@ -1894,7 +1924,17 @@ index 0000000..9071d0f
 +	}
 +
 +	if (type == TPM_EVT_HASH_START) {
-+		memcpy(&p->value, hash, sizeof(tb_hash_t));
++		if (extend_hash_start()) {
++			memset(&p->value, 0, sizeof(tb_hash_t));
++			if (!extend_hash(&p->value, hash, alg)) {
++				error_msg("failed to extend PCR%d with hash\n",
++					p->num);
++				return false;
++			}
++
++		} else {
++			memcpy(&p->value, hash, sizeof(tb_hash_t));
++		}
 +	} else if (!extend_hash(&p->value, hash, alg)) {
 +		error_msg("failed to extend PCR%d with hash\n", p->num);
 +		return false;
@@ -2161,10 +2201,10 @@ index 0000000..9071d0f
 +}
 diff --git a/pcr-calc/tpm.h b/pcr-calc/tpm.h
 new file mode 100644
-index 0000000..75b2be2
+index 0000000..6538409
 --- /dev/null
 +++ b/pcr-calc/tpm.h
-@@ -0,0 +1,156 @@
+@@ -0,0 +1,167 @@
 +/*
 + * pcr.h: pcr definitions
 + *
@@ -2306,6 +2346,17 @@ index 0000000..75b2be2
 +		return ALG_MASK_SHA512;
 +	else
 +		return 0;
++}
++
++extern bool __hash_start_use_extend;
++static inline void set_hash_start_extend(void)
++{
++	__hash_start_use_extend = true;
++}
++
++static inline bool extend_hash_start(void)
++{
++	return __hash_start_use_extend;
 +}
 +
 +struct tpm *new_tpm(uint8_t version);
