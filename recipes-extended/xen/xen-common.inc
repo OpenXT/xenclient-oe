@@ -79,8 +79,6 @@ SRC_URI_append = " \
     file://libxl-vwif-support.patch \
     file://libxl-atapi-pt.patch \
     file://libxl-iso-hotswap.patch \
-    file://xsa-155-xen-0001-xen-Add-RING_COPY_REQUEST.patch \
-    file://xsa-155-xen-0002-blktap2-Use-RING_COPY_REQUEST.patch \
     file://xsa-212-x86-broken-check-in-memory_exchange.patch \
     file://xsa-213-x86-64bit-PV-guest-breakout-via-pagetable-use-after-mode-change.patch \
     file://xsa-214-grant-transfer-allows-pv-guest-to-elevate-privileges.patch \
