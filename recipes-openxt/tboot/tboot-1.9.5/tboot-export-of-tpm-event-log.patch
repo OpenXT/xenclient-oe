@@ -1,4 +1,4 @@
-From a11a64e1ac9b465ec1fe0a38db1aed54befd78ba Mon Sep 17 00:00:00 2001
+From 6499ffe845f0e01eb9b4fa3d5c53e2d738d01cd9 Mon Sep 17 00:00:00 2001
 From: "Daniel P. Smith" <dpsmith@apertussolutions.com>
 Date: Tue, 16 May 2017 12:59:33 -0400
 Subject: [PATCH 1/2] tboot: export of tpm event log
@@ -11,8 +11,8 @@ Signed-off-by: Daniel P. Smith <dpsmith@apertussolutions.com>
  include/tboot.h         |   4 ++
  tboot/common/tboot.c    |   5 ++
  tboot/include/txt/txt.h |   1 +
- tboot/txt/txt.c         | 124 ++++++++++++++++++++++++++++++++++++++++++++++++
- 4 files changed, 134 insertions(+)
+ tboot/txt/txt.c         | 128 ++++++++++++++++++++++++++++++++++++++++++++++++
+ 4 files changed, 138 insertions(+)
 
 diff --git a/include/tboot.h b/include/tboot.h
 index abb1ca4..4e7c7be 100644
@@ -48,7 +48,7 @@ index ebb93a3..c060a82 100644
 +     * export tpm event log
 +     */
 +    export_evtlog(&_tboot_shared.evt_log_region, &_tboot_shared.evt_log_size);
-+    replace_e820_map(g_ldr_ctx);
++
      print_tboot_shared(&_tboot_shared);
  
      launch_kernel(true);
@@ -65,15 +65,16 @@ index 293fad8..eb8380c 100644
  extern uint32_t g_using_da;
  #endif      /* __TXT_TXT_H__ */
 diff --git a/tboot/txt/txt.c b/tboot/txt/txt.c
-index 0eaaccb..3f71224 100644
+index 0eaaccb..44719c3 100644
 --- a/tboot/txt/txt.c
 +++ b/tboot/txt/txt.c
-@@ -319,6 +319,42 @@ bool evtlog_append_tpm12(uint8_t pcr, tb_hash_t *hash, uint32_t type)
+@@ -319,6 +319,43 @@ bool evtlog_append_tpm12(uint8_t pcr, tb_hash_t *hash, uint32_t type)
      return true;
  }
  
 +void export_evtlog_tpm12(uint64_t *log, uint64_t *size)
 +{
++    uint64_t ram_start, ram_size;
 +    uint64_t reserve;
 +    void *src, *dst;
 +
@@ -88,15 +89,15 @@ index 0eaaccb..3f71224 100644
 +        goto fail;
 +
 +    reserve = PAGE_UP(*size);
-+    get_highest_sized_ram(reserve, 0x100000000ULL, log, &reserve);
-+    if (*log == 0)
++    get_highest_sized_ram(reserve, 0x100000000ULL, &ram_start, &ram_size);
++    if (ram_start == 0)
 +        goto fail;
 +
++    *log = (ram_start + ram_size) - reserve;
 +    dst = (void *)(uint32_t) *log;
 +
 +    memcpy(dst, src, *size);
 +
-+    reserve = PAGE_UP(*size);
 +    if (! e820_reserve_ram(*log, reserve))
 +        goto fail;
 +
@@ -111,7 +112,7 @@ index 0eaaccb..3f71224 100644
  void dump_event_2(void)
  {
      heap_event_log_descr_t *log_descr;
-@@ -393,6 +429,78 @@ bool evtlog_append_tpm20(uint8_t pcr, uint16_t alg, tb_hash_t *hash, uint32_t ty
+@@ -393,6 +430,81 @@ bool evtlog_append_tpm20(uint8_t pcr, uint16_t alg, tb_hash_t *hash, uint32_t ty
      return true;
  }
  
@@ -119,6 +120,7 @@ index 0eaaccb..3f71224 100644
 +{
 +    size_t copied = 0;
 +    size_t count = 0;
++    uint64_t ram_start, ram_size;
 +    uint64_t reserve;
 +    void *curr = NULL;
 +    heap_event_log_descr_t *log_desc = NULL;
@@ -138,9 +140,12 @@ index 0eaaccb..3f71224 100644
 +        goto fail;
 +
 +    reserve = PAGE_UP(*size);
-+    get_highest_sized_ram(reserve, 0x100000000ULL, log, &reserve);
-+    if (*log == 0)
++    get_highest_sized_ram(reserve, 0x100000000ULL, &ram_start, &ram_size);
++    if (ram_start == 0)
 +        goto fail;
++
++    /* place log as the last n pages of ram section */
++    *log = (ram_start + ram_size) - reserve;
 +
 +    curr = (void *)(uint32_t) *log;
 +
@@ -174,7 +179,6 @@ index 0eaaccb..3f71224 100644
 +    if ( copied == 0 )
 +        goto fail;
 +
-+    reserve = PAGE_UP(*size);
 +    if (! e820_reserve_ram(*log, reserve) )
 +        goto fail;
 +
@@ -190,7 +194,7 @@ index 0eaaccb..3f71224 100644
  bool evtlog_append(uint8_t pcr, hash_list_t *hl, uint32_t type)
  {
      switch (g_tpm->major) {
-@@ -411,6 +519,22 @@ bool evtlog_append(uint8_t pcr, hash_list_t *hl, uint32_t type)
+@@ -411,6 +523,22 @@ bool evtlog_append(uint8_t pcr, hash_list_t *hl, uint32_t type)
      return true;
  }
  
