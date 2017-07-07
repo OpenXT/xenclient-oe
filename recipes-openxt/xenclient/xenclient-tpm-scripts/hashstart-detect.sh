@@ -34,8 +34,8 @@ else
     args="-a sha1 -c"
 fi
 
-nonquirk="$(pcr-calc $args|grep ^17|cut -f2 -d:|tr -d \ )"
-quirk="$(pcr-calc $args -q|grep ^17|cut -f2 -d:|tr -d \ )"
+nonquirk="$(pcr-calc $args|grep ^17|cut -f2 -d:|tr 'A-Z' 'a-z'|tr -d \ )"
+quirk="$(pcr-calc $args -q|grep ^17|cut -f2 -d:|tr 'A-Z' 'a-z'|tr -d \ )"
 
 case $pcr17 in
 $nonquirk)
