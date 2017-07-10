@@ -23,6 +23,7 @@
     exit 1
 }
 
+modprobe txt > /dev/null 2>&1
 [ -d /sys/kernel/security/txt ] || exit 0
 
 pcr17="$(tpm_get_pcr 17)"
