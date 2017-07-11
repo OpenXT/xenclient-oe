@@ -1,0 +1,181 @@
+#!/bin/bash
+#
+# Copyright (c) 2010 Citrix Systems, Inc.
+#
+
+set -e
+set -o pipefail
+
+readonly FDISK_BIN="/sbin/fdisk"
+readonly MAPPER_DIR="/dev/mapper"
+readonly DMSETUP_BIN="/usr/sbin/dmsetup"
+readonly VHDUTIL_BIN="/usr/sbin/vhd-util"
+readonly TAPCTL_BIN="/usr/sbin/tap-ctl"
+readonly TAPDISK_CTL="/sys/class/blktap2/blktap"
+readonly VHD_DM_REMOVE_BIN="/usr/sbin/vhd-dm-remove"
+
+usage()
+{
+    cat <<EOF >&2
+usage: $0 [options] /path/to/vhd
+
+This script creates a dm device derived from the given vhd.
+
+OPTIONS:
+    --device-name NAME       Specify the name the device node should have.
+                             If --device-name not given, the node will take
+                             the basename of the vhd (sans the .vhd extension).
+
+    --readonly               Create the device as readonly
+
+    --partitions             Add separate dm nodes for every primary partition
+                             found in device as well as a base node for the
+                             whole device.
+
+    --convert-type           Set the vhd to type dynamic to ignore parent vhds.
+                             Note that reads from unallocated regions of the
+                             vhd will return corrupt data in this case (all
+                             zeros).  Writes should use O_DIRECT to avoid page
+                             cache reads.  Use with caution!
+
+    --keydir DIR             Location of directory containing crypto keys
+EOF
+}
+
+cleanup()
+{
+    if [ -e "$DEV" ] ; then
+	local remove_partitions=""
+	[ "$ADD_PARTITIONS" = "yes" ] && remove_partitions="--partitions"
+	"$VHD_DM_REMOVE_BIN" $remove_partitions "$NAME" || :
+    elif [ -e "$TAPDEV" ] ; then
+	local minor=$((0x$(stat -c "%T" "$TAPDEV"))) || :
+	[ -n "$minor" ] && {
+	    echo > "${TAPDISK_CTL}${minor}/remove" || :
+	}
+    fi
+
+    [ "$CONVERT_TYPE" = "yes" ] && {
+	"$VHDUTIL_BIN" modify -n "$VHD" -t original || :
+    }
+}
+
+die()
+{
+    echo "$@" >&2
+    logger -s -t "vhd-dm-create[$$]" -p daemon.error "$@" || :
+    [ "$CLEANUP" = true ] && cleanup
+    exit 1
+}
+
+vhd_dm_partition_name()
+{
+    local partition="$1"
+    case "${DEV}" in
+	*[1-9]) echo "${DEV}p${partition}";;
+	*) echo "${DEV}${partition}";;
+    esac
+    return 0
+}
+
+vhd_dm_create_partitions()
+{
+    local partition=1
+    "$FDISK_BIN" -lu "$DEV" | grep -A5 Device | tail -n+2 | sed 's/\*/ /g' |
+    egrep -v 'Partition [1-9] does not end on cylinder boundary' |
+    while read dev start end id type ; do
+	local dev=$(vhd_dm_partition_name $partition)
+	"$DMSETUP_BIN" create "$(basename $dev)" \
+	    --table "0 $(($end - $start + 1)) linear $TAPDEV $start" \
+	    2>/dev/null || die "couldn't instantiate dm device $dev"
+	partition=$(($partition + 1))
+    done
+    return 0
+}
+
+vhd_dm_create()
+{
+    VHD=$(realpath "$VHD") || die "can't find vhd '$VHD'"
+    [ -w "$VHD" ] || die "vhd '$VHD' not readable"
+
+    local megs=$("$VHDUTIL_BIN" query -vn "$VHD") || die "couldn't parse $VHD"
+    local secs=$(($megs * 2**11))
+
+    if [ -z "$NAME" ]; then
+	NAME="$(basename $VHD .vhd)"
+    else
+	[ "$NAME" == "$(basename $NAME)" ] || die "invalid name $NAME"
+    fi
+
+    DEV="${MAPPER_DIR}/$NAME"
+    [ -e "$DEV" ] && die "$DEV already exists"
+
+    CLEANUP=true
+    trap cleanup ERR
+
+    [ "$CONVERT_TYPE" = "yes" ] && {
+	"$VHDUTIL_BIN" modify -n "$VHD" -t dynamic || \
+	    die "couldn't convert type"
+    }
+
+    TAPDEV=$(
+	[ -n "$KEYDIR" ] && export TAPDISK2_CRYPTO_KEYDIR="$KEYDIR"
+	"$TAPCTL_BIN" create $READONLY -a "vhd:$VHD"
+    ) || die "couldn't instantiate tapdev $VHD"
+
+    "$DMSETUP_BIN" create "$NAME" --table "0 $secs linear $TAPDEV 0" \
+	2>/dev/null || die "couldn't instantiate dm device $NAME"
+
+    [ "$ADD_PARTITIONS" = yes ] && {
+	vhd_dm_create_partitions || die "couldn't instantiate partitions"
+    }
+
+    return 0
+}
+
+ARGS=()
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+	--device-name)
+	    shift
+	    NAME="$1"
+	    ;;
+	--device-name=*)
+	    NAME="${1#*=}"
+	    ;;
+	--convert-type)
+	    CONVERT_TYPE=yes
+	    ;;
+	--partitions)
+	    ADD_PARTITIONS=yes
+	    ;;
+	--readonly)
+	    READONLY="-R"
+	    ;;
+	--keydir)
+	    shift
+	    KEYDIR="$1"
+	    ;;
+	--keydir=*)
+	    KEYDIR="${1#*=}"
+	    ;;
+	-h|--help)
+	    usage
+	    exit 0
+	    ;;
+	--*)
+	    usage
+	    exit 1
+	    ;;
+	*)
+	    ARGS+=("$1")
+	    ;;
+    esac
+    shift
+done
+
+VHD="${ARGS[0]}"
+[ -z "$VHD" ] && { usage; exit 1; }
+[ -n "$KEYDIR" -a ! -d "$KEYDIR" ] && die "keydir ${KEYDIR} does not exist"
+
+vhd_dm_create
