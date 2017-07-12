@@ -1,15 +1,15 @@
-From 0542bfbcd3b1f96ef8782dabad3d7563a4cbb9cd Mon Sep 17 00:00:00 2001
+From fee3e4a2677f133a45f2b9bea40c8d7715f58b16 Mon Sep 17 00:00:00 2001
 From: "Daniel P. Smith" <dpsmith@apertussolutions.com>
 Date: Thu, 18 May 2017 17:48:52 -0400
 Subject: [PATCH] xen-txt: add xen txt eventlog module
 
 ---
- arch/x86/include/asm/xen/hypercall.h |   6 +
+ arch/x86/include/asm/xen/hypercall.h |   6 ++
  drivers/xen/Kconfig                  |   7 ++
  drivers/xen/Makefile                 |   1 +
- drivers/xen/txt.c                    | 224 +++++++++++++++++++++++++++++++++++
+ drivers/xen/txt.c                    | 200 +++++++++++++++++++++++++++++++++++
  include/xen/interface/xen.h          |   8 ++
- 5 files changed, 246 insertions(+)
+ 5 files changed, 222 insertions(+)
  create mode 100644 drivers/xen/txt.c
 
 diff --git a/arch/x86/include/asm/xen/hypercall.h b/arch/x86/include/asm/xen/hypercall.h
@@ -61,10 +61,10 @@ index 8feab810..f9b425a 100644
  obj-$(CONFIG_XEN_PCIDEV_BACKEND)	+= xen-pciback/
 diff --git a/drivers/xen/txt.c b/drivers/xen/txt.c
 new file mode 100644
-index 0000000..ff44456
+index 0000000..c632267
 --- /dev/null
 +++ b/drivers/xen/txt.c
-@@ -0,0 +1,224 @@
+@@ -0,0 +1,200 @@
 +/*
 + * Copyright (C) 2017 Apertus Solutions, LLC
 + *
@@ -86,18 +86,13 @@ index 0000000..ff44456
 +#include <xen/xen.h>
 +#include <asm/xen/hypercall.h>
 +
++#define FS_LOG_ENTRY 0
++#define FS_DIR_ENTRY 1 /* must be last */
++#define FS_ENTRIES 2
++
 +static struct txt_op txt_log;
-+static struct dentry **fs_entries;
++static struct dentry *fs_entries[FS_ENTRIES];
 +
-+static inline struct txt_op *get_log(void)
-+{
-+	return &txt_log;
-+}
-+
-+static inline struct dentry ***get_entries(void)
-+{
-+	return &fs_entries;
-+}
 +
 +#define TPM_LOG_BLOCK_SIZE 1024
 +
@@ -164,13 +159,11 @@ index 0000000..ff44456
 +{
 +	int err;
 +	struct seq_file *seq;
-+	struct txt_op *log;
 +
 +	err = seq_open(file, &tpm_evtlog_seqops);
 +	if (!err) {
-+		log = get_log();
 +		seq = file->private_data;
-+		seq->private = log;
++		seq->private = &txt_log;
 +	}
 +
 +	return err;
@@ -184,27 +177,15 @@ index 0000000..ff44456
 +};
 +
 +
-+#define FS_LOG_ENTRY 0
-+#define FS_DIR_ENTRY 1 /* must be last */
-+#define FS_ENTRIES 2
 +static long expose_evtlog(const char *name)
 +{
 +	long ret = 0;
 +	char *filename;
-+	struct dentry ***ge = get_entries();
-+	struct dentry **entries;
 +
-+	*ge = kmalloc(FS_ENTRIES * sizeof(struct dentry *), GFP_KERNEL);
-+	entries = *ge;
-+	if (!entries) {
-+		ret = -ENOMEM;
++	fs_entries[FS_DIR_ENTRY] = securityfs_create_dir(name, NULL);
++	if (IS_ERR(fs_entries[FS_DIR_ENTRY])) {
++		ret = PTR_ERR(fs_entries[FS_DIR_ENTRY]);
 +		goto out;
-+	}
-+
-+	entries[FS_DIR_ENTRY] = securityfs_create_dir(name, NULL);
-+	if (IS_ERR(entries[FS_DIR_ENTRY])) {
-+		ret = PTR_ERR(entries[FS_DIR_ENTRY]);
-+		goto out_free;
 +	}
 +
 +	if ((ret = tpm_is_tpm2(TPM_ANY_NUM)) < 0)
@@ -215,22 +196,20 @@ index 0000000..ff44456
 +	else
 +		filename = "tpm20_binary_evtlog";
 +
-+	entries[FS_LOG_ENTRY] =
++	fs_entries[FS_LOG_ENTRY] =
 +	    securityfs_create_file(filename,
 +				   S_IRUSR | S_IRGRP,
-+				   entries[FS_DIR_ENTRY], NULL,
++				   fs_entries[FS_LOG_ENTRY], NULL,
 +				   &tpm_evtlog_ops);
-+	if (IS_ERR(entries[FS_LOG_ENTRY])) {
-+		ret = PTR_ERR(entries[FS_LOG_ENTRY]);
++	if (IS_ERR(fs_entries[FS_LOG_ENTRY])) {
++		ret = PTR_ERR(fs_entries[FS_LOG_ENTRY]);
 +		goto out_dir;
 +	}
 +
-+	return ret;
++	return 0;
 +
 +out_dir:
 +	securityfs_remove(fs_entries[FS_DIR_ENTRY]);
-+out_free:
-+	kfree(fs_entries);
 +out:
 +	return ret;
 +}
@@ -247,40 +226,37 @@ index 0000000..ff44456
 +static int __init txt_init(void)
 +{
 +	int err;
-+	struct txt_op *log;
 +
 +	if (!xen_domain())
 +		return -ENODEV;
 +
-+	log = get_log();
-+
-+	log->size = 0;
-+	if ((err = HYPERVISOR_txt_op(TXTOP_GET, log)) != 0)
++	txt_log.size = 0;
++	if ((err = HYPERVISOR_txt_op(TXTOP_GET, &txt_log)) != 0)
 +		return err;
 +
-+	log->buffer = kmalloc((size_t) log->size, GFP_KERNEL);
-+	if (!log->buffer)
++	txt_log.buffer = kmalloc((size_t) txt_log.size, GFP_KERNEL);
++	if (!txt_log.buffer)
 +		return -ENOMEM;
 +
-+	if ((err = HYPERVISOR_txt_op(TXTOP_GET, log)) != 0)
-+		return err;
++	if ((err = HYPERVISOR_txt_op(TXTOP_GET, &txt_log)) != 0)
++		goto error;
 +
 +	if ((err = expose_evtlog("txt")) != 0)
-+		return err;
++		goto error;
 +
 +	return 0;
++
++error:
++	kfree(txt_log.buffer);
++	return err;
 +}
 +
 +static void __exit txt_exit(void)
 +{
-+	struct txt_op *log;
-+
 +	teardown_evtlog();
 +
-+	log = get_log();
-+
-+	if (log->buffer)
-+		kfree(log->buffer);
++	if (txt_log.buffer)
++		kfree(txt_log.buffer);
 +}
 +
 +module_init(txt_init);
