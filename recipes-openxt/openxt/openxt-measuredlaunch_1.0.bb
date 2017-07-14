@@ -10,20 +10,22 @@ SRC_URI = " \
 "
 
 FILES_${PN} = "\
-	${libdir}/openxt/ml-functions \
-	${sbindir}/seal-system \
-	"
+    ${libdir}/openxt/ml-functions \
+    ${sbindir}/seal-system \
+    "
 
 do_install() {
-	install -d ${D}${libdir}/openxt
-	install -d ${D}${sbindir}
-	install -m 0755 ${WORKDIR}/ml-functions ${D}${libdir}/openxt
-	install -m 0755 ${WORKDIR}/seal-system ${D}${sbindir}
+    install -d ${D}${libdir}/openxt
+    install -d ${D}${sbindir}
+    install -m 0755 ${WORKDIR}/ml-functions ${D}${libdir}/openxt
+    install -m 0755 ${WORKDIR}/seal-system ${D}${sbindir}
 }
 
 RDEPENDS_${PN} = " \
     bash \
     tboot-lcptools \
+    tboot-lcptools-v2 \
     tboot-utils \
     tboot-pcr-calc \
+    openxt-keymanagement \
 "

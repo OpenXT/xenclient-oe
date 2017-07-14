@@ -1,0 +1,236 @@
+Index: xen-4.6.4/xen/include/asm-x86/tboot.h
+===================================================================
+--- xen-4.6.4.orig/xen/include/asm-x86/tboot.h
++++ xen-4.6.4/xen/include/asm-x86/tboot.h
+@@ -102,6 +102,9 @@ typedef struct __packed {
+     uint32_t  flags;
+     uint64_t  ap_wake_addr;      /* phys addr of kernel/VMM SIPI vector */
+     uint32_t  ap_wake_trigger;   /* kernel/VMM writes APIC ID to wake AP */
++    /* TPM event log fields: */
++    uint64_t  evt_log_size;      /* size of e820 TPM event log(s) region */
++    uint64_t  evt_log_region;    /* e820 region containing TPM event log(s) */
+ } tboot_shared_t;
+ 
+ #define TB_SHUTDOWN_REBOOT      0
+Index: xen-4.6.4/xen/include/public/txt.h
+===================================================================
+--- /dev/null
++++ xen-4.6.4/xen/include/public/txt.h
+@@ -0,0 +1,64 @@
++/******************************************************************************
++ * txt.h
++ *
++ * Control domain TXT/TPM services.
++ *
++ * Copyright (c) 2017 Assured Information Security, Inc
++ *
++ * Authors:
++ * Ross Philipson <philipsonr@ainfosec.com>
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining a copy
++ * of this software and associated documentation files (the "Software"), to
++ * deal in the Software without restriction, including without limitation the
++ * rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
++ * sell copies of the Software, and to permit persons to whom the Software is
++ * furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included in
++ * all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
++ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
++ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
++ * DEALINGS IN THE SOFTWARE.
++ */
++
++#ifndef __XEN_PUBLIC_TXT_H__
++#define __XEN_PUBLIC_TXT_H__
++
++#include "xen.h"
++
++/* version of ABI */
++#define TXT_SPEC_VERSION          1
++
++/*
++ * Return TXT TPM event log
++ *
++ * @arg == pointer to xen_txt_evtlog_t input/output structure.
++ */
++#define TXTOP_evtlog    0
++
++struct xen_txt_evtlog {
++    /* IN/OUT */
++    uint64_t  size;
++    /* OUT */
++    XEN_GUEST_HANDLE(void) buffer;
++};
++typedef struct xen_txt_evtlog xen_txt_evtlog_t;
++DEFINE_XEN_GUEST_HANDLE(xen_txt_evtlog_t);
++
++#endif /* __XEN_PUBLIC_TXT_H__ */
++
++/*
++ * Local variables:
++ * mode: C
++ * c-file-style: "BSD"
++ * c-basic-offset: 4
++ * tab-width: 4
++ * indent-tabs-mode: nil
++ * End:
++ */
+Index: xen-4.6.4/xen/arch/x86/tboot.c
+===================================================================
+--- xen-4.6.4.orig/xen/arch/x86/tboot.c
++++ xen-4.6.4/xen/arch/x86/tboot.c
+@@ -4,6 +4,7 @@
+ #include <xen/lib.h>
+ #include <xen/sched.h>
+ #include <xen/domain_page.h>
++#include <xen/guest_access.h>
+ #include <xen/iommu.h>
+ #include <xen/acpi.h>
+ #include <xen/pfn.h>
+@@ -13,6 +14,9 @@
+ #include <asm/e820.h>
+ #include <asm/tboot.h>
+ #include <crypto/vmac.h>
++#include <xen/vmap.h>
++#include <xen/hypercall.h>
++#include <public/txt.h>
+ 
+ /* tboot=<physical address of shared page> */
+ static unsigned long __initdata opt_tboot_pa;
+@@ -547,6 +551,64 @@ int tboot_wake_ap(int apicid, unsigned l
+     return 1;
+ }
+ 
++long do_txt_op(unsigned int cmd, XEN_GUEST_HANDLE_PARAM(void) arg)
++{
++    long ret = 0;
++
++    switch (cmd) {
++    case TXTOP_evtlog: {
++        struct xen_txt_evtlog evtlog;
++        void *va_evtlog;
++        XEN_GUEST_HANDLE(void) buffer_hnd;
++
++        if ( !g_tboot_shared )
++            return -ENOSYS;
++
++        /* TODO Add XSM check here */
++
++        if ( copy_from_guest(&evtlog, arg, 1) )
++            return -EFAULT;
++
++        /* Does the guest need to know the size? */
++        if ( evtlog.size == 0 ) {
++            evtlog.size = g_tboot_shared->evt_log_size;
++
++            if ( copy_to_guest(arg, &evtlog, 1) )
++                return -EFAULT;
++
++            break;
++        }
++
++        if ( evtlog.size < g_tboot_shared->evt_log_size )
++            return -EINVAL;
++
++        /* Map the event log region into Xen's virt mem */
++        va_evtlog = ioremap(g_tboot_shared->evt_log_region,
++                            g_tboot_shared->evt_log_size);
++        if ( !va_evtlog )
++            return -ENOMEM;
++
++        evtlog.size = g_tboot_shared->evt_log_size;
++        if ( copy_to_guest(arg, &evtlog, 1) ) {
++            iounmap(va_evtlog);
++            return -EFAULT;
++        }
++
++        buffer_hnd = guest_handle_cast(evtlog.buffer, void);
++        if ( copy_to_guest(buffer_hnd, va_evtlog, evtlog.size) )
++            ret = -EFAULT;
++
++        iounmap(va_evtlog);
++
++        break;
++    }
++    default:
++        ret = -ENOSYS;
++    }
++
++    return ret;
++}
++
+ /*
+  * Local variables:
+  * mode: C
+Index: xen-4.6.4/xen/include/public/xen.h
+===================================================================
+--- xen-4.6.4.orig/xen/include/public/xen.h
++++ xen-4.6.4/xen/include/public/xen.h
+@@ -102,6 +102,7 @@ DEFINE_XEN_GUEST_HANDLE(xen_ulong_t);
+ #define __HYPERVISOR_tmem_op              38
+ #define __HYPERVISOR_v4v_op               39 /* reserved for XenClient */
+ #define __HYPERVISOR_xenpmu_op            40
++#define __HYPERVISOR_txt_op               41
+ 
+ /* Architecture-specific hypercall definitions. */
+ #define __HYPERVISOR_arch_0               48
+Index: xen-4.6.4/xen/include/xen/hypercall.h
+===================================================================
+--- xen-4.6.4.orig/xen/include/xen/hypercall.h
++++ xen-4.6.4/xen/include/xen/hypercall.h
+@@ -143,6 +143,9 @@ do_xenoprof_op(int op, XEN_GUEST_HANDLE_
+ extern long
+ do_xenpmu_op(unsigned int op, XEN_GUEST_HANDLE_PARAM(xen_pmu_params_t) arg);
+ 
++extern long
++do_txt_op(unsigned int cmd, XEN_GUEST_HANDLE_PARAM(void) arg);
++
+ #ifdef CONFIG_COMPAT
+ 
+ extern int
+Index: xen-4.6.4/xen/arch/x86/x86_64/compat/entry.S
+===================================================================
+--- xen-4.6.4.orig/xen/arch/x86/x86_64/compat/entry.S
++++ xen-4.6.4/xen/arch/x86/x86_64/compat/entry.S
+@@ -505,6 +505,7 @@ ENTRY(compat_hypercall_table)
+         .quad do_tmem_op
+         .quad do_v4v_op           /* reserved for XenClient - used for v4v*/
+         .quad do_xenpmu_op              /* 40 */
++        .quad do_txt_op
+         .rept __HYPERVISOR_arch_0-((.-compat_hypercall_table)/8)
+         .quad compat_ni_hypercall
+         .endr
+@@ -556,6 +557,7 @@ ENTRY(compat_hypercall_args_table)
+         .byte 1 /* do_tmem_op               */
+         .byte 6 /* reserved for XenClient - used for v4v */
+         .byte 2 /* do_xenpmu_op             */  /* 40 */
++        .byte 3 /* do_txt_op                */
+         .rept __HYPERVISOR_arch_0-(.-compat_hypercall_args_table)
+         .byte 0 /* compat_ni_hypercall      */
+         .endr
+Index: xen-4.6.4/xen/arch/x86/x86_64/entry.S
+===================================================================
+--- xen-4.6.4.orig/xen/arch/x86/x86_64/entry.S
++++ xen-4.6.4/xen/arch/x86/x86_64/entry.S
+@@ -823,6 +823,7 @@ ENTRY(hypercall_table)
+         .quad do_tmem_op
+         .quad do_v4v_op       /* reserved for XenClient - used for v4v*/
+         .quad do_xenpmu_op          /* 40 */
++        .quad do_txt_op
+         .rept __HYPERVISOR_arch_0-((.-hypercall_table)/8)
+         .quad do_ni_hypercall
+         .endr
+@@ -874,6 +875,7 @@ ENTRY(hypercall_args_table)
+         .byte 1 /* do_tmem_op           */
+         .byte 6 /* reserved for XenClient - used for v4v */
+         .byte 2 /* do_xenpmu_op         */  /* 40 */
++        .byte 3 /* do_txt_op            */
+         .rept __HYPERVISOR_arch_0-(.-hypercall_args_table)
+         .byte 0 /* do_ni_hypercall      */
+         .endr

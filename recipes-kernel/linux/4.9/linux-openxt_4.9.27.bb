@@ -38,6 +38,7 @@ SRC_URI += "${KERNELORG_MIRROR}/linux/kernel/v${PV_MAJOR}.x/linux-${PV}.tar.xz;n
     file://thorough-reset-interface-to-pciback-s-sysfs.patch;patch=1 \
     file://tpm-tis-force-ioremap.patch;patch=1 \
     file://netback-vwif-support.patch;patch=1 \
+    file://xen-txt-add-xen-txt-eventlog-module.patch;patch=1 \
     file://xsa-155-qsb-023-add-RING_COPY_RESPONSE.patch;patch=1 \
     file://xsa-155-qsb-023-xen-blkfront-make-local-copy-of-response-before-usin.patch;patch=1 \
     file://xsa-155-qsb-023-xen-blkfront-prepare-request-locally-only-then-put-i.patch;patch=1 \
