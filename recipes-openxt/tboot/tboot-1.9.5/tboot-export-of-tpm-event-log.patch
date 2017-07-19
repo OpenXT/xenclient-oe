@@ -14,8 +14,6 @@ Signed-off-by: Daniel P. Smith <dpsmith@apertussolutions.com>
  tboot/txt/txt.c         | 128 ++++++++++++++++++++++++++++++++++++++++++++++++
  4 files changed, 138 insertions(+)
 
-diff --git a/include/tboot.h b/include/tboot.h
-index abb1ca4..4e7c7be 100644
 --- a/include/tboot.h
 +++ b/include/tboot.h
 @@ -109,6 +109,8 @@ typedef struct __packed {
@@ -27,7 +25,7 @@ index abb1ca4..4e7c7be 100644
  } tboot_shared_t;
  
  #define TB_SHUTDOWN_REBOOT      0
-@@ -163,6 +165,8 @@ static inline void print_tboot_shared(const tboot_shared_t *tboot_shared)
+@@ -163,6 +165,8 @@ static inline void print_tboot_shared(co
      printk(TBOOT_DETA"\t flags: 0x%8.8x\n", tboot_shared->flags);
      printk(TBOOT_DETA"\t ap_wake_addr: 0x%08x\n", (uint32_t)tboot_shared->ap_wake_addr);
      printk(TBOOT_DETA"\t ap_wake_trigger: %u\n", tboot_shared->ap_wake_trigger);
@@ -36,11 +34,22 @@ index abb1ca4..4e7c7be 100644
  }
  
  #endif    /* __TBOOT_H__ */
-diff --git a/tboot/common/tboot.c b/tboot/common/tboot.c
-index ebb93a3..c060a82 100644
 --- a/tboot/common/tboot.c
 +++ b/tboot/common/tboot.c
-@@ -251,6 +251,11 @@ static void post_launch(void)
+@@ -215,12 +215,6 @@ static void post_launch(void)
+         if ( !e820_protect_region(base, size, E820_RESERVED) )         apply_policy(TB_ERR_FATAL);
+     }
+ 
+-    /* replace map in loader context with copy */
+-    replace_e820_map(g_ldr_ctx);
+-
+-    printk(TBOOT_DETA"adjusted e820 map:\n");
+-    print_e820_map();
+-
+     /*
+      * verify modules against policy
+      */
+@@ -258,6 +252,17 @@ static void post_launch(void)
          printk(TBOOT_ERR"ap_wake_mwait specified but the CPU doesn't support it.\n");
      }
  
@@ -49,14 +58,18 @@ index ebb93a3..c060a82 100644
 +     */
 +    export_evtlog(&_tboot_shared.evt_log_region, &_tboot_shared.evt_log_size);
 +
++    /* replace map in loader context with copy */
++    replace_e820_map(g_ldr_ctx);
++
++    printk(TBOOT_DETA"adjusted e820 map:\n");
++    print_e820_map();
++
      print_tboot_shared(&_tboot_shared);
  
      launch_kernel(true);
-diff --git a/tboot/include/txt/txt.h b/tboot/include/txt/txt.h
-index 293fad8..eb8380c 100644
 --- a/tboot/include/txt/txt.h
 +++ b/tboot/include/txt/txt.h
-@@ -53,6 +53,7 @@ extern bool txt_s3_launch_environment(void);
+@@ -54,6 +54,7 @@ extern void display_last_boot_error(void
  extern void txt_shutdown(void);
  extern bool txt_is_powercycle_required(void);
  extern void ap_wait(unsigned int cpuid);
@@ -64,11 +77,9 @@ index 293fad8..eb8380c 100644
  
  extern uint32_t g_using_da;
  #endif      /* __TXT_TXT_H__ */
-diff --git a/tboot/txt/txt.c b/tboot/txt/txt.c
-index 0eaaccb..44719c3 100644
 --- a/tboot/txt/txt.c
 +++ b/tboot/txt/txt.c
-@@ -319,6 +319,43 @@ bool evtlog_append_tpm12(uint8_t pcr, tb_hash_t *hash, uint32_t type)
+@@ -320,6 +320,43 @@ bool evtlog_append_tpm12(uint8_t pcr, tb
      return true;
  }
  
@@ -112,7 +123,7 @@ index 0eaaccb..44719c3 100644
  void dump_event_2(void)
  {
      heap_event_log_descr_t *log_descr;
-@@ -393,6 +430,81 @@ bool evtlog_append_tpm20(uint8_t pcr, uint16_t alg, tb_hash_t *hash, uint32_t ty
+@@ -394,6 +431,81 @@ bool evtlog_append_tpm20(uint8_t pcr, ui
      return true;
  }
  
@@ -194,7 +205,7 @@ index 0eaaccb..44719c3 100644
  bool evtlog_append(uint8_t pcr, hash_list_t *hl, uint32_t type)
  {
      switch (g_tpm->major) {
-@@ -411,6 +523,22 @@ bool evtlog_append(uint8_t pcr, hash_list_t *hl, uint32_t type)
+@@ -412,6 +524,22 @@ bool evtlog_append(uint8_t pcr, hash_lis
      return true;
  }
  
@@ -217,6 +228,3 @@ index 0eaaccb..44719c3 100644
  __data uint32_t g_using_da = 0;
  __data acm_hdr_t *g_sinit = 0;
  
--- 
-1.9.1
-
