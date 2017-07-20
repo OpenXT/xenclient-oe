@@ -5,6 +5,7 @@ SRC_URI[md5sum] := "${XEN_SRC_MD5SUM}"
 SRC_URI[sha256sum] := "${XEN_SRC_SHA256SUM}"
 
 SRC_URI_append = " \
+    file://defconfig \
     file://config.patch \
     file://do-not-overwrite-cc-and-ld.patch \
     file://disable-xen-root-check.patch \
