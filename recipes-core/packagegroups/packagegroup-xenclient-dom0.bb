@@ -42,6 +42,7 @@ RDEPENDS_${PN} = " \
     iptables \
     iproute2 \
     qemu-dm \
+    seabios \
     xcpmd \
     vbetool-xc \
     xenclient-toolstack \
