@@ -27,11 +27,11 @@ do_configure () {
 }
 
 do_compile() {
-        make -C src/ bin/rtl8139.rom
+        make -C src/ bin/e1000.rom
 }
 
 do_install() {
         install -d ${D}/usr/share/firmware
-        install -m 0644 src/bin/rtl8139.rom ${D}/usr/share/firmware/
+        install -m 0644 src/bin/e1000.rom ${D}/usr/share/firmware/
 }
 

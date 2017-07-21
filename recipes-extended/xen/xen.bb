@@ -71,6 +71,8 @@ INITSCRIPT_PARAMS_${PN}-console = "defaults 20"
 INITSCRIPT_NAME_${PN}-xenstored-c = "xenstored"
 INITSCRIPT_PARAMS_${PN}-xenstored-c = "defaults 05"
 
+EXTRA_OEMAKE += "ETHERBOOT_ROMS=${STAGING_DIR_HOST}/usr/share/firmware/e1000.rom"
+
 pkg_postinst_${PN}-xenstored-c () {
     update-alternatives --install ${sbindir}/xenstored xenstored xenstored.${PN}-xenstored-c 200
     update-alternatives --install ${sysconfdir}/init.d/xenstored xenstored-initscript xenstored.${PN}-xenstored-c 200
