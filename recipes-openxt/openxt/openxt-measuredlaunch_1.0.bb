@@ -7,11 +7,13 @@ inherit xenclient
 SRC_URI = " \
     file://ml-functions \
     file://seal-system \
+    file://recovery-method \
 "
 
 FILES_${PN} = "\
     ${libdir}/openxt/ml-functions \
     ${sbindir}/seal-system \
+    ${sbindir}/recovery-method \
     "
 
 do_install() {
@@ -19,6 +21,7 @@ do_install() {
     install -d ${D}${sbindir}
     install -m 0755 ${WORKDIR}/ml-functions ${D}${libdir}/openxt
     install -m 0755 ${WORKDIR}/seal-system ${D}${sbindir}
+    install -m 0755 ${WORKDIR}/recovery-method ${D}${sbindir}
 }
 
 RDEPENDS_${PN} = " \
