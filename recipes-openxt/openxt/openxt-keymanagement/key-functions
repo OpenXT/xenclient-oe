@@ -66,17 +66,10 @@ close_keystore() {
     fi
 }
 
-recovery_prompt() {
+prompt_recovery_password() {
+    local capture=$( mktemp --tmpdir="${KEYDIR}" )
+    local msg="${2:-Please enter recovery password to unlock the config partition.}"
     local try=""
-
-    # Explicit interact on tty1
-    exec 3>/dev/tty1
-
-    if ! keystore_ready; then
-        dialog --ok-label Continue --msgbox \
-            "ERROR: Keystore does not appear to be available!" 0 0 1>&3
-        return 2;
-    fi
 
     case ${1} in
         1) try="first" ;;
@@ -85,21 +78,31 @@ recovery_prompt() {
         *) try="more than you should have" ;;
     esac
 
-    local capture="${KEYDIR}/recovery"
-    dialog --no-cancel --insecure --colors --passwordbox "
-    This is the ${try} attempt.
+    while true; do
+        dialog --no-cancel --insecure --passwordbox \
+"${msg}
 
-    Please enter the recovery password " 0 0 2>${capture} 1>&3
+This is the ${try} attempt" 0 0 2>"${capture}"
 
-    local ret=$?
-    if [ ${ret} -ne 0 ]; then
-        rm -f ${capture}
-        exec 3>&-
-        return ${ret}
-    fi
+        local ret=$?
+        if [ ${ret} -ne 0 ] ; then
+            break
+        fi
 
-    exec 3>&-
-    echo ${capture}
+        store_recovery_key "${capture}"
+        if ! have_recovery_key ; then
+            dialog --colors --ok-label Continue --msgbox \
+                '\ZbERROR:\ZB Empty password!\n\nPlease try again.' 0 0
+            remove_recovery_key
+            continue
+        fi
+
+        ret=0
+        break
+    done
+
+    rm "${capture}"
+    return ${ret}
 }
 
 # Seed kernel's CPRNG with some entropy
@@ -337,25 +340,26 @@ recovery_unlock_boot() {
     fi
 
     if have_recovery_key ; then
-        recovery_unlock_key "${part}" "${name}" "${boot}" "$( get_recovery_key )" && \
-            return 0
+        recovery_unlock_key "${part}" "${name}" "${boot}" \
+            "$( get_recovery_key )" \
+                  && return 0
     fi
 
-    local tries=1
-    while [ $tries -le 3 ]; do
-        key=$(recovery_prompt "$tries")
-
-        recovery_unlock_key "${part}" "${name}" "${boot}" "${key}"
+    local try=1
+    while [ $try -le 3 ]; do
+        prompt_recovery_password $try
+        recovery_unlock_key "${part}" "${name}" "${boot}" \
+            "$( get_recovery_key )"
         ret=$?
         if [ $ret -eq 0 ]; then
             break;
         fi
 
-        tries=$(($tries + 1))
+        try=$(( try + 1 ))
     done
 
     if [ "$mounted_keystore" = "1" ]; then
-        [ -f $key ] && rm -f ${key}
+        remove_recovery_key
         close_keystore
     fi
 
