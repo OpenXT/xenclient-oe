@@ -22,6 +22,7 @@ SRC_URI = "${SOURCEFORGE_MIRROR}/${BPN}/${BPN}-${PV}.tar.bz2;name=libtirpc \
            file://remove-des-crypt.patch \
            file://compile-static-with-fPIC.patch \
            file://fix-reference-to-etc_netconfig.patch \
+           file://add-svc-auth-none-sources.patch \
           "
 
 SRC_URI[libtirpc.md5sum] = "74c41c15c2909f7d11d9c7bfa7db6273"
