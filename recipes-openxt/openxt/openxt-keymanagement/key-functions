@@ -433,11 +433,34 @@ is_xc_scheme() {
     return 1
 }
 
+recovery_unlock_key() {
+    local part="${1}"
+    local name="${2}"
+    local root="${3}"
+    local key="${4}"
+
+    if is_xc_scheme ${root}; then
+        local rsa_priv_key="${root}/boot/system/config/recovery-private-key.conf"
+        local wrapped_key="${root}/boot/system/config/recovery-disk-key.ssl"
+
+        cat ${key} | openssl rsautl -decrypt -inkey ${rsa_priv_key} \
+          -in ${wrapped_key} -passin stdin 2>/dev/null | cryptsetup -q \
+          -d - luksOpen "${part}" "${name}" >/dev/null 2>&1 && \
+            return 0
+    else
+        cryptsetup -q -d ${key} -S ${RSLOT} luksOpen "${part}" "${name}" >/dev/null 2>&1 && \
+            return 0
+    fi
+
+    return 1
+}
+
 # Unlock using the recovery key
 recovery_unlock() {
     local part="${1}"
     local name="${2}"
     local root="${3}"
+    local ret=1
 
     setup_keystore
 
@@ -445,23 +468,10 @@ recovery_unlock() {
     while [ $tries -le 3 ]; do
         key=$(recovery_prompt "$tries")
 
-        if is_xc_scheme ${root}; then
-            local rsa_priv_key="${root}/boot/system/config/recovery-private-key.conf"
-            local wrapped_key="${root}/boot/system/config/recovery-disk-key.ssl"
-
-            cat ${key} | openssl rsautl -decrypt -inkey ${rsa_priv_key} \
-              -in ${wrapped_key} -passin stdin 2>/dev/null | cryptsetup -q \
-              -d - luksOpen "${part}" "${name}" >/dev/null 2>&1 && {
-                [ -f $key ] && rm -f ${key}
-                umount /tmp
-                return 0
-            }
-        else
-            cryptsetup -q -d ${key} -S ${RSLOT} luksOpen "${part}" "${name}" >/dev/null 2>&1 && {
-                [ -f $key ] && rm -f ${key}
-                umount /tmp
-                return 0
-            }
+        recovery_unlock_key "${part}" "${name}" "${root}" "${key}"
+        ret=$?
+        if [ $ret -eq 0 ]; then
+            break;
         fi
 
         tries=$(($tries + 1))
@@ -469,7 +479,8 @@ recovery_unlock() {
 
     [ -f $key ] && rm -f ${key}
     close_keystore
-    return 1
+
+    return $ret
 }
 
 platform_unlock() {
