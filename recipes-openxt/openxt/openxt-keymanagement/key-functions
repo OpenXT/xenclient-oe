@@ -402,55 +402,35 @@ get_device_key() {
     fi
 }
 
-# Sets the recovery key on a cryptdisk
-set_recovery_key() {
+set_luks_key() {
     local unlock_key="${1}"
     local key_file="${2}"
     local target="${3}"
+    local slot="${4}"
 
-    cryptsetup -q -d ${unlock_key} luksKillSlot ${target} ${RSLOT} >/dev/null 2>&1
-    cryptsetup -q -d ${unlock_key} -S ${RSLOT} -i 1 luksAddKey ${target} ${key_file} || {
+    cryptsetup -q -d ${unlock_key} luksKillSlot ${target} ${slot} >/dev/null 2>&1
+    cryptsetup -q -d ${unlock_key} -S ${slot} -i 1 luksAddKey ${target} ${key_file} || {
         echo "failed to add crypto key to config LUKS" >&2
         return 1
     }
-    cryptsetup -q -d ${key_file} -S ${RSLOT} luksOpen --test-passphrase ${target} >/dev/null 2>&1 || {
+    cryptsetup -q -d ${key_file} -S ${slot} luksOpen --test-passphrase ${target} >/dev/null 2>&1 || {
         echo "failed to verify new crypto key in config LUKS" >&2
         return 1
     }
+}
+# Sets the recovery key on a cryptdisk
+set_recovery_key() {
+    set_luks_key "${1}" "${2}" "${3}" "${RSLOT}"
 }
 
 # Sets the platform key on a cryptdisk
 set_platform_key() {
-    local unlock_key="${1}"
-    local key_file="${2}"
-    local target="${3}"
-
-    cryptsetup -q -d ${unlock_key} luksKillSlot ${target} ${PSLOT} >/dev/null 2>&1
-    cryptsetup -q -d ${unlock_key} -S ${PSLOT} -i 1 luksAddKey ${target} ${key_file} >&2 || {
-        echo "failed to add crypto key to config LUKS" >&2
-        return 1
-    }
-    cryptsetup -q -d ${key_file} -S ${PSLOT} luksOpen --test-passphrase ${target} >/dev/null 2>&1 || {
-        echo "failed to verify new crypto key in config LUKS" >&2
-        return 1
-    }
+    set_luks_key "${1}" "${2}" "${3}" "${PSLOT}"
 }
 
 # Sets the encrypted key on a cryptdisk
 set_encrypted_key() {
-    local unlock_key="${1}"
-    local key_file="${2}"
-    local target="${3}"
-
-    cryptsetup -q -d ${unlock_key} luksKillSlot ${target} ${ESLOT} >/dev/null 2>&1
-    cryptsetup -q -d ${unlock_key} -S ${ESLOT} -i 1 luksAddKey ${target} ${key_file} || {
-        echo "failed to add crypto key to config LUKS" >&2
-        return 1
-    }
-    cryptsetup -q -d ${key_file} -S ${ESLOT} luksOpen --test-passphrase ${target} >/dev/null 2>&1 || {
-        echo "failed to verify new crypto key in config LUKS" >&2
-        return 1
-    }
+    set_luks_key "${1}" "${2}" "${3}" "${ESLOT}"
 }
 
 is_xc_scheme() {
