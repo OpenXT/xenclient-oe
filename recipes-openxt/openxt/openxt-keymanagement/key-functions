@@ -422,10 +422,10 @@ set_encrypted_key() {
 }
 
 is_xc_scheme() {
-    local root="${1:-/}"
+    local boot="${1:-/boot/system}"
     local part="${2:-/dev/xenclient/config}"
 
-    [ -e ${root}/boot/system/config/recovery-private-key.conf ] && {
+    [ -e ${boot}/config/recovery-private-key.conf ] && {
         cryptsetup luksDump ${part} | grep -q "Slot 7: ENABLED"
         return $?
     }
@@ -436,13 +436,13 @@ is_xc_scheme() {
 recovery_unlock_key() {
     local part="${1}"
     local name="${2}"
-    local root="${3}"
+    local boot="${3}"
     local key="${4}"
     local extra="${5}" # Used to pass in --test-passphrase; ignored if unset
 
-    if is_xc_scheme ${root}; then
-        local rsa_priv_key="${root}/boot/system/config/recovery-private-key.conf"
-        local wrapped_key="${root}/boot/system/config/recovery-disk-key.ssl"
+    if is_xc_scheme ${boot}; then
+        local rsa_priv_key="${boot}/config/recovery-private-key.conf"
+        local wrapped_key="${boot}/config/recovery-disk-key.ssl"
 
         cat ${key} | \
           openssl rsautl -decrypt -inkey ${rsa_priv_key} -in ${wrapped_key} \
@@ -463,10 +463,10 @@ test_recovery_key() {
 }
 
 # Unlock using the recovery key
-recovery_unlock() {
+recovery_unlock_boot() {
     local part="${1}"
     local name="${2}"
-    local root="${3}"
+    local boot="${3}"
     local ret=1
     local mounted_keystore=0
 
@@ -476,7 +476,7 @@ recovery_unlock() {
     fi
 
     if have_recovery_key ; then
-        recovery_unlock_key "${part}" "${name}" "${root}" "$( get_recovery_key )" && \
+        recovery_unlock_key "${part}" "${name}" "${boot}" "$( get_recovery_key )" && \
             return 0
     fi
 
@@ -484,7 +484,7 @@ recovery_unlock() {
     while [ $tries -le 3 ]; do
         key=$(recovery_prompt "$tries")
 
-        recovery_unlock_key "${part}" "${name}" "${root}" "${key}"
+        recovery_unlock_key "${part}" "${name}" "${boot}" "${key}"
         ret=$?
         if [ $ret -eq 0 ]; then
             break;
@@ -499,6 +499,10 @@ recovery_unlock() {
     fi
 
     return $ret
+}
+
+recovery_unlock() {
+    recovery_unlock_boot "${1}" "${2}" "${3}/boot/system" "${4}"
 }
 
 platform_unlock() {
