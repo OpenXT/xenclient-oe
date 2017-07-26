@@ -438,6 +438,7 @@ recovery_unlock_key() {
     local name="${2}"
     local root="${3}"
     local key="${4}"
+    local extra="${5}" # Used to pass in --test-passphrase; ignored if unset
 
     if is_xc_scheme ${root}; then
         local rsa_priv_key="${root}/boot/system/config/recovery-private-key.conf"
@@ -446,15 +447,19 @@ recovery_unlock_key() {
         cat ${key} | \
           openssl rsautl -decrypt -inkey ${rsa_priv_key} -in ${wrapped_key} \
               -passin stdin 2>/dev/null | \
-          cryptsetup -q -d - luksOpen "${part}" "${name}" \
+          cryptsetup -q ${extra} -d - luksOpen "${part}" "${name}" \
               >/dev/null 2>&1 && \
             return 0
     else
-        cryptsetup -q -d ${key} -S ${RSLOT} luksOpen "${part}" "${name}" >/dev/null 2>&1 && \
+        cryptsetup -q ${extra} -d ${key} -S ${RSLOT} luksOpen "${part}" "${name}" >/dev/null 2>&1 && \
             return 0
     fi
 
     return 1
+}
+
+test_recovery_key() {
+    recovery_unlock_key "${1}" "${2}" "${3}" "${4}" --test-passphrase
 }
 
 # Unlock using the recovery key
