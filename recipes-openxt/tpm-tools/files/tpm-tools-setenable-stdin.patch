@@ -1,0 +1,75 @@
+Index: tpm-tools-1.3.9/src/tpm_mgmt/tpm_enable.c
+===================================================================
+--- tpm-tools-1.3.9.orig/src/tpm_mgmt/tpm_enable.c
++++ tpm-tools-1.3.9/src/tpm_mgmt/tpm_enable.c
+@@ -30,6 +30,7 @@
+ static int request = STATUS_CHECK;
+ static TSS_FLAG fForce = TSS_TPMSTATUS_OWNERSETDISABLE;
+ static BOOL isWellKnown = FALSE;
++static BOOL stdinPasswd = FALSE;
+ TSS_HCONTEXT hContext = 0;
+ /*
+  * Affect: Change TPM state between enabled and disabled
+@@ -42,6 +43,7 @@ static void help(const char *cmd)
+ 	logCmdHelp(cmd);
+ 	logUnicodeCmdOption();
+ 	logCmdOption("-s, --status", _("Display current state"));
++	logCmdOption("-i, --stdin", _("Accept password on stdin (use carefully)."));
+ 	logCmdOption("-e, --enable", _("Enable TPM"));
+ 	logCmdOption("-d, --disable", _("Disable TPM"));
+ 	logCmdOption("-f, --force",
+@@ -67,6 +69,10 @@ static int parse(const int aOpt, const c
+ 		logDebug(_("Changing mode to disable the TPM\n"));
+ 		request = DISABLE;
+ 		break;
++	case 'i':
++		logDebug(_("Reading password from stdin\n"));
++		stdinPasswd = TRUE;
++		break;
+ 	case 'f':
+ 		logDebug(_("Changing mode to use force authorization\n"));
+ 		fForce = TSS_TPMSTATUS_PHYSICALDISABLE;
+@@ -93,6 +99,7 @@ int main(int argc, char **argv)
+ 	struct option hOpts[] = { {"enable", no_argument, NULL, 'e'},
+ 	{"disable", no_argument, NULL, 'd'},
+ 	{"force", no_argument, NULL, 'f'},
++	{"stdin", no_argument, NULL, 'i'},
+ 	{"status", no_argument, NULL, 's'},
+ 	{"well-known", no_argument, NULL, 'z'},
+ 	};
+@@ -101,7 +108,7 @@ int main(int argc, char **argv)
+         initIntlSys();
+ 
+ 	if (genericOptHandler
+-	    (argc, argv, "edfsz", hOpts,
++	    (argc, argv, "edfisz", hOpts,
+ 	     sizeof(hOpts) / sizeof(struct option), parse, help) != 0)
+ 		goto out;
+ 
+@@ -121,7 +128,11 @@ int main(int argc, char **argv)
+ 			szTpmPasswd = (char *)well_known;
+ 			pswd_len = sizeof(well_known);
+ 		} else {
+-			szTpmPasswd = GETPASSWD(_("Enter owner password: "), &pswd_len, FALSE);
++			if (stdinPasswd) {
++				szTpmPasswd = GETPASSWD_STDIN (&pswd_len);
++			} else {
++				szTpmPasswd = GETPASSWD(_("Enter owner password: "), &pswd_len, FALSE);
++			}
+ 			if (!szTpmPasswd) {
+ 				logMsg(_("Failed to get password\n"));
+ 				goto out_close;
+@@ -145,8 +156,12 @@ int main(int argc, char **argv)
+ 				szTpmPasswd = (char *)well_known;
+ 				pswd_len = sizeof(well_known);
+ 			} else {
+-				szTpmPasswd = GETPASSWD(_("Enter owner password: "), &pswd_len,
++				if (stdinPasswd) {
++					szTpmPasswd = GETPASSWD_STDIN (&pswd_len);
++				} else {
++					szTpmPasswd = GETPASSWD(_("Enter owner password: "), &pswd_len,
+ 							FALSE);
++				}
+ 				if (!szTpmPasswd) {
+ 					logMsg(_("Failed to get password\n"));
+ 					goto out_close;
