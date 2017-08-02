@@ -168,6 +168,7 @@ tpm_is_owned() {
 # returns 0 if owner password is WKS
 #         1 if owner password is not WKS
 #         2 if indeterminant
+#         3 if TPM is in an authentication time-out period
 tpm_is_owner_wks() {
     local ret=0
     local msg=""
@@ -185,7 +186,36 @@ tpm_is_owner_wks() {
             *TPM\ is\ deactivated) ret=2 ;;
             *TPM\ is\ disabled) ret=2 ;;
             *Authentication\ failed) ret=1 ;;
+            *is\ in\ some\ time-out\ period) ret=3 ;;
             *No\ SRK) ret=1 ;;
+            *) ret=2 ;;
+        esac
+    fi
+    return $ret
+}
+# Function to determine if we have the TPM owner password
+# returns 0 if owner password is ${passwd}'s contents
+#         1 if owner password is not in ${passwd}
+#         2 if indeterminant
+#         3 if TPM is in an authentication time-out period
+tpm_check_owner_password() {
+    local passwd="$1"
+    local ret=0
+    local msg=""
+
+    is_tpm_2_0
+    local tpm2=$?
+    if [ "${tpm2}" -eq 0 ];
+    then
+        # Fail tpm2 owner check until we find a solution.
+        return 1
+    fi
+
+    msg=$(cat "${passwd}" | tpm_setenable --stdin -s 2>&1)
+    if [ $? -ne 0 ]; then
+        case "$msg" in
+            *Authentication\ failed) ret=1 ;;
+            *is\ in\ some\ time-out\ period) ret=3 ;;
             *) ret=2 ;;
         esac
     fi
@@ -196,6 +226,7 @@ tpm_is_owner_wks() {
 # returns 0 if TPM SRK passwd is WKS
 #         1 if TPM SRK passwd is not WKS
 #         2 if indeterminant
+#         3 if TPM is in an authentication time-out period
 tpm_is_srk_wks() {
     local ret=0
     local msg=""
@@ -213,6 +244,7 @@ tpm_is_srk_wks() {
             *TPM\ is\ deactivated) ret=2 ;;
             *TPM\ is\ disabled) ret=2 ;;
             *Authentication\ failed) ret=1 ;;
+            *is\ in\ some\ time-out\ period) ret=3 ;;
             *No\ SRK) ret=1 ;;
             *No\ EK) ret=1 ;;
             *) ret=2 ;;
@@ -226,6 +258,7 @@ tpm_is_srk_wks() {
 # returns 0 if TPM has an EK
 #         1 if TPM does not have an EK
 #         2 if indeterminant
+#         3 if TPM is in an authentication time-out period
 tpm_has_ek() {
     local ret=0
     local msg=""
@@ -243,6 +276,7 @@ tpm_has_ek() {
                 *TPM\ is\ deactivated) ret=2 ;;
                 *TPM\ is\ disabled) ret=2 ;;
                 *No\ SRK | *Authentication\ failed | *Handle\ is\ incorrect) ;;
+                *is\ in\ some\ time-out\ period) ret=3 ;;
                 *No\ EK)  ret=1 ;;
                 *) ret=2 ;;
             esac
@@ -254,7 +288,7 @@ tpm_has_ek() {
 #Taking ownership for tpm2 is slightly more complicated. Encapsulate this process
 #in its own function, checking err after each critical operation.
 tpm2_ownership () {
-    passwd=$1
+    passwd=$( cat $1 )
 
     #Taking endoresement password AND lockout password to fully own tpm
     err=$(tpm2_takeownership -o "${passwd}" -e "${passwd}" -l "${passwd}" 2>&1)
@@ -305,7 +339,7 @@ tpm_take_ownership() {
         err=$(tpm2_ownership ${passwd})
     else
         # take ownership of TPM
-        err=$(cat "${passwd}" | tpm_takeownership --srk-well-known --stdin 2>&1)
+        err=$(tpm_takeownership --srk-well-known --stdin 2>&1 < "${passwd}")
     fi
 
     if [ $? -ne 0 ]; then

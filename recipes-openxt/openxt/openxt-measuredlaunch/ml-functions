@@ -431,7 +431,34 @@ generate_policy() {
         tpm2_nvdefine -x $tboot_idx2 -s $polsize -a 0x40000001 -P "$password" -t 0x60006 1>/dev/null 2>&1 && \
         tpm2_nvwrite -x $tboot_idx2 -f $policy -a 0x40000001 -P "$password" 1>/dev/null 2>&1
     else
-        tpmnv_defindex -i $tboot_idx -s $polsize -pv 0x02 -p "$password" 1>/dev/null 2>&1 && \
+        local old_policy=/tmp/old-tboot.vl
+        local old_polsize
+
+        lcp_readpol -i $tboot_idx -f "$old_policy" >/dev/null 2>&1
+
+        # old_policy might not have been created.
+        touch "$old_policy"
+
+        # If the current policy matches, we are done
+        diff -q "$old_policy" "$policy" >/dev/null 2>&1 && {
+            rm -f "$old_policy"
+            rm -f "$policy"
+            return 0
+        }
+
+        old_polsize=$( cat "$old_policy" 2>/dev/null | wc -c )
+        rm -f "$old_policy"
+
+        if [ $old_polsize -ne $polsize ]; then
+            # Delete even if it doesn't exist, but don't error out
+            tpmnv_relindex -i $tboot_idx -p "$password" 1>/dev/null 2>&1
+            tpmnv_defindex -i $tboot_idx -s $polsize -pv 0x02 \
+                           -p "$password" 1>/dev/null 2>&1 || {
+                echo "Failed to create tboot TPM NVRAM index $tboot_idx" >&2
+                return 2
+            }
+        fi
+
         lcp_writepol -i $tboot_idx -f $policy -p "$password" 1>/dev/null 2>&1
     fi
 
