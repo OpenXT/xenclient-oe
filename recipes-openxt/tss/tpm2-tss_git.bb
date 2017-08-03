@@ -1,5 +1,5 @@
 SUMMARY = "Software stack for TPM2."
-DESCRIPTION = "tpm2.0-tss for interfacing with tpm2.0 device"
+DESCRIPTION = "tpm2-tss for interfacing with tpm2.0 device"
 SECTION = "tpm"
 
 LICENSE = "License-tss"
@@ -10,7 +10,7 @@ NO_GENERIC_LICENSE[License-tss] = "LICENSE"
 DEPENDS = "autoconf-archive autoconf pkgconfig"
 
 SRC_URI = " \
-    git://github.com/01org/TPM2.0-TSS.git;protocol=git;branch=master;name=TPM2.0-TSS;destsuffix=TPM2.0-TSS \
+    git://github.com/01org/tpm2-tss.git;protocol=git;branch=master;name=tpm2-tss;destsuffix=tpm2-tss \
     "
 
 # CAPS? SRSLY?
