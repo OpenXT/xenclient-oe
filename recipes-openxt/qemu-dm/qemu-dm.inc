@@ -51,7 +51,17 @@ SRC_URI += "file://compile-time-stubdom-flag.patch \
             file://CVE-2017-8284-tcg-i386-Check-the-size-of-instruction-being-transla.patch \
             file://CVE-2017-8309-audio-release-capture-buffers.patch \
             file://CVE-2017-8379-input-limit-kbd-queue-depth.patch \
+            file://ovmf-xenpc.patch \
             "
+
+# Experimental patches for q35 support
+# ovmf-q35.patch
+# but AHCI is broken for windows (bug in qemu mapcache)
+# you can work around this with
+#
+# memcache-failure-non-fatal.patch 
+# ahci-disable-ncq.patch 
+# ahci-fix-coincident-mappings.patch
 
 SRC_URI[md5sum] = "bdf1f3d0c177ebeb35a079a4bc3fc74e"
 SRC_URI[sha256sum] = "9a7ec64f147b9e1e570c410e00ebe271869b5d4c85392ba047db7617c297faa3"
@@ -72,6 +82,7 @@ INSANE_SKIP_${PN}-extra-roms = "arch"
 FILES_${PN}-utils = "/usr/libexec/*"
 
 PACKAGES += "${PN}-extra-keymaps ${PN}-extra-roms ${PN}-utils"
+
 
 EXTRA_OECONF += " \
     --enable-xen \

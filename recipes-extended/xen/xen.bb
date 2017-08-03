@@ -129,6 +129,10 @@ do_install() {
         -i ${D}${sysconfdir}/init.d/xenstored.${PN}-xenstored-c
 }
 
+DEPENDS_append = "\
+    ovmf \
+    "
+
 RDEPENDS_${PN}-base_remove = "\
     ${PN}-blktap \
     ${PN}-libblktapctl \

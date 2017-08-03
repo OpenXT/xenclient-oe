@@ -1,0 +1,98 @@
+Index: xenmgr/Vm/Config.hs
+===================================================================
+--- xenmgr.orig/Vm/Config.hs
++++ xenmgr/Vm/Config.hs
+@@ -80,6 +80,7 @@ module Vm.Config (
+                 , vmTimerMode, vmTimerModeDefault
+                 , vmNestedHvm
+                 , vmSerial
++                , vmOvmf
+                 ) where
+ 
+ import Control.Arrow
+@@ -446,6 +447,7 @@ vmTimerMode = property "config.timer-mod
+ vmTimerModeDefault = "no_delay_for_missed_ticks"
+ vmNestedHvm = property "config.nestedhvm"
+ vmSerial = property "config.serial"
++vmOvmf = property "config.ovmf"
+ vmStubdomMemory = property "config.stubdom-memory"
+ vmStubdomCmdline = property "config.stubdom-cmdline"
+ 
+@@ -737,6 +739,7 @@ miscSpecs cfg = do
+     hpet_    <- hpet
+     timer_mode_ <- timer_mode
+     nested_ <- nested
++    ovmf_ <- ovmf
+     dm_override_ <- liftRpc dm_override
+     extra_hvms <- readConfigPropertyDef uuid vmExtraHvms []
+     acpi_table_ <- liftIO $ acpi_table
+@@ -751,6 +754,7 @@ miscSpecs cfg = do
+         ++ hpet_
+         ++ timer_mode_
+         ++ nested_
++        ++ ovmf_
+         ++ dm_override_
+         ++ acpi_table_
+     where
+@@ -771,6 +775,8 @@ miscSpecs cfg = do
+                    \ v -> return ["timer_mode=" ++ (show v)]
+       nested = readConfigPropertyDef uuid vmNestedHvm False >>=
+                    \ v -> if v then return ["nestedhvm=1"] else return []
++      ovmf = readConfigPropertyDef uuid vmOvmf False >>=
++                   \ v -> if v then return ["bios='ovmf'"] else return []
+ 
+       acpi_table = do
+           case (vmcfgAcpi cfg) of
+Index: xenmgr/Vm/Actions.hs
+===================================================================
+--- xenmgr.orig/Vm/Actions.hs
++++ xenmgr/Vm/Actions.hs
+@@ -116,6 +116,7 @@ module Vm.Actions
+           , setVmAutolockCdDrives
+           , cleanupV4VDevice
+           , EventHookFailMode(..)
++          , setVmOvmf
+           ) where
+ 
+ import Prelude hiding (catch, mapM, mapM_)
+@@ -1846,6 +1847,7 @@ setVmHpet uuid v = saveConfigProperty uu
+ setVmTimerMode uuid v = saveConfigProperty uuid vmTimerMode (v::String)
+ setVmNestedHvm uuid v = saveConfigProperty uuid vmNestedHvm (v::Bool)
+ setVmSerial uuid v = saveConfigProperty uuid vmSerial (v::String)
++setVmOvmf uuid v = saveConfigProperty uuid vmOvmf (v::Bool)
+ 
+ -- set autolock flag on the vm xenstore tree, per cd device
+ -- cd devices which have sticky bit are not subject to autolock ever
+Index: xenmgr/Vm/Queries.hs
+===================================================================
+--- xenmgr.orig/Vm/Queries.hs
++++ xenmgr/Vm/Queries.hs
+@@ -121,6 +121,7 @@ module Vm.Queries
+                , getVmTimerMode
+                , getVmNestedHvm
+                , getVmSerial
++               , getVmOvmf
+                ) where
+ 
+ import Data.String
+@@ -1016,3 +1017,4 @@ getVmHpet uuid = readConfigPropertyDef u
+ getVmTimerMode uuid = readConfigPropertyDef uuid vmTimerMode vmTimerModeDefault
+ getVmNestedHvm uuid = readConfigPropertyDef uuid vmNestedHvm False
+ getVmSerial uuid = readConfigPropertyDef uuid vmSerial ""
++getVmOvmf uuid = readConfigPropertyDef uuid vmOvmf False
+Index: xenmgr/XenMgr/Expose/VmObject.hs
+===================================================================
+--- xenmgr.orig/XenMgr/Expose/VmObject.hs
++++ xenmgr/XenMgr/Expose/VmObject.hs
+@@ -651,6 +651,11 @@ implementationFor xm uuid = self where
+   , comCitrixXenclientXenmgrVmSetSerial = restrict' $ setVmSerial uuid
+   , comCitrixXenclientXenmgrVmUnrestrictedSetSerial = setVmSerial uuid
+ 
++  , comCitrixXenclientXenmgrVmGetOvmf = getVmOvmf uuid
++  , comCitrixXenclientXenmgrVmUnrestrictedGetOvmf = getVmOvmf uuid
++  , comCitrixXenclientXenmgrVmSetOvmf = restrict' $ setVmOvmf uuid
++  , comCitrixXenclientXenmgrVmUnrestrictedSetOvmf = setVmOvmf uuid
++
+   } where
+     stom "" = Nothing
+     stom x  = Just x

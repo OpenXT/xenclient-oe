@@ -1,0 +1,65 @@
+Index: xen-4.6.4/tools/firmware/hvmloader/pci.c
+===================================================================
+--- xen-4.6.4.orig/tools/firmware/hvmloader/pci.c
++++ xen-4.6.4/tools/firmware/hvmloader/pci.c
+@@ -131,19 +131,23 @@ void pci_setup(void)
+     if ( s )
+         mmio_hole_size = strtoll(s, NULL, 0);
+ 
+-    /* Program PCI-ISA bridge with appropriate link routes. */
+-    isa_irq = 0;
+-    for ( link = 0; link < 4; link++ )
+-    {
+-        do { isa_irq = (isa_irq + 1) & 15;
+-        } while ( !(PCI_ISA_IRQ_MASK & (1U << isa_irq)) );
+-        pci_writeb(PCI_ISA_DEVFN, 0x60 + link, isa_irq);
+-        printf("PCI-ISA link %u routed to IRQ%u\n", link, isa_irq);
+-    }
+ 
+-    /* Program ELCR to match PCI-wired IRQs. */
+-    outb(0x4d0, (uint8_t)(PCI_ISA_IRQ_MASK >> 0));
+-    outb(0x4d1, (uint8_t)(PCI_ISA_IRQ_MASK >> 8));
++    if ((pci_readw(PCI_ISA_DEVFN, PCI_VENDOR_ID) == 0x8086) &&
++    	(pci_readw(PCI_ISA_DEVFN, PCI_VENDOR_ID) == 0x7000)) {
++        /* Program PCI-ISA bridge with appropriate link routes. */
++        isa_irq = 0;
++        for ( link = 0; link < 4; link++ )
++        {
++            do { isa_irq = (isa_irq + 1) & 15;
++            } while ( !(PCI_ISA_IRQ_MASK & (1U << isa_irq)) );
++            pci_writeb(PCI_ISA_DEVFN, 0x60 + link, isa_irq);
++            printf("PCI-ISA link %u routed to IRQ%u\n", link, isa_irq);
++        }
++    
++        /* Program ELCR to match PCI-wired IRQs. */
++        outb(0x4d0, (uint8_t)(PCI_ISA_IRQ_MASK >> 0));
++        outb(0x4d1, (uint8_t)(PCI_ISA_IRQ_MASK >> 8));
++    }
+ 
+     /* Scan the PCI bus and map resources. */
+     for ( devfn = 0; devfn < 256; devfn++ )
+@@ -154,8 +158,10 @@ void pci_setup(void)
+         if ( (vendor_id == 0xffff) && (device_id == 0xffff) )
+             continue;
+ 
++#if 0
+         ASSERT((devfn != PCI_ISA_DEVFN) ||
+                ((vendor_id == 0x8086) && (device_id == 0x7000)));
++#endif
+ 
+         switch ( class )
+         {
+Index: xen-4.6.4/tools/firmware/hvmloader/acpi/dsdt.asl
+===================================================================
+--- xen-4.6.4.orig/tools/firmware/hvmloader/acpi/dsdt.asl
++++ xen-4.6.4/tools/firmware/hvmloader/acpi/dsdt.asl
+@@ -223,7 +223,8 @@ DefinitionBlock ("DSDT.aml", "DSDT", 2,
+ 
+             Device (ISA)
+             {
+-                Name (_ADR, 0x00010000) /* device 1, fn 0 */
++                //Name (_ADR, 0x00010000) /* device 1, fn 0 */
++                Name (_ADR, 0x001f0000) /* device 1f, fn 0 */
+ 
+                 OperationRegion(PIRQ, PCI_Config, 0x60, 0x4)
+                 Scope(\) {
