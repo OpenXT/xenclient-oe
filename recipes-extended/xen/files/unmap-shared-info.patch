@@ -1,8 +1,48 @@
+################################################################################
+SHORT DESCRIPTION: 
+################################################################################
+XENMAPSPACE_shared_info can also unmmap the shinfo page
+
+################################################################################
+LONG DESCRIPTION: 
+################################################################################
+When hibernating/resuming from disk HVM linux guests, there is the
+situation where the booting domU linux kernel requests via a hypercall
+its shared info page mapping but the just resumed from hibernation  kernel
+has no idea what that page was and it may inadvertently use the old shared info
+mapping - thinking it is a free page (when in fact is not).
+ 
+Therefore before freezing, the booting kernel has to restore(undo) its
+shared info mapping so the hypercall involving XENMAPSPACE_shared_info
+has now the ability to undo the operation if the xatp.gpfn field is
+passed the "magic" value INVALID_MFN.
+
+################################################################################
+CHANGELOG 
+################################################################################
+
+################################################################################
+REMOVAL 
+################################################################################
+
+################################################################################
+UPSTREAM PLAN
+################################################################################
+
+################################################################################
+INTERNAL DEPENDENCIES 
+################################################################################
+
+################################################################################
+PATCHES 
+################################################################################
+Index: xen-4.6.6/xen/arch/x86/mm.c
+===================================================================
 --- xen-4.6.6.orig/xen/arch/x86/mm.c
 +++ xen-4.6.6/xen/arch/x86/mm.c
-@@ -4703,12 +4703,18 @@
+@@ -4721,12 +4721,18 @@ int xenmem_add_to_physmap_one(
      unsigned long prev_mfn, mfn = 0, old_gpfn;
-     int rc;
+     int rc = 0;
      p2m_type_t p2mt;
 +    int unmap_shinfo = 0;
 +    xen_pfn_t gpfn_new = gpfn;
@@ -19,22 +59,22 @@
              break;
          case XENMAPSPACE_grant_table:
              write_lock(&d->grant_table->lock);
-@@ -4764,21 +4770,34 @@
+@@ -4782,24 +4788,37 @@ int xenmem_add_to_physmap_one(
      {
          if ( page )
              put_page(page);
-+        
++
 +        if ( unmap_shinfo )
-+         {
-+             if ( d->prev_mfn_shinfo  != INVALID_MFN &&
-+                 d->prev_gpfn_shinfo != INVALID_MFN )
-+             {
-+                 gpfn_new = d->prev_gpfn_shinfo;
-+                 mfn = d->prev_mfn_shinfo;
-+             }
-+             else
-+                 printk("unmapping of shared info requested while not mapped\n");
-+         }
++        {
++            if ( d->prev_mfn_shinfo  != INVALID_MFN &&
++                d->prev_gpfn_shinfo != INVALID_MFN )
++            {
++                gpfn_new = d->prev_gpfn_shinfo;
++                mfn = d->prev_mfn_shinfo;
++            }
++            else
++                printk("unmapping of shared info requested while not mapped\n");
++        }
 +
          if ( space == XENMAPSPACE_gmfn || space == XENMAPSPACE_gmfn_range )
              put_gfn(d, gfn);
@@ -48,24 +88,28 @@
      {
          if ( is_xen_heap_mfn(prev_mfn) )
              /* Xen heap frames are simply unhooked from this phys slot. */
--            guest_physmap_remove_page(d, gpfn, prev_mfn, PAGE_ORDER_4K);
+-            rc = guest_physmap_remove_page(d, gpfn, prev_mfn, PAGE_ORDER_4K);
 -        else
 +            rc = guest_physmap_remove_page(d, gpfn_new, prev_mfn, PAGE_ORDER_4K);
 +        else if ( space != XENMAPSPACE_shared_info )
              /* Normal domain memory is freed, to avoid leaking memory. */
--            guest_remove_page(d, gpfn);
+-            rc = guest_remove_page(d, gpfn);
 +            rc = guest_remove_page(d, gpfn_new);
      }
      /* In the XENMAPSPACE_gmfn case we still hold a ref on the old page. */
-     put_gfn(d, gpfn);
-@@ -4792,12 +4811,27 @@
-         guest_physmap_remove_page(d, old_gpfn, mfn, PAGE_ORDER_4K);
+-    put_gfn(d, gpfn);
++    put_gfn(d, gpfn_new);
+ 
+     if ( rc )
+         goto put_both;
+@@ -4814,13 +4833,28 @@ int xenmem_add_to_physmap_one(
  
      /* Map at new location. */
--    rc = guest_physmap_add_page(d, gpfn, mfn, PAGE_ORDER_4K);
--
+     if ( !rc )
+-        rc = guest_physmap_add_page(d, gpfn, mfn, PAGE_ORDER_4K);
 +        rc = guest_physmap_add_page(d, gpfn_new, mfn, PAGE_ORDER_4K);
-+    
+ 
+  put_both:
      /* In the XENMAPSPACE_gmfn, we took a ref of the gfn at the top */
      if ( space == XENMAPSPACE_gmfn || space == XENMAPSPACE_gmfn_range )
          put_gfn(d, gfn);
@@ -87,7 +131,9 @@
 +
      if ( page )
          put_page(page);
-
+ 
+Index: xen-4.6.6/xen/common/domain.c
+===================================================================
 --- xen-4.6.6.orig/xen/common/domain.c
 +++ xen-4.6.6/xen/common/domain.c
 @@ -392,6 +392,9 @@ struct domain *domain_create(domid_t dom
@@ -100,7 +146,8 @@
      return d;
  
   fail:
-
+Index: xen-4.6.6/xen/include/xen/sched.h
+===================================================================
 --- xen-4.6.6.orig/xen/include/xen/sched.h
 +++ xen-4.6.6/xen/include/xen/sched.h
 @@ -473,6 +473,10 @@ struct domain
