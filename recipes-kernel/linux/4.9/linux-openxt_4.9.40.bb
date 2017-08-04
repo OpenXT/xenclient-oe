@@ -48,7 +48,7 @@ SRC_URI += "${KERNELORG_MIRROR}/linux/kernel/v${PV_MAJOR}.x/linux-${PV}.tar.xz;n
     file://defconfig \
     "
 
-SRC_URI[kernel.md5sum] = "73548b7a9539346f6e79dbfb61f93b17"
-SRC_URI[kernel.sha256sum] = "76d789d87dd51d2fd58c095727171984fa4a992f5e25b9e3eb1e5fd5cd129074"
+SRC_URI[kernel.md5sum] = "efc35def981d458e57bc0c7b6de0cd72"
+SRC_URI[kernel.sha256sum] = "025767f3652a656c7b5ed2949aef205f88a5acfd70ae3fe77710ad37f1662d9b"
 
 LIC_FILES_CHKSUM = "file://COPYING;md5=d7810fab7487fb0aad327b76f1be7cd7"
