@@ -180,6 +180,7 @@ SRC_URI += " \
     file://patches/busybox-mmap-read-execute-checks-from-new-domain.patch \
     file://patches/tpm2util.patch;patch=1 \
     file://patches/lvmetad-add-rules.patch \
+    file://patches/dev-xen-privcmd.patch;patch=1 \
     "
 
 def get_poltype(f):
