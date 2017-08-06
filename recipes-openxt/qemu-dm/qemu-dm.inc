@@ -112,6 +112,7 @@ EXTRA_OECONF += " \
     --enable-readonly-ide \
     --enable-debug-info \
     --enable-trace-backends=nop \
+    --extra-cflags=-DXC_WANT_COMPAT_DEVICEMODEL_API \
 "
 
 do_configure(){
