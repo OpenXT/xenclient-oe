@@ -44,10 +44,10 @@ INTERNAL DEPENDENCIES
 ################################################################################
 PATCHES 
 ################################################################################
-Index: xen-4.6.6/xen/common/v4v.c
+Index: xen-4.9.0/xen/common/v4v.c
 ===================================================================
---- xen-4.6.6.orig/xen/common/v4v.c
-+++ xen-4.6.6/xen/common/v4v.c
+--- xen-4.9.0.orig/xen/common/v4v.c
++++ xen-4.9.0/xen/common/v4v.c
 @@ -1749,7 +1749,7 @@ v4v_send (struct domain *src_d, v4v_addr
      }
  
@@ -88,12 +88,12 @@ Index: xen-4.6.6/xen/common/v4v.c
    switch (cmd)
      {
      case V4VOP_register_ring:
-Index: xen-4.6.6/xen/include/xsm/dummy.h
+Index: xen-4.9.0/xen/include/xsm/dummy.h
 ===================================================================
---- xen-4.6.6.orig/xen/include/xsm/dummy.h
-+++ xen-4.6.6/xen/include/xsm/dummy.h
-@@ -721,9 +721,16 @@ static XSM_INLINE int xsm_pmu_op (XSM_DE
-     }
+--- xen-4.9.0.orig/xen/include/xsm/dummy.h
++++ xen-4.9.0/xen/include/xsm/dummy.h
+@@ -717,9 +717,16 @@ static XSM_INLINE int xsm_dm_op(XSM_DEFA
+     return xsm_default_action(action, current->domain, d);
  }
  
 -static XSM_INLINE int xsm_v4v_send(struct domain *d, struct domain *t)
@@ -111,20 +111,20 @@ Index: xen-4.6.6/xen/include/xsm/dummy.h
  }
  
  #endif /* CONFIG_X86 */
-Index: xen-4.6.6/xen/include/xsm/xsm.h
+Index: xen-4.9.0/xen/include/xsm/xsm.h
 ===================================================================
---- xen-4.6.6.orig/xen/include/xsm/xsm.h
-+++ xen-4.6.6/xen/include/xsm/xsm.h
-@@ -193,6 +193,7 @@ struct xsm_operations {
-     int (*pmu_op) (struct domain *d, unsigned int op);
+--- xen-4.9.0.orig/xen/include/xsm/xsm.h
++++ xen-4.9.0/xen/include/xsm/xsm.h
+@@ -184,6 +184,7 @@ struct xsm_operations {
  #endif
+     int (*xen_version) (uint32_t cmd);
      int (*v4v_send) (struct domain *dom1, struct domain *dom2);
 +    int (*v4v_use) (struct domain *d);
  };
  
- #ifdef XSM_ENABLE
-@@ -734,11 +735,16 @@ static inline int xsm_pmu_op (xsm_defaul
-     return xsm_ops->pmu_op(d, op);
+ #ifdef CONFIG_XSM
+@@ -705,11 +706,16 @@ static inline int xsm_dm_op(xsm_default_
+     return xsm_ops->dm_op(d);
  }
  
 -static inline int xsm_v4v_send(struct domain *d1, struct domain *d2)
@@ -140,22 +140,22 @@ Index: xen-4.6.6/xen/include/xsm/xsm.h
 +
  #endif /* CONFIG_X86 */
  
- #endif /* XSM_NO_WRAPPERS */
-Index: xen-4.6.6/xen/xsm/dummy.c
+ static inline int xsm_xen_version (xsm_default_t def, uint32_t op)
+Index: xen-4.9.0/xen/xsm/dummy.c
 ===================================================================
---- xen-4.6.6.orig/xen/xsm/dummy.c
-+++ xen-4.6.6/xen/xsm/dummy.c
-@@ -164,4 +164,5 @@ void xsm_fixup_ops (struct xsm_operation
- #endif
+--- xen-4.9.0.orig/xen/xsm/dummy.c
++++ xen-4.9.0/xen/xsm/dummy.c
+@@ -161,4 +161,5 @@ void __init xsm_fixup_ops (struct xsm_op
      set_to_dummy_if_null(ops, memory_translate);
+     set_to_dummy_if_null(ops, xen_version);
      set_to_dummy_if_null(ops, v4v_send);
 +    set_to_dummy_if_null(ops, v4v_use);
  }
-Index: xen-4.6.6/xen/xsm/flask/hooks.c
+Index: xen-4.9.0/xen/xsm/flask/hooks.c
 ===================================================================
---- xen-4.6.6.orig/xen/xsm/flask/hooks.c
-+++ xen-4.6.6/xen/xsm/flask/hooks.c
-@@ -1626,6 +1626,11 @@ static int flask_v4v_send(struct domain
+--- xen-4.9.0.orig/xen/xsm/flask/hooks.c
++++ xen-4.9.0/xen/xsm/flask/hooks.c
+@@ -1682,6 +1682,11 @@ static int flask_v4v_send(struct domain
      return domain_has_perm(dom1, dom2, SECCLASS_V4V, V4V__SEND);
  }
  
@@ -167,19 +167,19 @@ Index: xen-4.6.6/xen/xsm/flask/hooks.c
  long do_flask_op(XEN_GUEST_HANDLE_PARAM(xsm_op_t) u_flask_op);
  int compat_flask_op(XEN_GUEST_HANDLE_PARAM(xsm_op_t) u_flask_op);
  
-@@ -1765,6 +1770,7 @@ static struct xsm_operations flask_ops =
-     .pmu_op = flask_pmu_op,
+@@ -1818,6 +1823,7 @@ static struct xsm_operations flask_ops =
  #endif
+     .xen_version = flask_xen_version,
      .v4v_send = flask_v4v_send,
 +    .v4v_use = flask_v4v_use,
  };
  
- static __init void flask_init(void)
-Index: xen-4.6.6/xen/xsm/flask/policy/access_vectors
+ void __init flask_init(const void *policy_buffer, size_t policy_size)
+Index: xen-4.9.0/xen/xsm/flask/policy/access_vectors
 ===================================================================
---- xen-4.6.6.orig/xen/xsm/flask/policy/access_vectors
-+++ xen-4.6.6/xen/xsm/flask/policy/access_vectors
-@@ -499,4 +499,5 @@ class security
+--- xen-4.9.0.orig/xen/xsm/flask/policy/access_vectors
++++ xen-4.9.0/xen/xsm/flask/policy/access_vectors
+@@ -521,4 +521,5 @@ class version
  class v4v
  {
      send

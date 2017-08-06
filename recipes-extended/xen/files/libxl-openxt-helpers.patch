@@ -41,11 +41,11 @@ atapi_pt_helper and qmp_helper
 ################################################################################
 PATCHES
 ################################################################################
-Index: xen-4.6.6/tools/libxl/libxl_dm.c
+Index: xen-4.9.0/tools/libxl/libxl_dm.c
 ===================================================================
---- xen-4.6.6.orig/tools/libxl/libxl_dm.c
-+++ xen-4.6.6/tools/libxl/libxl_dm.c
-@@ -1488,6 +1488,41 @@ void libxl__spawn_stub_dm(libxl__egc *eg
+--- xen-4.9.0.orig/tools/libxl/libxl_dm.c
++++ xen-4.9.0/tools/libxl/libxl_dm.c
+@@ -1940,6 +1940,41 @@ void libxl__spawn_stub_dm(libxl__egc *eg
      if (ret)
          goto out;
      uint32_t dm_domid = sdss->pvqemu.guest_domid;
@@ -57,7 +57,7 @@ Index: xen-4.6.6/tools/libxl/libxl_dm.c
 +        LOG(ERROR, "Failed to fork");
 +    else if (pid == 0)
 +        execl(QMP_HELPER_PATH, QMP_HELPER_PATH, libxl__sprintf(gc, "%d", guest_domid), libxl__sprintf(gc, "%d", dm_domid), NULL);
-+    libxl__xs_write(gc, XBT_NULL,
++    libxl__xs_printf(gc, XBT_NULL,
 +                   libxl__sprintf(gc, "%s/qmp-helper-pid",
 +                                  libxl__xs_get_dompath(gc, dm_domid)),
 +                   "%d", pid);
@@ -68,7 +68,7 @@ Index: xen-4.6.6/tools/libxl/libxl_dm.c
 +        LOG(ERROR, "Failed to fork");
 +    else if (pid == 0)
 +        execl(ATAPI_PT_HELPER_PATH, ATAPI_PT_HELPER_PATH, libxl__sprintf(gc, "%d", guest_domid), libxl__sprintf(gc, "%d", dm_domid), NULL);
-+    libxl__xs_write(gc, XBT_NULL,
++    libxl__xs_printf(gc, XBT_NULL,
 +                   libxl__sprintf(gc, "%s/atapi-pt-helper-pid",
 +                                  libxl__xs_get_dompath(gc, dm_domid)),
 +                   "%d", pid);
@@ -79,7 +79,7 @@ Index: xen-4.6.6/tools/libxl/libxl_dm.c
 +        LOG(ERROR, "Failed to fork");
 +    else if (pid == 0)
 +        execl(AUDIO_HELPER_PATH, AUDIO_HELPER_PATH, libxl__sprintf(gc, "%d", guest_domid), libxl__sprintf(gc, "%d", dm_domid), NULL);
-+    libxl__xs_write(gc, XBT_NULL,
++    libxl__xs_printf(gc, XBT_NULL,
 +                   libxl__sprintf(gc, "%s/audio-helper-pid",
 +                                  libxl__xs_get_dompath(gc, dm_domid)),
 +                   "%d", pid);
@@ -87,11 +87,19 @@ Index: xen-4.6.6/tools/libxl/libxl_dm.c
      ret = libxl__domain_build(gc, dm_config, dm_domid, stubdom_state);
      if (ret)
          goto out;
-Index: xen-4.6.6/tools/libxl/libxl.c
+Index: xen-4.9.0/tools/libxl/libxl_domain.c
 ===================================================================
---- xen-4.6.6.orig/tools/libxl/libxl.c
-+++ xen-4.6.6/tools/libxl/libxl.c
-@@ -1648,6 +1648,36 @@ void libxl__destroy_domid(libxl__egc *eg
+--- xen-4.9.0.orig/tools/libxl/libxl_domain.c
++++ xen-4.9.0/tools/libxl/libxl_domain.c
+@@ -992,6 +992,7 @@ void libxl__destroy_domid(libxl__egc *eg
+     uint32_t domid = dis->domid;
+     char *dom_path;
+     int rc, dm_present;
++    char *pid;
+ 
+     libxl__ev_child_init(&dis->destroyer);
+ 
+@@ -1040,6 +1041,33 @@ void libxl__destroy_domid(libxl__egc *eg
  
          libxl__qmp_cleanup(gc, domid);
      }
@@ -100,8 +108,7 @@ Index: xen-4.6.6/tools/libxl/libxl.c
 +    if (dm_domid) {
 +        /* OpenXT: Kill qmp-helper */
 +        pid = libxl__xs_read(gc, XBT_NULL,
-+                             libxl__sprintf(gc,
-+                                            "/local/domain/%d/qmp-helper-pid", dm_domid));
++                             GCSPRINTF("/local/domain/%d/qmp-helper-pid", dm_domid));
 +        if (!pid)
 +            LOG(ERROR, "Cannot get qmp_helper pid for domain %d", dm_domid);
 +        else
@@ -109,8 +116,7 @@ Index: xen-4.6.6/tools/libxl/libxl.c
 +
 +        /* OpenXT: Kill atapi-pt-helper */
 +        pid = libxl__xs_read(gc, XBT_NULL,
-+                             libxl__sprintf(gc,
-+                                            "/local/domain/%d/atapi-pt-helper-pid", dm_domid));
++                             GCSPRINTF("/local/domain/%d/atapi-pt-helper-pid", dm_domid));
 +        if (!pid)
 +            LOG(ERROR, "Cannot get atapi-pt_helper pid for domain %d", dm_domid);
 +        else
@@ -118,8 +124,7 @@ Index: xen-4.6.6/tools/libxl/libxl.c
 +
 +        /* OpenXT: Kill audio-helper */
 +        pid = libxl__xs_read(gc, XBT_NULL,
-+                             libxl__sprintf(gc,
-+                                            "/local/domain/%d/audio-helper-pid", dm_domid));
++                             GCSPRINTF("/local/domain/%d/audio-helper-pid", dm_domid));
 +        if (!pid)
 +            LOG(ERROR, "Cannot get audio_helper pid for domain %d", dm_domid);
 +        else
@@ -128,13 +133,13 @@ Index: xen-4.6.6/tools/libxl/libxl.c
      dis->drs.ao = ao;
      dis->drs.domid = domid;
      dis->drs.callback = devices_destroy_cb;
-Index: xen-4.6.6/tools/libxl/libxl_internal.h
+Index: xen-4.9.0/tools/libxl/libxl_internal.h
 ===================================================================
---- xen-4.6.6.orig/tools/libxl/libxl_internal.h
-+++ xen-4.6.6/tools/libxl/libxl_internal.h
-@@ -115,6 +115,10 @@
- #define TAP_DEVICE_SUFFIX "-emu"
- #define DOMID_XS_PATH "domid"
+--- xen-4.9.0.orig/tools/libxl/libxl_internal.h
++++ xen-4.9.0/tools/libxl/libxl_internal.h
+@@ -127,6 +127,10 @@
+ #define MB(_mb)     (_AC(_mb, ULL) << 20)
+ #define GB(_gb)     (_AC(_gb, ULL) << 30)
  
 +#define QMP_HELPER_PATH "/usr/lib/xen/bin/qmp_helper"
 +#define ATAPI_PT_HELPER_PATH "/usr/lib/xen/bin/atapi_pt_helper"
@@ -143,12 +148,12 @@ Index: xen-4.6.6/tools/libxl/libxl_internal.h
  #define ARRAY_SIZE(a) (sizeof(a) / sizeof(a[0]))
  
  #define ROUNDUP(_val, _order)                                           \
-Index: xen-4.6.6/tools/libxl/libxl_create.c
+Index: xen-4.9.0/tools/libxl/libxl_create.c
 ===================================================================
---- xen-4.6.6.orig/tools/libxl/libxl_create.c
-+++ xen-4.6.6/tools/libxl/libxl_create.c
-@@ -1372,12 +1372,10 @@ static void domcreate_devmodel_started(l
-     if (dcs->dmss.dm.guest_domid) {
+--- xen-4.9.0.orig/tools/libxl/libxl_create.c
++++ xen-4.9.0/tools/libxl/libxl_create.c
+@@ -1528,12 +1528,10 @@ static void domcreate_devmodel_started(l
+     if (dcs->sdss.dm.guest_domid) {
          if (d_config->b_info.device_model_version
              == LIBXL_DEVICE_MODEL_VERSION_QEMU_XEN) {
 -            if (!libxl_defbool_val(d_config->b_info.device_model_stubdomain)) {
