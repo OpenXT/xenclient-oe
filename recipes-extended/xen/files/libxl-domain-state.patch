@@ -16,6 +16,8 @@ CHANGELOG
 Authors:
 Chris Rogers <rogersc@ainfosec.com>
 
+Updated for Xen 4.9.0
+
 ################################################################################
 REMOVAL
 ################################################################################
@@ -27,61 +29,29 @@ UPSTREAM PLAN
 ################################################################################
 INTERNAL DEPENDENCIES
 ################################################################################
+Requires uuid functions added in libxl-fixup-cmdline-ops.patch
 
 ################################################################################
 PATCHES
 ################################################################################
-Index: xen-4.6.6/tools/libxl/libxl.c
+Index: xen-4.9.0/tools/libxl/libxl_create.c
 ===================================================================
---- xen-4.6.6.orig/tools/libxl/libxl.c
-+++ xen-4.6.6/tools/libxl/libxl.c
-@@ -968,6 +968,8 @@ int libxl_domain_suspend(libxl_ctx *ctx,
-     AO_CREATE(ctx, domid, ao_how);
-     int rc;
- 
-+    libxl_update_state(ctx, domid, "suspending");
-+
-     libxl_domain_type type = libxl__domain_type(gc, domid);
-     if (type == LIBXL_DOMAIN_TYPE_INVALID) {
-         rc = ERROR_FAIL;
-@@ -1006,6 +1008,9 @@ int libxl_domain_pause(libxl_ctx *ctx, u
-         LIBXL__LOG_ERRNO(ctx, LIBXL__LOG_ERROR, "pausing domain %d", domid);
-         return ERROR_FAIL;
+--- xen-4.9.0.orig/tools/libxl/libxl_create.c
++++ xen-4.9.0/tools/libxl/libxl_create.c
+@@ -918,6 +918,8 @@ static void initiate_domain_create(libxl
+         goto error_out;
      }
-+
-+    libxl_update_state(ctx, domid, "paused");
-+
-     return 0;
- }
- 
-@@ -1053,6 +1058,9 @@ int libxl_domain_unpause(libxl_ctx *ctx,
-         }
-     }
-     ret = xc_domain_unpause(ctx->xch, domid);
-+
-+    libxl_update_state(ctx, domid, "running");
-+
-     if (ret<0) {
-         LIBXL__LOG_ERRNO(ctx, LIBXL__LOG_ERROR, "unpausing domain %d", domid);
-         rc = ERROR_FAIL;
-Index: xen-4.6.6/tools/libxl/libxl_create.c
-===================================================================
---- xen-4.6.6.orig/tools/libxl/libxl_create.c
-+++ xen-4.6.6/tools/libxl/libxl_create.c
-@@ -914,6 +914,8 @@ static void initiate_domain_create(libxl
-     dcs->guest_domid = domid;
-     dcs->dmss.dm.guest_domid = 0; /* means we haven't spawned */
  
 +     libxl_update_state(ctx, domid, "creating-devices");
 +
      ret = libxl__domain_build_info_setdefault(gc, &d_config->b_info);
      if (ret) {
-         LOG(ERROR, "Unable to set domain build info defaults");
-Index: xen-4.6.6/tools/libxl/libxl_dom_suspend.c
+         LOGD(ERROR, domid, "Unable to set domain build info defaults");
+Index: xen-4.9.0/tools/libxl/libxl_dom_suspend.c
 ===================================================================
---- xen-4.6.6.orig/tools/libxl/libxl_dom_suspend.c
-+++ xen-4.6.6/tools/libxl/libxl_dom_suspend.c
-@@ -38,6 +38,9 @@ int libxl__domain_suspend_device_model(l
+--- xen-4.9.0.orig/tools/libxl/libxl_dom_suspend.c
++++ xen-4.9.0/tools/libxl/libxl_dom_suspend.c
+@@ -85,6 +85,9 @@ int libxl__domain_suspend_device_model(l
      case LIBXL_DEVICE_MODEL_VERSION_QEMU_XEN:
          if (libxl__qmp_stop(gc, domid))
              return ERROR_FAIL;
@@ -91,30 +61,63 @@ Index: xen-4.6.6/tools/libxl/libxl_dom_suspend.c
          /* Save DM state into filename */
          ret = libxl__qmp_save(gc, domid, filename);
          if (ret)
-@@ -104,6 +107,8 @@ static void domain_suspend_callback_comm
+@@ -153,6 +156,8 @@ static void domain_suspend_callback_comm
          xc_hvm_param_get(CTX->xch, domid, HVM_PARAM_ACPI_S_STATE, &hvm_s_state);
      }
  
 +    libxl_update_state(CTX, domid, "suspending");
 +
-     if ((hvm_s_state == 0) && (dss->guest_evtchn.port >= 0)) {
-         LOG(DEBUG, "issuing %s suspend request via event channel",
-             dss->hvm ? "PVHVM" : "PV");
-@@ -153,6 +158,9 @@ static void domain_suspend_callback_comm
-     dss->pvcontrol.timeout_ms = 60 * 1000;
-     dss->pvcontrol.callback = domain_suspend_common_pvcontrol_suspending;
-     libxl__xswait_start(gc, &dss->pvcontrol);
+     if ((hvm_s_state == 0) && (dsps->guest_evtchn.port >= 0)) {
+         LOGD(DEBUG, domid, "issuing %s suspend request via event channel",
+             dsps->type == LIBXL_DOMAIN_TYPE_HVM ? "PVHVM" : "PV");
+@@ -202,6 +207,9 @@ static void domain_suspend_callback_comm
+     dsps->pvcontrol.timeout_ms = 60 * 1000;
+     dsps->pvcontrol.callback = domain_suspend_common_pvcontrol_suspending;
+     libxl__xswait_start(gc, &dsps->pvcontrol);
 +
 +    libxl_update_state(CTX, domid, "suspended");
 +
      return;
  
   err:
-Index: xen-4.6.6/tools/libxl/libxl_utils.c
+Index: xen-4.9.0/tools/libxl/libxl_domain.c
 ===================================================================
---- xen-4.6.6.orig/tools/libxl/libxl_utils.c
-+++ xen-4.6.6/tools/libxl/libxl_utils.c
-@@ -1195,6 +1195,63 @@ int libxl_domid_valid_guest(uint32_t dom
+--- xen-4.9.0.orig/tools/libxl/libxl_domain.c
++++ xen-4.9.0/tools/libxl/libxl_domain.c
+@@ -498,6 +498,8 @@ int libxl_domain_suspend(libxl_ctx *ctx,
+         goto out_err;
+     }
+ 
++    libxl_update_state(ctx, domid, "suspending");
++
+     libxl__domain_save_state *dss;
+     GCNEW(dss);
+ 
+@@ -533,6 +535,9 @@ int libxl_domain_pause(libxl_ctx *ctx, u
+         GC_FREE;
+         return ERROR_FAIL;
+     }
++
++    libxl_update_state(ctx, domid, "paused");
++
+     GC_FREE;
+     return 0;
+ }
+@@ -583,6 +588,9 @@ int libxl_domain_unpause(libxl_ctx *ctx,
+         }
+     }
+     ret = xc_domain_unpause(ctx->xch, domid);
++
++    libxl_update_state(ctx, domid, "running");
++
+     if (ret<0) {
+         LOGED(ERROR, domid, "Unpausing domain");
+         rc = ERROR_FAIL;
+Index: xen-4.9.0/tools/libxl/libxl_utils.c
+===================================================================
+--- xen-4.9.0.orig/tools/libxl/libxl_utils.c
++++ xen-4.9.0/tools/libxl/libxl_utils.c
+@@ -1195,6 +1195,62 @@ int libxl_domid_valid_guest(uint32_t dom
      return domid > 0 && domid < DOMID_FIRST_RESERVED;
  }
  
@@ -170,18 +173,17 @@ Index: xen-4.6.6/tools/libxl/libxl_utils.c
 +    {
 +        fprintf(stderr, "Failed to write the xenstore node: %s with state: %s\n", path, state);
 +    }
-+
 +    free(dominfo);
 +    return 0;
 +}
 +
- void libxl_string_copy(libxl_ctx *ctx, char **dst, char **src)
+ void libxl_string_copy(libxl_ctx *ctx, char **dst, char * const*src)
  {
      GC_INIT(ctx);
-Index: xen-4.6.6/tools/libxl/libxl_utils.h
+Index: xen-4.9.0/tools/libxl/libxl_utils.h
 ===================================================================
---- xen-4.6.6.orig/tools/libxl/libxl_utils.h
-+++ xen-4.6.6/tools/libxl/libxl_utils.h
+--- xen-4.9.0.orig/tools/libxl/libxl_utils.h
++++ xen-4.9.0/tools/libxl/libxl_utils.h
 @@ -37,6 +37,8 @@ int libxl_get_stubdom_id(libxl_ctx *ctx,
  int libxl_is_stubdom(libxl_ctx *ctx, uint32_t domid, uint32_t *target_domid);
  int libxl_create_logfile(libxl_ctx *ctx, const char *name, char **full_name);
@@ -191,11 +193,55 @@ Index: xen-4.6.6/tools/libxl/libxl_utils.h
  
  int libxl_read_file_contents(libxl_ctx *ctx, const char *filename,
                               void **data_r, int *datalen_r);
-Index: xen-4.6.6/tools/libxl/xl_cmdimpl.c
+Index: xen-4.9.0/tools/xl/xl_vmcontrol.c
 ===================================================================
---- xen-4.6.6.orig/tools/libxl/xl_cmdimpl.c
-+++ xen-4.6.6/tools/libxl/xl_cmdimpl.c
-@@ -2436,9 +2436,11 @@ static int handle_domain_death(uint32_t
+--- xen-4.9.0.orig/tools/xl/xl_vmcontrol.c
++++ xen-4.9.0/tools/xl/xl_vmcontrol.c
+@@ -45,6 +45,7 @@ static void unpause_domain(uint32_t domi
+ static void destroy_domain(uint32_t domid, int force)
+ {
+     int rc;
++    libxl_uuid uuid;
+ 
+     if (domid == 0 && !force) {
+         fprintf(stderr, "Not destroying domain 0; use -f to force.\n"
+@@ -52,8 +53,18 @@ static void destroy_domain(uint32_t domi
+                         "hardware domain and toolstack.\n\n");
+         exit(EXIT_FAILURE);
+     }
++    
++    rc = libxl_domid_to_uuid(ctx, &uuid, domid);
++    if (rc) {
++        fprintf(stderr, "domid to uuid failed during domain destroy\n");
++        exit(EXIT_FAILURE);
++    }
+     rc = libxl_domain_destroy(ctx, domid, 0);
+-    if (rc) { fprintf(stderr,"destroy failed (rc=%d)\n",rc); exit(EXIT_FAILURE); }
++    if (rc) {
++        fprintf(stderr,"destroy failed (rc=%d)\n",rc);
++        exit(EXIT_FAILURE);
++    }
++    libxl_update_state_direct(ctx, uuid, "shutdown");
+ }
+ 
+ int main_pause(int argc, char **argv)
+@@ -103,6 +114,7 @@ static void reboot_domain(uint32_t domid
+     int rc;
+ 
+     fprintf(stderr, "Rebooting domain %u\n", domid);
++    libxl_update_state(ctx, domid, "rebooting");
+     rc=libxl_domain_reboot(ctx, domid);
+     if (rc == ERROR_NOPARAVIRT) {
+         if (fallback_trigger) {
+@@ -136,6 +148,7 @@ static void shutdown_domain(uint32_t dom
+     int rc;
+ 
+     fprintf(stderr, "Shutting down domain %u\n", domid);
++    libxl_update_state(ctx, domid, "shutdowning");
+     rc=libxl_domain_shutdown(ctx, domid);
+     if (rc == ERROR_NOPARAVIRT) {
+         if (fallback_trigger) {
+@@ -403,9 +416,11 @@ static domain_restart_type handle_domain
          break;
      case LIBXL_SHUTDOWN_REASON_REBOOT:
          action = d_config->on_reboot;
@@ -207,8 +253,8 @@ Index: xen-4.6.6/tools/libxl/xl_cmdimpl.c
          return 0;
      case LIBXL_SHUTDOWN_REASON_CRASH:
          action = d_config->on_crash;
-@@ -2899,6 +2901,8 @@ start:
-         restore_fd_to_close = -1;
+@@ -941,6 +956,8 @@ start:
+         notify_pipe[0] = notify_pipe[1] = -1;
      }
  
 +    libxl_update_state(ctx, domid, "created");
@@ -216,7 +262,7 @@ Index: xen-4.6.6/tools/libxl/xl_cmdimpl.c
      if (!paused)
          libxl_domain_unpause(ctx, domid);
  
-@@ -2992,6 +2996,9 @@ start:
+@@ -1044,6 +1061,9 @@ start:
                   * re-creation fails sometimes.
                   */
                  LOG("Done. Rebooting now");
@@ -226,7 +272,7 @@ Index: xen-4.6.6/tools/libxl/xl_cmdimpl.c
                  sleep(2);
                  goto start;
  
-@@ -2999,6 +3006,7 @@ start:
+@@ -1051,6 +1071,7 @@ start:
                  LOG("Done. Exiting now");
                  libxl_event_free(ctx, event);
                  ret = 0;
@@ -234,15 +280,15 @@ Index: xen-4.6.6/tools/libxl/xl_cmdimpl.c
                  goto out;
  
              default:
-@@ -3009,6 +3017,7 @@ start:
-             LOG("Domain %d has been destroyed.", domid);
+@@ -1061,6 +1082,7 @@ start:
+             LOG("Domain %u has been destroyed.", domid);
              libxl_event_free(ctx, event);
              ret = 0;
 +            libxl_update_state(ctx, domid, "shutdown");
              goto out;
  
          case LIBXL_EVENT_TYPE_DISK_EJECT:
-@@ -3030,6 +3039,7 @@ error_out:
+@@ -1082,6 +1104,7 @@ error_out:
      release_lock();
      if (libxl_domid_valid_guest(domid)) {
          libxl_domain_destroy(ctx, domid, 0);
@@ -250,27 +296,3 @@ Index: xen-4.6.6/tools/libxl/xl_cmdimpl.c
          domid = INVALID_DOMID;
      }
  
-@@ -3663,6 +3673,7 @@ static void destroy_domain(uint32_t domi
-     }
-     rc = libxl_domain_destroy(ctx, domid, 0);
-     if (rc) { fprintf(stderr,"destroy failed (rc=%d)\n",rc); exit(-1); }
-+    libxl_update_state_direct(ctx, uuid, "shutdown");
- }
- 
- static void wait_for_domain_deaths(libxl_evgen_domain_death **deathws, int nr)
-@@ -3705,6 +3716,7 @@ static void shutdown_domain(uint32_t dom
-     int rc;
- 
-     fprintf(stderr, "Shutting down domain %d\n", domid);
-+    libxl_update_state(ctx, domid, "shutdowning");
-     rc=libxl_domain_shutdown(ctx, domid);
-     if (rc == ERROR_NOPARAVIRT) {
-         if (fallback_trigger) {
-@@ -3737,6 +3749,7 @@ static void reboot_domain(uint32_t domid
-     int rc;
- 
-     fprintf(stderr, "Rebooting domain %d\n", domid);
-+    libxl_update_state(ctx, domid, "rebooting");
-     rc=libxl_domain_reboot(ctx, domid);
-     if (rc == ERROR_NOPARAVIRT) {
-         if (fallback_trigger) {
