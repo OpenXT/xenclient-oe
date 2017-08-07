@@ -1,8 +1,14 @@
+LIC_FILES_CHKSUM := "file://COPYING;md5=bbb4b1bdc2c3b6743da3c39d03249095"
+
 PV = "${XEN_VERSION}"
 
 SRC_URI := "${XEN_SRC_URI}"
 SRC_URI[md5sum] := "${XEN_SRC_MD5SUM}"
 SRC_URI[sha256sum] := "${XEN_SRC_SHA256SUM}"
+
+# XSA patches take precedence and belong at the head of the queue.
+# This ensures that any collisions with other patches get addressed
+# by modifying the OpenXT-specific patches, not the XSA patches.
 
 SRC_URI_append = " \
     file://defconfig \
@@ -10,7 +16,6 @@ SRC_URI_append = " \
     file://do-not-overwrite-cc-and-ld.patch \
     file://disable-xen-root-check.patch \
     file://blktap-resume-fix.patch;patch=1 \
-    file://xsm-add-corespersocket.patch \
     file://hvm-pm-hibernate-s-state.patch;patch=1 \
     file://prune-vga-acpi-dev.patch;patch=1 \
     file://smbios.patch;patch=1 \
@@ -22,7 +27,10 @@ SRC_URI_append = " \
     file://tboot-shutdown-disable-irqs.patch;patch=1 \
     file://Dell-980-txt-shutdown-acpi-access-width.patch;patch=1 \
     file://parse-video-from-mbi.patch;patch=1 \
-    file://hvm-cpuid-multicore.patch;patch=1 \
+    file://cores-per-socket.patch;patch=1 \
+    file://hide-cores-from-cpuid.patch;patch=1 \
+    file://openxt-xci-cpuid-signature.patch;patch=1 \
+    file://allow-mwait-cstate.patch;patch=1 \
     file://xen-translate.patch;patch=1 \
     file://local-pxe-rom.patch;patch=1 \
     file://v4v.patch;patch=1 \
@@ -43,7 +51,7 @@ SRC_URI_append = " \
     file://gpt-s3-resume-reason.patch;patch=1 \
     file://cpufreq_gov_stop_avoid_panic.patch;patch=1 \
     file://fix-memcpy-in-x86-emulate.patch;patch=1 \
-    file://stubdomain-msi-irq-access.patch;striplevel=1 \
+    file://stubdomain-msi-irq-access.patch;patch=1 \
     file://workaround-nehalem-igd-vtd.patch;patch=1 \
     file://xen-x86-Fix-up-rules-when-forcing-mno-sse.patch;patch=1 \
     file://increase-ap-startup-time.patch;patch=1 \
@@ -51,6 +59,9 @@ SRC_URI_append = " \
     file://xenstat-disable-tmem-use.patch;patch=1 \
     file://acpi-slic-support.patch \
     file://xsm-for-vtd.patch \
+    file://tboot-xen-evtlog-support.patch \
+    file://disable-cpuid-hle-rtm.patch \
+    file://allow-stubdoms-cacheattr-control.patch \
     file://libxl-do-not-destroy-in-use-tapdevs.patch \
     file://libxl-syslog.patch \
     file://libxl-RFC-4of7-Add-stubdomain-version-tools-domain-build-info.patch \
@@ -58,7 +69,10 @@ SRC_URI_append = " \
     file://libxl-RFC-6of7-Build-the-domain-with-a-Linux-based-stubdomain.patch \
     file://libxl-RFC-7of7-Wait-for-QEMU-startup-in-stubdomain.patch \
     file://libxl-RFC-fixes.patch \
-    file://libxl-misc-fixes.patch \
+    file://libxl-rulesmk-opt-ldlibs.patch \
+    file://libxl-tapdisk-cdrom.patch \
+    file://libxl-vif-cleanup.patch \
+    file://libxl-RFC-fix-multiple-disks.patch \
     file://libxl-vif-make-ioemu-and-stubdom-mac-addresses-configurable.patch \
     file://libxl-linux-stubdom-replace-disk-with-initramfs.patch \
     file://libxl-openxt-helpers.patch \
@@ -80,7 +94,9 @@ SRC_URI_append = " \
     file://libxl-vwif-support.patch \
     file://libxl-atapi-pt.patch \
     file://libxl-iso-hotswap.patch \
-    file://tboot-xen-evtlog-support.patch \
+    file://libxl-disable-json-updates.patch \
+    file://libxl-allow-non-qdisk-cdrom.patch \
+    file://libxl-domain-build-fix-array-size-bug.patch \
 "
 
 COMPATIBLE_HOST = 'i686-oe-linux|(x86_64.*).*-linux|aarch64.*-linux'
@@ -89,6 +105,10 @@ PACKAGECONFIG =+ "xsm"
 PACKAGECONFIG =+ "hvm"
 
 S = "${WORKDIR}/xen-${PV}"
+
+#--
+# Override meta-virtualization's path to seabios:
+PACKAGECONFIG[hvm] = "--with-system-seabios="/usr/share/firmware/bios.bin",--disable-seabios,seabios ipxe vgabios,"
 
 #--
 # Modifications to the meta-virtualiation configuration (ref: OXT-1016)
@@ -105,3 +125,14 @@ DEPENDS_remove = "iproute2"
 deltask stubs
 deltask deploy
 #--
+
+# meta-virtualization updates for Xen 4.9 -- retire when these land in m-v
+PACKAGES_append = " \
+    ${PN}-libxendevicemodel \
+    ${PN}-libxendevicemodel-dev \
+"
+FILES_${PN}-libxendevicemodel = "${libdir}/libxendevicemodel.so.*"
+FILES_${PN}-libxendevicemodel-dev = "${libdir}/libxendevicemodel.so"
+RDEPENDS_${PN}-libxenctrl_append = " \
+    ${PN}-libxendevicemodel \
+"

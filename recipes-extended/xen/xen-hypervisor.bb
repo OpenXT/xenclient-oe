@@ -67,19 +67,28 @@ EXTRA_OEMAKE += " \
     "
 
 do_configure() {
+
     echo "debug := n" > .config
     echo "XSM_ENABLE := y" >> .config
     echo "FLASK_ENABLE := y" >> .config
+
+    cp "${WORKDIR}/defconfig" "${B}/xen/.config"
+
+    # do configure
+    oe_runconf
 }
 
 do_compile() {
-        oe_runmake dist-xen
+    unset CFLAGS
+    oe_runmake -C xen olddefconfig
+    oe_runmake -C xen
 }
 
 do_install() {
-        install -d ${D}/boot
-        oe_runmake DESTDIR=${D} install-xen
-        ln -sf "`basename ${D}/boot/xen-*xc.gz`" ${D}/boot/xen-debug.gz
+    unset CFLAGS
+    install -d ${D}/boot
+    oe_runmake DESTDIR=${D} install-xen
+    ln -sf "`basename ${D}/boot/xen-*xc.gz`" ${D}/boot/xen-debug.gz
 }
 
 RPROVIDES_xen-efi = "xen-efi"

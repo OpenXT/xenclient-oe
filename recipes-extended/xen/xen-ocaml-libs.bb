@@ -71,6 +71,8 @@ do_compile() {
 		       LDLIBS_libxenstore='-lxenstore' \
 		       LDLIBS_libblktapctl='-lblktapctl' \
 		       LDLIBS_libxenguest='-lxenguest' \
+		       LDLIBS_libxentoollog='-lxentoollog' \
+		       LDLIBS_libxenevtchn='-lxenevtchn' \
 		       -C tools subdir-all-libxl
     oe_runmake V=1 \
        CC="${CC_FOR_OCAML}" \
@@ -80,6 +82,8 @@ do_compile() {
        LDLIBS_libxenstore='-lxenstore' \
        LDLIBS_libblktapctl='-lblktapctl' \
        LDLIBS_libxenguest='-lxenguest' \
+       LDLIBS_libxentoollog='-lxentoollog' \
+       LDLIBS_libxenevtchn='-lxenevtchn' \
        -C tools subdir-all-ocaml
 }
 

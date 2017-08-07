@@ -52,6 +52,7 @@ do_compile() {
 }
 
 do_install() {
+    install -d ${D}${datadir}/pkgconfig
     oe_runmake DESTDIR=${D} -C tools subdir-install-blktap2
     install -d ${D}/usr/include
     install tools/blktap2/control/tap-ctl.h ${D}/usr/include
