@@ -13,6 +13,7 @@ SRC_URI = "http://downloads.sourceforge.net/trousers/${PN}-${PV}.tar.gz;subdir=$
            file://tpm-tools-gcc6-compilation.patch;patch=1 \
            file://tpm-tools-passwd-stdin.patch;patch=1 \
            file://revert-6fb8a3c-fix-segv.patch;patch=1 \
+           file://tpm-tools-setenable-stdin.patch \
 "
 
 # This version is packaged without root directory.

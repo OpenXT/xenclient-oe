@@ -19,13 +19,19 @@
 
 . /usr/lib/tpm-scripts/tpm-functions
 
-# LUKS Key Slots 
+# LUKS Key Slots
 RSLOT=0
 ESLOT=1
 PSLOT=2
 
 KEYMNT="${KEYMNT:-/media/ram}"
 KEYDIR="${KEYDIR:-${KEYMNT}/keys}"
+KEY_FILE_OWN="${KEYDIR}/own"
+KEY_FILE_RECOVERY="${KEYDIR}/recovery"
+KEY_FILE_CONFIG="/config/keys/config.key"
+KEY_FILE_LOG="/config/keys/log.key"
+KEY_FILE_CORES="/config/keys/cores.key"
+KEY_FILE_DEVICE="/config/sec/device.key"
 
 # Setup keystore
 setup_keystore() {
@@ -60,88 +66,10 @@ close_keystore() {
     fi
 }
 
-password_prompt() {
-    local request=$1
-    local key=$2
-
-    exec 3>/dev/tty
-
-    if ! keystore_ready; then
-        dialog --ok-label Continue --msgbox \
-            "ERROR: Keystore does not appear to be available!" 0 0 1>&3
-        return 1;
-    fi
-
-    while [ 0 ] ; do
-        local capture="${KEYDIR}/${key}"
-        dialog --no-cancel --insecure --passwordbox \
-            "Please enter a new password for ${request}" 0 50 "" 2>${capture} 1>&3
-
-        local ret=$?
-        if [ ${ret} -ne 0 ]; then
-            rm -f ${capture}
-            exec 3>&-
-            return ${ret}
-        fi
-
-        local repeat=$(mktemp -p ${KEYDIR})
-        dialog --no-cancel --insecure --passwordbox \
-            "Please enter the same password to confirm" 0 50 "" 2>${repeat} 1>&3
-
-        local ret=$?
-        if [ ${ret} -ne 0 ]; then
-            rm -f ${capture}
-            rm -f ${repeat}
-            exec 3>&-
-            return ${ret}
-        fi
-
-        local password=$(cat ${capture})
-
-        if [ -z "${password}" ]; then
-            rm -f ${capture}
-            rm -f ${repeat}
-            dialog --colors --ok-label Continue --msgbox \
-                '  \ZbERROR:\ZB Empty password!\n\n    Please try again.' 7 30 1>&3
-            continue
-        fi
-
-        if diff -q ${capture} ${repeat} 2>/dev/null ; then
-            rm -f ${repeat}
-            break
-        fi
-        rm -f ${repeat}
-
-        dialog --ok-label Continue --msgbox \
-            "ERROR: Passwords did not match. Please try again." 0 0 1>&3
-    done
-
-    exec 3>&-
-    echo ${capture}
-}
-
-get_tpm_passwd () {
-    if ! keystore_ready; then
-        setup_keystore
-    fi
-    local capture="${KEYDIR}/own"
-    local well_known="00000000000000000000000000000000"
-
-    echo ${well_known} > ${capture}
-    echo ${capture}
-}
-
-recovery_prompt() {
+prompt_recovery_password() {
+    local capture=$( mktemp --tmpdir="${KEYDIR}" )
+    local msg="${2:-Please enter recovery password to unlock the config partition.}"
     local try=""
-
-    # Explicit interact on tty1
-    exec 3>/dev/tty1
-
-    if ! keystore_ready; then
-        dialog --ok-label Continue --msgbox \
-            "ERROR: Keystore does not appear to be available!" 0 0 1>&3
-        return 2;
-    fi
 
     case ${1} in
         1) try="first" ;;
@@ -150,21 +78,31 @@ recovery_prompt() {
         *) try="more than you should have" ;;
     esac
 
-    local capture="${KEYDIR}/recovery"
-    dialog --no-cancel --insecure --colors --passwordbox "
-    This is the ${try} attempt.
+    while true; do
+        dialog --no-cancel --insecure --passwordbox \
+"${msg}
 
-    Please enter the recovery password " 0 0 2>${capture} 1>&3
+This is the ${try} attempt" 0 0 2>"${capture}"
 
-    local ret=$?
-    if [ ${ret} -ne 0 ]; then
-        rm -f ${capture}
-        exec 3>&-
-        return ${ret}
-    fi
+        local ret=$?
+        if [ ${ret} -ne 0 ] ; then
+            break
+        fi
 
-    exec 3>&-
-    echo ${capture}
+        store_recovery_key "${capture}"
+        if ! have_recovery_key ; then
+            dialog --colors --ok-label Continue --msgbox \
+                '\ZbERROR:\ZB Empty password!\n\nPlease try again.' 0 0
+            remove_recovery_key
+            continue
+        fi
+
+        ret=0
+        break
+    done
+
+    rm "${capture}"
+    return ${ret}
 }
 
 # Seed kernel's CPRNG with some entropy
@@ -196,74 +134,6 @@ seed_entropy() {
     fi
 }
 
-# Generates the TPM own key/password
-gen_own_key() {
-    local key_file=""
-    local well_known="0000000000000000000000000000000000000000"
-
-    if ! keystore_ready; then
-        setup_keystore
-
-        # If function 'answerfile_specifies' exist, then inside the installer
-        type answerfile_specifies 2>/dev/null | head -1 | grep -q "function$"
-        if [[ $? -eq 0 ]]; then
-            if interactive; then
-                show_cursor
-                key_file=$(password_prompt "TPM Own" "own")
-                hide_cursor
-            else
-                key_file=${key_file:-"${KEYDIR}/own"}
-                echo -n ${well_known} > ${key_file}
-            fi
-        else
-            key_file=$(password_prompt "TPM Own" "own")
-        fi
-    fi
-
-    key_file=${key_file:-"${KEYDIR}/own"}
-
-    if [ ! -e ${key_file} ]; then
-        echo -n ${well_known} > ${key_file}
-    fi
-
-    echo ${key_file}
-}
-
-# Generates the recovery key/password
-gen_recovery_key() {
-    local key_file=""
-    local well_known="0000000000000000000000000000000000000000"
-
-    if ! keystore_ready; then
-        setup_keystore
-
-        # If function 'answerfile_specifies' exist, then inside the installer
-        type answerfile_specifies 2>/dev/null | head -1 | grep -q "function$"
-        if [[ $? -eq 0 ]]; then
-            if interactive; then
-                show_cursor
-                key_file=$(password_prompt "device recovery" "recovery")
-                hide_cursor
-            else
-                key_file=${key_file:-"${KEYDIR}/recovery"}
-                echo -n ${well_known} > ${key_file}
-            fi
-        else
-            key_file=$(password_prompt "device recovery" "recovery")
-        fi
-    fi
-
-    key_file=${key_file:-"${KEYDIR}/recovery"}
-
-    if [ ! -e ${key_file} ]; then
-        echo -n ${well_known} > ${key_file}
-    fi
-
-    [ "$(getenforce)" == "Enforcing" ] &&
-        chcon -t lvm_tmp_t ${key_file} >/dev/null
-    echo ${key_file}
-}
-
 gen_platform_key() {
     local key_file=`mktemp -t`
 
@@ -274,68 +144,36 @@ gen_platform_key() {
     echo $key_file
 }
 
-# Generates the config partition key
-gen_config_key() {
+gen_luks_key() {
     local root="${1:-/}"
-    local key_file="${root}/config/keys/config.key"
+    local key_file="${root}/${2}"
+    local bytes="${3}"
+    local rand="${4-/dev/urandom}"
 
     seed_entropy 2>/dev/null
-    dd if=/dev/random bs=1 count=32 of="${key_file}" 2>/dev/null || return 1
+    dd if="${rand}" bs=1 count="${bytes}" of="${key_file}" 2>/dev/null || return 1
 
-    echo $key_file
+    echo "${key_file}"
+}
+
+# Generates the config partition key
+gen_config_key() {
+    gen_luks_key "${1}" "${KEY_FILE_CONFIG}" "32" "/dev/random"
 }
 
 # Generates the log partition key
 gen_log_key() {
-    local root="${1:-/}"
-    local key_file="${root}/config/keys/log.key"
-
-    seed_entropy 2>/dev/null
-    dd if=/dev/urandom bs=1 count=128 of="${key_file}" 2>/dev/null || return 1
-
-    echo $key_file
+    gen_luks_key "${1}" "${KEY_FILE_LOG}" "128"
 }
 
 # Generates the cores partition key
 gen_cores_key() {
-    local root="${1:-/}"
-    local key_file="${root}/config/keys/cores.key"
-
-    seed_entropy 2>/dev/null
-    dd if=/dev/urandom bs=1 count=128 of="${key_file}" 2>/dev/null || return 1
-
-    echo $key_file
+    gen_luks_key "${1}" "${KEY_FILE_CORES}" "128"
 }
 
 # Generates the device binding key
 gen_device_key() {
-    local root="${1:-/}"
-    local key_file="${root}/config/sec/device.key"
-
-    seed_entropy 2>/dev/null
-    dd if=/dev/urandom bs=1 count=128 of="${key_file}" 2>/dev/null || return 1
-
-    echo $key_file
-}
-
-# Generates the TPM own key/password
-get_own_key() {
-    local key_file=""
-
-    show_cursor
-    key_file=$(get_tpm_passwd)
-    hide_cursor
-
-    echo ${key_file}
-}
-
-# Gets the recovery key/password
-get_recovery_key() {
-    local key_file=""
-
-    key_file=$(password_prompt "device recovery")
-
-    echo ${key_file}
+    gen_luks_key "${1}" "${KEY_FILE_DEVICE}" "128"
 }
 
 get_platform_key() {
@@ -346,10 +184,17 @@ get_platform_key() {
     echo $key_file
 }
 
-# Gets the config partition key
-get_config_key() {
+have_own_key() {
+    [ -s "${1:-/}/${KEY_FILE_OWN}" ]
+}
+
+have_recovery_key() {
+    [ -s "${1:-/}/${KEY_FILE_RECOVERY}" ]
+}
+
+get_luks_key() {
     local root="${1:-/}"
-    local key_file="${root}/config/keys/config.key"
+    local key_file="${root}/${2}"
 
     if [ -e ${key_file} ]; then
         echo $key_file
@@ -358,106 +203,93 @@ get_config_key() {
         echo ""
         return 1
     fi
+}
+
+# Gets TPM own key/password
+get_own_key() {
+    get_luks_key "${1}" "${KEY_FILE_OWN}"
+}
+
+# Gets the recovery key/password
+get_recovery_key() {
+    get_luks_key "${1}" "${KEY_FILE_RECOVERY}"
+}
+
+# Gets the config partition key
+get_config_key() {
+    get_luks_key "${1}" "${KEY_FILE_CONFIG}"
 }
 
 # Gets the log partition key
 get_log_key() {
-    local root="${1:-/}"
-    local key_file="${root}/config/keys/log.key"
-
-    if [ -e ${key_file} ]; then
-        echo $key_file
-        return 0
-    else
-        echo ""
-        return 1
-    fi
+    get_luks_key "${1}" "${KEY_FILE_LOG}"
 }
 
 # Gets the cores partition key
 get_cores_key() {
-    local root="${1:-/}"
-    local key_file="${root}/config/keys/cores.key"
-
-    if [ -e ${key_file} ]; then
-        echo $key_file
-        return 0
-    else
-        echo ""
-        return 1
-    fi
+    get_luks_key "${1}" "${KEY_FILE_CORES}"
 }
 
 # Gets the device binding key
 get_device_key() {
-    local root="${1:-/}"
-    local key_file="${root}/config/sec/device.key"
-
-    if [ -e ${key_file} ]; then
-        echo $key_file
-        return 0
-    else
-        echo ""
-        return 1
-    fi
+    get_luks_key "${1}" "${KEY_FILE_DEVICE}"
 }
 
-# Sets the recovery key on a cryptdisk
-set_recovery_key() {
+# Store a password/key into a file.
+# Will either read the second file or stdin if no file is provided.
+# Removes trailing newline.
+do_store_key() {
+    echo -n "$( cat ${2} )" > ${1}
+}
+
+# Store tpm owner key into file
+store_own_key() {
+    keystore_ready || return 1
+    do_store_key ${KEY_FILE_OWN} ${1}
+}
+
+# Store recovery key into file
+store_recovery_key() {
+    keystore_ready || return 1
+    do_store_key ${KEY_FILE_RECOVERY} ${1}
+}
+
+set_luks_key() {
     local unlock_key="${1}"
     local key_file="${2}"
     local target="${3}"
+    local slot="${4}"
 
-    cryptsetup -q -d ${unlock_key} luksKillSlot ${target} ${RSLOT} >/dev/null 2>&1
-    cryptsetup -q -d ${unlock_key} -S ${RSLOT} -i 1 luksAddKey ${target} ${key_file} || {
+    cryptsetup -q -d ${unlock_key} luksKillSlot ${target} ${slot} >/dev/null 2>&1
+    cryptsetup -q -d ${unlock_key} -S ${slot} -i 1 luksAddKey ${target} ${key_file} || {
         echo "failed to add crypto key to config LUKS" >&2
         return 1
     }
-    cryptsetup -q -d ${key_file} -S ${RSLOT} luksOpen --test-passphrase ${target} >/dev/null 2>&1 || {
+    cryptsetup -q -d ${key_file} -S ${slot} luksOpen --test-passphrase ${target} >/dev/null 2>&1 || {
         echo "failed to verify new crypto key in config LUKS" >&2
         return 1
     }
+}
+# Sets the recovery key on a cryptdisk
+set_recovery_key() {
+    set_luks_key "${1}" "${2}" "${3}" "${RSLOT}"
 }
 
 # Sets the platform key on a cryptdisk
 set_platform_key() {
-    local unlock_key="${1}"
-    local key_file="${2}"
-    local target="${3}"
-
-    cryptsetup -q -d ${unlock_key} luksKillSlot ${target} ${PSLOT} >/dev/null 2>&1
-    cryptsetup -q -d ${unlock_key} -S ${PSLOT} -i 1 luksAddKey ${target} ${key_file} >&2 || {
-        echo "failed to add crypto key to config LUKS" >&2
-        return 1
-    }
-    cryptsetup -q -d ${key_file} -S ${PSLOT} luksOpen --test-passphrase ${target} >/dev/null 2>&1 || {
-        echo "failed to verify new crypto key in config LUKS" >&2
-        return 1
-    }
+    set_luks_key "${1}" "${2}" "${3}" "${PSLOT}"
 }
 
 # Sets the encrypted key on a cryptdisk
 set_encrypted_key() {
-    local unlock_key="${1}"
-    local key_file="${2}"
-    local target="${3}"
-
-    cryptsetup -q -d ${unlock_key} luksKillSlot ${target} ${ESLOT} >/dev/null 2>&1
-    cryptsetup -q -d ${unlock_key} -S ${ESLOT} -i 1 luksAddKey ${target} ${key_file} || {
-        echo "failed to add crypto key to config LUKS" >&2
-        return 1
-    }
-    cryptsetup -q -d ${key_file} -S ${ESLOT} luksOpen --test-passphrase ${target} >/dev/null 2>&1 || {
-        echo "failed to verify new crypto key in config LUKS" >&2
-        return 1
-    }
+    set_luks_key "${1}" "${2}" "${3}" "${ESLOT}"
 }
 
 is_xc_scheme() {
-    local root="${1:-/}"
+    local boot="${1:-/boot/system}"
     local part="${2:-/dev/xenclient/config}"
 
-    [ -e ${root}/boot/system/config/recovery-private-key.conf ] && {
+    [ -e ${boot}/config/recovery-private-key.conf ] && {
         cryptsetup luksDump ${part} | grep -q "Slot 7: ENABLED"
         return $?
     }
@@ -465,43 +297,77 @@ is_xc_scheme() {
     return 1
 }
 
-# Unlock using the recovery key
-recovery_unlock() {
+recovery_unlock_key() {
     local part="${1}"
     local name="${2}"
-    local root="${3}"
+    local boot="${3}"
+    local key="${4}"
+    local extra="${5}" # Used to pass in --test-passphrase; ignored if unset
 
-    setup_keystore
+    if is_xc_scheme ${boot}; then
+        local rsa_priv_key="${boot}/config/recovery-private-key.conf"
+        local wrapped_key="${boot}/config/recovery-disk-key.ssl"
 
-    local tries=1
-    while [ $tries -le 3 ]; do
-        key=$(recovery_prompt "$tries")
+        cat ${key} | \
+          openssl rsautl -decrypt -inkey ${rsa_priv_key} -in ${wrapped_key} \
+              -passin stdin 2>/dev/null | \
+          cryptsetup -q ${extra} -d - luksOpen "${part}" "${name}" \
+              >/dev/null 2>&1 && \
+            return 0
+    else
+        cryptsetup -q ${extra} -d ${key} -S ${RSLOT} luksOpen "${part}" "${name}" >/dev/null 2>&1 && \
+            return 0
+    fi
 
-        if is_xc_scheme ${root}; then
-            local rsa_priv_key="${root}/boot/system/config/recovery-private-key.conf"
-            local wrapped_key="${root}/boot/system/config/recovery-disk-key.ssl"
+    return 1
+}
 
-            cat ${key} | openssl rsautl -decrypt -inkey ${rsa_priv_key} \
-              -in ${wrapped_key} -passin stdin 2>/dev/null | cryptsetup -q \
-              -d - luksOpen "${part}" "${name}" >/dev/null 2>&1 && {
-                [ -f $key ] && rm -f ${key}
-                umount /tmp
-                return 0
-            }
-        else
-            cryptsetup -q -d ${key} -S ${RSLOT} luksOpen "${part}" "${name}" >/dev/null 2>&1 && {
-                [ -f $key ] && rm -f ${key}
-                umount /tmp
-                return 0
-            }
+test_recovery_key() {
+    recovery_unlock_key "${1}" "${2}" "${3}" "${4}" --test-passphrase
+}
+
+# Unlock using the recovery key
+recovery_unlock_boot() {
+    local part="${1}"
+    local name="${2}"
+    local boot="${3}"
+    local ret=1
+    local mounted_keystore=0
+
+    if ! keystore_ready; then
+        setup_keystore
+        mounted_keystore=1
+    fi
+
+    if have_recovery_key ; then
+        recovery_unlock_key "${part}" "${name}" "${boot}" \
+            "$( get_recovery_key )" \
+                  && return 0
+    fi
+
+    local try=1
+    while [ $try -le 3 ]; do
+        prompt_recovery_password $try
+        recovery_unlock_key "${part}" "${name}" "${boot}" \
+            "$( get_recovery_key )"
+        ret=$?
+        if [ $ret -eq 0 ]; then
+            break;
         fi
 
-        tries=$(($tries + 1))
+        try=$(( try + 1 ))
     done
 
-    [ -f $key ] && rm -f ${key}
-    close_keystore
-    return 1
+    if [ "$mounted_keystore" = "1" ]; then
+        remove_recovery_key
+        close_keystore
+    fi
+
+    return $ret
+}
+
+recovery_unlock() {
+    recovery_unlock_boot "${1}" "${2}" "${3}/boot/system" "${4}"
 }
 
 platform_unlock() {
@@ -541,34 +407,35 @@ encrypted_unlock() {
     return $ret
 }
 
-# Clear the recovery key on a cryptdisk
-clear_recovery_key() {
+remove_own_key() {
+    rm "${1:-/}/${KEY_FILE_OWN}"
+}
+
+remove_recovery_key() {
+    rm "${1:-/}/${KEY_FILE_RECOVERY}"
+}
+
+clear_luks_key() {
     local unlock_key="${1}"
     local target="${2}"
+    local slot="${3}"
 
-    cryptsetup -q -d ${unlock_key} luksKillSlot ${target} ${RSLOT} >/dev/null 2>&1
+    cryptsetup -q -d ${unlock_key} luksKillSlot ${target} ${slot} >/dev/null 2>&1
+}
 
-    return $?
+# Clear the recovery key on a cryptdisk
+clear_recovery_key() {
+    clear_luks_key "${1}" "${2}" "${RSLOT}"
 }
 
 # Clear the platform key on a cryptdisk
 clear_platform_key() {
-    local unlock_key="${1}"
-    local target="${2}"
-
-    cryptsetup -q -d ${unlock_key} luksKillSlot ${target} ${PSLOT} >/dev/null 2>&1
-
-    return $?
+    clear_luks_key "${1}" "${2}" "${PSLOT}"
 }
 
 # Clear the encrypted key on a cryptdisk
 clear_encrypted_key() {
-    local unlock_key="${1}"
-    local target="${2}"
-
-    cryptsetup -q -d ${unlock_key} luksKillSlot ${target} ${ESLOT} >/dev/null 2>&1
-
-    return $?
+    clear_luks_key "${1}" "${2}" "${ESLOT}"
 }
 
 # Hook to take any final actions with keys before installer exits
