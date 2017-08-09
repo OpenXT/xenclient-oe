@@ -117,22 +117,7 @@ poweroff()
     fi
 }
 
-recovery()
-{
-    dialog --colors --backtitle "${BACK_TITLE}" --defaultno \
-        --yes-label "Continue" --no-label "Shutdown" --yesno "
-          \ZbSECURITY WARNING: TXT measured boot FAILED\ZB
-
-    \ZbThis could be because this system has been tampered with!\ZB
-
-    This may also occur if there is a BIOS incompatibility - please
-    see the documentation for how to provide a status-report.
-
-    If you trust that this system has not been compromised, you may
-    enter the recovery passphrase to continue." 0 0
-
-    [ $? -ne 0 ] && poweroff
-
+recovery() {
     maybe_break "recovery-password"
 
     recovery_unlock "/dev/mapper/${CONFIG_LV}" config && {
@@ -151,6 +136,75 @@ recovery()
 
     The system will now shutdown.
     " 0 0
+
+    return 1
+}
+
+txt_failure()
+{
+    dialog --colors --backtitle "${BACK_TITLE}" --defaultno \
+        --yes-label "Continue" --no-label "Shutdown" --yesno "
+                 \ZbSECURITY WARNING: TXT Launch FAILED\ZB
+
+           \ZbIt is not possible to make integrity statements! \ZB
+
+    This is due to either system tampering or a hardware failure.
+    Please see the documentation for how to provide a status-report.
+
+    If you are willing to accept the risk, you may enter the
+    recovery passphrase to continue launching the system." 0 0
+
+
+    [ $? -ne 0 ] && poweroff
+
+    recovery
+    [ $? -eq 0 ] && return 0
+
+    poweroff
+    exit 1
+}
+
+unseal_failure()
+{
+    dialog --colors --backtitle "${BACK_TITLE}" --defaultno \
+        --yes-label "Continue" --no-label "Shutdown" --yesno "
+          \ZbSECURITY WARNING: Measured Launch Unseal FAILED\ZB
+
+    The failure is due to a mismatch between sealed and current
+    PCR values. Primarily this is the result of either an upgrade
+    or the tampering of the system.
+
+    If a system change is expected, then you may enter the
+    recovery passphrase to continue launching the system." 0 0
+
+    [ $? -ne 0 ] && poweroff
+
+    recovery
+    [ $? -eq 0 ] && return 0
+
+    poweroff
+    exit 1
+}
+
+
+platfom_unlock_failure()
+{
+    dialog --colors --backtitle "${BACK_TITLE}" --defaultno \
+        --yes-label "Continue" --no-label "Shutdown" --yesno "
+            \ZbSECURITY WARNING: Platform Key FAILED\ZB
+
+    The platform key was not able to unlock this platform.
+    If this is a Measured Launch system, then tampering has
+    likely occured.
+
+    If you believe the risk is acceptable, you may enter the 
+    recovery passphrase to continue launching the system." 0 0
+
+
+    [ $? -ne 0 ] && poweroff
+
+    recovery
+    [ $? -eq 0 ] && return 0
 
     poweroff
     exit 1
@@ -262,7 +316,7 @@ unlock_config()
         if [ -e /boot/system/tpm/enabled ]; then
             [ "$measured" != 0 ] && {
                 maybe_break "txt-fail"
-                recovery
+                txt_failure
                 [ -f ${measured_flag} ] && rm -f ${measured_flag}
                 return 1
             }
@@ -303,14 +357,14 @@ unlock_config()
                 [ -d "${PCR_DEV}" ] && cat "${PCR_DEV}/device/pcrs" > "${PCRS_BAD}"
             fi
 
-            recovery
+            unseal_failure
             [ -f ${measured_flag} ] && rm -f ${measured_flag}
             reseal "${tss_path}"
 
             return 2
         else
             platform_unlock "${lv_path}" "${lv_name}" || {
-                recovery
+                platform_unlock_failure
                 [ -f ${measured_flag} ] && rm -f ${measured_flag}
                 return 1
             }
