@@ -193,6 +193,33 @@ tpm_is_owner_wks() {
     fi
     return $ret
 }
+
+tpm2_check_password() {
+    local passwd="$1"
+    local msg
+
+    msg=$( tpm2_takeownership -O $(cat "${passwd}") -o $(cat "${passwd}") \
+                              -E $(cat "${passwd}") -e $(cat "${passwd}") \
+                              -L $(cat "${passwd}") -l $(cat "${passwd}") \
+                              2>&1 )
+    [ $? -eq 0 ] && return 0
+
+    msg=${msg#*TPM Error:}
+    case "${msg}" in
+        0x9a2) #TPM_RC_BAD_AUTH
+            return 1
+            ;;
+        0x98e) #TPM_RC_AUTH_FAIL
+            return 1
+            ;;
+        0x921) #TPM_RC_LOCKOUT DA protection
+            return 3
+            ;;
+    esac
+
+    return 2
+}
+
 # Function to determine if we have the TPM owner password
 # returns 0 if owner password is ${passwd}'s contents
 #         1 if owner password is not in ${passwd}
@@ -207,8 +234,8 @@ tpm_check_owner_password() {
     local tpm2=$?
     if [ "${tpm2}" -eq 0 ];
     then
-        # Fail tpm2 owner check until we find a solution.
-        return 1
+        tpm2_check_password "${passwd}"
+        return $?
     fi
 
     msg=$(cat "${passwd}" | tpm_setenable --stdin -s 2>&1)
