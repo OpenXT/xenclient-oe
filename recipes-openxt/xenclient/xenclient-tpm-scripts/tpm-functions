@@ -551,6 +551,67 @@ tpm_take_ownership() {
     return 0
 }
 
+# Write a tboot policy to a TPM2 NV index
+# will only write if necessary
+# $1 - New tboot policy file
+# $2 - NV index
+# $3 - TPM password
+# Standard 0 success return value
+tpm2_write_tboot_policy() {
+    local policy="$1"
+    # remove leading 0s from hex index to match tpm2_nvlist output
+    local tboot_idx="$( tpm2_normalize $2 )"
+    local password="$3"
+    local old_policy="${policy}.old"
+    local polsize=$(cat "${policy}" | wc -c)
+
+    # To limit scope, these TPM2 globals values are defined locally
+    # TPM2 permanent handles
+    local TPM_RH_OWNER=0x40000001
+    # TPM2 NVRAM attributes
+    local TPMA_NV_TPMA_NV_WRITTEN=0x20000000
+    local TPMA_NV_TPMA_NV_OWNERWRITE=0x00000002
+    local TPMA_NV_TPMA_NV_AUTHWRITE=0x00000004
+    local TPMA_NV_TPMA_NV_OWNERREAD=0x00020000
+    local TPMA_NV_TPMA_NV_AUTHREAD=0x00040000
+    local TBOOT_NV_ATTRIB="$( tpm2_normalize $(( TPMA_NV_TPMA_NV_OWNERWRITE | \
+                                                 TPMA_NV_TPMA_NV_AUTHWRITE  | \
+                                                 TPMA_NV_TPMA_NV_OWNERREAD  | \
+                                                 TPMA_NV_TPMA_NV_AUTHREAD )) )"
+
+    local idx=$( tpm2_nvlist | sed -n "/NV Index: ${tboot_idx}/,/\}/p" )
+    local alg=$( echo "${idx}" | awk -F: '/\(nameAlg\)/ { print $2 }' )
+    local attr=$( echo "${idx}" | awk -F: '/\(attributes\)/ { print $2 }' )
+    local size=$( echo "${idx}" | awk -F: '/\(dataSize\)/ { print $2 }' )
+
+    # Read the current contents into a temp file.
+    # tpm2_nvread could fail, and this ends up being a big pipeline to
+    # create an empty file, but that is fine for below.
+    tpm2_nvread -x "${tboot_idx}" -a "${TPM_RH_OWNER}" -P "${password}" \
+                -s "${size}" -o 0 2>/dev/null \
+        | tail -n 1 | tr -d ' ' | hex2bin > "${old_policy}"
+
+    if diff -q "${old_policy}" "${policy}" ; then
+        rm "${old_policy}"
+        return 0
+    fi >/dev/null 2>&1
+
+    rm "${old_policy}"
+
+    if [ "${size}" != "${polsize}" -o \
+         "$( tpm2_normalize $(( attr & ~TPMA_NV_TPMA_NV_WRITTEN )) )" != \
+	     "${TBOOT_NV_ATTRIB}" ]; then
+        tpm2_nvrelease -x "${tboot_idx}" -a "${TPM_RH_OWNER}" -P "${password}" \
+                       >/dev/null 2>&1
+        tpm2_nvdefine -x "${tboot_idx}" -a "${TPM_RH_OWNER}" -P "${password}" \
+                      -s "${polsize}" -t "${TBOOT_NV_ATTRIB}" >/dev/null 2>&1 \
+            || return 1
+    fi
+
+    tpm2_nvwrite -x "${tboot_idx}" -a "${TPM_RH_OWNER}" -P "${password}" \
+                 -f "${policy}" >/dev/null 2>&1
+}
+
 tpm_get_pcr() {
     local pcr="${1}"
 
