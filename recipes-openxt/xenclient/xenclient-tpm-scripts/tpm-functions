@@ -46,11 +46,27 @@ pcr_bank_exists () {
     return 1
 }
 
+# For comparison, normalize to 0x-prefixed, lowercase, unpadded, hex values
+# e.g. 0x000B -> 0xb
+tpm2_normalize() {
+    printf "%#x" $1
+}
+
 OXT_HANDLE_SHA256=0x81000000
 # SHA1 currently unused
-#OXT_HANDLE_SHA1=0x81000001
+OXT_HANDLE_SHA1=0x81000001
 OXT_HANDLES="${OXT_HANDLE_SHA256}"
 OXT_HANDLES_COUNT="$( echo "${OXT_HANDLES}" | wc -w )"
+
+# TPM2 Object attribute bits
+TPMA_OBJECT_FIXEDTPM=0x00000002
+TPMA_OBJECT_FIXEDPARENT=0x00000010
+TPMA_OBJECT_ADMINWITHPOLICY=0x00000080
+TPMA_OBJECT_NODA=0x00000400
+OXT_SEAL_ATTR=$( tpm2_normalize $(( TPMA_OBJECT_FIXEDTPM | \
+                                    TPMA_OBJECT_FIXEDPARENT | \
+                                    TPMA_OBJECT_ADMINWITHPOLICY | \
+                                    TPMA_OBJECT_NODA )) )
 
 # TPM2 hash algorithms
 TPM_ALG_SHA1=0x4
@@ -64,12 +80,6 @@ TPM_ALG_RSA=0x1
 TPM_ALG_KEYEDHASH=0x8
 TPM_ALG_ECC=0x23
 TPM_ALG_SYMCIPHER=0x25
-
-# For comparison, normalize to 0x-prefixed, lowercase, unpadded, hex values
-# e.g. 0x000B -> 0xb
-tpm2_normalize() {
-    printf "%#x" $1
-}
 
 handle_type() {
     case "$1" in
@@ -90,11 +100,11 @@ handle_alg() {
 alg_to_handle () {
     alg=$1
     case $alg in
-        0x000b)
-            echo "0x81000000"
+        ${TPM_ALG_SHA256})
+            echo "${OXT_HANDLE_SHA256}"
             ;;
-        0x0004)
-            echo "0x81000001"
+        ${TPM_ALG_SHA1})
+            echo "${OXT_HANDLE_SHA1}"
             ;;
     esac
 }
@@ -477,11 +487,11 @@ tpm2_create_handle() {
     local passwd=$( cat $1 )
 
     #Create our primary object
-    handle=$(echo -n "${passwd}" | tpm2_createprimary -A o -g 0xB -G 0x1 -P | grep Handle | cut -d ':' -f 2)
+    handle=$(echo -n "${passwd}" | tpm2_createprimary -A o -g ${TPM_ALG_SHA256} -G ${TPM_ALG_RSA} -P | grep Handle | cut -d ':' -f 2)
     ret=$?
     [ ${ret} -ne 0 ] && echo "Failed to create primary" && return ${ret}
     #Make it permanent for this measured install
-    err=$(tpm2_evictcontrol -A o -H ${handle} -S $(alg_to_handle "0x000b") -P "${passwd}" 2>&1)
+    err=$(tpm2_evictcontrol -A o -H ${handle} -S $(alg_to_handle "${TPM_ALG_SHA256}") -P "${passwd}" 2>&1)
     ret=$?
     [ ${ret} -ne 0 ] && echo ${err} && return ${ret}
     return 0
@@ -595,15 +605,15 @@ tpm_seal() {
 
         case $hashalg in
         sha1)
-            sealout=$(tpm2_sealdata -H 0x81000001 -I ${secret} \
-                -O ${tss}.sha1 -o ${tss}.pub.sha1 -g 0x4 \
-                -G 8 -b 0x492 ${pcr_params} 2>&1)
+            sealout=$(tpm2_sealdata -H ${OXT_HANDLE_SHA1} -I ${secret} \
+                -O ${tss}.sha1 -o ${tss}.pub.sha1 -g ${TPM_ALG_SHA1} \
+                -G ${TPM_ALG_KEYEDHASH} -b ${OXT_SEAL_ATTR} ${pcr_params} 2>&1)
             return $?
         ;;
         sha256)
-            sealout=$(tpm2_sealdata -H 0x81000000 -I ${secret} \
-                -O ${tss}.sha256 -o ${tss}.pub.sha256 -g 0xB \
-                -G 8 -b 0x492 ${pcr_params} 2>&1)
+            sealout=$(tpm2_sealdata -H ${OXT_HANDLE_SHA256} -I ${secret} \
+                -O ${tss}.sha256 -o ${tss}.pub.sha256 -g ${TPM_ALG_SHA256} \
+                -G ${TPM_ALG_KEYEDHASH} -b ${OXT_SEAL_ATTR} ${pcr_params} 2>&1)
             return $?
         ;;
         *)
@@ -660,7 +670,10 @@ tpm_forward_seal() {
         seal_file=${key}
         clean_old_tpm_files
         if pcr_bank_exists "TPM_ALG_SHA256"; then
-            tpm2_sealdata -H 0x81000000 -I ${seal_file} -O ${tss}.sha256 -o ${tss}.pub.sha256 -g 0xB -G 8 -b 0x492 ${pcr_params} 2>&1
+            tpm2_sealdata -H ${OXT_HANDLE_SHA256} -I ${seal_file} \
+                          -O ${tss}.sha256 -o ${tss}.pub.sha256 \
+                          -g ${TPM_ALG_SHA256} -G ${TPM_ALG_KEYEDHASH} \
+                          -b ${OXT_SEAL_ATTR} ${pcr_params} 2>&1
             err=$?
             if [ $err -ne 0 ]; then return $err; fi
         fi
@@ -714,13 +727,15 @@ tpm_unseal() {
 
         case $hashalg in
         sha1)
-            tpm2_unsealdata -H 0x81000001 -n "${tss}.sha1" \
-                -u "${tss}.pub.sha1" -g 0x4 ${pcr_params} 2>/dev/null
+            tpm2_unsealdata -H ${OXT_HANDLE_SHA1} -n "${tss}.sha1" \
+                            -u "${tss}.pub.sha1" -g ${TPM_ALG_SHA1} \
+                            ${pcr_params} 2>/dev/null
             return $?
         ;;
         sha256)
-            tpm2_unsealdata -H 0x81000000 -n "${tss}.sha256" \
-                -u "${tss}.pub.sha256" -g 0xB ${pcr_params} 2>/dev/null
+            tpm2_unsealdata -H ${OXT_HANDLE_SHA256} -n "${tss}.sha256" \
+                            -u "${tss}.pub.sha256" -g ${TPM_ALG_SHA256} \
+                            ${pcr_params} 2>/dev/null
             return $?
         ;;
         *)
