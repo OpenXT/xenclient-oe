@@ -46,6 +46,47 @@ pcr_bank_exists () {
     return 1
 }
 
+OXT_HANDLE_SHA256=0x81000000
+# SHA1 currently unused
+#OXT_HANDLE_SHA1=0x81000001
+OXT_HANDLES="${OXT_HANDLE_SHA256}"
+OXT_HANDLES_COUNT="$( echo "${OXT_HANDLES}" | wc -w )"
+
+# TPM2 hash algorithms
+TPM_ALG_SHA1=0x4
+TPM_ALG_SHA256=0xb
+TPM_ALG_SHA384=0xc
+TPM_ALG_SHA512=0xd
+TPM_ALG_SM3_256=0x12
+
+# TPM2 encryption algorithms
+TPM_ALG_RSA=0x1
+TPM_ALG_KEYEDHASH=0x8
+TPM_ALG_ECC=0x23
+TPM_ALG_SYMCIPHER=0x25
+
+# For comparison, normalize to 0x-prefixed, lowercase, unpadded, hex values
+# e.g. 0x000B -> 0xb
+tpm2_normalize() {
+    printf "%#x" $1
+}
+
+handle_type() {
+    case "$1" in
+        ${OXT_HANDLE_SHA256}) echo "${TPM_ALG_RSA}" ;;
+        ${OXT_HANDLE_SHA1})   echo "${TPM_ALG_RSA}" ;;
+        *)                    echo "INVALID_TYPE" ;;
+    esac
+}
+
+handle_alg() {
+    case "$1" in
+        ${OXT_HANDLE_SHA256}) echo "${TPM_ALG_SHA256}" ;;
+        ${OXT_HANDLE_SHA1})   echo "${TPM_ALG_SHA1}" ;;
+        *)                    echo "INVALID_ALG" ;;
+    esac
+}
+
 alg_to_handle () {
     alg=$1
     case $alg in
@@ -135,6 +176,113 @@ tpm_is_enabled() {
 
     return $state
 }
+
+# Function to determine if a single tpm2 handle is correct
+# returns 0 if the handle is defined
+#         1 if the handle is not defined
+#         2 if the handle is incorrect
+tpm2_handle_defined() {
+    local oxt_handle="$1"
+    local handles=$( tpm2_listpersistent )
+    local handle=$( echo "${handles}" | \
+                    sed -n "/Persistent handle: ${oxt_handle}/,/\}/p" )
+    if [ -z "${handle}" ]; then
+            return 1
+    fi
+
+    local h_type=$( echo "${handles}" | awk '/Type/ { print $2 }' )
+    local alg=$( echo "${handles}" | \
+                   awk '/Hash algorithm\(nameAlg\):/ { print $3 }' )
+    h_type=$( tpm2_normalize "${h_type}" )
+    alg=$( tpm2_normalize "${alg}" )
+    if [ "${h_type}" != "$( handle_type "${oxt_handle}" )" -o \
+            "${alg}" != "$( handle_alg "${oxt_handle}" )" ]; then
+        return 2
+    fi
+
+    return 0
+}
+
+# Function to determine if we have all the correct tpm2 handles
+# returns 0 if the handles are defined
+#         1 if the handles are not defined
+#         2 if the handles are incorrect
+tpm2_handles_defined() {
+    local handles=$( tpm2_listpersistent )
+    local num_handles=$( echo "${handles}" | \
+                         awk '/persistent objects defined./ { print $1 }')
+
+    if [ "${num_handles}" -eq 0 ]; then
+        return 1
+    fi
+
+    if [ "${num_handles}" -ne ${OXT_HANDLES_COUNT} ]; then
+        return 2
+    fi
+
+    local handle
+    for handle in ${OXT_HANDLES}; do
+        tpm2_handle_defined ${handle} || return $?
+    done
+
+    return 0
+}
+
+# Function to determine if we have the correct tpm handles
+# returns 0 if the handles are defined
+#         1 if the handles are not defined
+#         2 if the handles are incorrect
+tpm_handles_defined() {
+    #Return success for TPM1
+    is_tpm_2_0 || return 0
+
+    tpm2_handles_defined
+}
+
+tpm2_clear_handle() {
+    local passwd="$( cat $1 )"
+    local handle="$2"
+
+    tpm2_evictcontrol -A o -H "${handle}" -S "${handle}" -P "${passwd}"
+}
+
+# Clear out all the TPM handles.  This should help avoid issues with a TPM2's
+# limited number of handles.
+tpm_clear_handles() {
+    local passwd="$1"
+    local handles
+    local handle
+
+    is_tpm_2_0 || return 0
+
+    handles=$( tpm2_listpersistent | \
+               awk -F: '/Persistent handle:/ { print $2 }' )
+    for handle in ${handles} ; do
+        tpm2_clear_handle "${passwd}" "${handle}"
+    done
+}
+
+# Creates TPM2 handles.  Already existing handles are cleared before
+# recreating.
+tpm_create_handles() {
+    local passwd="$1"
+    local ret
+
+    is_tpm_2_0 || return 0
+
+    tpm2_handles_defined
+    case $? in
+        0) return 0;;
+        1) ;; # not defined
+        2) tpm_clear_handles "${passwd}" ;;
+        *) echo "tpm_create_handle: handles in unexpected state!" 1>&2
+           return 1
+           ;;
+    esac
+
+    tpm2_create_handle "${passwd}"
+}
+
 # Function to determine whether or not the TPM is owned.
 # returns 0 if TPM is owned
 #         1 if TPM is not owned
