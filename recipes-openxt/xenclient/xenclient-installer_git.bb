@@ -1,9 +1,6 @@
 DESCRIPTION = "XenClient Installer"
-RDEPENDS_${PN} = "xenclient-eula xenclient-keyboard-list xenclient-repo-certs xenclient-caps"
 LICENSE = "GPLv2"
 LIC_FILES_CHKSUM = "file://COPYING;md5=4641e94ec96f98fabc56ff9cc48be14b"
-
-inherit xenclient
 
 PV = "0+git${SRCPV}"
 
@@ -13,10 +10,21 @@ SRC_URI = "git://${OPENXT_GIT_MIRROR}/installer.git;protocol=${OPENXT_GIT_PROTOC
 
 S = "${WORKDIR}/git"
 
+inherit xenclient
+
 PACKAGES += "${PN}-part2"
 
 FILES_${PN} = "/install/*"
 FILES_${PN}-part2 = "/*"
+
+RDEPENDS_${PN} = " \
+    busybox \
+    xenclient-eula \
+    xenclient-keyboard-list \
+    xenclient-repo-certs \
+    xenclient-caps \
+"
+RDEPENDS_${PN}-part2 += "busybox"
 
 do_install () {
     ${S}/install part1 ${D}/install
