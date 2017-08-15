@@ -43,7 +43,6 @@ $nonquirk)
     exit 0
 ;;
 $quirk)
-    echo "TPM 2.0 quirk is required on this platform."
     exit 1
 ;;
 *)
