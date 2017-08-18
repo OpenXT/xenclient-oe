@@ -80,6 +80,11 @@ SRC_URI_append = " \
     file://libxl-atapi-pt.patch \
     file://libxl-iso-hotswap.patch \
     file://tboot-xen-evtlog-support.patch \
+    file://0001-gnttab-dont-use-possibly-unbounded-tail-calls.patch \
+    file://0002-gnttab-fix-transitive-grant-handling.patch \
+    file://xsa227-4.6.patch \
+    file://xsa228-4.8.patch \
+    file://xsa230.patch \
 "
 
 COMPATIBLE_HOST = 'i686-oe-linux|(x86_64.*).*-linux|aarch64.*-linux'
