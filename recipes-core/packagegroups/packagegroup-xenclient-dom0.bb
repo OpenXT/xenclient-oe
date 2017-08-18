@@ -119,7 +119,7 @@ RDEPENDS_${PN} = " \
     libtss2 \
     libtctidevice \
     libtctisocket \
-    tpm2.0-tools \
+    tpm2-tools \
 "
 
 # OE upgrade - temporarly disabled:
