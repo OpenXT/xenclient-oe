@@ -14,7 +14,7 @@ SRC_URI = " \
     "
 
 # CAPS? SRSLY?
-S = "${WORKDIR}/${@d.getVar('BPN',d).upper()}"
+S = "${WORKDIR}/tpm2-tss"
 
 # https://lists.yoctoproject.org/pipermail/yocto/2013-November/017042.html
 SRCREV = "56fec897d55873dbf8677fa0cfdc2144c14412b3"
