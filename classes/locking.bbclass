@@ -15,16 +15,13 @@ def acquire_sharedlock (d, task):
     bb.note("Acquiring shared lock for %s" % task);
     lockfile = bb.data.expand("${SYSROOT_LOCK}", d)
     fd = bb.utils.lockfile_shared(lockfile)
-    #bb.note("Acquired shared lock fd=%d for %s" % (fd,task));
     d.setVar("_task_lock_held_%s" % task, fd)
-    #print "Lock was set, fd=%d" % fd
 
 def acquire_exclock (d, task):
     bb.note("Acquiring exclusive lock for %s" % task);
     lockfile = bb.data.expand("${SYSROOT_LOCK}", d)
     fd = bb.utils.lockfile(lockfile)
     d.setVar("_task_lock_held_%s" % task, fd)
-    #print "Lock was set, fd=%d" % fd
 
 addhandler locking_eventhandler
 python locking_eventhandler () {
@@ -32,9 +29,7 @@ python locking_eventhandler () {
     name = getName(e)
     if e.data is None or name == "MsgNote":
         return NotHandled
-    #print "Event: %s" % name
     if isinstance(e, TaskStarted):
-        #print "Task: %s" % e.task
         if e.task == "do_configure" or \
            e.task == "do_compile" or \
            e.task == "do_runlibtool":
@@ -44,9 +39,7 @@ python locking_eventhandler () {
              else:
                acquire_sharedlock(e.data, e.task)
     elif isinstance(e, TaskSucceeded) or isinstance(e, TaskFailed):
-        #print "Task over: %s" % e.task
         release_tasklock(e.data, e.task)
 
-    #print "The file we run for is %s" % e.data.getVar('FILE', True)
     return NotHandled
 }
