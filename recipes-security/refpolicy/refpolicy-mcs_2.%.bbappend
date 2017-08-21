@@ -1,6 +1,4 @@
-FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}-${PV}:"
-
-PR .= ".3"
+FILESEXTRAPATHS_prepend := "${THISDIR}/patches:"
 
 SRC_URI += " \
     file://config \
@@ -183,19 +181,28 @@ SRC_URI += " \
     file://patches/dev-xen-privcmd.patch;patch=1 \
     "
 
+S = "${WORKDIR}/refpolicy"
+
+FILES_${PN} += " \
+    ${sysconfdir}/selinux \
+"
+
 def get_poltype(f):
     import re
+    poltype = None
     config = open (f, "r")
     regex = re.compile('^[\s]*SELINUXTYPE=[\s]*(\w+)[\s]*$')
     for line in config:
         match = regex.match(line)
         if match is not None:
-            return match.group(1)
-    return None
+            poltype = match.group(1)
+            break
+    config.close()
+    return poltype
 
-RDEPENDS_${PN} = ""
-inherit xenclient
-
+# Define policy name from config file.
+conf_file := "${THISDIR}/patches/config"
+POL_TYPE = "${@get_poltype(conf_file)}"
 POLICY_NAME = "${POL_TYPE}"
 POLICY_DISTRO = "debian"
 POLICY_UBAC = "y"
@@ -203,19 +210,10 @@ POLICY_DIRECT_INITRC = "y"
 POLICY_QUIET = "n"
 POLICY_MLS_CATS = "256"
 
-S = "${WORKDIR}/refpolicy"
-
-FILES_${PN} += "${sysconfdir}/selinux"
-
-# Just explicitly define the policy
-POL_TYPE = "xc_policy"
-#conf_file = "${THISDIR}/${PN}-${PV}/config"
-#POL_TYPE = "${@get_poltype(conf_file)}"
-
 do_srctree_copy() {
         cp -r ${WORKDIR}/policy ${S}/
 }
- 
+
 do_modules_copy() {
         cat ${S}/policy/modules-upstream.conf ${S}/policy/modules-openxt.conf > ${S}/policy/modules.conf
 }
