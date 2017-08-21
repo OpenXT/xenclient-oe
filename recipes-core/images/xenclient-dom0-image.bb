@@ -5,7 +5,7 @@ IMAGE_FEATURES += "package-management"
 
 COMPATIBLE_MACHINE = "(xenclient-dom0)"
 
-IMAGE_FSTYPES = "xc.ext3.gz"
+IMAGE_FSTYPES = "ext3.gz"
 
 # No thanks, we provide our own xorg.conf with the hacked Intel driver
 # And we don't need Avahi
