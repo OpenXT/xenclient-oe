@@ -1,8 +1,8 @@
-diff --git a/configure.ac b/configure.ac
-index 6380828..790cca0 100644
---- a/configure.ac
-+++ b/configure.ac
-@@ -156,6 +156,7 @@ AC_ARG_ENABLE(libaudit,AS_HELP_STRING([--enable-libaudit],[build audit daemon su
+Index: dbus-1.10.14/configure.ac
+===================================================================
+--- dbus-1.10.14.orig/configure.ac
++++ dbus-1.10.14/configure.ac
+@@ -184,6 +184,7 @@ AC_ARG_ENABLE(libaudit,AS_HELP_STRING([-
  AC_ARG_ENABLE(inotify, AS_HELP_STRING([--enable-inotify],[build with inotify support (linux only)]),enable_inotify=$enableval,enable_inotify=auto)
  AC_ARG_ENABLE(kqueue, AS_HELP_STRING([--enable-kqueue],[build with kqueue support]),enable_kqueue=$enableval,enable_kqueue=auto)
  AC_ARG_ENABLE(console-owner-file, AS_HELP_STRING([--enable-console-owner-file],[enable console owner file]),enable_console_owner_file=$enableval,enable_console_owner_file=auto)
@@ -10,9 +10,9 @@ index 6380828..790cca0 100644
  AC_ARG_ENABLE(launchd, AS_HELP_STRING([--enable-launchd],[build with launchd auto-launch support]),enable_launchd=$enableval,enable_launchd=auto)
  AC_ARG_ENABLE(systemd, AS_HELP_STRING([--enable-systemd],[build with systemd at_console support]),enable_systemd=$enableval,enable_systemd=auto)
  
-@@ -1247,6 +1248,23 @@ AC_DEFINE_UNQUOTED([DBUS_DEFAULT_MESSAGE_UNIX_FDS],
-   [Default for dbus_connection_get_max_message_unix_fds()])
- AC_SUBST([DEFAULT_MESSAGE_UNIX_FDS])
+@@ -1292,6 +1293,23 @@ if test x$with_valgrind != xno; then
+   AC_DEFINE([WITH_VALGRIND], [1], [Define to add Valgrind instrumentation])
+ fi
  
 +# v4v checks
 +if test x$enable_v4v = xno ; then
@@ -34,21 +34,21 @@ index 6380828..790cca0 100644
  if test -z "$with_dbus_default_reply_timeout" ; then
      DBUS_DEFAULT_REPLY_TIMEOUT=25000
  else
-@@ -1824,6 +1842,7 @@ echo "
-         Building X11 code:        ${have_x11}
+@@ -1949,6 +1967,7 @@ echo "
          Building Doxygen docs:    ${enable_doxygen_docs}
+         Building Ducktype docs:   ${enable_ducktype_docs}
          Building XML docs:        ${enable_xml_docs}
 +        Building v4v support:     ${enable_v4v}
          Building launchd support: ${have_launchd}
          Init scripts style:       ${with_init_scripts}
          Default reply timeout:    ${DBUS_DEFAULT_REPLY_TIMEOUT}
-diff --git a/dbus/dbus-sysdeps-unix.c b/dbus/dbus-sysdeps-unix.c
-index e81e52c..c608541 100644
---- a/dbus/dbus-sysdeps-unix.c
-+++ b/dbus/dbus-sysdeps-unix.c
-@@ -82,6 +82,10 @@
- 
- #include "sd-daemon.h"
+Index: dbus-1.10.14/dbus/dbus-sysdeps-unix.c
+===================================================================
+--- dbus-1.10.14.orig/dbus/dbus-sysdeps-unix.c
++++ dbus-1.10.14/dbus/dbus-sysdeps-unix.c
+@@ -86,6 +86,10 @@
+ #include <systemd/sd-daemon.h>
+ #endif
  
 +#ifdef HAVE_V4V
 +#include <libv4v.h>
@@ -57,7 +57,7 @@ index e81e52c..c608541 100644
  #if !DBUS_USE_SYNC
  #include <pthread.h>
  #endif
-@@ -1243,6 +1247,10 @@ _dbus_connect_tcp_socket_with_nonce (const char     *host,
+@@ -1363,6 +1367,10 @@ _dbus_connect_tcp_socket_with_nonce (con
      hints.ai_family = AF_INET;
    else if (!strcmp(family, "ipv6"))
      hints.ai_family = AF_INET6;
@@ -68,7 +68,7 @@ index e81e52c..c608541 100644
    else
      {
        dbus_set_error (error,
-@@ -1266,6 +1274,11 @@ _dbus_connect_tcp_socket_with_nonce (const char     *host,
+@@ -1386,6 +1394,10 @@ _dbus_connect_tcp_socket_with_nonce (con
    tmp = ai;
    while (tmp)
      {
@@ -76,11 +76,10 @@ index e81e52c..c608541 100644
 +      if (family && !strcmp(family, "v4v"))
 +        tmp->ai_family = PF_XENV4V;
 +#endif
-+
-       if (!_dbus_open_socket (&fd, tmp->ai_family, SOCK_STREAM, 0, error))
+       if (!_dbus_open_socket (&fd.fd, tmp->ai_family, SOCK_STREAM, 0, error))
          {
            freeaddrinfo(ai);
-@@ -1361,6 +1374,10 @@ _dbus_listen_tcp_socket (const char     *host,
+@@ -1482,6 +1494,10 @@ _dbus_listen_tcp_socket (const char
      hints.ai_family = AF_INET;
    else if (!strcmp(family, "ipv6"))
      hints.ai_family = AF_INET6;
@@ -91,16 +90,14 @@ index e81e52c..c608541 100644
    else
      {
        dbus_set_error (error,
-@@ -1388,6 +1405,12 @@ _dbus_listen_tcp_socket (const char     *host,
-   while (tmp)
-     {
-       int fd = -1, *newlisten_fd;
-+
+@@ -1511,6 +1527,10 @@ _dbus_listen_tcp_socket (const char
+       int fd = -1, tcp_nodelay_on;
+       DBusSocket *newlisten_fd;
+ 
 +#ifdef HAVE_V4V
 +      if (family && !strcmp(family, "v4v"))
 +        tmp->ai_family = PF_XENV4V;
 +#endif
-+
        if (!_dbus_open_socket (&fd, tmp->ai_family, SOCK_STREAM, 0, error))
          {
            _DBUS_ASSERT_ERROR_IS_SET(error);
