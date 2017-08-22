@@ -1,10 +1,6 @@
-PR .= ".1"
-
-FILESEXTRAPATHS_prepend := "${THISDIR}/${BP}:"
+FILESEXTRAPATHS_prepend := "${THISDIR}/patches:"
 SRC_URI += " \
     file://vhd.patch \
     file://autofix-sb-future-timestamps.patch \
-    file://fix-infinite-recursion.patch \
 "
-
 DEPENDS += "libbudgetvhd"
