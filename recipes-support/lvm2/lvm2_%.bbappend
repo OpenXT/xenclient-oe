@@ -1,11 +1,8 @@
 FILESEXTRAPATHS_prepend := "${THISDIR}/${BPN}:"
 
 SRC_URI += " \
-    file://0004-tweak-MODPROBE_CMD-for-cross-compile.patch \
     file://yocto-initscripts.patch \
 "
-
-CACHED_CONFIGUREVARS += "MODPROBE_CMD=${base_sbindir}/modprobe"
 
 # meta-oe recipe will already _append the autotools do_install(), and
 # do_<something>_append() cannot be overridden...
