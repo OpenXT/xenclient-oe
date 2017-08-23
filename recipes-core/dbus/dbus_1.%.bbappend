@@ -1,7 +1,8 @@
-DEPENDS += "libselinux"
-DEPENDS_${PN} += "libv4v xen"
-RDEPENDS_${PN} += "libselinux"
-
+DEPENDS_${PN} += " \
+    libselinux \
+    libv4v \
+    xen \
+"
 FILESEXTRAPATHS_prepend := "${THISDIR}/patches:"
 
 SRC_URI += " \
