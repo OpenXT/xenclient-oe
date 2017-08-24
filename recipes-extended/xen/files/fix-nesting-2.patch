@@ -1,0 +1,151 @@
+Index: xen-4.6.4/xen/arch/x86/mm/p2m.c
+===================================================================
+--- xen-4.6.4.orig/xen/arch/x86/mm/p2m.c
++++ xen-4.6.4/xen/arch/x86/mm/p2m.c
+@@ -2024,6 +2024,128 @@ p2m_get_p2m(struct vcpu *v)
+     return p2m_get_nestedp2m(v, nhvm_vcpu_p2m_base(v));
+ }
+ 
++
++
++static unsigned long paging_get_l1_pfn_from_l2_pa(struct vcpu *v, unsigned long l2_pa)
++{
++       unsigned long l1_pfn;
++
++       unsigned int page_order;
++       uint8_t ept_p2m_acc;
++       uint64_t exit_qual;
++       uint32_t exit_reason;
++
++       /* BUG: We use access 0 here - but EPT requires we check the RWX/US from pfec*/
++
++               if (nept_translate_l2ga(v,l2_pa & PAGE_MASK,
++               &page_order, 0, &l1_pfn, &ept_p2m_acc, 
++               &exit_qual, &exit_reason) != EPT_TRANSLATE_SUCCEED) 
++                       return INVALID_GFN;
++
++
++       return l1_pfn;
++}
++
++
++static int paging_read_l2_entry(struct vcpu *v, unsigned long l2_pa, uint64_t * entry)
++{
++  void *page;
++  void *pte;
++  unsigned long l1_pfn;
++
++
++l1_pfn = paging_get_l1_pfn_from_l2_pa(v,l2_pa);
++if (l1_pfn == INVALID_GFN) return 1;
++
++  pte = page = hvm_map_guest_frame_ro (l1_pfn, 0);
++  if (!page) {
++      *entry = ~0ULL;
++       return 1;
++  }
++
++  pte += l2_pa & ~PAGE_MASK;
++
++  memcpy (entry, pte, sizeof (pte));
++
++  hvm_unmap_guest_frame (page, 0);
++
++  return 0;
++}
++
++static unsigned int paging_get_l2_pa_from_l2_va(struct vcpu *v,unsigned long l2_va, unsigned long *l2_pa)
++{
++  /* God awful hacked up code - doesn't check permisions, and only works in LM */
++  unsigned long l2_cr3=v->arch.hvm_vcpu.guest_cr[3];
++
++  uint64_t pml4e_addr;
++  uint64_t pml4e;
++
++  uint64_t pdpte_addr;
++  uint64_t pdpte;
++
++  uint64_t pde_addr;
++  uint64_t pde;
++
++  uint64_t pte_addr;
++  uint64_t pte;
++
++
++  pml4e_addr = l2_cr3 & 0xffffffffff000ULL;
++  pml4e_addr |= (l2_va >> 36) & 0xff8;
++
++  if (paging_read_l2_entry (v, pml4e_addr, &pml4e))
++    return 1;
++
++  pdpte_addr = pml4e & 0xffffffffff000ULL;
++  pdpte_addr |= (l2_va >> 27) & 0xff8;
++
++  if (paging_read_l2_entry (v, pdpte_addr, &pdpte))
++    return 1;;
++
++  if (pdpte & 0x80) {
++      (*l2_pa) = pdpte & 0xffffffffff000ULL;
++      (*l2_pa) |= l2_va & 0x3FFFFFFF;
++      return 0;
++  } 
++
++  pde_addr = pdpte & 0xffffffffff000ULL;
++  pde_addr |= (l2_va >> 18) & 0xff8;
++
++  if (paging_read_l2_entry (v, pde_addr, &pde))
++    return 1;
++
++  if (pde & 0x80)
++    {
++      (*l2_pa) = pde & 0xffffffffff000ULL;
++      (*l2_pa) |= l2_va & 0x1FFFFF;
++      return 0;
++    }
++
++  pte_addr = pde & 0xffffffffff000ULL;
++  pte_addr |= (l2_va >> 9) & 0xff8;
++
++  if (paging_read_l2_entry (v, pte_addr, &pte))
++    return 1;
++
++  (*l2_pa) = pte & 0xffffffffff000ULL;
++  (*l2_pa) |= l2_va & 0xFFF;
++
++  return 0;
++}
++
++
++static unsigned long paging_get_l1_pfn_from_l2_va(struct vcpu *v, unsigned long va,uint32_t *pfec)
++{
++       /* BUG: We dont check access either EPT or the L2 guest page tables */
++
++       uint64_t l2_pa;
++
++if (paging_get_l2_pa_from_l2_va(v,va,&l2_pa))
++       return INVALID_GFN;
++
++return paging_get_l1_pfn_from_l2_pa(v,l2_pa);
++}
++
+ unsigned long paging_gva_to_gfn(struct vcpu *v,
+                                 unsigned long va,
+                                 uint32_t *pfec)
+@@ -2033,6 +2155,7 @@ unsigned long paging_gva_to_gfn(struct v
+ 
+     if ( is_hvm_vcpu(v) && paging_mode_hap(v->domain) && nestedhvm_is_n2(v) )
+     {
++#if 0
+         unsigned long l2_gfn, l1_gfn;
+         struct p2m_domain *p2m;
+         const struct paging_mode *mode;
+@@ -2066,6 +2189,9 @@ unsigned long paging_gva_to_gfn(struct v
+                (l1_gfn & ((1ul << l1_page_order) - 1)));
+ 
+         return l1_gfn;
++#else
++	return paging_get_l1_pfn_from_l2_va(v,va,pfec);
++#endif
+     }
+ 
+     return hostmode->gva_to_gfn(v, hostp2m, va, pfec);

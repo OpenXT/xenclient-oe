@@ -1,0 +1,284 @@
+Index: qemu-2.6.2/hw/i386/pc_piix.c
+===================================================================
+--- qemu-2.6.2.orig/hw/i386/pc_piix.c
++++ qemu-2.6.2/hw/i386/pc_piix.c
+@@ -56,6 +56,8 @@
+ #include "migration/migration.h"
+ #include "kvm_i386.h"
+ 
++extern int xen_q35;
++
+ #define MAX_IDE_BUS 2
+ 
+ static const int ide_iobase[MAX_IDE_BUS] = { 0x1f0, 0x170 };
+@@ -377,6 +379,8 @@ static void pc_xen_hvm_init_pci(MachineS
+              pci_type);
+ }
+ 
++extern void pc_q35_init(MachineState *machine);
++
+ static void pc_xen_hvm_init(MachineState *machine)
+ {
+     PCIBus *bus;
+@@ -386,7 +390,10 @@ static void pc_xen_hvm_init(MachineState
+         exit(1);
+     }
+ 
+-    pc_xen_hvm_init_pci(machine);
++    if (!xen_q35) 
++        pc_xen_hvm_init_pci(machine);
++    else 
++        pc_q35_init(machine);
+ 
+     bus = pci_find_primary_bus();
+     if (bus != NULL) {
+@@ -419,7 +426,12 @@ static void pc_i440fx_machine_options(Ma
+ static void pc_i440fx_2_6_machine_options(MachineClass *m)
+ {
+     pc_i440fx_machine_options(m);
+-    m->alias = "pc";
++
++    if (!xen_q35)
++    	m->alias = "pc";
++    else 
++	m->alias = "old-pc";
++
+     m->is_default = 1;
+ }
+ 
+Index: qemu-2.6.2/hw/i386/pc_q35.c
+===================================================================
+--- qemu-2.6.2.orig/hw/i386/pc_q35.c
++++ qemu-2.6.2/hw/i386/pc_q35.c
+@@ -28,6 +28,7 @@
+  * THE SOFTWARE.
+  */
+ #include "qemu/osdep.h"
++#include "sysemu/block-backend.h"
+ #include "hw/hw.h"
+ #include "hw/loader.h"
+ #include "sysemu/arch_init.h"
+@@ -47,12 +48,88 @@
+ #include "hw/usb.h"
+ #include "qemu/error-report.h"
+ #include "migration/migration.h"
++#include "hw/block/flash.h"
++#ifdef CONFIG_XEN
++#  include <xen/hvm/hvm_info_table.h>
++#endif
+ 
+ /* ICH9 AHCI has 6 ports */
+ #define MAX_SATA_PORTS     6
+ 
++extern int xen_q35;
++
++static void xen_map_efi_var_rom(MemoryRegion *rom_memory)
++{
++       DriveInfo *pflash_drv;
++       BlockBackend *blk;
++       int64_t size;
++
++       char *fatal_errmsg = NULL;
++       hwaddr phys_addr = 0xffe00000ULL;
++       int sector_bits, sector_size;
++       char name[64];
++
++        pflash_drv = drive_get(IF_PFLASH, 0, 0);
++
++       if (!pflash_drv) {
++               error_report("XEN EFI NVRAM - No pflash device found\n");
++               exit(1);
++       }
++
++
++               blk = blk_by_legacy_dinfo(pflash_drv);
++               size = blk_getlength(blk);
++
++       sector_bits = 12;
++       sector_size = 1 << sector_bits;
++
++
++        if (size < 0) {
++            fatal_errmsg = g_strdup_printf("failed to get backing file size");
++        } else if (size == 0) {
++            fatal_errmsg = g_strdup_printf("PC system firmware (pflash) "
++                               "cannot have zero size");
++        } else if ((size % sector_size) != 0) {
++            fatal_errmsg = g_strdup_printf("PC system firmware (pflash) "
++                               "must be a multiple of 0x%x", sector_size);
++        } else if (size != 0x20000) {
++            fatal_errmsg = g_strdup_printf("image must be exactly 0x20000 bytes, yours is 0x%x",(unsigned) size);
++        }
++
++        if (fatal_errmsg != NULL) {
++            Location loc;
++
++            /* push a new, "none" location on the location stack; overwrite its
++             * contents with the location saved in the option; print the error
++             * (includes location); pop the top
++             */
++            loc_push_none(&loc);
++            if (pflash_drv->opts != NULL) {
++                qemu_opts_loc_restore(pflash_drv->opts);
++            }
++            error_report("%s", fatal_errmsg);
++            loc_pop(&loc);
++            g_free(fatal_errmsg);
++            exit(1);
++        }
++
++        /* pflash_cfi01_register() creates a deep copy of the name */
++        snprintf(name, sizeof name, "system.flash0");
++        pflash_cfi01_register(phys_addr, NULL /* qdev */, name,
++                                             size, blk, sector_size,
++                                             size >> sector_bits,
++                                             1      /* width */,
++                                             0x0000 /* id0 */,
++                                             0x0000 /* id1 */,
++                                             0x0000 /* id2 */,
++                                             0x0000 /* id3 */,
++                                             0      /* be */);
++}
++
++void pc_q35_init(MachineState *machine);
++
+ /* PC hardware initialisation */
+-static void pc_q35_init(MachineState *machine)
++void pc_q35_init(MachineState *machine)
+ {
+     PCMachineState *pcms = PC_MACHINE(machine);
+     PCMachineClass *pcmc = PC_MACHINE_GET_CLASS(pcms);
+@@ -143,6 +220,8 @@ static void pc_q35_init(MachineState *ma
+     if (!xen_enabled()) {
+         pc_memory_init(pcms, get_system_memory(),
+                        rom_memory, &ram_memory);
++    } else {
++       xen_map_efi_var_rom(rom_memory);
+     }
+ 
+     /* irq lines */
+@@ -186,8 +265,16 @@ static void pc_q35_init(MachineState *ma
+     ich9_lpc = ICH9_LPC_DEVICE(lpc);
+     ich9_lpc->pic = gsi;
+     ich9_lpc->ioapic = gsi_state->ioapic_irq;
+-    pci_bus_irqs(host_bus, ich9_lpc_set_irq, ich9_lpc_map_irq, ich9_lpc,
++
++#define XEN_PIIX_NUM_PIRQS      128ULL
++
++    if (xen_enabled()) {
++        pci_bus_irqs(host_bus, xen_q35_set_irq, xen_pci_slot_get_pirq, ich9_lpc, XEN_PIIX_NUM_PIRQS);
++    } else {
++        pci_bus_irqs(host_bus, ich9_lpc_set_irq, ich9_lpc_map_irq, ich9_lpc,
+                  ICH9_LPC_NB_PIRQS);
++    }
++
+     pci_bus_set_route_irq_fn(host_bus, ich9_route_intx_pin_to_irq);
+     isa_bus = ich9_lpc->isa_bus;
+ 
+@@ -286,7 +373,10 @@ static void pc_q35_machine_options(Machi
+ static void pc_q35_2_6_machine_options(MachineClass *m)
+ {
+     pc_q35_machine_options(m);
+-    m->alias = "q35";
++    if (xen_q35)
++	m->alias = "pc";
++    else
++        m->alias = "q35";
+ }
+ 
+ DEFINE_Q35_MACHINE(v2_6, "pc-q35-2.6", NULL,
+@@ -316,3 +406,5 @@ static void pc_q35_2_4_machine_options(M
+ 
+ DEFINE_Q35_MACHINE(v2_4, "pc-q35-2.4", NULL,
+                    pc_q35_2_4_machine_options);
++
++
+Index: qemu-2.6.2/hw/i386/pc_sysfw.c
+===================================================================
+--- qemu-2.6.2.orig/hw/i386/pc_sysfw.c
++++ qemu-2.6.2/hw/i386/pc_sysfw.c
+@@ -35,6 +35,7 @@
+ #include "sysemu/sysemu.h"
+ #include "hw/block/flash.h"
+ #include "sysemu/kvm.h"
++#include "hw/xen/xen.h"
+ 
+ #define BIOS_FILENAME "bios.bin"
+ 
+@@ -166,7 +167,7 @@ static void pc_system_flash_init(MemoryR
+                                              0x0000 /* id2 */,
+                                              0x0000 /* id3 */,
+                                              0      /* be */);
+-        if (unit == 0) {
++        if ((unit == 0) && (!xen_enabled())) {
+             flash_mem = pflash_cfi01_get_memory(system_flash);
+             pc_isa_bios_init(rom_memory, flash_mem, size);
+         }
+Index: qemu-2.6.2/include/hw/xen/xen.h
+===================================================================
+--- qemu-2.6.2.orig/include/hw/xen/xen.h
++++ qemu-2.6.2/include/hw/xen/xen.h
+@@ -30,6 +30,7 @@ static inline bool xen_enabled(void)
+ 
+ int xen_pci_slot_get_pirq(PCIDevice *pci_dev, int irq_num);
+ void xen_piix3_set_irq(void *opaque, int irq_num, int level);
++void xen_q35_set_irq(void *opaque, int irq_num, int level);
+ void xen_piix_pci_write_config_client(uint32_t address, uint32_t val, int len);
+ void xen_hvm_inject_msi(uint64_t addr, uint32_t data);
+ int xen_is_pirq_msi(uint32_t msi_data);
+Index: qemu-2.6.2/xen-hvm.c
+===================================================================
+--- qemu-2.6.2.orig/xen-hvm.c
++++ qemu-2.6.2/xen-hvm.c
+@@ -147,6 +147,13 @@ void xen_piix3_set_irq(void *opaque, int
+                               irq_num & 3, level);
+ }
+ 
++void xen_q35_set_irq(void *opaque, int irq_num, int level)
++{
++    xc_hvm_set_pci_intx_level(xen_xc, xen_domid, 0, 0, irq_num >> 2,
++                              irq_num & 3, level);
++}
++
++
+ void xen_piix_pci_write_config_client(uint32_t address, uint32_t val, int len)
+ {
+     int i;
+Index: qemu-2.6.2/qemu-options.hx
+===================================================================
+--- qemu-2.6.2.orig/qemu-options.hx
++++ qemu-2.6.2/qemu-options.hx
+@@ -3714,6 +3714,8 @@ ETEXI
+ HXCOMM Deprecated by -machine accel=tcg property
+ DEF("no-kvm", 0, QEMU_OPTION_no_kvm, "", QEMU_ARCH_I386)
+ 
++DEF("xen-q35", 0, QEMU_OPTION_xen_q35, "", QEMU_ARCH_I386)
++
+ HXCOMM Deprecated by kvm-pit driver properties
+ DEF("no-kvm-pit-reinjection", 0, QEMU_OPTION_no_kvm_pit_reinjection,
+     "", QEMU_ARCH_I386)
+Index: qemu-2.6.2/vl.c
+===================================================================
+--- qemu-2.6.2.orig/vl.c
++++ qemu-2.6.2/vl.c
+@@ -203,6 +203,8 @@ bool xen_allowed;
+ uint32_t xen_domid;
+ enum xen_mode xen_mode = XEN_EMULATE;
+ 
++int xen_q35;
++
+ static int has_defaults = 1;
+ static int default_serial = 1;
+ static int default_parallel = 1;
+@@ -3695,7 +3697,10 @@ int main(int argc, char **argv, char **e
+                     exit(1);
+                 }
+                 break;
+-             case QEMU_OPTION_no_kvm:
++            case QEMU_OPTION_xen_q35:
++		xen_q35 = 1;
++		break;
++            case QEMU_OPTION_no_kvm:
+                 olist = qemu_find_opts("machine");
+                 qemu_opts_parse_noisily(olist, "accel=tcg", false);
+                 break;

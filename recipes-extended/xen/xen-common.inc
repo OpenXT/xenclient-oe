@@ -80,7 +80,16 @@ SRC_URI_append = " \
     file://libxl-atapi-pt.patch \
     file://libxl-iso-hotswap.patch \
     file://tboot-xen-evtlog-support.patch \
+    file://fix-nesting-1.patch \
+    file://fix-nesting-2.patch \
+    file://ovmf.patch \
+    file://ovmf-stubdom.patch \
+    file://hvmloader-nvram.patch \
+    file://libxl-stubdom-nvram.patch \
 "
+
+#    This patch adds experimental q35 support for hvmloader
+#    file://hvmloader-qemu-q35.patch 
 
 COMPATIBLE_HOST = 'i686-oe-linux|(x86_64.*).*-linux|aarch64.*-linux'
 

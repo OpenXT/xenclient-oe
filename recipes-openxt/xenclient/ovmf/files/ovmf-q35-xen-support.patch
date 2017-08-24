@@ -1,0 +1,662 @@
+diff --git a/MdeModulePkg/Bus/Pci/PciBusDxe/PciDeviceSupport.c b/MdeModulePkg/Bus/Pci/PciBusDxe/PciDeviceSupport.c
+index c0227fa..f30b789 100644
+--- a/MdeModulePkg/Bus/Pci/PciBusDxe/PciDeviceSupport.c
++++ b/MdeModulePkg/Bus/Pci/PciBusDxe/PciDeviceSupport.c
+@@ -799,6 +799,7 @@ StartPciDevices (
+   IN EFI_HANDLE                         Controller
+   )
+ {
++#if 0
+   PCI_IO_DEVICE     *RootBridge;
+   EFI_HANDLE        ThisHostBridge;
+   LIST_ENTRY        *CurrentLink;
+@@ -827,8 +828,30 @@ StartPciDevices (
+ 
+     CurrentLink = CurrentLink->ForwardLink;
+   }
++#else
++  PCI_IO_DEVICE     *RootBridge;
++  LIST_ENTRY        *CurrentLink;
++
++  CurrentLink = mPciDevicePool.ForwardLink;
++
++  while (CurrentLink != NULL && CurrentLink != &mPciDevicePool) {
++
++    RootBridge = PCI_IO_DEVICE_FROM_LINK (CurrentLink);
++    //
++    // Locate the right root bridge to start
++    //
++      StartPciDevicesOnBridge (
++         RootBridge->Handle,
++         RootBridge,
++         NULL,
++         NULL,
++         NULL
++         );
+ 
++    CurrentLink = CurrentLink->ForwardLink;
++  }
+   return EFI_SUCCESS;
++#endif
+ }
+ 
+ /**
+diff --git a/MdeModulePkg/Bus/Pci/PciHostBridgeDxe/PciRootBridgeIo.c b/MdeModulePkg/Bus/Pci/PciHostBridgeDxe/PciRootBridgeIo.c
+index cda9b49..e12a51b 100644
+--- a/MdeModulePkg/Bus/Pci/PciHostBridgeDxe/PciRootBridgeIo.c
++++ b/MdeModulePkg/Bus/Pci/PciHostBridgeDxe/PciRootBridgeIo.c
+@@ -98,24 +98,28 @@ CreateRootBridge (
+   if (Bridge->Mem.Base < Bridge->Mem.Limit) {
+     ASSERT (Bridge->Mem.Limit < SIZE_4GB);
+     if (Bridge->Mem.Limit >= SIZE_4GB) {
++      ASSERT(!"Root bridge sadness #0");
+       return NULL;
+     }
+   }
+   if (Bridge->MemAbove4G.Base < Bridge->MemAbove4G.Limit) {
+     ASSERT (Bridge->MemAbove4G.Base >= SIZE_4GB);
+     if (Bridge->MemAbove4G.Base < SIZE_4GB) {
++      ASSERT(!"Root bridge sadness #1");
+       return NULL;
+     }
+   }
+   if (Bridge->PMem.Base < Bridge->PMem.Limit) {
+     ASSERT (Bridge->PMem.Limit < SIZE_4GB);
+     if (Bridge->PMem.Limit >= SIZE_4GB) {
++      ASSERT(!"Root bridge sadness #2");
+       return NULL;
+     }
+   }
+   if (Bridge->PMemAbove4G.Base < Bridge->PMemAbove4G.Limit) {
+     ASSERT (Bridge->PMemAbove4G.Base >= SIZE_4GB);
+     if (Bridge->PMemAbove4G.Base < SIZE_4GB) {
++      ASSERT(!"Root bridge sadness #3");
+       return NULL;
+     }
+   }
+@@ -131,6 +135,7 @@ CreateRootBridge (
+     if ((Bridge->PMem.Base < Bridge->PMem.Limit) ||
+         (Bridge->PMemAbove4G.Base < Bridge->PMemAbove4G.Limit)
+         ) {
++      ASSERT(!"Root bridge sadness #4");
+       return NULL;
+     }
+   }
+@@ -145,9 +150,11 @@ CreateRootBridge (
+     if ((Bridge->MemAbove4G.Base < Bridge->MemAbove4G.Limit) ||
+         (Bridge->PMemAbove4G.Base < Bridge->PMemAbove4G.Limit)
+         ) {
++      ASSERT(!"Root bridge sadness #5");
+       return NULL;
+     }
+   }
++  DEBUG ((EFI_D_INFO, "FISH FISH FISH Rootbridge OK\n"));
+ 
+   RootBridge = AllocateZeroPool (sizeof (PCI_ROOT_BRIDGE_INSTANCE));
+   ASSERT (RootBridge != NULL);
+diff --git a/OvmfPkg/AcpiPlatformDxe/AcpiPlatform.c b/OvmfPkg/AcpiPlatformDxe/AcpiPlatform.c
+index 61166c6..8840084 100644
+--- a/OvmfPkg/AcpiPlatformDxe/AcpiPlatform.c
++++ b/OvmfPkg/AcpiPlatformDxe/AcpiPlatform.c
+@@ -14,6 +14,12 @@
+ 
+ #include "AcpiPlatform.h"
+ 
++#define FISH \
++	do { \
++		DEBUG ((EFI_D_INFO, "%a:%a:%d\n", __FILE__,__FUNCTION__,__LINE__)); \
++	} while (0)
++
++
+ EFI_STATUS
+ EFIAPI
+ InstallAcpiTable (
+@@ -246,16 +252,23 @@ InstallAcpiTables (
+ {
+   EFI_STATUS                         Status;
+ 
++
++  FISH;
++
+   if (XenDetected ()) {
++	FISH;
+     Status = InstallXenTables (AcpiTable);
+   } else {
++	FISH;
+     Status = InstallQemuFwCfgTables (AcpiTable);
+   }
+ 
+   if (EFI_ERROR (Status)) {
++	FISH;
+     Status = InstallOvmfFvTables (AcpiTable);
+   }
+ 
++  FISH;
+   return Status;
+ }
+ 
+diff --git a/OvmfPkg/AcpiPlatformDxe/EntryPoint.c b/OvmfPkg/AcpiPlatformDxe/EntryPoint.c
+index d713b0d..5bc9e4d 100644
+--- a/OvmfPkg/AcpiPlatformDxe/EntryPoint.c
++++ b/OvmfPkg/AcpiPlatformDxe/EntryPoint.c
+@@ -65,7 +65,9 @@ AcpiPlatformEntryPoint (
+   EFI_STATUS Status;
+   VOID       *Interface;
+   EFI_EVENT  PciEnumerated;
++#if 0
+   VOID       *Registration;
++#endif
+ 
+   //
+   // If the platform doesn't support PCI, or PCI enumeration has been disabled,
+@@ -102,6 +104,7 @@ AcpiPlatformEntryPoint (
+     return Status;
+   }
+ 
++#if 0
+   Status = gBS->RegisterProtocolNotify (
+                   &gEfiPciEnumerationCompleteProtocolGuid, PciEnumerated,
+                   &Registration);
+@@ -111,6 +114,11 @@ AcpiPlatformEntryPoint (
+     DEBUG ((EFI_D_INFO, "%a: PCI enumeration pending, registered callback\n",
+       __FUNCTION__));
+   }
++#else
++    DEBUG ((EFI_D_INFO, "%a: Screw this - installing ACPI anyway\n",
++      __FUNCTION__));
++    return InstallAcpiTables (FindAcpiTableProtocol ());
++#endif
+ 
+   return Status;
+ }
+diff --git a/OvmfPkg/AcpiPlatformDxe/Xen.c b/OvmfPkg/AcpiPlatformDxe/Xen.c
+index 618ac58..c7c7f1d 100644
+--- a/OvmfPkg/AcpiPlatformDxe/Xen.c
++++ b/OvmfPkg/AcpiPlatformDxe/Xen.c
+@@ -24,6 +24,11 @@
+ 
+ EFI_ACPI_2_0_ROOT_SYSTEM_DESCRIPTION_POINTER  *XenAcpiRsdpStructurePtr = NULL;
+ 
++#define FISH \
++	do { \
++		DEBUG ((EFI_D_INFO, "%a:%a:%d\n", __FILE__,__FUNCTION__,__LINE__)); \
++	} while (0)
++
+ /**
+   This function detects if OVMF is running on Xen.
+ 
+@@ -155,19 +160,24 @@ InstallXenTables (
+   TableHandle = 0;
+   NumberOfTableEntries = 0;
+ 
++  
++  FISH;
+   //
+   // Try to find Xen ACPI tables
+   //
+   Status = GetXenAcpiRsdp (&XenAcpiRsdpStructurePtr);
+   if (EFI_ERROR (Status)) {
++    FISH;
+     return Status;
+   }
+ 
++    FISH;
+   //
+   // If XSDT table is find, just install its tables. 
+   // Otherwise, try to find and install the RSDT tables.
+   //
+   if (XenAcpiRsdpStructurePtr->XsdtAddress) {
++    FISH;
+     //
+     // Retrieve the addresses of XSDT and 
+     // calculate the number of its table entries.
+@@ -182,6 +192,7 @@ InstallXenTables (
+     // Install ACPI tables found in XSDT.
+     //
+     for (Index = 0; Index < NumberOfTableEntries; Index++) {
++    FISH;
+       //
+       // Get the table entry from XSDT
+       //
+@@ -202,6 +213,7 @@ InstallXenTables (
+                  );
+ 
+       if (EFI_ERROR (Status)) {
++    FISH;
+         return Status;
+       }
+ 
+@@ -209,6 +221,7 @@ InstallXenTables (
+       // Get the FACS and DSDT table address from the table FADT
+       //
+       if (!AsciiStrnCmp ((CHAR8 *) &CurrentTable->Signature, "FACP", 4)) {
++    FISH;
+         Fadt2Table = (EFI_ACPI_2_0_FIXED_ACPI_DESCRIPTION_TABLE *)
+                        (UINTN) CurrentTablePointer;
+         Facs2Table = (EFI_ACPI_2_0_FIRMWARE_ACPI_CONTROL_STRUCTURE *)
+@@ -218,6 +231,7 @@ InstallXenTables (
+     }
+   }
+   else if (XenAcpiRsdpStructurePtr->RsdtAddress) {
++    FISH;
+     //
+     // Retrieve the addresses of RSDT and
+     // calculate the number of its table entries.
+@@ -232,6 +246,7 @@ InstallXenTables (
+     // Install ACPI tables found in XSDT.
+     //
+     for (Index = 0; Index < NumberOfTableEntries; Index++) {
++    FISH;
+       //
+       // Get the table entry from RSDT
+       //
+@@ -252,6 +267,7 @@ InstallXenTables (
+                  );
+ 
+       if (EFI_ERROR (Status)) {
++    FISH;
+         return Status;
+       }
+ 
+@@ -267,6 +283,7 @@ InstallXenTables (
+       }
+     }
+   }
++    FISH;
+ 
+   //
+   // Install the FACS table.
+@@ -282,6 +299,7 @@ InstallXenTables (
+                &TableHandle
+                );
+     if (EFI_ERROR (Status)) {
++    FISH;
+       return Status;
+     }
+   }
+@@ -296,10 +314,12 @@ InstallXenTables (
+                &TableHandle
+                );
+     if (EFI_ERROR (Status)) {
++    FISH;
+       return Status;
+     }
+   }
+ 
++    FISH;
+   //
+   // Install DSDT table.
+   //
+@@ -310,9 +330,11 @@ InstallXenTables (
+              &TableHandle
+              );
+   if (EFI_ERROR (Status)) {
++    FISH;
+     return Status;
+   }
+ 
++    FISH;
+   return EFI_SUCCESS;
+ }
+ 
+diff --git a/OvmfPkg/EnrollDefaultKeys/EnrollDefaultKeys.c b/OvmfPkg/EnrollDefaultKeys/EnrollDefaultKeys.c
+index 29de6e2..a3f8635 100644
+--- a/OvmfPkg/EnrollDefaultKeys/EnrollDefaultKeys.c
++++ b/OvmfPkg/EnrollDefaultKeys/EnrollDefaultKeys.c
+@@ -843,18 +377,21 @@ GetSettings (
+              &gEfiSecureBootEnableDisableGuid, &Settings->SecureBootEnable,
+              sizeof Settings->SecureBootEnable, TRUE);
+   if (EFI_ERROR (Status)) {
+-    return Status;
++    Settings->SecureBootEnable=FALSE;
+   }
+ 
+   Status = GetExact (EFI_CUSTOM_MODE_NAME, &gEfiCustomModeEnableGuid,
+              &Settings->CustomMode, sizeof Settings->CustomMode, FALSE);
+   if (EFI_ERROR (Status)) {
+-    return Status;
++    Settings->CustomMode=TRUE;
+   }
+ 
+   Status = GetExact (EFI_VENDOR_KEYS_VARIABLE_NAME, &gEfiGlobalVariableGuid,
+              &Settings->VendorKeys, sizeof Settings->VendorKeys, FALSE);
+-  return Status;
++  if (EFI_ERROR (Status)) {
++    Settings->VendorKeys=FALSE;
++  }
++  return EFI_SUCCESS;
+ }
+ 
+ STATIC
+@@ -881,14 +418,16 @@ ShellAppMain (
+   SETTINGS   Settings;
+ 
+   Status = GetSettings (&Settings);
++#if 0
+   if (EFI_ERROR (Status)) {
+     return 1;
+   }
++#endif
+   PrintSettings (&Settings);
+ 
+   if (Settings.SetupMode != 1) {
+     AsciiPrint ("error: already in User Mode\n");
+-    return 1;
++//    return 1;
+   }
+ 
+   if (Settings.CustomMode != CUSTOM_SECURE_BOOT_MODE) {
+@@ -917,8 +464,7 @@ ShellAppMain (
+   Status = EnrollListOfX509Certs (
+              EFI_KEY_EXCHANGE_KEY_NAME,
+              &gEfiGlobalVariableGuid,
+-             ExampleCert,  sizeof ExampleCert,  &gEfiCallerIdGuid,
+              MicrosoftKEK, sizeof MicrosoftKEK, &gEfiCallerIdGuid,
+              NULL);
+   if (EFI_ERROR (Status)) {
+     return 1;
+@@ -927,7 +473,7 @@ ShellAppMain (
+   Status = EnrollListOfX509Certs (
+              EFI_PLATFORM_KEY_NAME,
+              &gEfiGlobalVariableGuid,
+-             ExampleCert, sizeof ExampleCert, &gEfiGlobalVariableGuid,
++             MicrosoftKEK, sizeof MicrosoftKEK, &gEfiCallerIdGuid,
+              NULL);
+   if (EFI_ERROR (Status)) {
+     return 1;
+diff --git a/OvmfPkg/Library/PlatformBdsLib/BdsPlatform.c b/OvmfPkg/Library/PlatformBdsLib/BdsPlatform.c
+index e345b47..461f818 100644
+--- a/OvmfPkg/Library/PlatformBdsLib/BdsPlatform.c
++++ b/OvmfPkg/Library/PlatformBdsLib/BdsPlatform.c
+@@ -1337,6 +1337,11 @@ Returns:
+   //
+   PlatformBdsConnectSequence ();
+ 
++#ifdef TPM_ENABLED
++   TcgPhysicalPresenceLibProcessRequest();
++#endif
++
++
+   //
+   // Process QEMU's -kernel command line option
+   //
+diff --git a/OvmfPkg/OvmfPkg.dec b/OvmfPkg/OvmfPkg.dec
+index 784542f..98c9d04 100644
+--- a/OvmfPkg/OvmfPkg.dec
++++ b/OvmfPkg/OvmfPkg.dec
+@@ -65,6 +65,8 @@
+   gXenBusProtocolGuid             = {0x3d3ca290, 0xb9a5, 0x11e3, {0xb7, 0x5d, 0xb8, 0xac, 0x6f, 0x7d, 0x65, 0xe6}}
+   gXenIoProtocolGuid              = {0x6efac84f, 0x0ab0, 0x4747, {0x81, 0xbe, 0x85, 0x55, 0x62, 0x59, 0x04, 0x49}}
+ 
++
++
+ [PcdsFixedAtBuild]
+   gUefiOvmfPkgTokenSpaceGuid.PcdOvmfPeiMemFvBase|0x0|UINT32|0
+   gUefiOvmfPkgTokenSpaceGuid.PcdOvmfPeiMemFvSize|0x0|UINT32|1
+@@ -72,7 +74,7 @@
+   gUefiOvmfPkgTokenSpaceGuid.PcdOvmfDxeMemFvSize|0x0|UINT32|0x16
+ 
+   ## This flag is used to control the destination port for PlatformDebugLibIoPort
+-  gUefiOvmfPkgTokenSpaceGuid.PcdDebugIoPort|0x402|UINT16|4
++  gUefiOvmfPkgTokenSpaceGuid.PcdDebugIoPort|0xe9|UINT16|4
+ 
+   ## This flag determines the Power Management Base Address of choice, written
+   #  to PIIX4 function 3 offset 0x40-0x43 bits [15:6].
+diff --git a/OvmfPkg/OvmfPkgX64.dsc b/OvmfPkg/OvmfPkgX64.dsc
+index a18858f..454dcff 100644
+--- a/OvmfPkg/OvmfPkgX64.dsc
++++ b/OvmfPkg/OvmfPkgX64.dsc
+@@ -33,7 +33,8 @@
+   # Defines for default states.  These can be changed on the command line.
+   # -D FLAG=VALUE
+   #
+-  DEFINE SECURE_BOOT_ENABLE      = FALSE
++  DEFINE SECURE_BOOT_ENABLE      = TRUE
++  DEFINE TPM_ENABLED             = TRUE
+   DEFINE NETWORK_IP6_ENABLE      = FALSE
+   DEFINE HTTP_BOOT_ENABLE        = FALSE
+   DEFINE SMM_REQUIRE             = FALSE
+@@ -129,11 +130,20 @@
+   LocalApicLib|UefiCpuPkg/Library/BaseXApicX2ApicLib/BaseXApicX2ApicLib.inf
+   DebugPrintErrorLevelLib|MdePkg/Library/BaseDebugPrintErrorLevelLib/BaseDebugPrintErrorLevelLib.inf
+ 
++!if $(TPM_ENABLED) == TRUE
++  TpmCommLib|SecurityPkg/Library/TpmCommLib/TpmCommLib.inf
++  Tpm12CommandLib|SecurityPkg/Library/Tpm12CommandLib/Tpm12CommandLib.inf
++  Tpm12DeviceLib|SecurityPkg/Library/Tpm12DeviceLibDTpm/Tpm12DeviceLibDTpm.inf
++!endif
++
+ !if $(SECURE_BOOT_ENABLE) == TRUE
+   PlatformSecureLib|OvmfPkg/Library/PlatformSecureLib/PlatformSecureLib.inf
+   IntrinsicLib|CryptoPkg/Library/IntrinsicLib/IntrinsicLib.inf
+   OpensslLib|CryptoPkg/Library/OpensslLib/OpensslLib.inf
+   TpmMeasurementLib|SecurityPkg/Library/DxeTpmMeasurementLib/DxeTpmMeasurementLib.inf
++!if $(TPM_ENABLED) == TRUE
++  TrEEPhysicalPresenceLib|SecurityPkg/Library/DxeTrEEPhysicalPresenceLib/DxeTrEEPhysicalPresenceLib.inf
++!endif
+   AuthVariableLib|SecurityPkg/Library/AuthVariableLib/AuthVariableLib.inf
+ !if $(NETWORK_IP6_ENABLE) == TRUE
+   TcpIoLib|MdeModulePkg/Library/DxeTcpIoLib/DxeTcpIoLib.inf
+@@ -225,6 +235,9 @@
+   DebugLib|OvmfPkg/Library/PlatformDebugLibIoPort/PlatformDebugLibIoPort.inf
+ !endif
+   ExtractGuidedSectionLib|MdePkg/Library/DxeExtractGuidedSectionLib/DxeExtractGuidedSectionLib.inf
++!if $(TPM_ENABLED) == TRUE
++  TcgPhysicalPresenceLib|SecurityPkg/Library/DxeTcgPhysicalPresenceLib/DxeTcgPhysicalPresenceLib.inf
++!endif
+ !ifdef $(SOURCE_DEBUG_ENABLE)
+   DebugAgentLib|SourceLevelDebugPkg/Library/DebugAgent/DxeDebugAgentLib.inf
+ !endif
+@@ -456,6 +469,12 @@
+   gEfiMdeModulePkgTokenSpaceGuid.PcdSetNxForStack|FALSE
+   gEfiMdeModulePkgTokenSpaceGuid.PcdPropertiesTableEnable|FALSE
+ 
++  !if $(TPM_ENABLED) == TRUE
++  gEfiSecurityPkgTokenSpaceGuid.PcdTpmInstanceGuid|{0x7b, 0x3a, 0xcd, 0x72, 0xA5, 0xFE, 0x5e, 0x4f, 0x91, 0x65, 0x4d, 0xd1, 0x21, 0x87, 0xbb, 0x13}
++  gEfiSecurityPkgTokenSpaceGuid.PcdTpmInitializationPolicy|1
++  gEfiSecurityPkgTokenSpaceGuid.PcdTpmScrtmPolicy|1
++  !endif
++
+ ################################################################################
+ #
+ # Components Section - list of all EDK II Modules needed by this Platform.
+@@ -503,6 +522,7 @@
+       PcdLib|MdePkg/Library/PeiPcdLib/PeiPcdLib.inf
+   }
+ !endif
++
+ 
+   #
+   # DXE Phase modules
+@@ -525,28 +545,64 @@
+   MdeModulePkg/Universal/SecurityStubDxe/SecurityStubDxe.inf {
+     <LibraryClasses>
+       NULL|SecurityPkg/Library/DxeImageVerificationLib/DxeImageVerificationLib.inf
++!if $(TPM_ENABLED) == TRUE
++      NULL|SecurityPkg/Library/DxeTpmMeasureBootLib/DxeTpmMeasureBootLib.inf
++!endif
+ 	}
+ !else
+   MdeModulePkg/Universal/SecurityStubDxe/SecurityStubDxe.inf
+ !endif
++
++
++!if $(TPM_ENABLED) == TRUE
++  SecurityPkg/Tcg/TrEEConfig/TrEEConfigPei.inf {
++    <LibraryClasses>
++      Tpm12DeviceLib|SecurityPkg/Library/Tpm12DeviceLibDTpm/Tpm12DeviceLibDTpm.inf
++      PcdLib|MdePkg/Library/PeiPcdLib/PeiPcdLib.inf
++  }
++
++  SecurityPkg/Tcg/TcgConfigDxe/TcgConfigDxe.inf {
++    <LibraryClasses>
++      PcdLib|MdePkg/Library/DxePcdLib/DxePcdLib.inf
++    <BuildOptions>
++      #
++      # specify GUID gEfiIfrNotInTPVPageGuid, this page will not
++      # be showed in TPV page.
++      #
++      #*_*_*_VFR_FLAGS   = -g e58809f8-fbc1-48e2-883a-a30fdc4b441e
++  }
++
++  SecurityPkg/Tcg/TcgDxe/TcgDxe.inf {
++    <LibraryClasses>
++      PcdLib|MdePkg/Library/DxePcdLib/DxePcdLib.inf
++  }
++#  SecurityPkg/Tcg/TcgSmm/TcgSmm.inf
++!endif
++
+ 
+   MdeModulePkg/Universal/EbcDxe/EbcDxe.inf
+   PcAtChipsetPkg/8259InterruptControllerDxe/8259.inf
+   UefiCpuPkg/CpuIo2Dxe/CpuIo2Dxe.inf
+   UefiCpuPkg/CpuDxe/CpuDxe.inf
+   PcAtChipsetPkg/8254TimerDxe/8254Timer.inf
+-!if $(USE_OLD_PCI_HOST) == TRUE
+-  OvmfPkg/PciHostBridgeDxe/PciHostBridgeDxe.inf
+-!else
+-  MdeModulePkg/Bus/Pci/PciHostBridgeDxe/PciHostBridgeDxe.inf {
+-    <LibraryClasses>
+-      PciHostBridgeLib|OvmfPkg/Library/PciHostBridgeLib/PciHostBridgeLib.inf
+-  }
+-!endif
+-  MdeModulePkg/Bus/Pci/PciBusDxe/PciBusDxe.inf {
+-    <LibraryClasses>
+-      PcdLib|MdePkg/Library/DxePcdLib/DxePcdLib.inf
+-  }
++#!if $(USE_OLD_PCI_HOST) == TRUE
++#  OvmfPkg/PciHostBridgeDxe/PciHostBridgeDxe.inf
++#!else
++#  MdeModulePkg/Bus/Pci/PciHostBridgeDxe/PciHostBridgeDxe.inf {
++#    <LibraryClasses>
++#      PciHostBridgeLib|OvmfPkg/Library/PciHostBridgeLib/PciHostBridgeLib.inf
++#  }
++#!endif
++#
++  DuetPkg/PciRootBridgeNoEnumerationDxe/PciRootBridgeNoEnumeration.inf
++  DuetPkg/PciBusNoEnumerationDxe/PciBusNoEnumeration.inf
++
++#  MdeModulePkg/Bus/Pci/PciBusDxe/PciBusDxe.inf {
++#    <LibraryClasses>
++#      PcdLib|MdePkg/Library/DxePcdLib/DxePcdLib.inf
++#  }
++
++
+   PcAtChipsetPkg/KbcResetDxe/Reset.inf
+   MdeModulePkg/Universal/Metronome/Metronome.inf
+   PcAtChipsetPkg/PcatRealTimeClockRuntimeDxe/PcatRealTimeClockRuntimeDxe.inf
+diff --git a/OvmfPkg/OvmfPkgX64.fdf b/OvmfPkg/OvmfPkgX64.fdf
+index 711f47a..ec4de24 100644
+--- a/OvmfPkg/OvmfPkgX64.fdf
++++ b/OvmfPkg/OvmfPkgX64.fdf
+@@ -163,6 +163,8 @@ INF  UefiCpuPkg/Universal/Acpi/S3Resume2Pei/S3Resume2Pei.inf
+ INF  OvmfPkg/SmmAccess/SmmAccessPei.inf
+ !endif
+ 
++
++
+ ################################################################################
+ 
+ [FV.DXEFV]
+@@ -207,12 +209,23 @@ INF  PcAtChipsetPkg/8259InterruptControllerDxe/8259.inf
+ INF  UefiCpuPkg/CpuIo2Dxe/CpuIo2Dxe.inf
+ INF  UefiCpuPkg/CpuDxe/CpuDxe.inf
+ INF  PcAtChipsetPkg/8254TimerDxe/8254Timer.inf
+-!if $(USE_OLD_PCI_HOST) == TRUE
+-INF  OvmfPkg/PciHostBridgeDxe/PciHostBridgeDxe.inf
+-!else
+-INF  MdeModulePkg/Bus/Pci/PciHostBridgeDxe/PciHostBridgeDxe.inf
++#!if $(USE_OLD_PCI_HOST) == TRUE
++#INF  OvmfPkg/PciHostBridgeDxe/PciHostBridgeDxe.inf
++#!else
++#INF  MdeModulePkg/Bus/Pci/PciHostBridgeDxe/PciHostBridgeDxe.inf
++#!endif
++#
++INF  DuetPkg/PciRootBridgeNoEnumerationDxe/PciRootBridgeNoEnumeration.inf
++INF  DuetPkg/PciBusNoEnumerationDxe/PciBusNoEnumeration.inf
++
++!if $(TPM_ENABLED) == TRUE
++INF SecurityPkg/Tcg/TcgConfigDxe/TcgConfigDxe.inf
++INF SecurityPkg/Tcg/TcgDxe/TcgDxe.inf
++#INF RuleOverride = DRIVER_ACPITABLE SecurityPkg/Tcg/TcgSmm/TcgSmm.inf
+ !endif
+-INF  MdeModulePkg/Bus/Pci/PciBusDxe/PciBusDxe.inf
++
++#INF  MdeModulePkg/Bus/Pci/PciBusDxe/PciBusDxe.inf
++
+ INF  PcAtChipsetPkg/KbcResetDxe/Reset.inf
+ INF  MdeModulePkg/Universal/Metronome/Metronome.inf
+ INF  PcAtChipsetPkg/PcatRealTimeClockRuntimeDxe/PcatRealTimeClockRuntimeDxe.inf
+diff --git a/OvmfPkg/PlatformPei/Platform.c b/OvmfPkg/PlatformPei/Platform.c
+index 7d09412..6cdea84 100644
+--- a/OvmfPkg/PlatformPei/Platform.c
++++ b/OvmfPkg/PlatformPei/Platform.c
+@@ -242,6 +242,8 @@ MemMapInitialization (
+     // 0xFEE00000    LAPIC                          1 MB
+     //
+     PciSize = 0xFC000000 - PciBase;
++
++
+     AddIoMemoryBaseSizeHob (PciBase, PciSize);
+     PcdSet64 (PcdPciMmio32Base, PciBase);
+     PcdSet64 (PcdPciMmio32Size, PciSize);
+diff --git a/OvmfPkg/PlatformPei/Xen.c b/OvmfPkg/PlatformPei/Xen.c
+index 7fa9019..f91bcb1 100644
+--- a/OvmfPkg/PlatformPei/Xen.c
++++ b/OvmfPkg/PlatformPei/Xen.c
+@@ -225,7 +225,19 @@ InitializeXen (
+   //
+   AddReservedMemoryBaseSizeHob (0xFC000000, 0x1000000, FALSE);
+ 
+-  PcdSetBool (PcdPciDisableBusEnumeration, TRUE);
++  //PcdSetBool (PcdPciDisableBusEnumeration, TRUE);
++
++  PcdSet64 (PcdPciMmio32Base, 0x80000000);
++  PcdSet64 (PcdPciMmio32Size, 0x7c000000);
++
++# if 0
++
++    AddIoMemoryBaseSizeHob (0xFEC00000, SIZE_4KB);
++    AddIoMemoryBaseSizeHob (0xFED00000, SIZE_1KB);
++    AddIoMemoryBaseSizeHob (ICH9_ROOT_COMPLEX_BASE, SIZE_16KB);
++    AddIoMemoryBaseSizeHob (PcdGet32(PcdCpuLocalApicBaseAddress), SIZE_1MB);
++#endif
++ 
+ 
+   return EFI_SUCCESS;
+ }
+diff --git a/OvmfPkg/XenBusDxe/XenBusDxe.c b/OvmfPkg/XenBusDxe/XenBusDxe.c
+index 439b060..86c4181 100644
+--- a/OvmfPkg/XenBusDxe/XenBusDxe.c
++++ b/OvmfPkg/XenBusDxe/XenBusDxe.c
+@@ -320,6 +320,8 @@ XenBusDxeDriverBindingStart (
+   XENIO_PROTOCOL *XenIo;
+   EFI_DEVICE_PATH_PROTOCOL *DevicePath;
+ 
++  return EFI_UNSUPPORTED;
++
+   Status = gBS->OpenProtocol (
+                      ControllerHandle,
+                      &gXenIoProtocolGuid,
+diff --git a/OvmfPkg/XenPvBlkDxe/XenPvBlkDxe.c b/OvmfPkg/XenPvBlkDxe/XenPvBlkDxe.c
+index caaa9b4..b94fd94 100644
+--- a/OvmfPkg/XenPvBlkDxe/XenPvBlkDxe.c
++++ b/OvmfPkg/XenPvBlkDxe/XenPvBlkDxe.c
+@@ -192,6 +192,8 @@ XenPvBlkDxeDriverBindingSupported (
+   EFI_STATUS Status;
+   XENBUS_PROTOCOL *XenBusIo;
+ 
++  return EFI_UNSUPPORTED;
++
+   Status = gBS->OpenProtocol (
+                 ControllerHandle,
+                 &gXenBusProtocolGuid,
+@@ -263,6 +265,8 @@ XenPvBlkDxeDriverBindingStart (
+   XEN_BLOCK_FRONT_DEVICE *Dev;
+   EFI_BLOCK_IO_MEDIA *Media;
+ 
++  return EFI_UNSUPPORTED;
++
+   Status = gBS->OpenProtocol (
+                 ControllerHandle,
+                 &gXenBusProtocolGuid,
