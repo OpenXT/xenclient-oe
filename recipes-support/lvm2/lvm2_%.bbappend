@@ -9,7 +9,7 @@ SRC_URI += " \
 # So instead, overwrite the files since this is a bbappend it should be done
 # after the initial do_install_append()
 do_install_append() {
-    if ! ${@base_contains('DISTRO_FEATURES','systemd','true','false',d)}; then
+    if ! ${@bb.utils.contains('DISTRO_FEATURES','systemd','true','false',d)}; then
         # Use Yocto compatible initscripts instead of the RHEL ones provided by
         # the tarball.
         oe_runmake 'DESTDIR=${D}' install_initscripts_yocto

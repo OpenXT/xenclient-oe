@@ -14,7 +14,6 @@ PACKAGE_REMOVE = "avahi-daemon avahi-autoipd busybox-hwclock"
 ANGSTROM_EXTRA_INSTALL += " \
 			  " 
 XSERVER ?= "xserver-kdrive-fbdev"
-#SPLASH ?= ' ${@base_contains("MACHINE_FEATURES", "screen", "psplash-angstrom", "",d)}'
 
 export IMAGE_BASENAME = "xenclient-uivm-image"
 
