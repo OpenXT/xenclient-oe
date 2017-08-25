@@ -1,43 +1,97 @@
-Index: xen-4.6.6/tools/libxl/libxl_dm.c
+################################################################################
+SHORT DESCRIPTION:
+################################################################################
+Support read-only disks for HVM VMs.
+
+################################################################################
+LONG DESCRIPTION:
+################################################################################
+Generates the correct qemu command line to connect disks as read-only.
+
+################################################################################
+CHANGELOG
+################################################################################
+Rebased for Xen 4.8, 4.9 upgrades
+
+################################################################################
+REMOVAL
+################################################################################
+
+################################################################################
+UPSTREAM PLAN
+################################################################################
+Yes
+
+################################################################################
+INTERNAL DEPENDENCIES
+################################################################################
+
+################################################################################
+PATCHES
+################################################################################
+Index: xen-4.9.0/tools/libxl/libxl_dm.c
 ===================================================================
---- xen-4.6.6.orig/tools/libxl/libxl_dm.c
-+++ xen-4.6.6/tools/libxl/libxl_dm.c
-@@ -1129,11 +1129,6 @@ static int libxl__build_device_model_arg
-                         (gc, "file=%s,if=ide,index=%d,readonly=%s,media=cdrom,format=%s,cache=writeback,id=ide-%i",
-                          disks[i].pdev_path, disk, disks[i].readwrite ? "off" : "on", format, dev_number);
-             } else {
--                if (!disks[i].readwrite) {
--                    LIBXL__LOG(ctx, LIBXL__LOG_ERROR, "qemu-xen doesn't support read-only disk drivers");
--                    return ERROR_INVAL;
--                }
--
-                 if (disks[i].format == LIBXL_DISK_FORMAT_EMPTY) {
-                     LIBXL__LOG(ctx, LIBXL__LOG_WARNING, "cannot support"
-                                " empty disk format for %s", disks[i].vdev);
-@@ -1173,14 +1168,21 @@ static int libxl__build_device_model_arg
+--- xen-4.9.0.orig/tools/libxl/libxl_dm.c
++++ xen-4.9.0/tools/libxl/libxl_dm.c
+@@ -842,12 +842,13 @@ static char *qemu_disk_ide_drive_string(
+     const char *exportname = disk->colo_export;
+     const char *active_disk = disk->active_disk;
+     const char *hidden_disk = disk->hidden_disk;
++    const char *access = (disk->readwrite ? "cache=writeback" : "readonly");
+ 
+     switch (colo_mode) {
+     case LIBXL__COLO_NONE:
+         drive = GCSPRINTF
+-            ("file=%s,if=ide,index=%d,media=disk,format=%s,cache=writeback",
+-             target_path, unit, format);
++            ("file=%s,if=ide,index=%d,media=disk,format=%s,%s",
++             target_path, unit, format, access);
+         break;
+     case LIBXL__COLO_PRIMARY:
+         /*
+@@ -860,13 +861,13 @@ static char *qemu_disk_ide_drive_string(
+          *  vote-threshold=1
+          */
+         drive = GCSPRINTF(
+-            "if=ide,index=%d,media=disk,cache=writeback,driver=quorum,"
++            "if=ide,index=%d,media=disk,%s,driver=quorum,"
+             "id=%s,"
+             "children.0.file.filename=%s,"
+             "children.0.driver=%s,"
+             "read-pattern=fifo,"
+             "vote-threshold=1",
+-             unit, exportname, target_path, format);
++             unit, access, exportname, target_path, format);
+         break;
+     case LIBXL__COLO_SECONDARY:
+         /*
+@@ -880,7 +881,7 @@ static char *qemu_disk_ide_drive_string(
+          *  file.backing.backing=exportname,
+          */
+         drive = GCSPRINTF(
+-            "if=ide,index=%d,id=top-colo,media=disk,cache=writeback,"
++            "if=ide,index=%d,id=top-colo,media=disk,%s,"
+             "driver=replication,"
+             "mode=secondary,"
+             "top-id=top-colo,"
+@@ -889,7 +890,7 @@ static char *qemu_disk_ide_drive_string(
+             "file.backing.driver=qcow2,"
+             "file.backing.file.filename=%s,"
+             "file.backing.backing=%s",
+-            unit, active_disk, hidden_disk, exportname);
++            unit, access, active_disk, hidden_disk, exportname);
+         break;
+     default:
+          abort();
+@@ -1578,11 +1579,6 @@ static int libxl__build_device_model_arg
+                         disk, disk), NULL);
                      continue;
-                 }
-                 else if (disk < 4) {
--                    if (b_info->stubdomain_version == LIBXL_STUBDOMAIN_VERSION_LINUX)
--                        drive = libxl__sprintf
--                                (gc, "file=%s%c,if=ide,index=%d,media=disk,cache=writeback,format=%s",
--                                 "/dev/xvd", 'a' + disk, disk, format);
--                    else
-+                    if (b_info->stubdomain_version == LIBXL_STUBDOMAIN_VERSION_LINUX) {
-+                        if(disks[i].readwrite) {
-+                            drive = libxl__sprintf
-+                                    (gc, "file=%s%c,if=ide,index=%d,media=disk,cache=writeback,format=%s",
-+                                     "/dev/xvd", 'a' + disk, disk, format);
-+                        } else {
-+                            drive = libxl__sprintf
-+                                    (gc, "file=%s%c,if=ide,index=%d,media=disk,readonly,format=%s",
-+                                     "/dev/xvd", 'a' + disk, disk, format);
-+                        }
-+                    } else {
-                         drive = libxl__sprintf
-                                 (gc, "file=%s,if=ide,index=%d,media=disk,format=%s,cache=writeback",
-                                  pdev_path, disk, format);
-+                    }
-                 }
-                 else
-                     continue; /* Do not emulate this disk */
+                 } else if (disk < 4) {
+-                    if (!disks[i].readwrite) {
+-                        LOGD(ERROR, guest_domid,
+-                             "qemu-xen doesn't support read-only IDE disk drivers");
+-                        return ERROR_INVAL;
+-                    }
+                     if (b_info->stubdomain_version == LIBXL_STUBDOMAIN_VERSION_LINUX) {
+                         target_path = (char *[]) {"/dev/xvda",
+                                                   "/dev/xvdb",

@@ -1,0 +1,119 @@
+################################################################################
+SHORT DESCRIPTION:
+################################################################################
+Allow stubdomains to set the cache attributes of guest memory ranges to enable
+the correct visual display of the guest framebuffer.
+
+################################################################################
+LONG DESCRIPTION:
+################################################################################
+The memory used for a guest framebuffer needs to be mapped with PTE cache
+attributes set to XEN_DOMCTL_MEM_CACHEATTR_WC (aka PAT_TYPE_WRCOMB) in order to
+prevent visual display artefacts.
+
+The framebuffer memory configuration is performed by xen_add_to_physmap in qemu
+using the libxc function: xc_domain_pin_memory_cacheattr
+which invokes a domctl hypercall to do so.
+
+This patch modifies the hypervisor so that the stubdomain has the correct
+permission for the call to succeed, and for the hypervisor to respect the
+attributes configured in the new pinned region when mappings are introduced.
+
+Patch changes:
+
+* Reorder the EPT page table entry logic to respect memory regions that have
+  been pinned via the XEN_DOMCTL_pin_mem_cacheattr operation, even for guests
+  that do not have I/O privileges.
+
+* Update the dummy XSM policy, active when XSM is disabled, to grant
+  stubdomains permission to use XEN_DOMCTL_pin_mem_cacheattr on their guest.
+
+If appropriate for your trust model, guests themselves can be prevented from
+using XEN_DOMCTL_pin_mem_cacheattr via XSM policy.
+
+################################################################################
+CHANGELOG
+################################################################################
+Introduced in OpenXT as part of the Xen 4.8 and 4.9 uprev.
+
+Author: Christopher Clark <christopher.clark6@baesystems.com>
+
+################################################################################
+REMOVAL
+################################################################################
+This control is required for stubdomains to be able to correctly configure guest
+framebuffers that are populated with memory that is owned by the guest.
+Do not remove without an alternative method available.
+
+################################################################################
+UPSTREAM PLAN
+################################################################################
+XSA-154 is directly relevant to this patch set. The code changes introduced for
+that advisory intentionally prevent domains from introducing multiple memory
+mappings with different cache attributes. The vaguely-worded concern is that a
+guest may be able to utilize the different mappings to induce a machine check
+exception and halt the host. The recent reordering of logic in
+epte_get_entry_emt has been defined by this concern.
+
+The guest framebuffer requires the write-combining cache attribute in order to
+avoid visual display artefacts.
+
+The patch author believes that this patch series is unlikely to be accepted
+upstream since a potential guest-initiated DoS on the host has different impact
+on different use cases, and XSM is not yet in wide enough use to be an accepted
+solution for limiting guest access to cache attribute control.
+
+################################################################################
+INTERNAL DEPENDENCIES
+################################################################################
+
+Recommended: XSM policy should grant stubdomains access to
+XEN_DOMCTL_pin_mem_cacheattr applied to their target guests.
+It should disallow guests themselves access to it unless needed for passed
+through devices.
+
+################################################################################
+PATCHES
+################################################################################
+Index: xen-4.9.0/xen/include/xsm/dummy.h
+===================================================================
+--- xen-4.9.0.orig/xen/include/xsm/dummy.h
++++ xen-4.9.0/xen/include/xsm/dummy.h
+@@ -127,6 +127,7 @@ static XSM_INLINE int xsm_domctl(XSM_DEF
+     case XEN_DOMCTL_memory_mapping:
+     case XEN_DOMCTL_bind_pt_irq:
+     case XEN_DOMCTL_unbind_pt_irq:
++    case XEN_DOMCTL_pin_mem_cacheattr:
+         return xsm_default_action(XSM_DM_PRIV, current->domain, d);
+     case XEN_DOMCTL_getdomaininfo:
+         return xsm_default_action(XSM_XS_PRIV, current->domain, d);
+Index: xen-4.9.0/xen/arch/x86/hvm/mtrr.c
+===================================================================
+--- xen-4.9.0.orig/xen/arch/x86/hvm/mtrr.c
++++ xen-4.9.0/xen/arch/x86/hvm/mtrr.c
+@@ -798,12 +798,6 @@ int epte_get_entry_emt(struct domain *d,
+         return MTRR_TYPE_UNCACHABLE;
+     }
+ 
+-    if ( !need_iommu(d) && !cache_flush_permitted(d) )
+-    {
+-        *ipat = 1;
+-        return MTRR_TYPE_WRBACK;
+-    }
+-
+     gmtrr_mtype = hvm_get_mem_pinned_cacheattr(d, _gfn(gfn), order);
+     if ( gmtrr_mtype >= 0 )
+     {
+@@ -814,6 +808,12 @@ int epte_get_entry_emt(struct domain *d,
+     if ( gmtrr_mtype == -EADDRNOTAVAIL )
+         return -1;
+ 
++    if ( !need_iommu(d) && !cache_flush_permitted(d) )
++    {
++        *ipat = 1;
++        return MTRR_TYPE_WRBACK;
++    }
++
+     gmtrr_mtype = is_hvm_domain(d) && v ?
+                   get_mtrr_type(&v->arch.hvm_vcpu.mtrr,
+                                 gfn << PAGE_SHIFT, order) :

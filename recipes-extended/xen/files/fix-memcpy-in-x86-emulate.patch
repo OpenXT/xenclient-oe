@@ -17,6 +17,7 @@ This change uses specific atomic operations if the size is 4 or 2 bytes.
 ################################################################################
 CHANGELOG 
 ################################################################################
+Updated for Xen 4.9.
 
 ################################################################################
 REMOVAL 
@@ -33,16 +34,16 @@ INTERNAL DEPENDENCIES
 ################################################################################
 PATCHES 
 ################################################################################
-Index: xen-4.6.6/xen/arch/x86/hvm/hvm.c
+Index: xen-4.9.0/xen/arch/x86/hvm/hvm.c
 ===================================================================
---- xen-4.6.6.orig/xen/arch/x86/hvm/hvm.c
-+++ xen-4.6.6/xen/arch/x86/hvm/hvm.c
-@@ -4178,6 +4178,26 @@ void hvm_task_switch(
+--- xen-4.9.0.orig/xen/arch/x86/hvm/hvm.c
++++ xen-4.9.0/xen/arch/x86/hvm/hvm.c
+@@ -3065,6 +3065,37 @@ void hvm_task_switch(
      hvm_unmap_entry(nptss_desc);
  }
  
 +/*
-+ * Routine to make __hvm_copy appropriate to use for copying the
++ * Routines to make __hvm_copy appropriate to use for copying the
 + * results of instruction emulation back to guest memory - these
 + * typically require 64-bit, 32-bit and 16-bit writes to be atomic
 + * whereas memcpy is only atomic for 64-bit writes. This is still
@@ -51,7 +52,7 @@ Index: xen-4.6.6/xen/arch/x86/hvm/hvm.c
 + * instruction emulation
 + */
 +static inline void __hvm_atomic_copy(
-+    void *to, void *from, int count)
++    void *to, const void *from, size_t count)
 +{
 +    if (count == sizeof(uint32_t))
 +        *(uint32_t *)to = *(uint32_t *)from;
@@ -61,24 +62,38 @@ Index: xen-4.6.6/xen/arch/x86/hvm/hvm.c
 +        memcpy(to, from, count);
 +}
 +
++static inline void __hvm_atomic_zero(
++    void *to, size_t count)
++{
++    if (count == sizeof(int32_t))
++        *(int32_t *)to = (int32_t)0;
++    else if (count == sizeof(int16_t))
++        *(int16_t *)to = (int16_t)0;
++    else
++        memset(to, 0, count);
++}
++
  #define HVMCOPY_from_guest (0u<<0)
  #define HVMCOPY_to_guest   (1u<<0)
- #define HVMCOPY_no_fault   (0u<<1)
-@@ -4283,7 +4303,7 @@ static enum hvm_copy_result __hvm_copy(
-             }
+ #define HVMCOPY_phys       (0u<<2)
+@@ -3174,9 +3205,9 @@ static enum hvm_copy_result __hvm_copy(
              else
              {
--                memcpy(p, buf, count);
-+                __hvm_atomic_copy(p, buf, count);
-                 paging_mark_dirty(curr->domain, page_to_mfn(page));
+                 if ( buf )
+-                    memcpy(p, buf, count);
++                    __hvm_atomic_copy(p, buf, count);
+                 else
+-                    memset(p, 0, count);
++                    __hvm_atomic_zero(p, count);
+                 paging_mark_dirty(v->domain, _mfn(page_to_mfn(page)));
              }
          }
-Index: xen-4.6.6/xen/arch/x86/mm/shadow/multi.c
+Index: xen-4.9.0/xen/arch/x86/mm/shadow/multi.c
 ===================================================================
---- xen-4.6.6.orig/xen/arch/x86/mm/shadow/multi.c
-+++ xen-4.6.6/xen/arch/x86/mm/shadow/multi.c
-@@ -4816,6 +4816,26 @@ static void emulate_unmap_dest(struct vc
-     atomic_inc(&v->domain->arch.paging.shadow.gtable_dirty_version);
+--- xen-4.9.0.orig/xen/arch/x86/mm/shadow/multi.c
++++ xen-4.9.0/xen/arch/x86/mm/shadow/multi.c
+@@ -4741,6 +4741,26 @@ static void emulate_unmap_dest(struct vc
+     sh_emulate_unmap_dest(v, addr, bytes, sh_ctxt);
  }
  
 +/*
@@ -91,7 +106,7 @@ Index: xen-4.6.6/xen/arch/x86/mm/shadow/multi.c
 + * instruction emulation
 + */
 +static inline void __sh_atomic_write(
-+    void *to, void *from, int count)
++    void *to, const void *from, size_t count)
 +{
 +    if (count == sizeof(uint32_t))
 +        *(uint32_t *)to = *(uint32_t *)from;
@@ -104,7 +119,7 @@ Index: xen-4.6.6/xen/arch/x86/mm/shadow/multi.c
  static int
  sh_x86_emulate_write(struct vcpu *v, unsigned long vaddr, void *src,
                       u32 bytes, struct sh_emulate_ctxt *sh_ctxt)
-@@ -4831,7 +4851,7 @@ sh_x86_emulate_write(struct vcpu *v, uns
+@@ -4756,7 +4776,7 @@ sh_x86_emulate_write(struct vcpu *v, uns
          return (long)addr;
  
      paging_lock(v->domain);

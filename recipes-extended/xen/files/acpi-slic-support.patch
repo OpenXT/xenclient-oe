@@ -20,6 +20,8 @@ CHANGELOG
 Ported from qemu-acpi-tables.patch by:
 Ross Philipson, philipsonr@ainfosec.com, 05/05/2015
 
+Updated for Xen 4.8 and 4.9.
+
 ################################################################################
 REMOVAL 
 ################################################################################
@@ -37,11 +39,11 @@ INTERNAL DEPENDENCIES
 ################################################################################
 PATCHES 
 ################################################################################
-Index: xen-4.6.6/tools/firmware/hvmloader/acpi/build.c
+Index: xen-4.9.0/tools/libacpi/build.c
 ===================================================================
---- xen-4.6.6.orig/tools/firmware/hvmloader/acpi/build.c
-+++ xen-4.6.6/tools/firmware/hvmloader/acpi/build.c
-@@ -344,14 +344,75 @@ static int construct_passthrough_tables(
+--- xen-4.9.0.orig/tools/libacpi/build.c
++++ xen-4.9.0/tools/libacpi/build.c
+@@ -340,6 +340,66 @@ static int construct_passthrough_tables(
      return nr_added;
  }
  
@@ -105,38 +107,19 @@ Index: xen-4.6.6/tools/firmware/hvmloader/acpi/build.c
 +    return 0;
 +}
 +
- static int construct_secondary_tables(unsigned long *table_ptrs,
--                                      struct acpi_info *info)
-+                                      struct acpi_info *info,
-+                                      struct acpi_20_fadt *fadt)
- {
-     int nr_tables = 0;
--    struct acpi_20_madt *madt;
--    struct acpi_20_hpet *hpet;
--    struct acpi_20_waet *waet;
--    struct acpi_20_tcpa *tcpa;
-+    struct acpi_20_madt *madt = NULL;
-+    struct acpi_20_hpet *hpet = NULL;
-+    struct acpi_20_waet *waet = NULL;
-+    struct acpi_20_tcpa *tcpa = NULL;
-     unsigned char *ssdt;
-     static const uint16_t tis_signature[] = {0x0001, 0x0001, 0x0001};
-     uint16_t *tis_hdr;
-@@ -513,6 +574,8 @@ void acpi_build_tables(struct acpi_confi
-     unsigned char       *dsdt;
+ static int construct_secondary_tables(struct acpi_ctxt *ctxt,
+                                       unsigned long *table_ptrs,
+                                       struct acpi_config *config,
+@@ -521,6 +581,8 @@ int acpi_build_tables(struct acpi_ctxt *
      unsigned long        secondary_tables[ACPI_MAX_SECONDARY_TABLES];
      int                  nr_secondaries, i;
+     unsigned int         fadt_size;
 +    struct acpi_header  *slic_header = NULL;
 +    int                  needs_id_fixup = 0;
  
-     /* Allocate and initialise the acpi info area. */
-     mem_hole_populate_ram(ACPI_INFO_PHYSICAL_ADDRESS >> PAGE_SHIFT, 1);
-@@ -580,10 +643,28 @@ void acpi_build_tables(struct acpi_confi
-                  offsetof(struct acpi_header, checksum),
-                  sizeof(struct acpi_20_fadt));
- 
--    nr_secondaries = construct_secondary_tables(secondary_tables, acpi_info);
-+    nr_secondaries = construct_secondary_tables(secondary_tables, acpi_info, fadt);
+     acpi_info = (struct acpi_info *)config->infop;
+     memset(acpi_info, 0, sizeof(*acpi_info));
+@@ -640,6 +702,24 @@ int acpi_build_tables(struct acpi_ctxt *
      if ( nr_secondaries < 0 )
          goto oom;
  
@@ -158,10 +141,10 @@ Index: xen-4.6.6/tools/firmware/hvmloader/acpi/build.c
 +        fixup_headers(&fadt->header, slic_header);
 +    }
 +
-     xsdt = mem_alloc(sizeof(struct acpi_20_xsdt)+
-                      sizeof(uint64_t)*nr_secondaries,
-                      16);
-@@ -593,9 +674,13 @@ void acpi_build_tables(struct acpi_confi
+     xsdt = ctxt->mem_ops.alloc(ctxt, sizeof(struct acpi_20_xsdt) + 
+                                sizeof(uint64_t) * nr_secondaries,
+                                16);
+@@ -649,9 +729,13 @@ int acpi_build_tables(struct acpi_ctxt *
      for ( i = 0; secondary_tables[i]; i++ )
          xsdt->entry[i+1] = secondary_tables[i];
      xsdt->header.length = sizeof(struct acpi_header) + (i+1)*sizeof(uint64_t);
@@ -176,9 +159,9 @@ Index: xen-4.6.6/tools/firmware/hvmloader/acpi/build.c
 +                     xsdt->header.length);
 +    }
  
-     rsdt = mem_alloc(sizeof(struct acpi_20_rsdt)+
-                      sizeof(uint32_t)*nr_secondaries,
-@@ -606,9 +691,13 @@ void acpi_build_tables(struct acpi_confi
+     rsdt = ctxt->mem_ops.alloc(ctxt, sizeof(struct acpi_20_rsdt) +
+                                sizeof(uint32_t) * nr_secondaries,
+@@ -662,9 +746,13 @@ int acpi_build_tables(struct acpi_ctxt *
      for ( i = 0; secondary_tables[i]; i++ )
          rsdt->entry[i+1] = secondary_tables[i];
      rsdt->header.length = sizeof(struct acpi_header) + (i+1)*sizeof(uint32_t);
@@ -195,10 +178,10 @@ Index: xen-4.6.6/tools/firmware/hvmloader/acpi/build.c
  
      /*
       * Fill in low-memory data structures: acpi_info and RSDP.
-@@ -618,6 +707,9 @@ void acpi_build_tables(struct acpi_confi
+@@ -674,6 +762,9 @@ int acpi_build_tables(struct acpi_ctxt *
      memcpy(rsdp, &Rsdp, sizeof(struct acpi_20_rsdp));
-     rsdp->rsdt_address = (unsigned long)rsdt;
-     rsdp->xsdt_address = (unsigned long)xsdt;
+     rsdp->rsdt_address = ctxt->mem_ops.v2p(ctxt, rsdt);
+     rsdp->xsdt_address = ctxt->mem_ops.v2p(ctxt, xsdt);
 +    if (needs_id_fixup) {
 +        memcpy(rsdp->oem_id, slic_header->oem_id, 6);
 +    }

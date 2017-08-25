@@ -16,6 +16,8 @@ CHANGELOG
 Authors:
 Jed Lejosne <lejosnej@ainfosec.com>
 
+Updated for Xen 4.9
+
 ################################################################################
 REMOVAL
 ################################################################################
@@ -35,44 +37,120 @@ INTERNAL DEPENDENCIES
 ################################################################################
 PATCHES
 ################################################################################
-Index: xen-4.6.6/tools/libxl/xl_cmdimpl.c
+Index: xen-4.9.0/tools/libxl/libxl_dm.c
 ===================================================================
---- xen-4.6.6.orig/tools/libxl/xl_cmdimpl.c
-+++ xen-4.6.6/tools/libxl/xl_cmdimpl.c
-@@ -475,7 +475,6 @@ out:
+--- xen-4.9.0.orig/tools/libxl/libxl_dm.c
++++ xen-4.9.0/tools/libxl/libxl_dm.c
+@@ -43,27 +43,6 @@ static const char *qemu_xen_path(libxl__
+     return QEMU_XEN_PATH;
+ }
  
- static int do_daemonize(char *name, const char *pidfile)
- {
--    char *fullname;
-     pid_t child1;
-     int nullfd, ret = 0;
- 
-@@ -489,19 +488,10 @@ static int do_daemonize(char *name, cons
- 
-     postfork();
- 
--    ret = libxl_create_logfile(ctx, name, &fullname);
--    if (ret) {
--        LOG("failed to open logfile %s: %s",fullname,strerror(errno));
--        exit(-1);
+-static int libxl__create_qemu_logfile(libxl__gc *gc, char *name)
+-{
+-    char *logfile;
+-    int rc, logfile_w;
+-
+-    rc = libxl_create_logfile(CTX, name, &logfile);
+-    if (rc) return rc;
+-
+-    logfile_w = open(logfile, O_WRONLY|O_CREAT|O_APPEND, 0644);
+-
+-    if (logfile_w < 0) {
+-        LOGE(ERROR, "unable to open Qemu logfile: %s", logfile);
+-        free(logfile);
+-        return ERROR_FAIL;
 -    }
 -
--    CHK_SYSCALL(logfile = open(fullname, O_WRONLY|O_CREAT|O_APPEND, 0644));
--    free(fullname);
-+    /* OpenXT: we don't want separate logfiles */
+-    free(logfile);
+-
+-    return logfile_w;
+-}
+-
+ const char *libxl__domain_device_model(libxl__gc *gc,
+                                        const libxl_domain_build_info *info)
+ {
+@@ -2147,11 +2126,10 @@ void libxl__spawn_local_dm(libxl__egc *e
  
-     CHK_SYSCALL(nullfd = open("/dev/null", O_RDONLY));
-     dup2(nullfd, 0);
--    dup2(logfile, 1);
--    dup2(logfile, 2);
+     libxl_ctx *ctx = CTX;
+     libxl_domain_config *guest_config = dmss->guest_config;
+-    const libxl_domain_create_info *c_info = &guest_config->c_info;
+     const libxl_domain_build_info *b_info = &guest_config->b_info;
+     const libxl_vnc_info *vnc = libxl__dm_vnc(guest_config);
+     char *path;
+-    int logfile_w, null;
++    int null;
+     int rc;
+     char **args, **arg, **envs;
+     xs_transaction_t t;
+@@ -2205,12 +2183,6 @@ void libxl__spawn_local_dm(libxl__egc *e
+         libxl__xs_printf(gc, XBT_NULL, GCSPRINTF("%s/disable_pf", path),
+                          "%d", !libxl_defbool_val(b_info->u.hvm.xen_platform_pci));
  
-     CHK_SYSCALL(daemon(0, 1));
+-    logfile_w = libxl__create_qemu_logfile(gc, GCSPRINTF("qemu-dm-%s",
+-                                                         c_info->name));
+-    if (logfile_w < 0) {
+-        rc = logfile_w;
+-        goto out;
+-    }
+     null = open("/dev/null", O_RDONLY);
+     if (null < 0) {
+         LOGED(ERROR, domid, "unable to open /dev/null");
+@@ -2264,14 +2236,13 @@ retry_transaction:
+         goto out_close;
+     if (!rc) { /* inner child */
+         setsid();
+-        libxl__exec(gc, null, logfile_w, logfile_w, dm, args, envs);
++        libxl__exec(gc, null, null, null, dm, args, envs);
+     }
  
-Index: xen-4.6.6/tools/libxl/libxl_internal.c
+     rc = 0;
+ 
+ out_close:
+     if (null >= 0) close(null);
+-    if (logfile_w >= 0) close(logfile_w);
+ out:
+     if (dm_state_fd >= 0) close(dm_state_fd);
+     if (rc)
+@@ -2360,7 +2331,7 @@ void libxl__spawn_qdisk_backend(libxl__e
+     flexarray_t *dm_args, *dm_envs;
+     char **args, **envs;
+     const char *dm;
+-    int logfile_w, null = -1, rc;
++    int null = -1, rc;
+     uint32_t domid = dmss->guest_domid;
+ 
+     /* Always use qemu-xen as device model */
+@@ -2385,11 +2356,6 @@ void libxl__spawn_qdisk_backend(libxl__e
+     libxl__set_qemu_env_for_xsa_180(gc, dm_envs);
+     envs = (char **) flexarray_contents(dm_envs);
+ 
+-    logfile_w = libxl__create_qemu_logfile(gc, GCSPRINTF("qdisk-%u", domid));
+-    if (logfile_w < 0) {
+-        rc = logfile_w;
+-        goto out;
+-    }
+     null = open("/dev/null", O_RDONLY);
+     if (null < 0) {
+        rc = ERROR_FAIL;
+@@ -2422,12 +2388,11 @@ void libxl__spawn_qdisk_backend(libxl__e
+         goto out;
+     if (!rc) { /* inner child */
+         setsid();
+-        libxl__exec(gc, null, logfile_w, logfile_w, dm, args, envs);
++        libxl__exec(gc, null, null, null, dm, args, envs);
+     }
+ 
+     rc = 0;
+ out:
+-    if (logfile_w >= 0) close(logfile_w);
+     if (null >= 0) close(null);
+     /* callback on error only, success goes via dmss->spawn.*_cb */
+     if (rc) dmss->callback(egc, dmss, rc);
+Index: xen-4.9.0/tools/libxl/libxl_internal.c
 ===================================================================
---- xen-4.6.6.orig/tools/libxl/libxl_internal.c
-+++ xen-4.6.6/tools/libxl/libxl_internal.c
-@@ -199,6 +199,34 @@ char *libxl__dirname(libxl__gc *gc, cons
+--- xen-4.9.0.orig/tools/libxl/libxl_internal.c
++++ xen-4.9.0/tools/libxl/libxl_internal.c
+@@ -211,6 +211,34 @@ char *libxl__dirname(libxl__gc *gc, cons
      return libxl__strndup(gc, s, c - s);
  }
  
@@ -106,33 +184,34 @@ Index: xen-4.6.6/tools/libxl/libxl_internal.c
 +
  void libxl__logv(libxl_ctx *ctx, xentoollog_level msglevel, int errnoval,
               const char *file, int line, const char *func,
-              const char *fmt, va_list ap)
-@@ -221,10 +249,14 @@ void libxl__logv(libxl_ctx *ctx, xentool
-     fileline[sizeof(fileline)-1] = 0;
- 
+              uint32_t domid, const char *fmt, va_list ap)
+@@ -237,10 +265,15 @@ void libxl__logv(libxl_ctx *ctx, xentool
+     if (domid != INVALID_DOMID)
+         snprintf(domain, sizeof(domain), "Domain %"PRIu32":", domid);
   x:
 -    xtl_log(ctx->lg, msglevel, errnoval, "libxl",
--            "%s%s%s%s" "%s",
+-            "%s%s%s%s%s" "%s",
 -            fileline, func&&file?":":"", func?func:"", func||file?": ":"",
--            base);
+-            domain, base);
 +    /* xtl_log(ctx->lg, msglevel, errnoval, "libxl", */
-+    /*         "%s%s%s%s" "%s", */
++    /*         "%s%s%s%s%s" "%s", */
 +    /*         fileline, func&&file?":":"", func?func:"", func||file?": ":"", */
-+    /*         base); */
++    /*         domain, base); */
 +    /* OpenXT: we use syslog */
-+    syslog(LOG_USER | xtl_level_to_syslog_level(msglevel), "%s%s%s%s%s",
-+           fileline, func&&file?":":"", func?func:"", func||file?": ":"", base);
++    syslog(LOG_USER | xtl_level_to_syslog_level(msglevel), "%s%s%s%s%s%s",
++           fileline, func&&file?":":"", func?func:"", func||file?": ":"",
++           domain, base);
 +
      if (base != enomem) free(base);
      errno = esave;
  }
-Index: xen-4.6.6/tools/libxl/libxl_internal.h
+Index: xen-4.9.0/tools/libxl/libxl_internal.h
 ===================================================================
---- xen-4.6.6.orig/tools/libxl/libxl_internal.h
-+++ xen-4.6.6/tools/libxl/libxl_internal.h
-@@ -52,6 +52,9 @@
- #include <xenctrl.h>
+--- xen-4.9.0.orig/tools/libxl/libxl_internal.h
++++ xen-4.9.0/tools/libxl/libxl_internal.h
+@@ -55,6 +55,9 @@
  #include <xenguest.h>
+ #include <xc_dom.h>
  
 +/* OpenXT: we use syslog */
 +#include <syslog.h>
@@ -140,21 +219,21 @@ Index: xen-4.6.6/tools/libxl/libxl_internal.h
  #include "xentoollog.h"
  
  #include <xen/io/xenbus.h>
-Index: xen-4.6.6/tools/libxl/xl.c
+Index: xen-4.9.0/tools/xl/xl.c
 ===================================================================
---- xen-4.6.6.orig/tools/libxl/xl.c
-+++ xen-4.6.6/tools/libxl/xl.c
-@@ -28,6 +28,9 @@
+--- xen-4.9.0.orig/tools/xl/xl.c
++++ xen-4.9.0/tools/xl/xl.c
+@@ -24,6 +24,9 @@
  #include <inttypes.h>
  #include <regex.h>
  
 +/* OpenXT: we use syslog */
 +#include <syslog.h>
 +
- #include "libxl.h"
- #include "libxl_utils.h"
- #include "libxlutil.h"
-@@ -291,6 +294,8 @@ static void xl_ctx_free(void)
+ #include <libxl.h>
+ #include <libxl_utils.h>
+ #include <libxlutil.h>
+@@ -299,6 +302,8 @@ static void xl_ctx_free(void)
          free(lockfile);
          lockfile = NULL;
      }
@@ -163,121 +242,47 @@ Index: xen-4.6.6/tools/libxl/xl.c
  }
  
  int main(int argc, char **argv)
-@@ -333,6 +338,8 @@ int main(int argc, char **argv)
+@@ -341,6 +346,8 @@ int main(int argc, char **argv)
      logger = xtl_createlogger_stdiostream(stderr, minmsglevel,
          (progress_use_cr ? XTL_STDIOSTREAM_PROGRESS_USE_CR : 0));
-     if (!logger) exit(1);
+     if (!logger) exit(EXIT_FAILURE);
 +    /* OpenXT: we use syslog, we could probably comment out the above. */
 +    openlog("xl", LOG_CONS, LOG_USER);
  
      atexit(xl_ctx_free);
  
-Index: xen-4.6.6/tools/libxl/libxl_dm.c
+Index: xen-4.9.0/tools/xl/xl_utils.c
 ===================================================================
---- xen-4.6.6.orig/tools/libxl/libxl_dm.c
-+++ xen-4.6.6/tools/libxl/libxl_dm.c
-@@ -39,25 +39,6 @@ static const char *qemu_xen_path(libxl__
-     return QEMU_XEN_PATH;
- }
+--- xen-4.9.0.orig/tools/xl/xl_utils.c
++++ xen-4.9.0/tools/xl/xl_utils.c
+@@ -250,7 +250,6 @@ void print_bitmap(uint8_t *map, int mapl
  
--static int libxl__create_qemu_logfile(libxl__gc *gc, char *name)
--{
--    char *logfile;
--    int rc, logfile_w;
--
--    rc = libxl_create_logfile(CTX, name, &logfile);
--    if (rc) return rc;
--
--    logfile_w = open(logfile, O_WRONLY|O_CREAT|O_APPEND, 0644);
--    free(logfile);
--
--    if (logfile_w < 0) {
--        LOGE(ERROR, "unable to open Qemu logfile");
--        return ERROR_FAIL;
--    }
--
--    return logfile_w;
--}
--
- const char *libxl__domain_device_model(libxl__gc *gc,
-                                        const libxl_domain_build_info *info)
+ int do_daemonize(char *name, const char *pidfile)
  {
-@@ -1697,11 +1678,10 @@ void libxl__spawn_local_dm(libxl__egc *e
+-    char *fullname;
+     pid_t child1;
+     int nullfd, ret = 0;
  
-     libxl_ctx *ctx = CTX;
-     libxl_domain_config *guest_config = dmss->guest_config;
--    const libxl_domain_create_info *c_info = &guest_config->c_info;
-     const libxl_domain_build_info *b_info = &guest_config->b_info;
-     const libxl_vnc_info *vnc = libxl__dm_vnc(guest_config);
-     char *path;
--    int logfile_w, null;
-+    int null;
-     int rc;
-     char **args, **arg, **envs;
-     xs_transaction_t t;
-@@ -1758,12 +1738,6 @@ void libxl__spawn_local_dm(libxl__egc *e
-         libxl__xs_write(gc, XBT_NULL, libxl__sprintf(gc, "%s/disable_pf", path),
-                     "%d", !libxl_defbool_val(b_info->u.hvm.xen_platform_pci));
+@@ -264,22 +263,10 @@ int do_daemonize(char *name, const char
  
--    logfile_w = libxl__create_qemu_logfile(gc, GCSPRINTF("qemu-dm-%s",
--                                                         c_info->name));
--    if (logfile_w < 0) {
--        rc = logfile_w;
--        goto out;
+     postfork();
+ 
+-    ret = libxl_create_logfile(ctx, name, &fullname);
+-    if (ret) {
+-        LOG("failed to open logfile %s: %s",fullname,strerror(errno));
+-        exit(-1);
 -    }
-     null = open("/dev/null", O_RDONLY);
-     if (null < 0) {
-         LOGE(ERROR, "unable to open /dev/null");
-@@ -1817,14 +1791,13 @@ retry_transaction:
-         goto out_close;
-     if (!rc) { /* inner child */
-         setsid();
--        libxl__exec(gc, null, logfile_w, logfile_w, dm, args, envs);
-+        libxl__exec(gc, null, null, null, dm, args, envs);
-     }
+-
+-    CHK_SYSCALL(logfile = open(fullname, O_WRONLY|O_CREAT|O_APPEND, 0644));
+-    free(fullname);
+-    assert(logfile >= 3);
+-
+     CHK_SYSCALL(nullfd = open("/dev/null", O_RDONLY));
+     assert(nullfd >= 3);
  
-     rc = 0;
+     dup2(nullfd, 0);
+-    dup2(logfile, 1);
+-    dup2(logfile, 2);
  
- out_close:
-     if (null >= 0) close(null);
--    if (logfile_w >= 0) close(logfile_w);
- out:
-     if (dm_state_fd >= 0) close(dm_state_fd);
-     if (rc)
-@@ -1893,7 +1866,7 @@ void libxl__spawn_qdisk_backend(libxl__e
-     flexarray_t *dm_args, *dm_envs;
-     char **args, **envs;
-     const char *dm;
--    int logfile_w, null = -1, rc;
-+    int null = -1, rc;
-     uint32_t domid = dmss->guest_domid;
+     close(nullfd);
  
-     /* Always use qemu-xen as device model */
-@@ -1918,11 +1891,6 @@ void libxl__spawn_qdisk_backend(libxl__e
-     libxl__set_qemu_env_for_xsa_180(gc, dm_envs);
-     envs = (char **) flexarray_contents(dm_envs);
- 
--    logfile_w = libxl__create_qemu_logfile(gc, GCSPRINTF("qdisk-%u", domid));
--    if (logfile_w < 0) {
--        rc = logfile_w;
--        goto error;
--    }
-     null = open("/dev/null", O_RDONLY);
-     if (null < 0) {
-        rc = ERROR_FAIL;
-@@ -1955,14 +1923,13 @@ void libxl__spawn_qdisk_backend(libxl__e
-         goto error;
-     if (!rc) { /* inner child */
-         setsid();
--        libxl__exec(gc, null, logfile_w, logfile_w, dm, args, envs);
-+        libxl__exec(gc, null, null, null, dm, args, envs);
-     }
- 
-     return;
- 
- error:
-     assert(rc);
--    if (logfile_w >= 0) close(logfile_w);
-     if (null >= 0) close(null);
-     dmss->callback(egc, dmss, rc);
-     return;

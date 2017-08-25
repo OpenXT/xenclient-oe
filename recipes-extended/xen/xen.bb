@@ -84,6 +84,7 @@ pkg_prerm_${PN}-xenstored-c () {
 
 do_compile() {
     oe_runmake -C tools subdir-all-include
+    oe_runmake -C tools subdir-all-libs
     oe_runmake -C tools subdir-all-libxc
     oe_runmake -C tools subdir-all-flask
     oe_runmake -C tools subdir-all-xenstore
@@ -97,7 +98,10 @@ do_compile() {
 }
 
 do_install() {
+    install -d ${D}${datadir}/pkgconfig
+
     oe_runmake DESTDIR=${D} -C tools subdir-install-include
+    oe_runmake DESTDIR=${D} -C tools subdir-install-libs
     oe_runmake DESTDIR=${D} -C tools subdir-install-libxc
     oe_runmake DESTDIR=${D} -C tools subdir-install-flask
     oe_runmake DESTDIR=${D} -C tools subdir-install-xenstore
