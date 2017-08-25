@@ -12,7 +12,7 @@ do_install_append() {
     if ! ${@base_contains('DISTRO_FEATURES','systemd','true','false',d)}; then
         # Use Yocto compatible initscripts instead of the RHEL ones provided by
         # the tarball.
-        oe_runmake 'DESTDIR=${D}' install install_initscripts_yocto
+        oe_runmake 'DESTDIR=${D}' install_initscripts_yocto
         mv -f ${D}${sysconfdir}/rc.d/init.d/* ${D}${sysconfdir}/init.d/
         rm -rf ${D}${sysconfdir}/rc.d
     fi
