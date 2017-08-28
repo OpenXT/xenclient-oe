@@ -97,6 +97,12 @@ SRC_URI_append = " \
     file://libxl-disable-json-updates.patch \
     file://libxl-allow-non-qdisk-cdrom.patch \
     file://libxl-domain-build-fix-array-size-bug.patch \
+    file://xsa226-4.9/0001-gnttab-dont-use-possibly-unbounded-tail-calls.patch \
+    file://xsa226-4.9/0002-gnttab-fix-transitive-grant-handling.patch \
+    file://xsa227.patch \
+    file://xsa228.patch \
+    file://xsa230.patch \
+    file://xsa235-4.9.patch \
 "
 
 COMPATIBLE_HOST = 'i686-oe-linux|(x86_64.*).*-linux|aarch64.*-linux'
