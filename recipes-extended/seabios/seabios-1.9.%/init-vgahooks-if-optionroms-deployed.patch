@@ -1,45 +1,54 @@
 ################################################################################
 SHORT DESCRIPTION: 
 ################################################################################
-Change version name to custom "openxt".
+Set up VGA hooks for passed through PCI devices as well.
 
 ################################################################################
 LONG DESCRIPTION: 
 ################################################################################
-Output that the SeaBIOS version booted is the one including OpenXT
-modifications.
+ROMs are deployed in the guest memory by hvmloader, but some hooks can help to
+manage specific behaviour for PCI devices passed through to the guest.
 
 ################################################################################
 CHANGELOG 
 ################################################################################
+Documented: Eric Chanudet, chanudete@ainfosec.com, 17/03/2015
 Ported to SeaBIOS 1.7.5: Eric Chanudet, chanudete@ainfosec.com, 01/03/2015
 
 ################################################################################
 REMOVAL 
 ################################################################################
-This patch is only cosmetic, or for testing purpose.
+This patch is required for amd-gpu-support.patch.
 
 ################################################################################
 UPSTREAM PLAN 
 ################################################################################
-This is OpenXT specific. There is no plan to upstream this patch.
+This is an OpenXT work-around. There is no plan to upstream this patch.
 
 ################################################################################
 INTERNAL DEPENDENCIES 
 ################################################################################
-None.
+Depended on by SeaBIOS: amd-gpu-support.patch
 
 ################################################################################
 PATCHES
 ################################################################################
---- a/scripts/buildversion.sh
-+++ b/scripts/buildversion.sh
-@@ -11,7 +11,7 @@ elif [ -f .version ]; then
- else
-     VERSION="?"
- fi
--VERSION="${VERSION}-`date +"%Y%m%d_%H%M%S"`-`hostname`"
-+VERSION="${VERSION}-openxt"
- echo "Version: ${VERSION}"
+Index: seabios-1.9.1/src/optionroms.c
+===================================================================
+--- seabios-1.9.1.orig/src/optionroms.c
++++ seabios-1.9.1/src/optionroms.c
+@@ -432,6 +432,14 @@ vgarom_setup(void)
+     ScreenAndDebug = romfile_loadint("etc/screen-and-debug", 1);
  
- # Build header file
+     if (CONFIG_OPTIONROMS_DEPLOYED) {
++        // setup hooks for vga pci devices
++        struct pci_device *pci;
++        foreachpci(pci) {
++            if (!is_pci_vga(pci))
++                continue;
++            vgahook_setup(pci);
++            break;
++        }
+         // Option roms are already deployed on the system.
+         init_optionrom((void*)BUILD_ROM_START, 0, 1);
+     } else {
