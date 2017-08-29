@@ -1,11 +1,11 @@
 SUMMARY = "Tools for TPM2."
-DESCRIPTION = "tpm2.0-tools"
+DESCRIPTION = "tpm2-tools"
 SECTION = "tpm"
 
 LICENSE = "BSD"
 LIC_FILES_CHKSUM = "file://${S}/LICENSE;md5=91b7c548d73ea16537799e8060cea819"
-DEPENDS = "tpm2.0-tss openssl curl autoconf-archive pkgconfig"
-SRC_URI = "git://github.com/01org/tpm2.0-tools.git;protocol=git;branch=master;name=tpm2.0-tools;destsuffix=tpm2.0-tools \
+DEPENDS = "tpm2-tss openssl curl autoconf-archive pkgconfig"
+SRC_URI = "git://github.com/01org/tpm2-tools.git;protocol=git;branch=master;name=tpm2-tools;destsuffix=tpm2-tools \
     file://tpm2-tools-lib-support.patch \
     file://tpm2-sealing-support.patch \
     file://tpm2-unsealing-support.patch \
@@ -13,7 +13,7 @@ SRC_URI = "git://github.com/01org/tpm2.0-tools.git;protocol=git;branch=master;na
     file://tpm2-fix-forward-seal.patch \
 "
 
-S = "${WORKDIR}/tpm2.0-tools"
+S = "${WORKDIR}/tpm2-tools"
 # https://lists.yoctoproject.org/pipermail/yocto/2013-November/017042.html
 SRCREV = "2.0.0"
 PVBASE := "${PV}"
