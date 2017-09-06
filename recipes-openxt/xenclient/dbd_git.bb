@@ -1,31 +1,35 @@
-inherit findlib
-require recipes-devtools/ghc/ghc-pkg.inc
-
 DESCRIPTION = "XenClient database daemon"
 LICENSE = "GPLv2"
 LIC_FILES_CHKSUM = "file://../COPYING;md5=4641e94ec96f98fabc56ff9cc48be14b"
-DEPENDS = "xenclient-idl ocaml-cross ocaml-dbus xen-ocaml-libs xenclient-toolstack xenclient-rpcgen-native"
-
-# Ocaml stuff is built with the native compiler with "-m32".
-
-PV = "0+git${SRCPV}"
-
-SRCREV = "${AUTOREV}"
-SRC_URI = "git://${OPENXT_GIT_MIRROR}/manager.git;protocol=${OPENXT_GIT_PROTOCOL};branch=${OPENXT_BRANCH}"
-
-SRC_URI += "file://dbd.initscript \
-            file://db.default \
+DEPENDS = " \
+    xenclient-idl \
+    ocaml-cross \
+    ocaml-dbus \
+    xen-ocaml-libs \
+    xenclient-toolstack \
+    xenclient-rpcgen-native \
 "
 
-FILES_${PN} += "/usr/share/xenclient/db.default"
+PV = "0+git${SRCPV}"
+SRCREV = "${AUTOREV}"
+SRC_URI = " \
+    git://${OPENXT_GIT_MIRROR}/manager.git;protocol=${OPENXT_GIT_PROTOCOL};branch=${OPENXT_BRANCH} \
+    file://dbd.initscript \
+    file://db.default \
+"
+
 RDEPENDS_${PN} += "bash"
 
 S = "${WORKDIR}/git/dbd"
 
-inherit xenclient update-rc.d
+inherit update-rc.d haskell findlib
 
 INITSCRIPT_NAME = "dbd"
 INITSCRIPT_PARAMS = "defaults 25"
+
+FILES_${PN} += " \
+    ${datadir}/xenclient/db.default \
+"
 
 do_configure() {
     # generate rpc stubs

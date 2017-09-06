@@ -1,30 +1,62 @@
-require recipes-devtools/ghc/ghc-xcprog.inc
-
 DESCRIPTION = "XenClient xenmgr"
 LICENSE = "GPLv2"
 LIC_FILES_CHKSUM = "file://../COPYING;md5=4641e94ec96f98fabc56ff9cc48be14b"
-DEPENDS = "libxenmgr-core libxchutils libxchv4v libxchxenstore libxchdb xenclient-rpcgen-native xenclient-idl xen xen-libxl xenmgr-data ghc-native ghc-json ghc-hsyslog ghc-regex-posix ghc-network libxch-rpc ghc-attoparsec ghc-zlib ghc-parsec ghc-deepseq ghc-text ghc-mtl"
-RDEPENDS_${PN} += "glibc-gconv-utf-32 xenclient-eula ghc-runtime xenclient-caps heimdallr"
+DEPENDS = " \
+    xen \
+    xen-libxl \
+    xenclient-rpcgen-native \
+    xenclient-idl \
+    libxenmgr-core \
+    libxchutils \
+    libxchv4v \
+    libxchxenstore \
+    libxchdb \
+    libxch-rpc \
+    hkg-json \
+    hkg-hsyslog \
+    hkg-regex-posix \
+    hkg-network \
+    hkg-attoparsec \
+    hkg-zlib \
+    hkg-parsec \
+    hkg-deepseq \
+    hkg-text \
+    hkg-mtl \
+    xenmgr-data \
+"
+RDEPENDS_${PN} += " \
+    glibc-gconv-utf-32 \
+    xenclient-eula \
+    xenclient-caps \
+    heimdallr \
+    bash \
+"
 
 PV = "0+git${SRCPV}"
 
 SRCREV = "${AUTOREV}"
-SRC_URI = "git://${OPENXT_GIT_MIRROR}/manager.git;protocol=${OPENXT_GIT_PROTOCOL};branch=${OPENXT_BRANCH}"
-
-SRC_URI += "file://xenmgr_dbus.conf \
-            file://xenstore-init-extra \
-            file://xenmgr.initscript \
+SRC_URI = " \
+    git://${OPENXT_GIT_MIRROR}/manager.git;protocol=${OPENXT_GIT_PROTOCOL};branch=${OPENXT_BRANCH} \
+    file://xenmgr_dbus.conf \
+    file://xenstore-init-extra \
+    file://xenmgr.initscript \
 "
 
 S = "${WORKDIR}/git/xenmgr"
 
-inherit xenclient update-rc.d
+inherit haskell update-rc.d
 
 INITSCRIPT_NAME = "xenmgr"
 INITSCRIPT_PARAMS = "start 80 5 . stop 01 0 1 6 ."
 
-FILES_${PN} += "/usr/bin/xenmgr /etc/dbus-1/system.d/xenmgr_dbus.conf /etc/init.d/xenmgr /usr/share/xenmgr-1.0/templates/default/*"
-FILES_${PN} += "/usr/share/xenclient"
+FILES_${PN} += " \
+    ${datadir}/xenmgr-1.0/templates/default/* \
+    ${datadir}/xenclient \
+    /etc/dbus-1/system.d/xenmgr_dbus.conf \
+    /etc/init.d/xenmgr \
+"
+
+INSANE_SKIP_${PN} = "already-stripped"
 
 do_configure_append() {
     # generate rpc stubs
@@ -45,8 +77,7 @@ do_configure_append() {
     xc-rpcgen --haskell -c -o Rpc/Autogen --module-prefix=Rpc.Autogen ${STAGING_DATADIR}/idl/ctxusb_daemon.xml
 }
 
-do_install() {
-    runhaskell Setup.hs copy --destdir=${D}
+do_install_append() {
     install -m 0755 ${S}/setup-ica-vm ${D}/usr/bin/setup-ica-vm
     install -m 0755 -d ${D}/etc
     install -m 0755 -d ${D}/etc/dbus-1/system.d
