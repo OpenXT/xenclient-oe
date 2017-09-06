@@ -1,8 +1,43 @@
-diff --git a/xen/arch/x86/hvm/hvm.c b/xen/arch/x86/hvm/hvm.c
-index 2dd9b7e..2ad603e 100644
---- a/xen/arch/x86/hvm/hvm.c
-+++ b/xen/arch/x86/hvm/hvm.c
-@@ -2602,6 +2602,26 @@ void hvm_task_switch(
+################################################################################
+SHORT DESCRIPTION: 
+################################################################################
+Make sure writebacks to guest memory are properly atomic
+
+################################################################################
+LONG DESCRIPTION: 
+################################################################################
+When running x86_emulate, the code that writes the results back to guest
+memory must ensure that the proper atomicity guaranteed by the instructions
+being emulated is maintained. memcpy provides for atomic quadword writes
+but writes the last 1-7 bytes using single byte operations (rep movsb) so
+32- and 16- bit updates are not done atomically.
+ 
+This change uses specific atomic operations if the size is 4 or 2 bytes.
+
+################################################################################
+CHANGELOG 
+################################################################################
+
+################################################################################
+REMOVAL 
+################################################################################
+
+################################################################################
+UPSTREAM PLAN
+################################################################################
+
+################################################################################
+INTERNAL DEPENDENCIES 
+################################################################################
+
+################################################################################
+PATCHES 
+################################################################################
+Index: xen-4.6.6/xen/arch/x86/hvm/hvm.c
+===================================================================
+--- xen-4.6.6.orig/xen/arch/x86/hvm/hvm.c
++++ xen-4.6.6/xen/arch/x86/hvm/hvm.c
+@@ -4178,6 +4178,26 @@ void hvm_task_switch(
      hvm_unmap_entry(nptss_desc);
  }
  
@@ -29,7 +64,7 @@ index 2dd9b7e..2ad603e 100644
  #define HVMCOPY_from_guest (0u<<0)
  #define HVMCOPY_to_guest   (1u<<0)
  #define HVMCOPY_no_fault   (0u<<1)
-@@ -2701,7 +2721,7 @@ static enum hvm_copy_result __hvm_copy(
+@@ -4283,7 +4303,7 @@ static enum hvm_copy_result __hvm_copy(
              }
              else
              {
@@ -38,11 +73,11 @@ index 2dd9b7e..2ad603e 100644
                  paging_mark_dirty(curr->domain, page_to_mfn(page));
              }
          }
-diff --git a/xen/arch/x86/mm/shadow/multi.c b/xen/arch/x86/mm/shadow/multi.c
-index 3fed0b6..5e0da82 100644
---- a/xen/arch/x86/mm/shadow/multi.c
-+++ b/xen/arch/x86/mm/shadow/multi.c
-@@ -4762,6 +4762,26 @@ static void emulate_unmap_dest(struct vcpu *v,
+Index: xen-4.6.6/xen/arch/x86/mm/shadow/multi.c
+===================================================================
+--- xen-4.6.6.orig/xen/arch/x86/mm/shadow/multi.c
++++ xen-4.6.6/xen/arch/x86/mm/shadow/multi.c
+@@ -4816,6 +4816,26 @@ static void emulate_unmap_dest(struct vc
      atomic_inc(&v->domain->arch.paging.shadow.gtable_dirty_version);
  }
  
@@ -69,7 +104,7 @@ index 3fed0b6..5e0da82 100644
  static int
  sh_x86_emulate_write(struct vcpu *v, unsigned long vaddr, void *src,
                       u32 bytes, struct sh_emulate_ctxt *sh_ctxt)
-@@ -4777,7 +4797,7 @@ sh_x86_emulate_write(struct vcpu *v, unsigned long vaddr, void *src,
+@@ -4831,7 +4851,7 @@ sh_x86_emulate_write(struct vcpu *v, uns
          return (long)addr;
  
      paging_lock(v->domain);

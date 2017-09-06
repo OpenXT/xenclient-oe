@@ -5,11 +5,28 @@ inherit pkgconfig update-rc.d pythonnative
 SRC_URI += "file://xenstored.initscript \
 	    file://xenconsoled.initscript \
 "
-
-DEPENDS += " gettext ncurses openssl python zlib seabios ipxe gmp lzo glib-2.0 iasl-native xz "
-DEPENDS += "util-linux"
-# lzo2 required by libxenguest.
-RDEPENDS_${PN} += " lzo"
+# Pixman is required for the configure step... Might be worth removing from the configure.
+DEPENDS += " \
+    gettext \
+    ncurses \
+    openssl \
+    python \
+    zlib \
+    seabios \
+    ipxe \
+    gmp \
+    lzo \
+    glib-2.0 \
+    iasl-native \
+    xz \
+    util-linux \
+    pixman \
+    libaio \
+    yajl \
+"
+RDEPENDS_${PN} += " \
+    bash \
+"
 
 PACKAGES = "${PN}-libxenstore ${PN}-libxenstore-dev ${PN}-libxenstore-dbg ${PN}-libxenstore-staticdev   \
             ${PN}-xenstore-utils ${PN}-xenstore-utils-dbg                                               \
@@ -17,7 +34,7 @@ PACKAGES = "${PN}-libxenstore ${PN}-libxenstore-dev ${PN}-libxenstore-dbg ${PN}-
 	    ${PN}-xenstored                                                                             \
             ${PN}-xenctx                                                                                \
             ${PN}-xentrace                                                                              \
-            ${PN}-xenpvnetboot                                                                          \
+            ${PN}-flask                                                                                 \
             ${PN} ${PN}-dbg ${PN}-doc ${PN}-dev ${PN}-staticdev                                         \
 "
 
@@ -46,6 +63,16 @@ FILES_${PN}-dbg += "${libdir}*/*/*/.debug           \
 
 FILES_${PN}-xenpvnetboot = "${libdir}/xen/bin/xenpvnetboot"
 
+FILES_${PN}-libvhd = " \
+    ${libdir}/libvhd.so.* \
+"
+FILES_${PN}-libvhd-dev = " \
+    ${libdir}/libvhd.so \
+"
+
+FLASK_POLICY_FILE ?= "xenpolicy-${PV}"
+FILES_${PN}-flask = "/boot/${FLASK_POLICY_FILE}"
+
 FILES_${PN} += "${datadir}/xen/qemu"
 RDEPENDS_${PN} += "${PN}-xenstore-utils"
 
@@ -65,7 +92,11 @@ EXTRA_OEMAKE += "DESTDIR=${D}"
 TARGET_CC_ARCH += "${LDFLAGS}"
 
 do_configure() {
-	DESTDIR=${D} ./configure --prefix=${prefix}
+    DESTDIR=${D} ./configure \
+        --prefix=${prefix} \
+        --disable-xen \
+        --disable-docs \
+        --disable-stubdom
 }
 
 do_compile() {
@@ -109,5 +140,13 @@ do_install() {
 	rm -f ${D}/etc/init.d/xen-watchdog
         install -m 0755 ${WORKDIR}/xenstored.initscript ${D}${sysconfdir}/init.d/xenstored
         install -m 0755 ${WORKDIR}/xenconsoled.initscript ${D}${sysconfdir}/init.d/xenconsoled
+
+# Remove unwanted installed tools.
+	rm -f ${D}${libdir}/xen/bin/xenpvnetboot
+	rm -f ${D}${bindir}/xentrace_format
+	rm -f ${D}${bindir}/xencons
+	rm -f ${D}${bindir}/xencov_split
+	rm -f ${D}${sbindir}/xen-bugtool
+	rm -f ${D}${sbindir}/xen-ringwatch
 }
 

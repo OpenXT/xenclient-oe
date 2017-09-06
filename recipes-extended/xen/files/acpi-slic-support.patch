@@ -1,0 +1,207 @@
+################################################################################
+SHORT DESCRIPTION: 
+################################################################################
+Additional support in ACPI builder to support SLIC and OEM installs.
+
+################################################################################
+LONG DESCRIPTION: 
+################################################################################
+In order to use Windows OEM install media, the SLIC table must be passed to a
+guest. In addition all the OEM table IDs must match the SLIC or Windows will
+think it is invalid and the install ends up unactivated.
+
+NOTE: The DSDT does not get updated. This was the same in the original patch.
+Not sure why that is but it is being left that way for now since it works w/o
+it.
+
+################################################################################
+CHANGELOG 
+################################################################################
+Ported from qemu-acpi-tables.patch by:
+Ross Philipson, philipsonr@ainfosec.com, 05/05/2015
+
+################################################################################
+REMOVAL 
+################################################################################
+Never.
+
+################################################################################
+UPSTREAM PLAN
+################################################################################
+None.
+
+################################################################################
+INTERNAL DEPENDENCIES 
+################################################################################
+
+################################################################################
+PATCHES 
+################################################################################
+Index: xen-4.6.6/tools/firmware/hvmloader/acpi/build.c
+===================================================================
+--- xen-4.6.6.orig/tools/firmware/hvmloader/acpi/build.c
++++ xen-4.6.6/tools/firmware/hvmloader/acpi/build.c
+@@ -344,14 +344,75 @@ static int construct_passthrough_tables(
+     return nr_added;
+ }
+ 
++static void fixup_headers(struct acpi_header *dest, struct acpi_header *src)
++{
++    char bounce[9];
++
++    if (dest == src)
++        return;
++
++    memset(bounce, 0, 9);
++    memcpy(bounce, dest->oem_id, 6);
++    printf("  Overwriting '%s'   with ", bounce);
++    memset(bounce, 0, 9);
++    memcpy(bounce, src->oem_id, 6);
++    printf("'%s'   in ", bounce);
++    printf("%c%c%c%c's OEM_ID\n",
++           ((char*)(&dest->signature))[0],
++           ((char*)(&dest->signature))[1],
++           ((char*)(&dest->signature))[2],
++           ((char*)(&dest->signature))[3]);
++
++
++    memcpy(dest->oem_id, src->oem_id, 6);
++
++    memset(bounce, 0, 9);
++    memcpy(bounce, dest->oem_table_id, 8);
++    printf("  Overwriting '%s' with ", bounce);
++    memset(bounce, 0, 9);
++    memcpy(bounce, src->oem_table_id, 8);
++    printf("'%s' in ", bounce);
++    printf("%c%c%c%c's OEM_TABLE_ID\n",
++           ((char*)(&dest->signature))[0],
++           ((char*)(&dest->signature))[1],
++           ((char*)(&dest->signature))[2],
++           ((char*)(&dest->signature))[3]);
++
++
++    memcpy(dest->oem_table_id, src->oem_table_id, 8);
++    set_checksum(dest, offsetof(struct acpi_header, checksum), dest->length);
++}
++
++static int is_slic(struct acpi_header *table)
++{
++    printf("  Table (%c%c%c%c) is ",
++           ((char*)(&table->signature))[0],
++           ((char*)(&table->signature))[1],
++           ((char*)(&table->signature))[2],
++           ((char*)(&table->signature))[3]);
++
++
++    if ( ( ((char*)(&table->signature))[0] == 'S' ) &&
++         ( ((char*)(&table->signature))[1] == 'L' ) &&
++         ( ((char*)(&table->signature))[2] == 'I' ) &&
++         ( ((char*)(&table->signature))[3] == 'C' ) ) {
++        printf("SLIC\n");
++        return 1;
++    }
++
++    printf ("NOT SLIC\n");
++    return 0;
++}
++
+ static int construct_secondary_tables(unsigned long *table_ptrs,
+-                                      struct acpi_info *info)
++                                      struct acpi_info *info,
++                                      struct acpi_20_fadt *fadt)
+ {
+     int nr_tables = 0;
+-    struct acpi_20_madt *madt;
+-    struct acpi_20_hpet *hpet;
+-    struct acpi_20_waet *waet;
+-    struct acpi_20_tcpa *tcpa;
++    struct acpi_20_madt *madt = NULL;
++    struct acpi_20_hpet *hpet = NULL;
++    struct acpi_20_waet *waet = NULL;
++    struct acpi_20_tcpa *tcpa = NULL;
+     unsigned char *ssdt;
+     static const uint16_t tis_signature[] = {0x0001, 0x0001, 0x0001};
+     uint16_t *tis_hdr;
+@@ -513,6 +574,8 @@ void acpi_build_tables(struct acpi_confi
+     unsigned char       *dsdt;
+     unsigned long        secondary_tables[ACPI_MAX_SECONDARY_TABLES];
+     int                  nr_secondaries, i;
++    struct acpi_header  *slic_header = NULL;
++    int                  needs_id_fixup = 0;
+ 
+     /* Allocate and initialise the acpi info area. */
+     mem_hole_populate_ram(ACPI_INFO_PHYSICAL_ADDRESS >> PAGE_SHIFT, 1);
+@@ -580,10 +643,28 @@ void acpi_build_tables(struct acpi_confi
+                  offsetof(struct acpi_header, checksum),
+                  sizeof(struct acpi_20_fadt));
+ 
+-    nr_secondaries = construct_secondary_tables(secondary_tables, acpi_info);
++    nr_secondaries = construct_secondary_tables(secondary_tables, acpi_info, fadt);
+     if ( nr_secondaries < 0 )
+         goto oom;
+ 
++    /* Check to see if one of the secondary tables is a SLIC. */
++    for (i = 0; i < (sizeof(secondary_tables) /  sizeof(unsigned long)) && secondary_tables[i]; i++) {
++        if (secondary_tables[i] && is_slic((struct acpi_header *)secondary_tables[i])) {
++            slic_header = (struct acpi_header *)secondary_tables[i];
++            needs_id_fixup = 1;
++            break;
++        }
++    }
++
++    /* If we have a SLIC, patch up the other tables to match it. */
++    if (needs_id_fixup) {
++        for (i = 0; i < sizeof(secondary_tables) && secondary_tables[i]; i++) {
++            fixup_headers((struct acpi_header *)secondary_tables[i], slic_header);
++        }
++        fixup_headers(&fadt_10->header, slic_header);
++        fixup_headers(&fadt->header, slic_header);
++    }
++
+     xsdt = mem_alloc(sizeof(struct acpi_20_xsdt)+
+                      sizeof(uint64_t)*nr_secondaries,
+                      16);
+@@ -593,9 +674,13 @@ void acpi_build_tables(struct acpi_confi
+     for ( i = 0; secondary_tables[i]; i++ )
+         xsdt->entry[i+1] = secondary_tables[i];
+     xsdt->header.length = sizeof(struct acpi_header) + (i+1)*sizeof(uint64_t);
+-    set_checksum(xsdt,
+-                 offsetof(struct acpi_header, checksum),
+-                 xsdt->header.length);
++    if (needs_id_fixup) {
++        fixup_headers(&xsdt->header, slic_header);
++    } else {
++        set_checksum(xsdt,
++                     offsetof(struct acpi_header, checksum),
++                     xsdt->header.length);
++    }
+ 
+     rsdt = mem_alloc(sizeof(struct acpi_20_rsdt)+
+                      sizeof(uint32_t)*nr_secondaries,
+@@ -606,9 +691,13 @@ void acpi_build_tables(struct acpi_confi
+     for ( i = 0; secondary_tables[i]; i++ )
+         rsdt->entry[i+1] = secondary_tables[i];
+     rsdt->header.length = sizeof(struct acpi_header) + (i+1)*sizeof(uint32_t);
+-    set_checksum(rsdt,
+-                 offsetof(struct acpi_header, checksum),
+-                 rsdt->header.length);
++    if (needs_id_fixup) {
++        fixup_headers(&rsdt->header, slic_header);
++    } else {
++        set_checksum(rsdt,
++                     offsetof(struct acpi_header, checksum),
++                     rsdt->header.length);
++    }
+ 
+     /*
+      * Fill in low-memory data structures: acpi_info and RSDP.
+@@ -618,6 +707,9 @@ void acpi_build_tables(struct acpi_confi
+     memcpy(rsdp, &Rsdp, sizeof(struct acpi_20_rsdp));
+     rsdp->rsdt_address = (unsigned long)rsdt;
+     rsdp->xsdt_address = (unsigned long)xsdt;
++    if (needs_id_fixup) {
++        memcpy(rsdp->oem_id, slic_header->oem_id, 6);
++    }
+     set_checksum(rsdp,
+                  offsetof(struct acpi_10_rsdp, checksum),
+                  sizeof(struct acpi_10_rsdp));

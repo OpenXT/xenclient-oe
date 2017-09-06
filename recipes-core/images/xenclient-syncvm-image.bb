@@ -26,7 +26,7 @@ IMAGE_INSTALL = "\
     libv4v-bin \
     rsyslog \
     openssh \
-    blktap \
+    xen-blktap \
     wget \
     sync-client \
     ifplugd \
