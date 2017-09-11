@@ -133,15 +133,19 @@ tpm_is_active() {
     local tpm="$(find /sys/class -name tpm0 2>/dev/null)/device"
     local active
     local msg
+    local val
 
     if is_tpm_2_0 ; then
-        msg=$(tpm2_dump_capability --capability=properties-fixed 2>&1) \
-            && return 0
+        msg=$(tpm2_dump_capability --capability=properties-variable 2>&1) || \
+            return 2
 
-        case "$msg" in
-            *Invalid) return 1 ;;
-            *) return 2 ;;
-        esac
+        # Ensure Hierarchies are enabled; otherwise the TPM2 is unusable.
+        for v in phEnable shEnable ehEnable phEnableNV; do
+            val="$( echo "${msg}" | awk "/${v}:/ { print \$2 }" )"
+            [ "${val}" = "set" ] || return 1
+        done
+
+        return 0
     fi
 
     active="$(cat ${tpm}/active)" || return 2
