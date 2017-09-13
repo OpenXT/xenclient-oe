@@ -82,6 +82,7 @@ SRC_URI_append = " \
     file://tboot-xen-evtlog-support.patch \
     file://0001-gnttab-dont-use-possibly-unbounded-tail-calls.patch \
     file://0002-gnttab-fix-transitive-grant-handling.patch \
+    file://0003-gnttab-fix-don-t-use-possibly-unbounded-tail-calls.patch \
     file://xsa227-4.6.patch \
     file://xsa228-4.8.patch \
     file://xsa230.patch \
