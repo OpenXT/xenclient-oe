@@ -99,6 +99,7 @@ SRC_URI_append = " \
     file://libxl-domain-build-fix-array-size-bug.patch \
     file://xsa226-4.9/0001-gnttab-dont-use-possibly-unbounded-tail-calls.patch \
     file://xsa226-4.9/0002-gnttab-fix-transitive-grant-handling.patch \
+    file://xsa226-4.9/0003-gnttab-fix-don-t-use-possibly-unbounded-tail-calls.patch \
     file://xsa227.patch \
     file://xsa228.patch \
     file://xsa230.patch \
