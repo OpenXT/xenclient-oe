@@ -103,6 +103,10 @@ SRC_URI_append = " \
     file://xsa227.patch \
     file://xsa228.patch \
     file://xsa230.patch \
+    file://xsa231-4.9.patch \
+    file://xsa232.patch \
+    file://xsa233.patch \
+    file://xsa234-4.9.patch \
     file://xsa235-4.9.patch \
 "
 
