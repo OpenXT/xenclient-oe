@@ -86,6 +86,11 @@ SRC_URI_append = " \
     file://xsa227-4.6.patch \
     file://xsa228-4.8.patch \
     file://xsa230.patch \
+    file://xsa231-4.7.patch \
+    file://xsa232.patch \
+    file://xsa233.patch \
+    file://xsa234-4.6.patch \
+    file://xsa235-4.6.patch \
 "
 
 COMPATIBLE_HOST = 'i686-oe-linux|(x86_64.*).*-linux|aarch64.*-linux'
