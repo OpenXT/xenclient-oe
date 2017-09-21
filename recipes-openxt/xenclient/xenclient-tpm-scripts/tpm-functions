@@ -131,30 +131,30 @@ tcsd_start() {
 #         2 if indeterminant
 tpm_is_active() {
     local tpm="$(find /sys/class -name tpm0 2>/dev/null)/device"
-    local state=""
+    local active
+    local msg
+    local val
 
-    is_tpm_2_0
-    local tpm2=$?
-    if [ "${tpm2}" -eq 0 ];
-    then
-        msg=$(tpm2_dump_capability --capability=properties-fixed 2>&1)
-        if [ $? -ne 0 ]; then
-            case "$msg" in
-                *Invalid) state=1 ;;
-                *) state=0 ;;
-            esac
-        else
-            state=0
-        fi
-    else
-        state=$(cat ${tpm}/active)
-        if [ $? -ne 0 ]; then
+    if is_tpm_2_0 ; then
+        msg=$(tpm2_dump_capability --capability=properties-variable 2>&1) || \
             return 2
-        fi
-        [ $state -eq 1 ] && state=0 || state=1
+
+        # Ensure Hierarchies are enabled; otherwise the TPM2 is unusable.
+        for v in phEnable shEnable ehEnable phEnableNV; do
+            val="$( echo "${msg}" | awk "/${v}:/ { print \$2 }" )"
+            [ "${val}" = "set" ] || return 1
+        done
+
+        return 0
     fi
 
-    return $state
+    active="$(cat ${tpm}/active)" || return 2
+
+    if [ "${active}" -eq 1 ]; then
+        return 0
+    fi
+
+    return 1
 }
 # Function to determine whether or not the TPM is enabled
 # return 0 if TPM is enabled
