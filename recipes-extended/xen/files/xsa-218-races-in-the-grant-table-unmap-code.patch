@@ -1,0 +1,277 @@
+Index: xen-4.3.4/xen/common/grant_table.c
+===================================================================
+--- xen-4.3.4.orig/xen/common/grant_table.c
++++ xen-4.3.4/xen/common/grant_table.c
+@@ -77,8 +77,8 @@ struct gnttab_unmap_common {
+     /* Shared state beteen *_unmap and *_unmap_complete */
+     u16 flags;
+     unsigned long frame;
+-    struct grant_mapping *map;
+     struct domain *rd;
++    grant_ref_t ref;
+ };
+ 
+ /* Number of unmap operations that are done between each tlb flush */
+@@ -837,6 +837,8 @@ __gnttab_unmap_common(
+     struct grant_table *lgt, *rgt;
+     struct active_grant_entry *act;
+     s16              rc = 0;
++    struct grant_mapping *map;
++    bool_t put_handle = 0;
+ 
+     ld = current->domain;
+     lgt = ld->grant_table;
+@@ -850,10 +852,12 @@ __gnttab_unmap_common(
+         return;
+     }
+ 
+-    op->map = &maptrack_entry(lgt, op->handle);
++    smp_rmb();
++    map = &maptrack_entry(lgt, op->handle);
++
+     spin_lock(&lgt->lock);
+ 
+-    if ( unlikely(!op->map->flags) )
++    if ( unlikely(!map->flags) )
+     {
+         spin_unlock(&lgt->lock);
+         gdprintk(XENLOG_INFO, "Zero flags for handle (%d).\n", op->handle);
+@@ -861,7 +865,7 @@ __gnttab_unmap_common(
+         return;
+     }
+ 
+-    dom = op->map->domid;
++    dom = map->domid;
+     spin_unlock(&lgt->lock);
+ 
+     if ( unlikely((rd = rcu_lock_domain_by_id(dom)) == NULL) )
+@@ -885,8 +889,8 @@ __gnttab_unmap_common(
+     rgt = rd->grant_table;
+     double_gt_lock(lgt, rgt);
+ 
+-    op->flags = op->map->flags;
+-    if ( unlikely(!op->flags) || unlikely(op->map->domid != dom) )
++    op->flags = map->flags;
++    if ( unlikely(!op->flags) || unlikely(map->domid != dom) )
+     {
+         gdprintk(XENLOG_WARNING, "Unstable handle %u\n", op->handle);
+         rc = GNTST_bad_handle;
+@@ -894,7 +898,8 @@ __gnttab_unmap_common(
+     }
+ 
+     op->rd = rd;
+-    act = &active_entry(rgt, op->map->ref);
++    op->ref = map->ref;
++    act = &active_entry(rgt, map->ref);
+ 
+     if ( op->frame == 0 )
+     {
+@@ -906,15 +911,8 @@ __gnttab_unmap_common(
+             PIN_FAIL(unmap_out, GNTST_general_error,
+                      "Bad frame number doesn't match gntref. (%lx != %lx)\n",
+                      op->frame, act->frame);
+-        if ( op->flags & GNTMAP_device_map )
+-        {
+-            ASSERT(act->pin & (GNTPIN_devw_mask | GNTPIN_devr_mask));
+-            op->map->flags &= ~GNTMAP_device_map;
+-            if ( op->flags & GNTMAP_readonly )
+-                act->pin -= GNTPIN_devr_inc;
+-            else
+-                act->pin -= GNTPIN_devw_inc;
+-        }
++
++        map->flags &= ~GNTMAP_device_map;
+     }
+ 
+     if ( (op->host_addr != 0) && (op->flags & GNTMAP_host_map) )
+@@ -924,37 +922,47 @@ __gnttab_unmap_common(
+                                               op->flags)) < 0 )
+             goto unmap_out;
+ 
+-        ASSERT(act->pin & (GNTPIN_hstw_mask | GNTPIN_hstr_mask));
+-        op->map->flags &= ~GNTMAP_host_map;
+-        if ( op->flags & GNTMAP_readonly )
+-            act->pin -= GNTPIN_hstr_inc;
+-        else
+-            act->pin -= GNTPIN_hstw_inc;
++        map->flags &= ~GNTMAP_host_map;
+     }
+ 
+-    if ( !is_hvm_domain(ld) && need_iommu(ld) )
++    if ( !(map->flags & (GNTMAP_device_map|GNTMAP_host_map)) )
++    {
++        map->flags = 0;
++        put_handle = 1;
++    }
++
++ unmap_out:
++    double_gt_unlock(lgt, rgt);
++
++    if ( put_handle )
++        put_maptrack_handle(lgt, op->handle);
++
++    if ( rc == GNTST_okay && !paging_mode_translate(ld) && need_iommu(ld) )
+     {
+         unsigned int wrc, rdc;
+         int err = 0;
++
++        double_gt_lock(lgt, rgt);
++
+         BUG_ON(paging_mode_translate(ld));
+         mapcount(lgt, rd, op->frame, &wrc, &rdc);
+         if ( (wrc + rdc) == 0 )
+             err = iommu_unmap_page(ld, op->frame);
+         else if ( wrc == 0 )
+             err = iommu_map_page(ld, op->frame, op->frame, IOMMUF_readable);
++
++        double_gt_unlock(lgt, rgt);
++
+         if ( err )
+         {
+             rc = GNTST_general_error;
+-            goto unmap_out;
+         }
+     }
+ 
+     /* If just unmapped a writable mapping, mark as dirtied */
+-    if ( !(op->flags & GNTMAP_readonly) )
++    if ( rc == GNTST_okay && !(op->flags & GNTMAP_readonly) )
+          gnttab_mark_dirty(rd, op->frame);
+ 
+- unmap_out:
+-    double_gt_unlock(lgt, rgt);
+     op->status = rc;
+     rcu_unlock_domain(rd);
+ }
+@@ -968,7 +976,6 @@ __gnttab_unmap_common_complete(struct gn
+     grant_entry_header_t *sha;
+     struct page_info *pg;
+     uint16_t *status;
+-    bool_t put_handle = 0;
+ 
+     if ( rd == NULL )
+     { 
+@@ -989,13 +996,13 @@ __gnttab_unmap_common_complete(struct gn
+     if ( rgt->gt_version == 0 )
+         goto unmap_out;
+ 
+-    act = &active_entry(rgt, op->map->ref);
+-    sha = shared_entry_header(rgt, op->map->ref);
++    act = &active_entry(rgt, op->ref);
++    sha = shared_entry_header(rgt, op->ref);
+ 
+     if ( rgt->gt_version == 1 )
+         status = &sha->flags;
+     else
+-        status = &status_entry(rgt, op->map->ref);
++        status = &status_entry(rgt, op->ref);
+ 
+     if ( unlikely(op->frame != act->frame) ) 
+     {
+@@ -1017,6 +1024,12 @@ __gnttab_unmap_common_complete(struct gn
+             else
+                 put_page_and_type(pg);
+         }
++
++        ASSERT(act->pin & (GNTPIN_devw_mask | GNTPIN_devr_mask));
++        if ( op->flags & GNTMAP_readonly )
++            act->pin -= GNTPIN_devr_inc;
++        else
++            act->pin -= GNTPIN_devw_inc;
+     }
+ 
+     if ( (op->host_addr != 0) && (op->flags & GNTMAP_host_map) )
+@@ -1025,7 +1038,9 @@ __gnttab_unmap_common_complete(struct gn
+         {
+             /*
+              * Suggests that __gntab_unmap_common failed in
+-             * replace_grant_host_mapping() so nothing further to do
++             * replace_grant_host_mapping() or IOMMU handling, so nothing
++             * further to do (short of re-establishing the mapping in the
++             * latter case).
+              */
+             goto unmap_out;
+         }
+@@ -1036,10 +1051,13 @@ __gnttab_unmap_common_complete(struct gn
+                 put_page_type(pg);
+             put_page(pg);
+         }
+-    }
+ 
+-    if ( (op->map->flags & (GNTMAP_device_map|GNTMAP_host_map)) == 0 )
+-        put_handle = 1;
++        ASSERT(act->pin & (GNTPIN_hstw_mask | GNTPIN_hstr_mask));
++        if ( op->flags & GNTMAP_readonly )
++            act->pin -= GNTPIN_hstr_inc;
++        else
++            act->pin -= GNTPIN_hstw_inc;
++    }
+ 
+     if ( ((act->pin & (GNTPIN_devw_mask|GNTPIN_hstw_mask)) == 0) &&
+          !(op->flags & GNTMAP_readonly) )
+@@ -1050,11 +1068,6 @@ __gnttab_unmap_common_complete(struct gn
+ 
+  unmap_out:
+     spin_unlock(&rgt->lock);
+-    if ( put_handle )
+-    {
+-        op->map->flags = 0;
+-        put_maptrack_handle(ld->grant_table, op->handle);
+-    }
+     rcu_unlock_domain(rd);
+ }
+ 
+Index: xen-4.3.4/xen/drivers/passthrough/iommu.c
+===================================================================
+--- xen-4.3.4.orig/xen/drivers/passthrough/iommu.c
++++ xen-4.3.4/xen/drivers/passthrough/iommu.c
+@@ -416,21 +416,47 @@ int iommu_map_page(struct domain *d, uns
+                    unsigned int flags)
+ {
+     struct hvm_iommu *hd = domain_hvm_iommu(d);
++    int rc;
+ 
+     if ( !iommu_enabled || !hd->platform_ops )
+         return 0;
+ 
+-    return hd->platform_ops->map_page(d, gfn, mfn, flags);
++    rc = hd->platform_ops->map_page(d, gfn, mfn, flags);
++    if ( unlikely(rc) )
++    {
++        if ( !d->is_shutting_down && printk_ratelimit() )
++            printk(XENLOG_ERR
++                   "d%d: IOMMU mapping gfn %#lx to mfn %#lx failed: %d\n",
++                   d->domain_id, gfn, mfn, rc);
++
++        if ( !is_hardware_domain(d) )
++            domain_crash(d);
++    }
++
++    return rc;
+ }
+ 
+ int iommu_unmap_page(struct domain *d, unsigned long gfn)
+ {
+     struct hvm_iommu *hd = domain_hvm_iommu(d);
++    int rc;
+ 
+     if ( !iommu_enabled || !hd->platform_ops )
+         return 0;
+ 
+-    return hd->platform_ops->unmap_page(d, gfn);
++    rc = hd->platform_ops->unmap_page(d, gfn);
++    if ( unlikely(rc) )
++    {
++        if ( !d->is_shutting_down && printk_ratelimit() )
++            printk(XENLOG_ERR
++                   "d%d: IOMMU unmapping gfn %#lx failed: %d\n",
++                   d->domain_id, gfn, rc);
++
++        if ( !is_hardware_domain(d) )
++            domain_crash(d);
++    }
++
++    return rc;
+ }
+ 
+ static void iommu_free_pagetables(unsigned long unused)

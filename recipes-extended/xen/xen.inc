@@ -144,6 +144,9 @@ SRC_URI = "${XEN_SRC_URI};name=source \
     file://xsa-213-x86-64bit-PV-guest-breakout-via-pagetable-use-after-mode-change.patch \
     file://xsa-214-grant-transfer-allows-pv-guest-to-elevate-privileges.patch \
     file://xsa-215-possible-memory-corruption-via-failsafe-callback.patch \
+    file://xsa-217-page-transfer-may-allow-PV-guest-to-elevate-privilege.patch \
+    file://xsa-218-races-in-the-grant-table-unmap-code.patch \
+    file://xsa-219-insufficient-reference-counts-during-shadow-emulation.patch \
 "
 
 SRC_URI[source.md5sum] := "${XEN_SRC_MD5SUM}"
