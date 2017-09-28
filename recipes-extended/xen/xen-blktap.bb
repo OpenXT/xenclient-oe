@@ -57,6 +57,9 @@ do_install() {
     install -d ${D}/usr/include
     install tools/blktap2/control/tap-ctl.h ${D}/usr/include
     install tools/blktap2/include/tapdisk-message.h ${D}/usr/include
+
+    # /usr/share is not packaged, removing to silence QA warnings
+    rm -rf ${D}/${datadir}
 }
 
 RDEPENDS_${PN} += "glibc-gconv-utf-16"

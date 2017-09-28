@@ -105,16 +105,28 @@ do_compile() {
 		       LDLIBS_libxentoollog='-lxentoollog' \
 		       LDLIBS_libxenevtchn='-lxenevtchn' \
 		       -C tools subdir-all-xl
+    oe_runmake LDLIBS_libxenctrl='-lxenctrl' \
+		       LDLIBS_libxenstore='-lxenstore' \
+		       LDLIBS_libblktapctl='-lblktapctl' \
+		       LDLIBS_libxenguest='-lxenguest' \
+		       LDLIBS_libxentoollog='-lxentoollog' \
+		       LDLIBS_libxenevtchn='-lxenevtchn' \
+		       -C tools subdir-all-helpers
 }
 
 do_install() {
     install -d ${D}${datadir}/pkgconfig
     oe_runmake DESTDIR=${D} -C tools subdir-install-libxl
     oe_runmake DESTDIR=${D} -C tools subdir-install-xl
+    oe_runmake DESTDIR=${D} -C tools subdir-install-helpers
     install -d ${D}${sysconfdir}/init.d
     install -m 0755 ${WORKDIR}/xen-init-dom0.initscript \
                     ${D}${sysconfdir}/init.d/xen-init-dom0
     install -d ${D}${sysconfdir}/xen
     install -m 0644 ${WORKDIR}/xl.conf \
                     ${D}${sysconfdir}/xen/xl.conf
+
+    # Since we don't have a xenstore stubdomain, remove the
+    # xenstore stubdomain init program (libdir == /usr/lib)
+    rm -f ${D}/${libdir}/xen/bin/init-xenstore-domain
 }

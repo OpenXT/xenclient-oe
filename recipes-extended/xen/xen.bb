@@ -131,6 +131,20 @@ do_install() {
     # The C xenstored uses one additional command line argument:
     sed 's/EXECUTABLE --/EXECUTABLE --internal-db --/' \
         -i ${D}${sysconfdir}/init.d/xenstored.${PN}-xenstored-c
+
+    # These files are not packaged, removing them to silence QA warnings
+    # ${datadir} is the OE way of saying "/usr/share".
+    #   sbindir == /usr/sbin, bindir == /usr/bin, sysconfig == /etc
+    rm -rf ${D}/${datadir}
+    rm -rf ${D}/${sbindir}/xen-livepatch
+    rm -rf ${D}/${bindir}/xen-cpuid
+    rm -rf ${D}/${sysconfdir}/init.d/xencommons
+    rm -rf ${D}/${sysconfdir}/init.d/xendriverdomain
+    rm -rf ${D}/${sysconfdir}/xen/scripts/colo-proxy-setup
+    rm -rf ${D}/${sysconfdir}/xen/scripts/launch-xenstore
+    rm -rf ${D}/${sysconfdir}/xen/scripts/block-dummy
+    rm -rf ${D}/${sysconfdir}/default/xencommons
+
 }
 
 RDEPENDS_${PN}-base_remove = "\
