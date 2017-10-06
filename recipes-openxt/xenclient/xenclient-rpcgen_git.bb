@@ -1,19 +1,8 @@
-require recipes-devtools/ghc/ghc-pkg.inc
 require xenclient-rpcgen.inc
+
 BBCLASSEXTEND = "native"
 
-SRCREV = "${AUTOREV}"
-
 S = "${WORKDIR}/git/rpcgen"
-
-PACKAGES = " ${PN} ${PN}-dev ${PN}-dbg "
-
-RDEPENDS_${PN}-dev = ""
-
-FILES_${PN}-dev  = " /usr/bin/* /usr/share/* " 
-
-LDFLAGS += "-pthread"
-CFLAGS += "-pthread"
 
 do_install() {
     install -d ${D}/${bindir}
