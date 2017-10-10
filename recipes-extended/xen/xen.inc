@@ -54,6 +54,16 @@ SRC_URI = "${XEN_SRC_URI};name=source \
     file://xsm-for-vtd.patch \
     file://hvm-info-tool.patch \
     file://tboot-xen-evtlog-support.patch \
+    file://xsa226-4.6/0001-gnttab-dont-use-possibly-unbounded-tail-calls.patch \
+    file://xsa226-4.6/0002-gnttab-fix-transitive-grant-handling.patch \
+    file://xsa227-4.6.patch \
+    file://xsa228-4.8.patch \
+    file://xsa230.patch \
+    file://xsa231-4.7.patch \
+    file://xsa232.patch \
+    file://xsa233.patch \
+    file://xsa234-4.6.patch \
+    file://xsa235-4.6.patch \
 "
 
 SRC_URI[source.md5sum] := "${XEN_SRC_MD5SUM}"
