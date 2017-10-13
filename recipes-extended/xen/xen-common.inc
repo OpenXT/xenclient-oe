@@ -108,6 +108,19 @@ SRC_URI_append = " \
     file://xsa233.patch \
     file://xsa234-4.9.patch \
     file://xsa235-4.9.patch \
+    file://xsa237-4.9/0001-x86-dont-allow-MSI-pIRQ-mapping-on-unowned-device.patch \
+    file://xsa237-4.9/0002-x86-enforce-proper-privilege-when-mapping-pIRQ-s.patch \
+    file://xsa237-4.9/0003-x86-MSI-disallow-redundant-enabling.patch \
+    file://xsa237-4.9/0004-x86-IRQ-conditionally-preserve-irq-pirq-mapping-on-error.patch \
+    file://xsa237-4.9/0005-x86-FLASK-fix-unmap-domain-IRQ-XSM-hook.patch \
+    file://xsa238.patch \
+    file://xsa239.patch \
+    file://xsa240-4.9/0001-x86-limit-linear-page-table-use-to-a-single-level.patch \
+    file://xsa240-4.9/0002-x86-mm-Disable-PV-linear-pagetables-by-default.patch \
+    file://xsa241-4.9.patch \
+    file://xsa242-4.9.patch \
+    file://xsa243.patch \
+    file://xsa244.patch \
 "
 
 COMPATIBLE_HOST = 'i686-oe-linux|(x86_64.*).*-linux|aarch64.*-linux'
