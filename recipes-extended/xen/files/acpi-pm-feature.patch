@@ -1,8 +1,46 @@
-Index: xen-4.3.4/tools/firmware/hvmloader/acpi/build.c
+################################################################################
+SHORT DESCRIPTION: 
+################################################################################
+ACPI PM feature for battery/AC/lid management for guests.
+
+################################################################################
+LONG DESCRIPTION: 
+################################################################################
+This feature provides enhanced PM capabilities for batteries, AC adapters and
+laptop lids. It also supports power and sleep button even injection. It depends
+on the acpi-pm-feature.patch in the QEMU patch queue. The two parts work
+in conjunction to surface various PM related devices in the PM SSDT. There is a
+partial version of this in upstream Xen that was removed recently.
+
+################################################################################
+CHANGELOG 
+################################################################################
+Original Author: Kamala Narasimhan, kamala.narasimhan@citrix.com
+Second Incarnation: Nicolas DI PRIMA, nicolas.diprima@citrix.com
+Latest Rework: Ross Philipson, philipsonr@ainfosec.com, 05/05/2015
+
+################################################################################
+REMOVAL 
+################################################################################
+Removal will disable the ACPI PM features.
+
+################################################################################
+UPSTREAM PLAN
+################################################################################
+Not sure if upstream would take it since the original version was removed.
+
+################################################################################
+INTERNAL DEPENDENCIES 
+################################################################################
+
+################################################################################
+PATCHES 
+################################################################################
+Index: xen-4.6.6/tools/firmware/hvmloader/acpi/build.c
 ===================================================================
---- xen-4.3.4.orig/tools/firmware/hvmloader/acpi/build.c
-+++ xen-4.3.4/tools/firmware/hvmloader/acpi/build.c
-@@ -72,9 +72,15 @@ static void set_checksum(
+--- xen-4.6.6.orig/tools/firmware/hvmloader/acpi/build.c
++++ xen-4.6.6/tools/firmware/hvmloader/acpi/build.c
+@@ -73,9 +73,15 @@ static void set_checksum(
      p[checksum_offset] = -sum;
  }
  
@@ -20,7 +58,7 @@ Index: xen-4.3.4/tools/firmware/hvmloader/acpi/build.c
  }
  
  static struct acpi_20_madt *construct_madt(struct acpi_info *info)
-@@ -344,7 +350,7 @@ static int construct_secondary_tables(un
+@@ -372,7 +378,7 @@ static int construct_secondary_tables(un
      if (!waet) return -1;
      table_ptrs[nr_tables++] = (unsigned long)waet;
  
@@ -29,10 +67,10 @@ Index: xen-4.3.4/tools/firmware/hvmloader/acpi/build.c
      {
          ssdt = mem_alloc(sizeof(ssdt_pm), 16);
          if (!ssdt) return -1;
-Index: xen-4.3.4/tools/firmware/hvmloader/acpi/ssdt_pm.asl
+Index: xen-4.6.6/tools/firmware/hvmloader/acpi/ssdt_pm.asl
 ===================================================================
---- xen-4.3.4.orig/tools/firmware/hvmloader/acpi/ssdt_pm.asl
-+++ xen-4.3.4/tools/firmware/hvmloader/acpi/ssdt_pm.asl
+--- xen-4.6.6.orig/tools/firmware/hvmloader/acpi/ssdt_pm.asl
++++ xen-4.6.6/tools/firmware/hvmloader/acpi/ssdt_pm.asl
 @@ -3,6 +3,7 @@
   *
   * Copyright (c) 2008  Kamala Narasimhan
@@ -41,7 +79,17 @@ Index: xen-4.3.4/tools/firmware/hvmloader/acpi/ssdt_pm.asl
   *
   * This program is free software; you can redistribute it and/or modify
   * it under the terms of the GNU General Public License as published by
-@@ -36,16 +37,41 @@
+@@ -15,7 +16,8 @@
+  * GNU General Public License for more details.
+  *
+  * You should have received a copy of the GNU General Public License
+- * along with this program; If not, see <http://www.gnu.org/licenses/>.
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+  */
+ 
+ /*
+@@ -35,16 +37,41 @@
   *
   * Following are the battery ports read/written to in order to implement
   * battery support:
@@ -87,7 +135,7 @@ Index: xen-4.3.4/tools/firmware/hvmloader/acpi/ssdt_pm.asl
   */
  
  DefinitionBlock ("SSDT_PM.aml", "SSDT", 2, "Xen", "HVM", 0)
-@@ -76,11 +102,10 @@ DefinitionBlock ("SSDT_PM.aml", "SSDT",
+@@ -75,11 +102,10 @@ DefinitionBlock ("SSDT_PM.aml", "SSDT",
              DBG4,   8,
          }
  
@@ -101,7 +149,7 @@ Index: xen-4.3.4/tools/firmware/hvmloader/acpi/ssdt_pm.asl
          }
  
          OperationRegion (PRT2, SystemIO, 0x86, 0x01)
-@@ -95,6 +120,31 @@ DefinitionBlock ("SSDT_PM.aml", "SSDT",
+@@ -94,6 +120,31 @@ DefinitionBlock ("SSDT_PM.aml", "SSDT",
              P88,  8
          }
  
@@ -133,7 +181,7 @@ Index: xen-4.3.4/tools/firmware/hvmloader/acpi/ssdt_pm.asl
  
          Mutex (SYNC, 0x01)
          Name (BUF0, Buffer (0x0100) {})
-@@ -125,30 +175,30 @@ DefinitionBlock ("SSDT_PM.aml", "SSDT",
+@@ -124,30 +175,30 @@ DefinitionBlock ("SSDT_PM.aml", "SSDT",
          }
  
          /*
@@ -170,7 +218,7 @@ Index: xen-4.3.4/tools/firmware/hvmloader/acpi/ssdt_pm.asl
           * Value 1 or 2 written to port 0x86.  1 for BIF (batterry info) and 2 
           * for BST (battery status).
           */
-@@ -162,7 +212,7 @@ DefinitionBlock ("SSDT_PM.aml", "SSDT",
+@@ -161,7 +212,7 @@ DefinitionBlock ("SSDT_PM.aml", "SSDT",
          }
  
          /*
@@ -179,7 +227,7 @@ Index: xen-4.3.4/tools/firmware/hvmloader/acpi/ssdt_pm.asl
           * indicating battery info initialization request.  First thing written
           * to battery port before querying for further information pertaining
           * to the battery.
-@@ -179,7 +229,7 @@ DefinitionBlock ("SSDT_PM.aml", "SSDT",
+@@ -178,7 +229,7 @@ DefinitionBlock ("SSDT_PM.aml", "SSDT",
          }
  
          /*
@@ -188,7 +236,24 @@ Index: xen-4.3.4/tools/firmware/hvmloader/acpi/ssdt_pm.asl
           * indicating request of battery data returned through battery data
           * port 0x86.
           */
-@@ -291,8 +341,114 @@ DefinitionBlock ("SSDT_PM.aml", "SSDT",
+@@ -275,13 +326,14 @@ DefinitionBlock ("SSDT_PM.aml", "SSDT",
+                 HLP8 (Arg0, Local0)
+                 Increment (Local0)
+             }
+-            Return (Arg0)
+         }
+ 
+         Method (HLPA, 0, NotSerialized)
+         {
+             Store (HLP6 (), Local0)
+-            Return (HLP9 (Buffer (Local0) {}, Local0))
++            Name (TMP, Buffer (Local0) {})
++            HLP9 (TMP, Local0)
++            Return (TMP)
+         }
+ 
+         Method (REL, 0, NotSerialized)
+@@ -289,8 +341,114 @@ DefinitionBlock ("SSDT_PM.aml", "SSDT",
              Release (SYNC)
          }
  
@@ -305,7 +370,7 @@ Index: xen-4.3.4/tools/firmware/hvmloader/acpi/ssdt_pm.asl
          Device (AC)
          {
              Name (_HID, "ACPI0003")
-@@ -304,11 +460,23 @@ DefinitionBlock ("SSDT_PM.aml", "SSDT",
+@@ -302,11 +460,23 @@ DefinitionBlock ("SSDT_PM.aml", "SSDT",
              })
              Method (_PSR, 0, NotSerialized)
              {
@@ -329,7 +394,7 @@ Index: xen-4.3.4/tools/firmware/hvmloader/acpi/ssdt_pm.asl
                  Return (0x0F)
              }
          }
-@@ -320,6 +488,7 @@ DefinitionBlock ("SSDT_PM.aml", "SSDT",
+@@ -318,6 +488,7 @@ DefinitionBlock ("SSDT_PM.aml", "SSDT",
              ACQR ()
              INIT (0x01)
              INIT (Arg0)
@@ -337,7 +402,7 @@ Index: xen-4.3.4/tools/firmware/hvmloader/acpi/ssdt_pm.asl
              HLP5 ()
              Store (HLP7 (), Index (BIFP, 0x00))
              Store (HLP7 (), Index (BIFP, 0x01))
-@@ -338,7 +507,30 @@ DefinitionBlock ("SSDT_PM.aml", "SSDT",
+@@ -336,7 +507,30 @@ DefinitionBlock ("SSDT_PM.aml", "SSDT",
              Return (BIFP)
          }
  
@@ -369,7 +434,7 @@ Index: xen-4.3.4/tools/firmware/hvmloader/acpi/ssdt_pm.asl
          Device (BAT0)
          {
              Name (_HID, EisaId ("PNP0C0A"))
-@@ -348,12 +540,22 @@ DefinitionBlock ("SSDT_PM.aml", "SSDT",
+@@ -346,12 +540,22 @@ DefinitionBlock ("SSDT_PM.aml", "SSDT",
                  \_SB
              })
  
@@ -395,7 +460,7 @@ Index: xen-4.3.4/tools/firmware/hvmloader/acpi/ssdt_pm.asl
  
              /* Battery generic info: design capacity, voltage, model # etc. */
              Method (_BIF, 0, NotSerialized)
-@@ -368,9 +570,11 @@ DefinitionBlock ("SSDT_PM.aml", "SSDT",
+@@ -366,22 +570,24 @@ DefinitionBlock ("SSDT_PM.aml", "SSDT",
              Method (_BST, 0, NotSerialized)
              {
                  Store (1, \_SB.DBG1)
@@ -405,9 +470,20 @@ Index: xen-4.3.4/tools/firmware/hvmloader/acpi/ssdt_pm.asl
                  INIT (0x01)
 +                Store (0x01, PB5)
                  HLP5 ()
-                 Name (BST0, Package (0x04) {})
-                 Store (HLP7 (), Index (BST0, 0x00))
-@@ -383,7 +587,7 @@ DefinitionBlock ("SSDT_PM.aml", "SSDT",
+-                Store (Package (0x04) {}, Local0)
+-                Store (HLP7 (), Index (Local0, 0x00))
+-                Store (HLP7 (), Index (Local0, 0x01))
+-                Store (HLP7 (), Index (Local0, 0x02))
+-                Store (HLP7 (), Index (Local0, 0x03))
++                Name (BST0, Package (0x04) {})
++                Store (HLP7 (), Index (BST0, 0x00))
++                Store (HLP7 (), Index (BST0, 0x01))
++                Store (HLP7 (), Index (BST0, 0x02))
++                Store (HLP7 (), Index (BST0, 0x03))
+                 REL ()
+                 Store (2, \_SB.DBG1)
+-                Return (Local0)
++                Return (BST0)
              }
          }
  
@@ -416,7 +492,7 @@ Index: xen-4.3.4/tools/firmware/hvmloader/acpi/ssdt_pm.asl
          Device (BAT1)
          {
              Name (_HID, EisaId ("PNP0C0A"))
-@@ -394,20 +598,35 @@ DefinitionBlock ("SSDT_PM.aml", "SSDT",
+@@ -392,30 +598,86 @@ DefinitionBlock ("SSDT_PM.aml", "SSDT",
              })
              Method (_STA, 0, NotSerialized)
              {
@@ -452,9 +528,19 @@ Index: xen-4.3.4/tools/firmware/hvmloader/acpi/ssdt_pm.asl
                  INIT (0x02)
 +                Store (0x02, PB5)
                  HLP5 ()
-                 Name (BST1, Package (0x04) {})
-                 Store (HLP7 (), Index (BST1, 0x00))
-@@ -419,5 +638,46 @@ DefinitionBlock ("SSDT_PM.aml", "SSDT",
+-                Store (Package (0x04) {}, Local0)
+-                Store (HLP7 (), Index (Local0, 0x00))
+-                Store (HLP7 (), Index (Local0, 0x01))
+-                Store (HLP7 (), Index (Local0, 0x02))
+-                Store (HLP7 (), Index (Local0, 0x03))
++                Name (BST1, Package (0x04) {})
++                Store (HLP7 (), Index (BST1, 0x00))
++                Store (HLP7 (), Index (BST1, 0x01))
++                Store (HLP7 (), Index (BST1, 0x02))
++                Store (HLP7 (), Index (BST1, 0x03))
+                 REL ()
+-                Return (Local0)
++                Return (BST1)
              }
          }
      }
@@ -501,11 +587,11 @@ Index: xen-4.3.4/tools/firmware/hvmloader/acpi/ssdt_pm.asl
 +    }
  }
  
-Index: xen-4.3.4/tools/firmware/hvmloader/acpi/static_tables.c
+Index: xen-4.6.6/tools/firmware/hvmloader/acpi/static_tables.c
 ===================================================================
---- xen-4.3.4.orig/tools/firmware/hvmloader/acpi/static_tables.c
-+++ xen-4.3.4/tools/firmware/hvmloader/acpi/static_tables.c
-@@ -70,7 +70,8 @@ struct acpi_20_fadt Fadt = {
+--- xen-4.6.6.orig/tools/firmware/hvmloader/acpi/static_tables.c
++++ xen-4.6.6/tools/firmware/hvmloader/acpi/static_tables.c
+@@ -69,7 +69,8 @@ struct acpi_20_fadt Fadt = {
      .flags = (ACPI_PROC_C1 |
                ACPI_WBINVD |
                ACPI_FIX_RTC | ACPI_TMR_VAL_EXT |

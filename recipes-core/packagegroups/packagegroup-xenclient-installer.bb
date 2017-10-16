@@ -12,7 +12,6 @@ RDEPENDS_${PN} = " \
     openssh-sshd-tcp-init \
     util-linux-mount \
     util-linux-umount \
-    blktap \
     dialog \
     e2fsprogs \
     e2fsprogs-e2fsck \
@@ -23,6 +22,7 @@ RDEPENDS_${PN} = " \
     util-linux-sfdisk \
     xen \
     xen-tools \
+    xen-blktap \
     xenclient-installer \
     xenclient-installer-tweaks \
     cryptsetup \

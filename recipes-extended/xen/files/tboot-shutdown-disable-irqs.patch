@@ -1,14 +1,15 @@
 ################################################################################
 SHORT DESCRIPTION: 
 ################################################################################
-Fix Windows XP standby with cirrus VGA
+Disabling interrupts early causes debug assertions.
 
 ################################################################################
 LONG DESCRIPTION: 
 ################################################################################
-Fix it by telling OSPM don't power down vga card on entering S3
-state. The trick works for XP and Windows2003, but Vista still refuse
-to allow S3.
+This is only seen with debug builds but since it causes assertions it is
+probably a bigger problem. It clearly says in map_pages_to_xen that it should
+not be called with interrupts disabled. Moved disabling to just after that
+call.
 
 ################################################################################
 CHANGELOG 
@@ -21,6 +22,7 @@ REMOVAL
 ################################################################################
 UPSTREAM PLAN
 ################################################################################
+Should be.
 
 ################################################################################
 INTERNAL DEPENDENCIES 
@@ -29,33 +31,27 @@ INTERNAL DEPENDENCIES
 ################################################################################
 PATCHES 
 ################################################################################
-Index: xen-4.6.6/tools/firmware/hvmloader/acpi/dsdt.asl
+Index: xen-4.6.6/xen/arch/x86/tboot.c
 ===================================================================
---- xen-4.6.6.orig/tools/firmware/hvmloader/acpi/dsdt.asl
-+++ xen-4.6.6/tools/firmware/hvmloader/acpi/dsdt.asl
-@@ -87,25 +87,6 @@ DefinitionBlock ("DSDT.aml", "DSDT", 2,
-            Name (_ADR, 0x00)
-            Name (_BBN, 0x00)
+--- xen-4.6.6.orig/xen/arch/x86/tboot.c
++++ xen-4.6.6/xen/arch/x86/tboot.c
+@@ -343,8 +343,6 @@ void tboot_shutdown(uint32_t shutdown_ty
  
--           /* Make cirrues VGA S3 suspend/resume work in Windows XP/2003 */
--           Device (VGA)
--           {
--               Name (_ADR, 0x00020000)
+     g_tboot_shared->shutdown_type = shutdown_type;
+ 
+-    local_irq_disable();
 -
--               Method (_S1D, 0, NotSerialized)
--               {
--                   Return (0x00)
--               }
--               Method (_S2D, 0, NotSerialized)
--               {
--                   Return (0x00)
--               }
--               Method (_S3D, 0, NotSerialized)
--               {
--                   Return (0x00)
--               }
--           }
--
-            Method (_CRS, 0, NotSerialized)
-            {
-                Store (ResourceTemplate ()
+     /* Create identity map for tboot shutdown code. */
+     /* do before S3 integrity because mapping tboot may change xenheap */
+     map_base = PFN_DOWN(g_tboot_shared->tboot_base);
+@@ -359,6 +357,10 @@ void tboot_shutdown(uint32_t shutdown_ty
+         return;
+     }
+ 
++    /* Disable interrupts as early as possible but not before */
++    /* calling map_pages_to_xen */
++    local_irq_disable();
++
+     /* if this is S3 then set regions to MAC */
+     if ( shutdown_type == TB_SHUTDOWN_S3 )
+     {

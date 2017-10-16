@@ -2,7 +2,13 @@ require xen.inc
 
 inherit pkgconfig pythonnative
 
-DEPENDS += "util-linux xen-tools openssl libaio libicbinn-resolved"
+DEPENDS += " \
+    util-linux \
+    xen-tools \
+    openssl \
+    libaio \
+    libicbinn-resolved \
+"
 
 EXTRA_OEMAKE += "CROSS_SYS_ROOT=${STAGING_DIR_HOST} CROSS_COMPILE=${HOST_PREFIX}"
 EXTRA_OEMAKE += "CONFIG_IOEMU=n"
@@ -11,11 +17,14 @@ EXTRA_OEMAKE += "DESTDIR=${D}"
 TARGET_CC_ARCH += "${LDFLAGS}"
 
 do_configure() {
-	DESTDIR=${D} ./configure --prefix=${prefix}
+	DESTDIR=${D} ./configure \
+                --prefix=${prefix} \
+                --disable-xen \
+                --disable-docs \
+                --disable-stubdom
 }
 
 do_compile() {
-        oe_runmake -C tools subdir-all-libaio
         oe_runmake -C tools subdir-all-blktap2
 }
 

@@ -13,6 +13,7 @@ RDEPENDS_${PN} = " \
     util-linux-umount \
     xen \
     xen-tools \
+    xen-blktap \
     xen-firmware \
     xen-xsm-policy \
     grub \
@@ -60,7 +61,6 @@ RDEPENDS_${PN} = " \
     secure-vm \
     xenclient-sec-scripts \
     pmtools \
-    blktap \
     svirt-interpose \
     selinux-load \
     ustr \
