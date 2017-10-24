@@ -64,6 +64,22 @@ SRC_URI = "${XEN_SRC_URI};name=source \
     file://xsa233.patch \
     file://xsa234-4.6.patch \
     file://xsa235-4.6.patch \
+    file://xsa237-4.6/0001-x86-dont-allow-MSI-pIRQ-mapping-on-unowned-device.patch \
+    file://xsa237-4.6/0002-x86-enforce-proper-privilege-when-mapping-pIRQ-s.patch \
+    file://xsa237-4.6/0003-x86-MSI-disallow-redundant-enabling.patch \
+    file://xsa237-4.6/0004-x86-IRQ-conditionally-preserve-irq-pirq-mapping-on-error.patch \
+    file://xsa237-4.6/0005-x86-FLASK-fix-unmap-domain-IRQ-XSM-hook.patch \
+    file://xsa238-4.6.patch \
+    file://xsa239.patch \
+    file://xsa240-4.6/0001-x86-limit-linear-page-table-use-to-a-single-level.patch \
+    file://xsa240-4.6/0002-x86-mm-Disable-PV-linear-pagetables-by-default.patch \
+    file://xsa241-4.8.patch \
+    file://xsa242-4.9.patch \
+    file://xsa243-4.6-1.patch \
+    file://xsa243-4.6-2.patch \
+    file://xsa244-4.6.patch \
+    file://xsa245/0001-xen-page_alloc-Cover-memory-unreserved-after-boot-in.patch \
+    file://xsa245/0002-xen-arm-Correctly-report-the-memory-region-in-the-du.patch \
 "
 
 SRC_URI[source.md5sum] := "${XEN_SRC_MD5SUM}"
