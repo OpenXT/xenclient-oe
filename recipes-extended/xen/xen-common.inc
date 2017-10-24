@@ -79,6 +79,7 @@ SRC_URI_append = " \
     file://libxl-vwif-support.patch \
     file://libxl-atapi-pt.patch \
     file://libxl-iso-hotswap.patch \
+    file://libxl-fix-flr.patch \
     file://tboot-xen-evtlog-support.patch \
     file://0001-gnttab-dont-use-possibly-unbounded-tail-calls.patch \
     file://0002-gnttab-fix-transitive-grant-handling.patch \
