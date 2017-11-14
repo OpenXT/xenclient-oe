@@ -1,0 +1,73 @@
+From 58a9375b1309543a060dbb28ef349361f4a7a967 Mon Sep 17 00:00:00 2001
+From: Eric Chanudet <chanudete@ainfosec.com>
+Date: Mon, 30 Oct 2017 12:45:18 -0400
+Subject: [PATCH] x86/hvm: do not register hpet mmio during s3 cycle
+
+Do it once at domain creation (hpet_init).
+
+Sleep -> Resume cycles will end up crashing an HVM guest with hpet as
+the sequence during resume takes the path:
+-> hvm_s3_suspend
+  -> hpet_reset
+    -> hpet_deinit
+    -> hpet_init
+      -> register_mmio_handler
+        -> hvm_next_io_handler
+
+register_mmio_handler will use a new io handler each time, until
+eventually it reaches NR_IO_HANDLERS, then hvm_next_io_handler calls
+domain_crash.
+
+Signed-off-by: Eric Chanudet <chanudete@ainfosec.com>
+
+---
+v2:
+  * make hpet_reinit static inline (one call site in this file)
+  * remove single use local variable.
+---
+v3:
+  * remove single use of hpet_reinit.
+(cherry picked from commit 0f766e1573a45acb79642272b7b5c003a5f260a0)
+---
+ xen/arch/x86/hvm/hpet.c | 9 ++++++---
+ 1 file changed, 6 insertions(+), 3 deletions(-)
+
+diff --git a/xen/arch/x86/hvm/hpet.c b/xen/arch/x86/hvm/hpet.c
+index facab83dc5..d3fe393fb5 100644
+--- a/xen/arch/x86/hvm/hpet.c
++++ b/xen/arch/x86/hvm/hpet.c
+@@ -630,9 +630,8 @@ static int hpet_load(struct domain *d, hvm_domain_context_t *h)
+ 
+ HVM_REGISTER_SAVE_RESTORE(HPET, hpet_save, hpet_load, 1, HVMSR_PER_DOM);
+ 
+-void hpet_init(struct domain *d)
++static void hpet_set(HPETState *h)
+ {
+-    HPETState *h = domain_vhpet(d);
+     int i;
+ 
+     memset(h, 0, sizeof(HPETState));
+@@ -660,7 +659,11 @@ void hpet_init(struct domain *d)
+         h->hpet.comparator64[i] = ~0ULL;
+         h->pt[i].source = PTSRC_isa;
+     }
++}
+ 
++void hpet_init(struct domain *d)
++{
++    hpet_set(domain_vhpet(d));
+     register_mmio_handler(d, &hpet_mmio_ops);
+ }
+ 
+@@ -686,7 +689,7 @@ void hpet_deinit(struct domain *d)
+ void hpet_reset(struct domain *d)
+ {
+     hpet_deinit(d);
+-    hpet_init(d);
++    hpet_set(domain_vhpet(d));
+ }
+ 
+ /*
+-- 
+2.14.1
+
