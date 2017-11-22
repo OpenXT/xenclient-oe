@@ -126,14 +126,3 @@ DEPENDS_remove = "iproute2"
 deltask stubs
 deltask deploy
 #--
-
-# meta-virtualization updates for Xen 4.9 -- retire when these land in m-v
-PACKAGES_append = " \
-    ${PN}-libxendevicemodel \
-    ${PN}-libxendevicemodel-dev \
-"
-FILES_${PN}-libxendevicemodel = "${libdir}/libxendevicemodel.so.*"
-FILES_${PN}-libxendevicemodel-dev = "${libdir}/libxendevicemodel.so"
-RDEPENDS_${PN}-libxenctrl_append = " \
-    ${PN}-libxendevicemodel \
-"
