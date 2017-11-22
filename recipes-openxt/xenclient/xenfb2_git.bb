@@ -30,10 +30,6 @@ MAKE_TARGETS += "modules"
 
 FILES_${PN}-dev = " /usr/include "
 
-#do_stage() {
-#	install -m 644 fb2if.h ${STAGING_INCDIR}/fb2if.h
-#}
-
 do_install_headers() {
         install -m 0755 -d ${D}/usr/include
 	install -m 644 fb2if.h ${D}/usr/include/fb2if.h
@@ -49,5 +45,4 @@ do_install_headers_xenclient-nilfvm() {
 }
 
 addtask install_headers after do_install before do_package do_populate_sysroot
-
-
+do_install_headers[dirs] = "${B}"
