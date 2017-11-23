@@ -5,7 +5,7 @@ PRIORITY = "optional"
 DEPENDS = "trousers"
 
 do_compile() {
-	oe_runmake SUBDIRS="tboot" CC="${HOST_PREFIX}gcc ${TOOLCHAIN_OPTIONS}" CPP="${HOST_PREFIX}cpp ${TOOLCHAIN_OPTIONS}" LDFLAGS="" CFLAGS=""
+	oe_runmake SUBDIRS="tboot" CC="${HOST_PREFIX}gcc ${TOOLCHAIN_OPTIONS}" CPP="${HOST_PREFIX}cpp ${TOOLCHAIN_OPTIONS}"
 	oe_runmake SUBDIRS="lcptools lcptools-v2 tb_polgen utils pcr-calc" CFLAGS+="-std=c99" TARGET_ARCH="x86_32"
 }
 
