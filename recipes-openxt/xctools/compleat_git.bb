@@ -17,8 +17,6 @@ FILES_${PN} += " \
     ${datadir}/${PN}*/compleat_setup \
 "
 
-INSANE_SKIP_${PN} = "already-stripped"
-
 do_install_append() {
 	install -m 0755 -d ${D}/etc/compleat.d
 	install -m 0755 -d ${D}/etc/profile.d
