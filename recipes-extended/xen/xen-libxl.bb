@@ -1,8 +1,6 @@
 require recipes-extended/xen/xen.inc
 require xen-common.inc
 
-inherit findlib
-
 DESCRIPTION = "Xen hypervisor libxl components"
 
 # In OpenXT, multiple recipes are used to build Xen and its components:
@@ -59,6 +57,15 @@ FILES_${PN}-staticdev = " \
     "
 FILES_xen-libxlutil += " \
     ${sysconfdir}/xen/xl.conf \
+"
+FILES_${PN}-dev += " \
+    ${includedir} \
+"
+FILES_${PN}-dbg += " \
+    ${bindir}/.debug \
+    ${sbindir}/.debug \
+    ${libdir}/.debug \
+    /usr/src/debug \
 "
 
 EXTRA_OEMAKE += "CROSS_SYS_ROOT=${STAGING_DIR_HOST} CROSS_COMPILE=${HOST_PREFIX}"
