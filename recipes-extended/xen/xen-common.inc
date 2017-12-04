@@ -109,6 +109,9 @@ SRC_URI_append = " \
     file://xsa244-4.6.patch \
     file://xsa245/0001-xen-page_alloc-Cover-memory-unreserved-after-boot-in.patch \
     file://xsa245/0002-xen-arm-Correctly-report-the-memory-region-in-the-du.patch \
+    file://xsa246-4.7.patch \
+    file://xsa247-4.6/0001-p2m-Always-check-to-see-if-removing-a-p2m-entry-actu.patch \
+    file://xsa247-4.6/0002-p2m-Check-return-value-of-p2m_set_entry-when-decreas.patch \
 "
 
 COMPATIBLE_HOST = 'i686-oe-linux|(x86_64.*).*-linux|aarch64.*-linux'
