@@ -81,6 +81,7 @@ SRC_URI_append = " \
     file://libxl-iso-hotswap.patch \
     file://libxl-fix-flr.patch \
     file://tboot-xen-evtlog-support.patch \
+    file://x86-hvm-do-not-register-hpet-mmio-during-s3-cycle.patch \
     file://0001-gnttab-dont-use-possibly-unbounded-tail-calls.patch \
     file://0002-gnttab-fix-transitive-grant-handling.patch \
     file://0003-gnttab-fix-don-t-use-possibly-unbounded-tail-calls.patch \
@@ -108,7 +109,6 @@ SRC_URI_append = " \
     file://xsa244-4.6.patch \
     file://xsa245/0001-xen-page_alloc-Cover-memory-unreserved-after-boot-in.patch \
     file://xsa245/0002-xen-arm-Correctly-report-the-memory-region-in-the-du.patch \
-    file://x86-hvm-do-not-register-hpet-mmio-during-s3-cycle.patch \
 "
 
 COMPATIBLE_HOST = 'i686-oe-linux|(x86_64.*).*-linux|aarch64.*-linux'
