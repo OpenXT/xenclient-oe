@@ -96,6 +96,9 @@ SRC_URI_append = " \
     file://libxl-disable-json-updates.patch \
     file://libxl-allow-non-qdisk-cdrom.patch \
     file://libxl-fix-flr.patch \
+    file://xsa246-4.9.patch \
+    file://xsa247-4.9/0001-p2m-Always-check-to-see-if-removing-a-p2m-entry-actu.patch \
+    file://xsa247-4.9/0002-p2m-Check-return-value-of-p2m_set_entry-when-decreas.patch \
 "
 
 COMPATIBLE_HOST = 'i686-oe-linux|(x86_64.*).*-linux|aarch64.*-linux'
