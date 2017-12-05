@@ -56,8 +56,6 @@ FILES_${PN} += " \
     /etc/init.d/xenmgr \
 "
 
-INSANE_SKIP_${PN} = "already-stripped"
-
 do_configure_append() {
     # generate rpc stubs
     mkdir -p Rpc/Autogen

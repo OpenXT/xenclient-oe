@@ -25,7 +25,7 @@ DEPENDS += " \
     hkg-monad-control \
     hkg-errors \
 "
-RDEPENDS_${PN} += "glibc-gconv-utf-32"
+RDEPENDS_${PN} += "glibc-gconv-utf-32 bash"
 
 PV = "0+git${SRCPV}"
 SRCREV = "${AUTOREV}"

@@ -2,7 +2,7 @@ DESCRIPTION = "haskell dbus library"
 LICENSE = "LGPLv2.1"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=784a6790a51378ef1cc78d5c6999b241"
 DEPENDS += "hkg-binary hkg-cereal hkg-mtl hkg-network"
-RDEPENDS_${PN} += "glibc-gconv-utf-32"
+RDEPENDS_${PN} += "glibc-gconv-utf-32 hkg-utf8-string"
 
 PV = "0+git${SRCPV}"
 SRCREV = "${AUTOREV}"
