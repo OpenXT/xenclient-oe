@@ -1,7 +1,7 @@
 require recipes-extended/xen/xen.inc
 require xen-common.inc
 
-inherit findlib
+inherit ocaml findlib
 
 DESCRIPTION = "Xen hypervisor ocaml libs and xenstore components"
 
@@ -22,7 +22,6 @@ DEPENDS += " \
     xen \
     xen-blktap \
     libnl \
-    ocaml-cross \
     "
 EXTRA_OECONF_remove = "--disable-ocamltools"
 
@@ -37,16 +36,13 @@ PACKAGES = " \
     ${PN}-dbg \
     ${PN}-staticdev \
     ${PN} \
-    "
-
-FILES_${PN}-dev = "${ocamllibdir}/*/*.so"
-FILES_${PN}-dbg += "${ocamllibdir}/*/.debug/*"
-FILES_${PN}-staticdev = "${ocamllibdir}/*/*.a"
-FILES_${PN} = "${ocamllibdir}/*"
-
+"
 EXTRA_OEMAKE += "CROSS_SYS_ROOT=${STAGING_DIR_HOST} CROSS_COMPILE=${HOST_PREFIX}"
 EXTRA_OEMAKE += "CONFIG_IOEMU=n"
 EXTRA_OEMAKE += "DESTDIR=${D}"
+# OCAMLDESTDIR is set to $DESTDIR/$(ocamlfind printconf destdir), yet DESTDIR
+# is required for other binaries installation, so override OCAMLDESTDIR.
+EXTRA_OEMAKE += "OCAMLDESTDIR=${D}${sitelibdir}"
 
 TARGET_CC_ARCH += "${LDFLAGS}"
 CC_FOR_OCAML="i686-oe-linux-gcc"
@@ -88,7 +84,7 @@ do_compile() {
 }
 
 do_install() {
-    oe_runmake DESTDIR=${D} -C tools/ocaml install
+    oe_runmake -C tools/ocaml install
 
     mv ${D}/usr/sbin/oxenstored ${D}/${sbindir}/xenstored.xen-xenstored-ocaml
     install -d ${D}${sysconfdir}/init.d

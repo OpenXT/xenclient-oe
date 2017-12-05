@@ -1,12 +1,7 @@
-inherit findlib
 DESCRIPTION = "UID - User Interface Daemon"
 LICENSE = "GPLv2"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/GPL-2.0;md5=801f80980d171dd6425610833a22dbe6"
-DEPENDS = "ocaml-cross ocaml-dbus xen-ocaml-libs xenclient-toolstack"
-
-# Ocaml stuff is built with the native compiler with "-m32".
-
-PV = "0+git${SRCPV}"
+DEPENDS = "ocaml-dbus xen-ocaml-libs xenclient-toolstack"
 
 SRCREV = "${AUTOREV}"
 SRC_URI = "git://${OPENXT_GIT_MIRROR}/uid.git;protocol=${OPENXT_GIT_PROTOCOL};branch=${OPENXT_BRANCH}"
@@ -18,7 +13,7 @@ SRC_URI += "file://uid_dbus.conf \
 
 S = "${WORKDIR}/git"
 
-inherit xenclient update-rc.d
+inherit update-rc.d ocaml findlib
 
 INITSCRIPT_PACKAGES="${PN}"
 
@@ -34,6 +29,8 @@ do_compile() {
 }
 
 do_install() {
+	# No library.
+	rm -rf ${D}${libdir}
 	make DESTDIR=${D} V=1 install
 	install -m 0755 -d ${D}/etc
 	install -m 0644 ${WORKDIR}/uid.conf ${D}/etc
@@ -42,6 +39,3 @@ do_install() {
 	install -m 0755 -d ${D}${sysconfdir}/init.d
 	install -m 0755 ${WORKDIR}/uid.initscript ${D}${sysconfdir}/init.d/uid
 }
-
-# Avoid GNU_HASH check for the ocaml binaries
-INSANE_SKIP_${PN} = "1"
