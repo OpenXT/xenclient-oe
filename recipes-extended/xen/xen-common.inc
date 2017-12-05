@@ -49,7 +49,6 @@ SRC_URI_append = " \
     file://blktap2-vhd-encryption-support.patch \
     file://blktap2-vhd-icbinn-support.patch \
     file://gpt-s3-resume-reason.patch;patch=1 \
-    file://cpufreq_gov_stop_avoid_panic.patch;patch=1 \
     file://fix-memcpy-in-x86-emulate.patch;patch=1 \
     file://stubdomain-msi-irq-access.patch;patch=1 \
     file://workaround-nehalem-igd-vtd.patch;patch=1 \
@@ -96,33 +95,7 @@ SRC_URI_append = " \
     file://libxl-iso-hotswap.patch \
     file://libxl-disable-json-updates.patch \
     file://libxl-allow-non-qdisk-cdrom.patch \
-    file://libxl-domain-build-fix-array-size-bug.patch \
     file://libxl-fix-flr.patch \
-    file://xsa226-4.9/0001-gnttab-dont-use-possibly-unbounded-tail-calls.patch \
-    file://xsa226-4.9/0002-gnttab-fix-transitive-grant-handling.patch \
-    file://xsa226-4.9/0003-gnttab-fix-don-t-use-possibly-unbounded-tail-calls.patch \
-    file://xsa227.patch \
-    file://xsa228.patch \
-    file://xsa230.patch \
-    file://xsa231-4.9.patch \
-    file://xsa232.patch \
-    file://xsa233.patch \
-    file://xsa234-4.9.patch \
-    file://xsa235-4.9.patch \
-    file://xsa237-4.9/0001-x86-dont-allow-MSI-pIRQ-mapping-on-unowned-device.patch \
-    file://xsa237-4.9/0002-x86-enforce-proper-privilege-when-mapping-pIRQ-s.patch \
-    file://xsa237-4.9/0003-x86-MSI-disallow-redundant-enabling.patch \
-    file://xsa237-4.9/0004-x86-IRQ-conditionally-preserve-irq-pirq-mapping-on-error.patch \
-    file://xsa237-4.9/0005-x86-FLASK-fix-unmap-domain-IRQ-XSM-hook.patch \
-    file://xsa238.patch \
-    file://xsa239.patch \
-    file://xsa240-4.9/0001-x86-limit-linear-page-table-use-to-a-single-level.patch \
-    file://xsa240-4.9/0002-x86-mm-Disable-PV-linear-pagetables-by-default.patch \
-    file://xsa241-4.9.patch \
-    file://xsa242-4.9.patch \
-    file://xsa243.patch \
-    file://xsa244.patch \
-    file://x86-hvm-do-not-register-hpet-mmio-during-s3-cycle.patch \
 "
 
 COMPATIBLE_HOST = 'i686-oe-linux|(x86_64.*).*-linux|aarch64.*-linux'
