@@ -6,7 +6,7 @@
 
 include xenclient-image-common.inc
 
-COMPATIBLE_MACHINE = "(xenclient-dom0)"
+COMPATIBLE_MACHINE = "(openxt-installer)"
 IMAGE_INITSCRIPTS = "initscripts"
 
 PR = "r15"
@@ -19,6 +19,7 @@ SRC_URI += " \
             file://network_manual_download_win.ans \
 	    file://pxelinux.cfg \
 	    file://isolinux.cfg \
+	    file://grub.cfg \
 	    file://bootmsg.txt \
 "
 
@@ -28,7 +29,7 @@ export IMAGE_BASENAME = "xenclient-installer-image"
 
 BAD_RECOMMENDATIONS += "${@base_contains('IMAGE_FEATURES', 'web-certificates', '', 'ca-certificates', d)}"
 
-DEPENDS = "packagegroup-base packagegroup-xenclient-installer"
+DEPENDS = "packagegroup-base packagegroup-xenclient-installer grub-efi-cross"
 
 IMAGE_INSTALL = "\
     ${ROOTFS_PKGMANAGE} \
@@ -38,7 +39,6 @@ IMAGE_INSTALL = "\
     packagegroup-base \
     packagegroup-xenclient-common \
     packagegroup-xenclient-installer \
-    kernel-module-e1000e \
     linux-firmware-iwlwifi \
     linux-firmware-bnx2 \
     linux-firmware-i915 \
@@ -120,7 +120,7 @@ do_post_rootfs_items() {
 	install -m 0644 ${WORKDIR}/bootmsg.txt ${DEPLOY_DIR_IMAGE}/${IMAGE_LINK_NAME}/iso/
 	install -m 0644 ${IMAGE_ROOTFS}/${datadir}/syslinux/isolinux.bin ${DEPLOY_DIR_IMAGE}/${IMAGE_LINK_NAME}/iso/
 	install -m 0644 ${WORKDIR}/isolinux.cfg ${DEPLOY_DIR_IMAGE}/${IMAGE_LINK_NAME}/iso/
-	install -m 0755 ${IMAGE_ROOTFS}/${bindir}/isohybrid ${DEPLOY_DIR_IMAGE}/${IMAGE_LINK_NAME}/iso/
+	install -m 0644 ${WORKDIR}/grub.cfg ${DEPLOY_DIR_IMAGE}/${IMAGE_LINK_NAME}/iso/
 
 	# Force the copy in case this has already run before
 	cp -f ${IMAGE_ROOTFS}/boot/tboot.gz ${DEPLOY_DIR_IMAGE}/

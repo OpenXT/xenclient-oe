@@ -54,6 +54,14 @@ INITSCRIPT_PACKAGES_append_xenclient-dom0 = " ${PN}-sshd-tcp-init "
 INITSCRIPT_NAME_${PN}-sshd-tcp-init = "sshd"
 INITSCRIPT_PARAMS_${PN}-sshd-tcp-init = "defaults 9"
 
+SRC_URI_append_openxt-installer = " file://init "
+PACKAGES_prepend_openxt-installer = " ${PN}-sshd-tcp-init "
+FILES_${PN}-sshd-tcp-init = "/etc/init.d/sshd"
+
+INITSCRIPT_PACKAGES_append_openxt-installer = " ${PN}-sshd-tcp-init "
+INITSCRIPT_NAME_${PN}-sshd-tcp-init = "sshd"
+INITSCRIPT_PARAMS_${PN}-sshd-tcp-init = "defaults 9"
+
 do_install_append_xenclient-dom0() {
     install -m 0755 ${WORKDIR}/init ${D}/etc/init.d/sshd
 }

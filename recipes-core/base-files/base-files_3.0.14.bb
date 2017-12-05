@@ -16,6 +16,7 @@ SRC_URI = " \
            file://fstab.xenclient-ndvm \
            file://fstab.xenclient-uivm \
            file://fstab.xenclient-syncvm \
+           file://fstab.openxt-installer \
            file://filesystems \
            file://issue.net \
            file://issue \
@@ -145,6 +146,15 @@ do_install_append_xenclient-dom0 () {
 	install -m 0755 -d ${D}/storage
         install -m 0755 -d ${D}/var/lib/dbus
         install -m 0644 ${WORKDIR}/fstab.xenclient-dom0 ${D}${sysconfdir}/fstab
+}
+
+do_install_append_openxt-installer () {
+	install -m 0755 -d ${D}/config
+	install -m 0755 -d ${D}/var/cores
+	install -m 0755 -d ${D}/var/log
+	install -m 0755 -d ${D}/storage
+	install -m 0755 -d ${D}/var/lib/dbus
+	install -m 0644 ${WORKDIR}/fstab.openxt-installer ${D}${sysconfdir}/fstab
 }
 
 do_install_append_xenclient-ndvm () {
