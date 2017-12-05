@@ -9,7 +9,6 @@ PV = "0+git${SRCPV}"
 SRCREV = "${AUTOREV}"
 SRC_URI = "git://${OPENXT_GIT_MIRROR}/vusb-daemon.git;protocol=${OPENXT_GIT_PROTOCOL};branch=${OPENXT_BRANCH} \
            file://xenclient-vusb.initscript \
-           file://automake-foreign.patch \
            "
 
 # workaround for broken configure.in
