@@ -1,7 +1,7 @@
 DESCRIPTION = "Power Management Daemon for OpenXT"
 LICENSE = "GPLv2"
 LIC_FILES_CHKSUM = "file://COPYING;md5=4641e94ec96f98fabc56ff9cc48be14b"
-DEPENDS = "xenclient-idl dbus xen pciutils libxcdbus xenclient-rpcgen-native libxcxenstore udev libnl yajl"
+DEPENDS = "dbus xen pciutils libxcdbus libxcxenstore udev libnl yajl"
 
 PV = "0+git${SRCPV}"
 
@@ -9,8 +9,6 @@ SRCREV = "${AUTOREV}"
 SRC_URI = "git://${OPENXT_GIT_MIRROR}/xctools.git;protocol=${OPENXT_GIT_PROTOCOL};branch=${OPENXT_BRANCH} \
 	   file://xcpmd.initscript \
 "
-
-EXTRA_OECONF += "--with-idldir=${STAGING_IDLDIR}"
 
 CFLAGS_prepend += " -I${STAGING_INCDIR}/libnl3 "
 
@@ -20,7 +18,7 @@ S = "${WORKDIR}/git/xcpmd"
 
 ASNEEDED = ""
 
-inherit autotools xenclient update-rc.d pkgconfig
+inherit autotools xenclient update-rc.d pkgconfig xc-rpcgen-1.0
 
 INITSCRIPT_NAME = "xcpmd"
 INITSCRIPT_PARAMS = "defaults 60"

@@ -7,12 +7,12 @@ DEPENDS = " \
     libxslt-native \
 "
 
-PV = "0+git${SRCPV}"
 SRCREV = "${AUTOREV}"
 SRC_URI = "git://${OPENXT_GIT_MIRROR}/idl.git;protocol=${OPENXT_GIT_PROTOCOL};branch=${OPENXT_BRANCH}"
 
 S = "${WORKDIR}/git"
 
-TEMPLATES_DIR="xc-rpcgen-1.0/templates"
-
 inherit haskell 
+
+# This has to stay consistent with xc-rpcgen.bbclass.
+TEMPLATES_DIR="xc-rpcgen-${RPCGEN_VERSION}/templates"

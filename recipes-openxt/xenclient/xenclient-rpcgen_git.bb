@@ -1,3 +1,4 @@
+RPCGEN_VERSION = "1.0"
 require xenclient-rpcgen.inc
 
 BBCLASSEXTEND = "native"
