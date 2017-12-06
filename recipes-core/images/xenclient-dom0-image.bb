@@ -9,7 +9,7 @@ IMAGE_FSTYPES = "ext3.gz"
 
 # No thanks, we provide our own xorg.conf with the hacked Intel driver
 # And we don't need Avahi
-BAD_RECOMMENDATIONS += "xserver-xorg avahi-daemon avahi-autoipd ${@base_contains('IMAGE_FEATURES', 'web-certificates', '', 'ca-certificates', d)}"
+BAD_RECOMMENDATIONS += "xserver-xorg avahi-daemon avahi-autoipd ${@bb.utils.contains('IMAGE_FEATURES', 'web-certificates', '', 'ca-certificates', d)}"
 # The above seems to be broken and we *really* don't want avahi!
 # Also remove the unwanted version of xenstored
 PACKAGE_REMOVE = "avahi-daemon avahi-autoipd xen-xenstored-ocaml"

@@ -27,7 +27,7 @@ ANGSTROM_EXTRA_INSTALL += ""
 
 export IMAGE_BASENAME = "xenclient-installer-image"
 
-BAD_RECOMMENDATIONS += "${@base_contains('IMAGE_FEATURES', 'web-certificates', '', 'ca-certificates', d)}"
+BAD_RECOMMENDATIONS += "${@bb.utils.contains('IMAGE_FEATURES', 'web-certificates', '', 'ca-certificates', d)}"
 
 DEPENDS = "packagegroup-base packagegroup-xenclient-installer grub-efi-cross"
 
