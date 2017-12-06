@@ -18,6 +18,19 @@ XSERVER ?= "xserver-kdrive-fbdev"
 export IMAGE_BASENAME = "xenclient-uivm-image"
 
 DEPENDS = "packagegroup-base"
+
+# Specifies the list of locales to install into the image during the root
+# filesystem construction process.
+# http://www.yoctoproject.org/docs/current/ref-manual/ref-manual.html#var-IMAGE_LINGUAS
+IMAGE_LINGUAS = " \
+    de-de \
+    en-us \
+    es-es \
+    fr-fr \
+    ja-jp \
+    zh-cn \
+"
+
 IMAGE_INSTALL = "\
     ${ROOTFS_PKGMANAGE} \
     ${XSERVER} \
@@ -63,13 +76,6 @@ IMAGE_INSTALL = "\
     rsyslog \
     glibc-gconv-libjis \
     glibc-gconv-euc-jp \
-    glibc-localedata-translit-cjk-variants \
-    glibc-localedata-ja-jp \
-    locale-base-ja-jp \
-    locale-base-de-de \
-    locale-base-es-es \
-    locale-base-fr-fr \
-    locale-base-zh-cn \
     mobile-broadband-provider-info \
     shutdown-screen \
     ttf-dejavu-sans \
