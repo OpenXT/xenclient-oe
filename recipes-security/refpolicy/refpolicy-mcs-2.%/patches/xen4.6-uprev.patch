@@ -1,0 +1,57 @@
+Index: refpolicy/policy/modules/contrib/networkmanager.te
+===================================================================
+--- refpolicy.orig/policy/modules/contrib/networkmanager.te
++++ refpolicy/policy/modules/contrib/networkmanager.te
+@@ -108,6 +108,8 @@ kernel_rw_net_sysctls(NetworkManager_t)
+ kernel_read_crypto_sysctls(NetworkManager_t)
+ 
+ fs_dontaudit_manage_xenfs_files(NetworkManager_t)
++# xen 4.6 uprev
++dev_dontaudit_manage_xen(NetworkManager_t)
+ 
+ corenet_all_recvfrom_unlabeled(NetworkManager_t)
+ corenet_all_recvfrom_netlabel(NetworkManager_t)
+Index: refpolicy/policy/modules/kernel/devices.fc
+===================================================================
+--- refpolicy.orig/policy/modules/kernel/devices.fc
++++ refpolicy/policy/modules/kernel/devices.fc
+@@ -185,6 +185,7 @@ ifdef(`distro_suse', `
+ /dev/xen/evtchn		-c	gen_context(system_u:object_r:xen_device_t,s0)
+ /dev/xen/gntdev		-c	gen_context(system_u:object_r:xen_device_t,s0)
+ /dev/xen/gntalloc	-c	gen_context(system_u:object_r:xen_device_t,s0)
++/dev/xen/xenbus		-c	gen_context(system_u:object_r:xen_device_t,s0)
+ 
+ ifdef(`distro_debian',`
+ # this is a static /dev dir "backup mount"
+Index: refpolicy/policy/modules/kernel/devices.if
+===================================================================
+--- refpolicy.orig/policy/modules/kernel/devices.if
++++ refpolicy/policy/modules/kernel/devices.if
+@@ -5243,6 +5243,27 @@ interface(`dev_getattr_xen',`
+ 
+ ########################################
+ ## <summary>
++##	Do not audit attempts to create,
++##	read, write /dev/xen devices nodes.
++## </summary>
++## <param name="domain">
++##	<summary>
++##	Domain to not audit.
++##	</summary>
++## </param>
++#
++interface(`dev_dontaudit_manage_xen',`
++	gen_require(`
++		type xen_device_t;
++	')
++
++	dontaudit $1 xen_device_t:blk_file manage_blk_file_perms;
++	dontaudit $1 xen_device_t:chr_file manage_chr_file_perms;
++	dontaudit $1 xen_device_t:lnk_file manage_lnk_file_perms;
++')
++
++########################################
++## <summary>
+ ##      Unconfined readonly access to devices.
+ ## </summary>
+ ## <param name="domain">

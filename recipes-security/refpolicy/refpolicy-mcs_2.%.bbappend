@@ -1,9 +1,13 @@
-FILESEXTRAPATHS_prepend := "${THISDIR}/patches:"
+FILESEXTRAPATHS_prepend := "${THISDIR}/${BPN}-${PV}:"
 
+# Configuration.
 SRC_URI += " \
     file://config \
     file://policy/modules-upstream.conf \
     file://policy/modules-openxt.conf \
+"
+# Openxt additional modules.
+SRC_URI += " \
     file://policy/modules/admin/getedid.fc \
     file://policy/modules/admin/getedid.if \
     file://policy/modules/admin/getedid.te \
@@ -94,6 +98,9 @@ SRC_URI += " \
     file://policy/modules/system/xc-installer.fc \
     file://policy/modules/system/xc-installer.if \
     file://policy/modules/system/xc-installer.te \
+"
+# Patches.
+SRC_URI += " \
     file://patches/remove-xml-doc-gen.patch \
     file://patches/Makefile.diff \
     file://patches/build.conf.diff \
@@ -166,20 +173,27 @@ SRC_URI += " \
     file://patches/xec-interfaces.diff \
     file://patches/xsmutils-interfaces.diff \
     file://patches/vusb-interfaces.diff \
-    file://patches/qemu1.4_wrapper_file_context.patch;striplevel=1 \
-    file://patches/openxt_system_unconfined_readonly_neverallow_fixes.patch;patch=1 \
-    file://patches/upstream-add-binder-security-class.patch;patch=1 \
-    file://patches/upstream-update-netlink-classes.patch;patch=1 \
-    file://patches/upstream-contrib-networkmanager.patch;patch=1 \
-    file://patches/openxt-sysadm-lsusb.patch;patch=1 \
-    file://patches/openxt-dbus-deny-send-unconfined.patch;patch=1 \
-    file://patches/xen4.6-uprev.patch;patch=1 \
-    file://patches/openxt-init-spec-domtrans.patch;patch=1 \
+    file://patches/qemu1.4_wrapper_file_context.patch \
+    file://patches/openxt_system_unconfined_readonly_neverallow_fixes.patch \
+    file://patches/openxt-sysadm-lsusb.patch \
+    file://patches/xen4.6-uprev.patch \
+    file://patches/openxt-init-spec-domtrans.patch \
     file://patches/busybox-mmap-read-execute-checks-from-new-domain.patch \
-    file://patches/tpm2util.patch;patch=1 \
-    file://patches/lvmetad-add-rules.patch \
-    file://patches/dev-xen-privcmd.patch;patch=1 \
-    "
+    file://patches/dev-xen-privcmd.patch \
+"
+#file://patches/upstream-add-binder-security-class.patch
+#file://patches/upstream-update-netlink-classes.patch
+#file://patches/upstream-contrib-networkmanager.patch
+
+# This got reverted with:
+# bc14741 Revert "dbus: allow system, and session bus clients to answer to dbus unconfined domains"
+#file://patches/openxt-dbus-deny-send-unconfined.patch
+
+# This file is maintained in the layer, no need to patch.
+#file://patches/tpm2util.patch
+
+# Should not be required.
+#file://patches/lvmetad-add-rules.patch
 
 S = "${WORKDIR}/refpolicy"
 
@@ -201,7 +215,7 @@ def get_poltype(f):
     return poltype
 
 # Define policy name from config file.
-conf_file := "${THISDIR}/patches/config"
+conf_file := "${THISDIR}/${BPN}-${PV}/config"
 POL_TYPE = "${@get_poltype(conf_file)}"
 POLICY_NAME = "${POL_TYPE}"
 POLICY_DISTRO = "debian"
@@ -210,16 +224,22 @@ POLICY_DIRECT_INITRC = "y"
 POLICY_QUIET = "n"
 POLICY_MLS_CATS = "256"
 
+# Custom name to reflect modifications.
+EXTRA_OEMAKE += "PKGNAME=xc_policy-${PV}"
+
 do_srctree_copy() {
         cp -r ${WORKDIR}/policy ${S}/
 }
+addtask do_srctree_copy after do_unpack before do_compile
+do_srctree_copy[doc] = "Copy layer provided policy files in work directory."
+do_srctree_copy[dirs] = "${B}"
 
 do_modules_copy() {
         cat ${S}/policy/modules-upstream.conf ${S}/policy/modules-openxt.conf > ${S}/policy/modules.conf
 }
-
-addtask do_srctree_copy after do_unpack before do_compile
 addtask do_modules_copy after do_srctree_copy before do_compile
+do_modules_copy[doc] = "Create modules.conf from layer provided configuration files."
+do_modules_copy[dirs] = "${B}"
 
 do_install_append() {
         install -d ${D}/etc/selinux

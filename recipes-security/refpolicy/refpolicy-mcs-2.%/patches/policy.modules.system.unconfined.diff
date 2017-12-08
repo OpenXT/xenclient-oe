@@ -1,0 +1,136 @@
+Index: refpolicy/policy/modules/system/unconfined.if
+===================================================================
+--- refpolicy.orig/policy/modules/system/unconfined.if
++++ refpolicy/policy/modules/system/unconfined.if
+@@ -100,6 +100,43 @@ interface(`unconfined_domain_noaudit',`
+ 
+ ########################################
+ ## <summary>
++##      Make the specified domain unconfined readonly
++## </summary>
++## <param name="domain">
++##      <summary>
++##      Domain to make unconfined.
++##      </summary>
++## </param>
++#
++interface(`unconfined_readonly_domain_noaudit',`
++	gen_require(`
++		type unconfined_readonly_t;
++		class dbus all_dbus_perms;
++	')
++
++	allow $1 self:fifo_file read_fifo_file_perms;
++
++	# Transition to myself, to make get_ordered_context_list happy.
++	allow $1 self:process transition;
++
++	# Access is for getting attributes under /proc/self/attr.
++	allow $1 self:file read_file_perms;
++
++	allow $1 self:dbus *;
++	kernel_unconfined_readonly($1)
++	corenet_unconfined_readonly($1)
++	dev_unconfined_readonly($1)
++	domain_unconfined_readonly($1)
++	files_unconfined_readonly($1)
++	fs_unconfined_readonly($1)
++
++	optional_policy(`
++		dbus_system_bus_unconfined($1)
++	')
++')
++
++########################################
++## <summary>
+ ##	Make the specified domain unconfined and
+ ##	audit executable heap usage.
+ ## </summary>
+@@ -131,6 +168,31 @@ interface(`unconfined_domain',`
+ 
+ ########################################
+ ## <summary>
++##      Make the specified domain unconfined readonly and
++##      audit executable heap usage.
++## </summary>
++## <desc>
++##      <p>
++##      Make the specified domain unconfined readonly and
++##      audit executable heap usage.With this the domain will
++##	have readonly access.
++##      </p>
++##      <p>
++##      Only completely trusted domains should use this interface.
++##      </p>
++## </desc>
++## <param name="domain">
++##      <summary>
++##      Domain to make unconfined.
++##      </summary>
++## </param>
++#
++interface(`unconfined_readonly_domain',`
++	unconfined_readonly_domain_noaudit($1)
++')
++
++########################################
++## <summary>
+ ##	Add an alias type to the unconfined domain.  (Deprecated)
+ ## </summary>
+ ## <desc>
+@@ -314,6 +376,9 @@ interface(`unconfined_run_to',`
+ 
+ 	domtrans_pattern(unconfined_t,$2,$1)
+ 	role unconfined_r types $1;
++# FIXME
++# my unconfined user is in the system role for whatever reason
++	role system_r types $1;
+ 	userdom_use_user_terminals($1)
+ ')
+ 
+Index: refpolicy/policy/modules/system/unconfined.te
+===================================================================
+--- refpolicy.orig/policy/modules/system/unconfined.te
++++ refpolicy/policy/modules/system/unconfined.te
+@@ -8,11 +8,15 @@ policy_module(unconfined, 3.9.0)
+ # usage in this module of types created by these
+ # calls is not correct, however we dont currently
+ # have another method to add access to these types
++role unconfined_r;
+ userdom_base_user_template(unconfined)
+ userdom_manage_home_role(unconfined_r, unconfined_t)
+ userdom_manage_tmp_role(unconfined_r, unconfined_t)
+ userdom_manage_tmpfs_role(unconfined_r, unconfined_t)
+ 
++role unconfined_readonly_r;
++userdom_base_user_template(unconfined_readonly)
++
+ type unconfined_exec_t;
+ init_system_domain(unconfined_t, unconfined_exec_t)
+ 
+@@ -206,6 +210,10 @@ optional_policy(`
+ 	wine_domtrans(unconfined_t)
+ ')
+ 
++optional_policy(`
++	xen_dbus_chat(unconfined_t)
++')
++
+ ########################################
+ #
+ # Unconfined Execmem Local policy
+@@ -217,3 +225,14 @@ unconfined_domain_noaudit(unconfined_exe
+ optional_policy(`
+ 	unconfined_dbus_chat(unconfined_execmem_t)
+ ')
++
++########################################
++#
++# Unconfined readonly domain Local policy
++#
++logging_send_syslog_msg(unconfined_readonly_t)
++unconfined_readonly_domain(unconfined_readonly_t)
++
++optional_policy(`
++	networkmanager_dbus_chat(unconfined_readonly_t)
++')

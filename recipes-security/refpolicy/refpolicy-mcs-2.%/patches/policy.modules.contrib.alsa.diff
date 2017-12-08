@@ -1,0 +1,71 @@
+Index: refpolicy/policy/modules/contrib/alsa.fc
+===================================================================
+--- refpolicy.orig/policy/modules/contrib/alsa.fc
++++ refpolicy/policy/modules/contrib/alsa.fc
+@@ -8,6 +8,7 @@ ifdef(`distro_debian',`
+ 
+ /etc/alsa(/.*)?		gen_context(system_u:object_r:alsa_etc_t,s0)
+ /etc/asound\.conf	gen_context(system_u:object_r:alsa_etc_t,s0)
++/var/volatile/etc/asound(/.*)?	gen_context(system_u:object_r:alsa_etc_rw_t,s0)
+ 
+ /sbin/alsactl	--	gen_context(system_u:object_r:alsa_exec_t,s0)
+ /sbin/salsa	--	gen_context(system_u:object_r:alsa_exec_t,s0)
+@@ -17,6 +18,7 @@ ifdef(`distro_debian',`
+ /usr/lib/systemd/system/[^/]*alsa-state.* --	gen_context(system_u:object_r:alsa_unit_t,s0)
+ /usr/lib/systemd/system/[^/]*alsa-store.* --	gen_context(system_u:object_r:alsa_unit_t,s0)
+ 
++/tmp/alsactl.dump       --      gen_context(system_u:object_r:alsa_tmp_t,s0)
+ /usr/bin/ainit	--	gen_context(system_u:object_r:alsa_exec_t,s0)
+ /usr/bin/alsaunmute	--	gen_context(system_u:object_r:alsa_exec_t,s0)
+ 
+Index: refpolicy/policy/modules/contrib/alsa.if
+===================================================================
+--- refpolicy.orig/policy/modules/contrib/alsa.if
++++ refpolicy/policy/modules/contrib/alsa.if
+@@ -307,3 +307,24 @@ interface(`alsa_write_lib',`
+ 	files_search_var_lib($1)
+ 	write_files_pattern($1, alsa_var_lib_t, alsa_var_lib_t)
+ ')
++
++########################################
++## <summary>
++##	Manage alsa tmp files.
++## </summary>
++## <param name="domain">
++##	<summary>
++##	Domain allowed access.
++##	</summary>
++## </param>
++#
++interface(`alsa_manage_tmp_files',`
++	gen_require(`
++		type alsa_tmp_t;
++	')
++
++	files_search_tmp($1)
++	allow $1 alsa_tmp_t:dir list_dir_perms;
++	manage_files_pattern($1, alsa_tmp_t, alsa_tmp_t)
++	read_lnk_files_pattern($1, alsa_tmp_t, alsa_tmp_t)
++')
+Index: refpolicy/policy/modules/contrib/alsa.te
+===================================================================
+--- refpolicy.orig/policy/modules/contrib/alsa.te
++++ refpolicy/policy/modules/contrib/alsa.te
+@@ -91,6 +91,8 @@ logging_send_syslog_msg(alsa_t)
+ 
+ miscfiles_read_localization(alsa_t)
+ 
++seutil_use_newrole_fds(alsa_t)
++
+ userdom_manage_unpriv_user_semaphores(alsa_t)
+ userdom_manage_unpriv_user_shared_mem(alsa_t)
+ userdom_search_user_home_dirs(alsa_t)
+@@ -122,3 +124,8 @@ optional_policy(`
+ 	hal_use_fds(alsa_t)
+ 	hal_write_log(alsa_t)
+ ')
++
++xc_config_dir_getattr(alsa_t)
++xc_config_dir_search(alsa_t)
++xc_config_filetrans(alsa_t, alsa_etc_rw_t, { dir file })
++
