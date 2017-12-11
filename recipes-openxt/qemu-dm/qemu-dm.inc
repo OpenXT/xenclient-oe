@@ -11,6 +11,7 @@ DEPENDS = " \
     zlib \
     libcap-ng \
     libdmbus \
+    pixman \
 "
 
 # Leave this in it's own definition so that it can be replaced with a local
@@ -85,7 +86,7 @@ PACKAGES += "${PN}-extra-keymaps ${PN}-extra-roms ${PN}-utils"
 EXTRA_OECONF += " \
     --enable-xen \
     --target-list=i386-softmmu \
-    --without-system-pixman \
+    --with-system-pixman \
     --disable-sdl \
     --disable-vnc \
     --disable-docs \
