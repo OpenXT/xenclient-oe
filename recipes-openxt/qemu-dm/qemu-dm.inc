@@ -25,7 +25,6 @@ SRC_URI += "file://compile-time-stubdom-flag.patch \
             file://surfman-dcl.patch \
             file://audio-policy.patch \
             file://msix-cap-disable.patch \
-            file://xenstore-based-ISO-media-change-detection-for-both-s.patch \
             file://openxtaudio.patch \
             file://nic-link-state-propagation.patch \
             file://stubdom-read-gsi-from-device-config-space.patch \
