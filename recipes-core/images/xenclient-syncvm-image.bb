@@ -5,7 +5,7 @@ IMAGE_FEATURES += "package-management"
 
 COMPATIBLE_MACHINE = "(xenclient-syncvm)"
 
-IMAGE_FSTYPES = "xc.ext3.vhd.gz"
+IMAGE_FSTYPES = "ext3.vhd.gz"
 
 ANGSTROM_EXTRA_INSTALL += ""
 

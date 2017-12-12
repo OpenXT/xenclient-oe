@@ -5,7 +5,7 @@ IMAGE_FEATURES += "package-management"
 
 COMPATIBLE_MACHINE = "(xenclient-ndvm)"
 
-IMAGE_FSTYPES = "xc.ext3.vhd.gz"
+IMAGE_FSTYPES = "ext3.vhd.gz"
 
 BAD_RECOMMENDATIONS += "avahi-daemon avahi-autoipd ca-certificates"
 # The above seems to be broken and we *really* don't want avahi!
