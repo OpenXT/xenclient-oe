@@ -2,7 +2,7 @@ DESCRIPTION = "Surf is a lightweight web browser."
 LICENSE = "MIT"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=33ba16e67a5fa2edcbace4369802fedd"
 
-DEPENDS = "webkit-gtk"
+DEPENDS = "webkitgtk"
 
 inherit autotools-brokensep pkgconfig
 
