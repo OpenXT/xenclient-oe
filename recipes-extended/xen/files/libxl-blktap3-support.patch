@@ -26,10 +26,10 @@ Could be upstreamed
 ################################################################################
 PATCHES
 ################################################################################
-Index: xen-4.9.0/tools/libxl/libxl_blktap3.c
+Index: xen-4.9.1/tools/libxl/libxl_blktap3.c
 ===================================================================
 --- /dev/null
-+++ xen-4.9.0/tools/libxl/libxl_blktap3.c
++++ xen-4.9.1/tools/libxl/libxl_blktap3.c
 @@ -0,0 +1,139 @@
 +/*
 + * Copyright (C) 2012      Advanced Micro Devices
@@ -170,10 +170,10 @@ Index: xen-4.9.0/tools/libxl/libxl_blktap3.c
 + * indent-tabs-mode: nil
 + * End:
 + */
-Index: xen-4.9.0/tools/libxl/list.h
+Index: xen-4.9.1/tools/libxl/list.h
 ===================================================================
 --- /dev/null
-+++ xen-4.9.0/tools/libxl/list.h
++++ xen-4.9.1/tools/libxl/list.h
 @@ -0,0 +1,342 @@
 +/*  $NetBSD: list.h,v 1.5 2014/08/20 15:26:52 riastradh Exp $   */
 +
@@ -517,10 +517,10 @@ Index: xen-4.9.0/tools/libxl/list.h
 +#define hlist_for_each_entry_rcu    hlist_for_each_entry
 +
 +#endif  /* _LINUX_LIST_H_ */
-Index: xen-4.9.0/tools/libxl/Makefile
+Index: xen-4.9.1/tools/libxl/Makefile
 ===================================================================
---- xen-4.9.0.orig/tools/libxl/Makefile
-+++ xen-4.9.0/tools/libxl/Makefile
+--- xen-4.9.1.orig/tools/libxl/Makefile
++++ xen-4.9.1/tools/libxl/Makefile
 @@ -20,17 +20,17 @@ LIBUUID_LIBS += -luuid
  endif
  
@@ -553,10 +553,10 @@ Index: xen-4.9.0/tools/libxl/Makefile
  endif
  
  ifeq ($(CONFIG_LIBNL),y)
-Index: xen-4.9.0/tools/libxl/libxl_types_internal.idl
+Index: xen-4.9.1/tools/libxl/libxl_types_internal.idl
 ===================================================================
---- xen-4.9.0.orig/tools/libxl/libxl_types_internal.idl
-+++ xen-4.9.0/tools/libxl/libxl_types_internal.idl
+--- xen-4.9.1.orig/tools/libxl/libxl_types_internal.idl
++++ xen-4.9.1/tools/libxl/libxl_types_internal.idl
 @@ -27,6 +27,7 @@ libxl__device_kind = Enumeration("device
      (10, "QUSB"),
      (11, "9PFS"),
@@ -565,10 +565,10 @@ Index: xen-4.9.0/tools/libxl/libxl_types_internal.idl
      ])
  
  libxl__console_backend = Enumeration("console_backend", [
-Index: xen-4.9.0/tools/libxl/libxl_device.c
+Index: xen-4.9.1/tools/libxl/libxl_device.c
 ===================================================================
---- xen-4.9.0.orig/tools/libxl/libxl_device.c
-+++ xen-4.9.0/tools/libxl/libxl_device.c
+--- xen-4.9.1.orig/tools/libxl/libxl_device.c
++++ xen-4.9.1/tools/libxl/libxl_device.c
 @@ -297,11 +297,6 @@ static int disk_try_backend(disk_try_bac
  
          /* Note: keep going if the disk is a cdrom. tapdisk can handle them as "raw" */
@@ -603,10 +603,10 @@ Index: xen-4.9.0/tools/libxl/libxl_device.c
          }
  
          rc = libxl__xs_transaction_commit(gc, &t);
-Index: xen-4.9.0/tools/libxl/libxl_disk.c
+Index: xen-4.9.1/tools/libxl/libxl_disk.c
 ===================================================================
---- xen-4.9.0.orig/tools/libxl/libxl_disk.c
-+++ xen-4.9.0/tools/libxl/libxl_disk.c
+--- xen-4.9.1.orig/tools/libxl/libxl_disk.c
++++ xen-4.9.1/tools/libxl/libxl_disk.c
 @@ -56,7 +56,7 @@ static void disk_eject_xswatch_callback(
              "/local/domain/%d/backend/%" TOSTRING(BACKEND_STRING_SIZE)
             "[a-z]/%*d/%*d",
@@ -680,3 +680,24 @@ Index: xen-4.9.0/tools/libxl/libxl_disk.c
              case LIBXL_DISK_BACKEND_QDISK:
                  flexarray_append(back, "params");
                  flexarray_append(back, GCSPRINTF("%s:%s",
+@@ -547,6 +548,12 @@ static int libxl__device_disk_from_xenst
+     }
+     libxl_string_to_backend(ctx, tmp, &(disk->backend));
+ 
++    tmp = libxl__xs_read(gc, XBT_NULL,
++                         GCSPRINTF("%s/tapdisk-params", libxl_path));
++    if (tmp && strcmp(tmp, "")) {
++    	disk->backend = LIBXL_DISK_BACKEND_TAP;
++    }
++
+     disk->vdev = xs_read(ctx->xsh, XBT_NULL,
+                          GCSPRINTF("%s/dev", libxl_path), &len);
+     if (!disk->vdev) {
+@@ -834,6 +841,7 @@ int libxl_cdrom_change(libxl_ctx *ctx, u
+ 
+     libxl__ao_complete(egc, ao, 0);
+ out:
++    libxl_device_disk_dispose(&disk_empty);
+     if (lock) libxl__unlock_domain_userdata(lock);
+     if (rc) return AO_CREATE_FAIL(rc);
+     return AO_INPROGRESS;
