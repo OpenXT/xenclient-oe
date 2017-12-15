@@ -1,0 +1,682 @@
+################################################################################
+SHORT DESCRIPTION:
+################################################################################
+Libxl patch to support blktap3
+
+################################################################################
+LONG DESCRIPTION:
+################################################################################
+Modified libxl so as to be compatible with blktap3 for creation, operation and 
+destruction of tapdisk.
+
+################################################################################
+CHANGELOG
+################################################################################
+Initial work from Thanos Makatos
+https://github.com/qiaohaiming/blktap3/blob/master/libxl.diff
+
+Contributions by:
+Mahantesh Salimath <salimathm@ainfosec.com>
+
+################################################################################
+UPSTREAM PLAN
+################################################################################
+Could be upstreamed
+
+################################################################################
+PATCHES
+################################################################################
+Index: xen-4.9.0/tools/libxl/libxl_blktap3.c
+===================================================================
+--- /dev/null
++++ xen-4.9.0/tools/libxl/libxl_blktap3.c
+@@ -0,0 +1,139 @@
++/*
++ * Copyright (C) 2012      Advanced Micro Devices
++ * Author Christoph Egger <Christoph.Egger@amd.com>
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU Lesser General Public License as published
++ * by the Free Software Foundation; version 2.1 only.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU Lesser General Public License for more details.
++ */
++
++#include "libxl_osdeps.h" /* must come before any other headers */
++#include "libxl_internal.h"
++
++#include <tap-ctl.h>
++
++#include "list.h"   /* include for list_head structure */
++
++static int blktap_find(const char *type, const char *path, struct tap_list *tap)
++{
++    struct list_head list; /* Note: structure name updated */
++    struct tap_list *entry, *next_t;
++    int ret = -ENOENT, err;
++
++    /* TAILQ_INIT(&list);--> old function */
++    INIT_LIST_HEAD(&list);
++
++    if ((err = tap_ctl_list(&list)))
++        return err;
++
++    /* TAILQ_EMPTY(&list)--> old function */
++    if (list_empty(&list))
++        return ret;
++
++    tap_list_for_each_entry_safe(entry, next_t, &list) {
++
++        if (type && (!entry->type || strcmp(entry->type, type)))
++            continue;
++
++        if (path && (!entry->path || strcmp(entry->path, path)))
++            continue;
++
++        *tap = *entry;
++	tap->type = tap->path = NULL;
++        ret = 0;
++        break;
++    }
++
++    tap_ctl_list_free(&list);
++
++    return ret;
++}
++
++/**
++ * blktap3 doesn't require blkback, so it's always available.
++ */
++int libxl__blktap_enabled(libxl__gc *gc)
++{
++    return 1;
++}
++
++char *libxl__blktap_devpath(libxl__gc *gc, const char *disk,
++		libxl_disk_format format)
++{
++    const char *type = NULL;
++    char *params, *devname = NULL;
++    struct tap_list tap;
++    int err = 0;
++    int flags = 0;
++
++    type = libxl__device_disk_string_of_format(format);
++    if (!(err = blktap_find(type, disk, &tap))) {
++        LOG(DEBUG, "found tapdisk\n");
++	devname = libxl__sprintf(gc, "/dev/xen/blktap-2/tapdev%d", tap.minor);
++        if (devname)
++            return devname;
++		/* return 0; revert-back-changes*/
++    }
++
++    LOG(DEBUG, "tapdisk not found\n");
++
++	/* TODO Should we worry about return codes other than ENOENT? */
++
++    params = libxl__sprintf(gc, "%s:%s", type, disk);
++
++    /* tap_ctl_create(params, 0, -1, NULL) --> old function call  */
++    if (!(err = tap_ctl_create(params, &devname, flags, -1, 0, 0))) {
++        LOG(DEBUG, "created tapdisk\n");
++        return devname; /*revert-back-changes*/
++    }
++
++    LOG(ERROR, "error creating tapdisk: %s\n", strerror(err));
++
++    return NULL;/*revert-back-changes*/
++}
++
++int libxl__device_destroy_tapdisk(libxl__gc *gc, const char *be_path)
++{
++    char *disk;
++    int err;
++    struct tap_list tap;
++
++	LOG(DEBUG, "destroying tapdisk %s\n", be_path);
++
++    disk = strchr(be_path, ':');
++    if (!disk) {
++        LOG(ERROR, "Unable to parse params %s", be_path);
++        return ERROR_INVAL;
++    }
++
++    *disk++ = '\0';
++
++    err = blktap_find(be_path, disk, &tap);
++    if (err < 0) {
++        /* returns -errno */
++        LOGEV(ERROR, -err, "Unable to find type %s disk %s", be_path, disk);
++        return ERROR_FAIL;
++    }
++
++    err = tap_ctl_destroy(tap.pid, tap.minor, 0, NULL);
++    if (err < 0) {
++        LOGEV(ERROR, -err, "Failed to destroy tap device id %d minor %d",
++              tap.pid, tap.minor);
++        return ERROR_FAIL;
++    }
++
++    return 0;
++}
++
++/*
++ * Local variables:
++ * mode: C
++ * c-basic-offset: 4
++ * indent-tabs-mode: nil
++ * End:
++ */
+Index: xen-4.9.0/tools/libxl/list.h
+===================================================================
+--- /dev/null
++++ xen-4.9.0/tools/libxl/list.h
+@@ -0,0 +1,342 @@
++/*  $NetBSD: list.h,v 1.5 2014/08/20 15:26:52 riastradh Exp $   */
++
++/*-
++ * Copyright (c) 2013 The NetBSD Foundation, Inc.
++ * All rights reserved.
++ *
++ * This code is derived from software contributed to The NetBSD Foundation
++ * by Taylor R. Campbell.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ * 1. Redistributions of source code must retain the above copyright
++ *    notice, this list of conditions and the following disclaimer.
++ * 2. Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in the
++ *    documentation and/or other materials provided with the distribution.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
++ * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
++ * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
++ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FOUNDATION OR CONTRIBUTORS
++ * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++ * POSSIBILITY OF SUCH DAMAGE.
++ */
++
++/*
++ * Notes on porting:
++ *
++ * - LIST_HEAD(x) means a declaration `struct list_head x =
++ *   LIST_HEAD_INIT(x)' in Linux, but something else in NetBSD.
++ *   Replace by the expansion.
++ *
++ * - The `_rcu' routines here are not actually pserialize(9)-safe.
++ *   They need dependent read memory barriers added.  Please fix this
++ *   if you need to use them with pserialize(9).
++ */
++
++#ifndef _LINUX_LIST_H_
++#define _LINUX_LIST_H_
++
++//#include <sys/null.h>
++#include <sys/queue.h>
++#include <linux/kernel.h>
++#include <stddef.h>
++#include <stdbool.h>
++
++/*
++ * Doubly-linked lists.
++ */
++
++struct list_head {
++    struct list_head *prev;
++    struct list_head *next;
++};
++
++#define LIST_HEAD_INIT(name)    { .prev = &(name), .next = &(name) }
++
++static inline void
++INIT_LIST_HEAD(struct list_head *head)
++{
++    head->prev = head;
++    head->next = head;
++}
++
++static inline struct list_head *
++list_first(const struct list_head *head)
++{
++    return head->next;
++}
++
++static inline struct list_head *
++list_last(const struct list_head *head)
++{
++    return head->prev;
++}
++
++static inline struct list_head *
++list_next(const struct list_head *node)
++{
++    return node->next;
++}
++
++static inline struct list_head *
++list_prev(const struct list_head *node)
++{
++    return node->prev;
++}
++
++static inline int
++list_is_last(const struct list_head *list, const struct list_head *head)
++{
++	return list->next == head;
++}
++
++static inline int
++list_empty(const struct list_head *head)
++{
++    return (head->next == head);
++}
++
++static inline int
++list_is_singular(const struct list_head *head)
++{
++
++    if (list_empty(head))
++        return false;
++    if (head->next != head->prev)
++        return false;
++    return true;
++}
++
++static inline void
++__list_add_between(struct list_head *prev, struct list_head *node,
++    struct list_head *next)
++{
++    prev->next = node;
++    node->prev = prev;
++    node->next = next;
++    next->prev = node;
++}
++
++static inline void
++list_add(struct list_head *node, struct list_head *head)
++{
++    __list_add_between(head, node, head->next);
++}
++
++static inline void
++list_add_tail(struct list_head *node, struct list_head *head)
++{
++    __list_add_between(head->prev, node, head);
++}
++
++static inline void
++list_del(struct list_head *entry)
++{
++    entry->prev->next = entry->next;
++    entry->next->prev = entry->prev;
++}
++
++static inline void
++__list_splice_between(struct list_head *prev, const struct list_head *list,
++    struct list_head *next)
++{
++    struct list_head *first = list->next;
++    struct list_head *last = list->prev;
++
++    first->prev = prev;
++    prev->next = first;
++
++    last->next = next;
++    next->prev = last;
++}
++
++static inline void
++list_splice(const struct list_head *list, struct list_head *head)
++{
++    if (!list_empty(list))
++        __list_splice_between(head, list, head->next);
++}
++
++static inline void
++list_splice_tail(const struct list_head *list, struct list_head *head)
++{
++    if (!list_empty(list))
++        __list_splice_between(head->prev, list, head);
++}
++
++static inline void
++list_move(struct list_head *node, struct list_head *head)
++{
++    list_del(node);
++    list_add(node, head);
++}
++
++static inline void
++list_move_tail(struct list_head *node, struct list_head *head)
++{
++    list_del(node);
++    list_add_tail(node, head);
++}
++
++static inline void
++list_replace(struct list_head *old, struct list_head *new)
++{
++    new->prev = old->prev;
++    old->prev->next = new;
++    new->next = old->next;
++    old->next->prev = new;
++}
++
++static inline void
++list_del_init(struct list_head *node)
++{
++    list_del(node);
++    INIT_LIST_HEAD(node);
++}
++
++#define check_type(expr, type)			\
++	((typeof(expr) *)0 != (type *)0)
++
++#define check_types_match(expr1, expr2)		\
++	((typeof(expr1) *)0 != (typeof(expr2) *)0)
++
++#define container_off(containing_type, member)	\
++	offsetof(containing_type, member)
++
++#define container_of(member_ptr, containing_type, member)		\
++	 ((containing_type *)						\
++	  ((char *)(member_ptr)						\
++	   - container_off(containing_type, member))			\
++	  + check_types_match(*(member_ptr), ((containing_type *)0)->member))
++
++#define list_entry(PTR, TYPE, FIELD)    container_of(PTR, TYPE, FIELD)
++#define list_first_entry(PTR, TYPE, FIELD)              \
++    list_entry(list_first((PTR)), TYPE, FIELD)
++#define list_last_entry(PTR, TYPE, FIELD)               \
++    list_entry(list_last((PTR)), TYPE, FIELD)
++#define list_next_entry(ENTRY, FIELD)                   \
++    list_entry(list_next(&(ENTRY)->FIELD), typeof(*(ENTRY)), FIELD)
++#define list_prev_entry(ENTRY, FIELD)                   \
++    list_entry(list_prev(&(ENTRY)->FIELD), typeof(*(ENTRY)), FIELD)
++
++#define list_for_each(VAR, HEAD)                    \
++    for ((VAR) = list_first((HEAD));                \
++        (VAR) != (HEAD);                    \
++        (VAR) = list_next((VAR)))
++
++#define list_for_each_safe(VAR, NEXT, HEAD)             \
++    for ((VAR) = list_first((HEAD));                \
++        ((VAR) != (HEAD)) && ((NEXT) = list_next((VAR)), 1);    \
++        (VAR) = (NEXT))
++
++#define list_for_each_entry(VAR, HEAD, FIELD)               \
++    for ((VAR) = list_entry(list_first((HEAD)), typeof(*(VAR)), FIELD); \
++        &(VAR)->FIELD != (HEAD);                \
++        (VAR) = list_entry(list_next(&(VAR)->FIELD), typeof(*(VAR)), \
++            FIELD))
++
++#define list_for_each_entry_reverse(VAR, HEAD, FIELD)           \
++    for ((VAR) = list_entry(list_last((HEAD)), typeof(*(VAR)), FIELD); \
++        &(VAR)->FIELD != (HEAD);                \
++        (VAR) = list_entry(list_prev(&(VAR)->FIELD), typeof(*(VAR)), \
++            FIELD))
++
++#define list_for_each_entry_safe(VAR, NEXT, HEAD, FIELD)        \
++    for ((VAR) = list_entry(list_first((HEAD)), typeof(*(VAR)), FIELD); \
++        (&(VAR)->FIELD != (HEAD)) &&                \
++            ((NEXT) = list_entry(list_next(&(VAR)->FIELD),  \
++            typeof(*(VAR)), FIELD), 1);         \
++        (VAR) = (NEXT))
++
++#define list_for_each_entry_continue(VAR, HEAD, FIELD)          \
++    for ((VAR) = list_next_entry((VAR), FIELD);         \
++        &(VAR)->FIELD != (HEAD);                \
++        (VAR) = list_next_entry((VAR), FIELD))
++
++#define list_for_each_entry_continue_reverse(VAR, HEAD, FIELD)      \
++    for ((VAR) = list_prev_entry((VAR), FIELD);         \
++        &(VAR)->FIELD != (HEAD);                \
++        (VAR) = list_prev_entry((VAR), FIELD))
++
++#define list_for_each_entry_safe_from(VAR, NEXT, HEAD, FIELD)       \
++    for (;                              \
++        (&(VAR)->FIELD != (HEAD)) &&                \
++            ((NEXT) = list_next_entry((VAR), FIELD));       \
++        (VAR) = (NEXT))
++
++/*
++ * `H'ead-only/`H'ash-table doubly-linked lists.
++ */
++
++LIST_HEAD(hlist_head, hlist_node);
++struct hlist_node {
++    LIST_ENTRY(hlist_node) hln_entry;
++};
++
++static inline struct hlist_node *
++hlist_first(struct hlist_head *head)
++{
++    return LIST_FIRST(head);
++}
++
++static inline struct hlist_node *
++hlist_next(struct hlist_node *node)
++{
++    return LIST_NEXT(node, hln_entry);
++}
++
++static inline void
++hlist_add_head(struct hlist_node *node, struct hlist_head *head)
++{
++    LIST_INSERT_HEAD(head, node, hln_entry);
++}
++
++static inline void
++hlist_add_after(struct hlist_node *node, struct hlist_node *next)
++{
++    LIST_INSERT_AFTER(node, next, hln_entry);
++}
++
++static inline void
++hlist_del(struct hlist_node *node)
++{
++    LIST_REMOVE(node, hln_entry);
++}
++
++static inline void
++hlist_del_init(struct hlist_node *node)
++{
++    LIST_REMOVE(node, hln_entry);
++}
++
++#define hlist_entry(PTR, TYPE, FIELD)   container_of(PTR, TYPE, FIELD)
++#define hlist_for_each(VAR, HEAD)   LIST_FOREACH(VAR, HEAD, hln_entry)
++#define hlist_for_each_safe(VAR, NEXT, HEAD)                \
++    LIST_FOREACH_SAFE(VAR, HEAD, hln_entry, NEXT)
++
++#define hlist_for_each_entry(VAR, HEAD, FIELD)              \
++    for ((VAR) = hlist_entry(LIST_FIRST((HEAD)), typeof(*(VAR)), FIELD);  \
++        &(VAR)->FIELD != NULL;                        \
++            (VAR) = hlist_entry(LIST_NEXT(&(VAR)->FIELD, hln_entry),      \
++            typeof(*(VAR)), FIELD))
++
++/*
++ * XXX The nominally RCU-safe APIs below lack dependent read barriers,
++ * so they're not actually RCU-safe...on the alpha, anyway.  Someone^TM
++ * should fix this.
++ */
++
++#define hlist_add_after_rcu     hlist_add_after
++#define hlist_add_head_rcu      hlist_add_head
++#define hlist_del_init_rcu      hlist_del_init
++#define hlist_for_each_entry_rcu    hlist_for_each_entry
++
++#endif  /* _LINUX_LIST_H_ */
+Index: xen-4.9.0/tools/libxl/Makefile
+===================================================================
+--- xen-4.9.0.orig/tools/libxl/Makefile
++++ xen-4.9.0/tools/libxl/Makefile
+@@ -20,17 +20,17 @@ LIBUUID_LIBS += -luuid
+ endif
+ 
+ LIBXL_LIBS =
+-LIBXL_LIBS = $(LDLIBS_libxentoollog) $(LDLIBS_libxenevtchn) $(LDLIBS_libxenctrl) $(LDLIBS_libxenguest) $(LDLIBS_libxenstore) $(LDLIBS_libblktapctl) $(PTYFUNCS_LIBS) $(LIBUUID_LIBS)
++LIBXL_LIBS = $(LDLIBS_libxentoollog) $(LDLIBS_libxenevtchn) $(LDLIBS_libxenctrl) $(LDLIBS_libxenguest) $(LDLIBS_libxenstore) $(PTYFUNCS_LIBS) $(LIBUUID_LIBS)
+ ifeq ($(CONFIG_LIBNL),y)
+ LIBXL_LIBS += $(LIBNL3_LIBS)
+ endif
+ 
++CFLAGS_LIBXL += -I/usr/include/blktap
+ CFLAGS_LIBXL += $(CFLAGS_libxentoollog)
+ CFLAGS_LIBXL += $(CFLAGS_libxenevtchn)
+ CFLAGS_LIBXL += $(CFLAGS_libxenctrl)
+ CFLAGS_LIBXL += $(CFLAGS_libxenguest)
+ CFLAGS_LIBXL += $(CFLAGS_libxenstore)
+-CFLAGS_LIBXL += $(CFLAGS_libblktapctl) 
+ ifeq ($(CONFIG_LIBNL),y)
+ CFLAGS_LIBXL += $(LIBNL3_CFLAGS)
+ endif
+@@ -47,9 +47,9 @@ LIBXLU_LIBS = $(LDLIBS_libxenlight)
+ 
+ LIBXL_OBJS-y = osdeps.o libxl_paths.o libxl_bootloader.o flexarray.o
+ ifeq ($(LIBXL_BLKTAP),y)
+-LIBXL_OBJS-y += libxl_blktap2.o
++LIBXL_OBJS-y += libxl_blktap3.o
+ else
+-LIBXL_OBJS-y += libxl_noblktap2.o
++LIBXL_OBJS-y += libxl_noblktap3.o
+ endif
+ 
+ ifeq ($(CONFIG_LIBNL),y)
+Index: xen-4.9.0/tools/libxl/libxl_types_internal.idl
+===================================================================
+--- xen-4.9.0.orig/tools/libxl/libxl_types_internal.idl
++++ xen-4.9.0/tools/libxl/libxl_types_internal.idl
+@@ -27,6 +27,7 @@ libxl__device_kind = Enumeration("device
+     (10, "QUSB"),
+     (11, "9PFS"),
+     (12, "VWIF"),
++    (13, "VBD3"),
+     ])
+ 
+ libxl__console_backend = Enumeration("console_backend", [
+Index: xen-4.9.0/tools/libxl/libxl_device.c
+===================================================================
+--- xen-4.9.0.orig/tools/libxl/libxl_device.c
++++ xen-4.9.0/tools/libxl/libxl_device.c
+@@ -297,11 +297,6 @@ static int disk_try_backend(disk_try_bac
+ 
+         /* Note: keep going if the disk is a cdrom. tapdisk can handle them as "raw" */
+ 
+-        if (!libxl__blktap_enabled(a->gc)) {
+-            LOG(DEBUG, "Disk vdev=%s, backend tap unsuitable because blktap "
+-                       "not available", a->disk->vdev);
+-            return 0;
+-        }
+         if (!(a->disk->format == LIBXL_DISK_FORMAT_RAW ||
+               a->disk->format == LIBXL_DISK_FORMAT_VHD)) {
+             goto bad_format;
+@@ -920,7 +915,9 @@ void libxl__initiate_device_generic_remo
+     STATE_AO_GC(aodev->ao);
+     xs_transaction_t t = 0;
+     char *be_path = libxl__device_backend_path(gc, aodev->dev);
++    char *fe_path = libxl__device_frontend_path(gc, aodev->dev);
+     char *state_path = GCSPRINTF("%s/state", be_path);
++    char *fe_state_path = GCSPRINTF("%s/state", fe_path);
+     char *online_path = GCSPRINTF("%s/online", be_path);
+     const char *state;
+     libxl_dominfo info;
+@@ -990,6 +987,11 @@ void libxl__initiate_device_generic_remo
+                 LOGD(ERROR, domid, "unable to write to xenstore path %s", state_path);
+                 goto out;
+             }
++            rc = libxl__xs_write_checked(gc, t, fe_state_path, GCSPRINTF("%d", XenbusStateClosed));
++            if (rc) {
++                LOGD(ERROR, domid, "unable to write to xenstore path %s", fe_state_path);
++                goto out;
++            }
+         }
+ 
+         rc = libxl__xs_transaction_commit(gc, &t);
+Index: xen-4.9.0/tools/libxl/libxl_disk.c
+===================================================================
+--- xen-4.9.0.orig/tools/libxl/libxl_disk.c
++++ xen-4.9.0/tools/libxl/libxl_disk.c
+@@ -56,7 +56,7 @@ static void disk_eject_xswatch_callback(
+             "/local/domain/%d/backend/%" TOSTRING(BACKEND_STRING_SIZE)
+            "[a-z]/%*d/%*d",
+            &disk->backend_domid, backend_type);
+-    if (!strcmp(backend_type, "tap") || !strcmp(backend_type, "vbd")) {
++    if (!strcmp(backend_type, "tap") || !strcmp(backend_type, "vbd") || !strcmp(backend_type, "vbd3")) {
+         disk->backend = LIBXL_DISK_BACKEND_TAP;
+     } else if (!strcmp(backend_type, "qdisk")) {
+         disk->backend = LIBXL_DISK_BACKEND_QDISK;
+@@ -189,7 +189,7 @@ int libxl__device_from_disk(libxl__gc *g
+             device->backend_kind = LIBXL__DEVICE_KIND_VBD;
+             break;
+         case LIBXL_DISK_BACKEND_TAP:
+-            device->backend_kind = LIBXL__DEVICE_KIND_VBD;
++            device->backend_kind = LIBXL__DEVICE_KIND_VBD3;
+             break;
+         case LIBXL_DISK_BACKEND_QDISK:
+             device->backend_kind = LIBXL__DEVICE_KIND_QDISK;
+@@ -310,7 +310,6 @@ static void device_disk_add(libxl__egc *
+             case LIBXL_DISK_BACKEND_PHY:
+                 dev = disk->pdev_path;
+ 
+-        do_backend_phy:
+                 flexarray_append(back, "params");
+                 flexarray_append(back, dev);
+ 
+@@ -322,27 +321,29 @@ static void device_disk_add(libxl__egc *
+                 break;
+ 
+             case LIBXL_DISK_BACKEND_TAP:
+-                if (dev == NULL) {
+-                    dev = libxl__blktap_devpath(gc, disk->pdev_path,
+-                                                disk->format);
+-                    if (!dev) {
+-                        LOGD(ERROR, domid, "Failed to get blktap devpath for %p",
+-                             disk->pdev_path);
+-                        rc = ERROR_FAIL;
+-                        goto out;
+-                    }
+-                }
+-                flexarray_append(back, "tapdisk-params");
++		rc = 0;
++		dev = libxl__blktap_devpath(gc, disk->pdev_path, disk->format);
++		if (!dev) {
++		     LOG(ERROR, "failed to get blktap devpath for %s: %s\n",
++			  disk->pdev_path, strerror(rc));
++		     rc = ERROR_FAIL;
++		     goto out;
++		}
++		LOG(DEBUG,"\nBLKTAP3_DEBUG: dev path = %s \n", dev);
++		if (!disk->script && disk->backend_domid == LIBXL_TOOLSTACK_DOMID) {
++		    int major, minor;
++		    if (!libxl__device_physdisk_major_minor(dev, &major, &minor)) {
++			LOG(DEBUG, "\nBLKTAP3_DEBUG: major:minor = %x:%x\n",major,minor);
++			flexarray_append_pair(back, "physical-device",
++				GCSPRINTF("%x:%x", major, minor));
++		    }
++		}
++		flexarray_append(back, "tapdisk-params");
+                 flexarray_append(back, GCSPRINTF("%s:%s",
+                     libxl__device_disk_string_of_format(disk->format),
+                     disk->pdev_path));
++		break;
+ 
+-                /* tap backends with scripts are rejected by
+-                 * libxl__device_disk_set_backend */
+-                assert(!disk->script);
+-
+-                /* now create a phy device to export the device to the guest */
+-                goto do_backend_phy;
+             case LIBXL_DISK_BACKEND_QDISK:
+                 flexarray_append(back, "params");
+                 flexarray_append(back, GCSPRINTF("%s:%s",

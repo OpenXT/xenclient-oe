@@ -97,6 +97,8 @@ SRC_URI_append = " \
     file://libxl-allow-non-qdisk-cdrom.patch \
     file://libxl-fix-flr.patch \
     file://libxl-disable-vnc-query-when-disabled.patch \
+    file://libxl-blktap3-support.patch \
+    file://enable-out-of-tree-blktap3.patch \
     file://xsa246-4.9.patch \
     file://xsa247-4.9/0001-p2m-Always-check-to-see-if-removing-a-p2m-entry-actu.patch \
     file://xsa247-4.9/0002-p2m-Check-return-value-of-p2m_set_entry-when-decreas.patch \
