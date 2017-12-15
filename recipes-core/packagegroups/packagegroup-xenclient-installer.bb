@@ -12,12 +12,9 @@ RDEPENDS_${PN} = " \
     openssh-sshd-tcp-init \
     util-linux-mount \
     util-linux-umount \
-    xen-blktap \
     xen-console \
     xen-hypervisor \
     xen-flask-tools \
-    xen-libblktapctl \
-    xen-libvhd \
     xen-libxenctrl \
     xen-libxenguest \
     xen-libxenlight \
@@ -25,6 +22,7 @@ RDEPENDS_${PN} = " \
     xen-libxlutil \
     xen-xenstat \
     xen-xl \
+    blktap3 \
     dialog \
     e2fsprogs \
     e2fsprogs-e2fsck \

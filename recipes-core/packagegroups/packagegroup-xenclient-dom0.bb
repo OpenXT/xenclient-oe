@@ -11,13 +11,10 @@ RDEPENDS_${PN} = " \
     openssh-sshd-tcp-init \
     util-linux-mount \
     util-linux-umount \
-    xen-blktap \
     xen-console \
     xen-hvmloader \
     xen-hypervisor \
     xen-flask-tools \
-    xen-libblktapctl \
-    xen-libvhd \
     xen-libxenctrl \
     xen-libxenguest \
     xen-libxenlight \
@@ -28,6 +25,7 @@ RDEPENDS_${PN} = " \
     xen-xenstored \
     xen-xl \
     xen-xsm-policy \
+    blktap3 \
     grub \
     tboot \
     tboot-utils \

@@ -7,6 +7,24 @@ LICENSE = "GPLv2"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/GPL-2.0;md5=801f80980d171dd6425610833a22dbe6"
 DEPENDS = "${@deb_bootstrap_deps(d)}"
 
+RDEPENDS_${PN}-base_remove = "\
+    ${PN}-blktap \
+    ${PN}-libblktapctl \
+    ${PN}-libvhd \
+    "
+
+RRECOMMENDS_${PN}-base_remove = " \
+    ${PN}-libblktap \
+    "
+
+PACKAGES_remove = " \
+    ${PN}-blktap \
+    ${PN}-libblktap \
+    ${PN}-libblktapctl \
+    ${PN}-libblktapctl-dev \
+    ${PN}-libblktap-dev \
+    "
+
 DEB_SUITE = "wheezy"
 DEB_ARCH = "i386"
 

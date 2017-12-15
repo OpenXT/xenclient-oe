@@ -32,9 +32,20 @@ python () {
 DEPENDS += " \
     util-linux \
     xen \
-    xen-blktap \
+    blktap3 \
     libnl \
     "
+
+RDEPENDS_${PN}-base_remove = "\
+    ${PN}-blktap \
+    ${PN}-libblktapctl \
+    ${PN}-libvhd \
+    "
+
+RRECOMMENDS_${PN}-base_remove = " \
+    ${PN}-libblktap \
+    "
+
 SRC_URI_append = " \
     file://xen-init-dom0.initscript \
     file://xl.conf \
@@ -49,6 +60,14 @@ PACKAGES = " \
     xen-libxenlight-dev \
     xen-libxl-staticdev \
     ${PN}-dbg \
+    "
+
+PACKAGES_remove = " \
+    ${PN}-blktap \
+    ${PN}-libblktap \
+    ${PN}-libblktapctl \
+    ${PN}-libblktapctl-dev \
+    ${PN}-libblktap-dev \
     "
 
 FILES_${PN}-staticdev = " \
@@ -67,6 +86,8 @@ FILES_${PN}-dbg += " \
     ${libdir}/.debug \
     /usr/src/debug \
 "
+
+CFLAGS_prepend += " -I${STAGING_INCDIR}/blktap "
 
 EXTRA_OEMAKE += "CROSS_SYS_ROOT=${STAGING_DIR_HOST} CROSS_COMPILE=${HOST_PREFIX}"
 EXTRA_OEMAKE += "CONFIG_IOEMU=n"
