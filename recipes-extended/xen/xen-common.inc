@@ -81,7 +81,6 @@ SRC_URI_append = " \
     file://libxl-openxt-tweaks.patch \
     file://libxl-domain-state.patch \
     file://libxl-fixup-cmdline-ops.patch \
-    file://libxl-crypto-key-dir.patch \
     file://libxl-fix-reboot.patch \
     file://libxl-display-manager-support.patch \
     file://libxl-xenmgr-support.patch \
@@ -98,6 +97,7 @@ SRC_URI_append = " \
     file://libxl-fix-flr.patch \
     file://libxl-disable-vnc-query-when-disabled.patch \
     file://libxl-blktap3-support.patch \
+    file://libxl-crypto-key-dir.patch \
     file://enable-out-of-tree-blktap3.patch \
     file://xsa246-4.9.patch \
     file://xsa247-4.9/0001-p2m-Always-check-to-see-if-removing-a-p2m-entry-actu.patch \
