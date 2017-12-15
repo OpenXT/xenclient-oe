@@ -98,6 +98,8 @@ SRC_URI_append = " \
     file://libxl-disable-vnc-query-when-disabled.patch \
     file://libxl-blktap3-support.patch \
     file://libxl-crypto-key-dir.patch \
+    file://libxl-blktap3-do-not-destroy-in-use-tapdevs.patch \
+    file://libxl-blktap3-iso-hotswap.patch \
     file://enable-out-of-tree-blktap3.patch \
     file://xsa246-4.9.patch \
     file://xsa247-4.9/0001-p2m-Always-check-to-see-if-removing-a-p2m-entry-actu.patch \
