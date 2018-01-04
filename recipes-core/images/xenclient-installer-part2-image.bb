@@ -22,7 +22,7 @@ inherit xenclient-image-src-package
 inherit xenclient-licences
 require xenclient-version.inc
 
-post_rootfs_shell_commands() {
+post_image_installer_part2_mangle() {
 	mv ${IMAGE_ROOTFS}/etc/xenclient.conf ${IMAGE_ROOTFS}/config/;
 	rm -rf ${IMAGE_ROOTFS}/dev;
 	rm -rf ${IMAGE_ROOTFS}/etc;
@@ -30,13 +30,13 @@ post_rootfs_shell_commands() {
 	rm -rf ${IMAGE_ROOTFS}/bin;
 	rm -rf ${IMAGE_ROOTFS}/lib;
 	rm -rf ${IMAGE_ROOTFS}/sbin;
-	# safe to now remove the run directory and put the script there
-	rm -rf ${IMAGE_ROOTFS}/run;
-	mv -f ${IMAGE_ROOTFS}/run.installer ${IMAGE_ROOTFS}/run;
+	# "safe" to now remove the run directory and put the script there
+	rm -rf ${IMAGE_ROOTFS}/run
+	mv -f ${IMAGE_ROOTFS}/run.installer ${IMAGE_ROOTFS}/run
 }
 
-ROOTFS_POSTPROCESS_COMMAND += " \
-    post_rootfs_shell_commands; \
+IMAGE_POSTPROCESS_COMMAND += " \
+    post_image_installer_part2_mangle; \
 "
 
 LICENSE = "GPLv2 & MIT"
