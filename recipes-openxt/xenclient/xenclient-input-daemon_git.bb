@@ -1,7 +1,7 @@
 DESCRIPTION = "Input daemon for XenClient"
 LICENSE = "LGPLv2.1"
 LIC_FILES_CHKSUM = "file://COPYING;md5=321bf41f280cf805086dd5a720b37785"
-DEPENDS = "xenclient-idl dbus xen libxcdbus udev xenclient-rpcgen-native openssl libevent libxcxenstore libdmbus libxenbackend xenfb2"
+DEPENDS = "xen libxcdbus udev openssl libevent libxcxenstore libdmbus libxenbackend xenfb2"
 
 RDEPENDS_${PN} += "xenclient-keyboard-list libxcxenstore"
 
@@ -12,8 +12,6 @@ SRC_URI = "git://${OPENXT_GIT_MIRROR}/input.git;protocol=${OPENXT_GIT_PROTOCOL};
 	   file://input-daemon.initscript \
 "
 
-EXTRA_OECONF += "--with-idldir=${STAGING_IDLDIR}"
-
 CFLAGS_append += " -Wno-unused-parameter -Wno-deprecated-declarations "
 
 S = "${WORKDIR}/git"
@@ -22,7 +20,7 @@ ASNEEDED = ""
 
 LDFLAGS += "-lm -lcrypto"
 
-inherit autotools xenclient update-rc.d pkgconfig
+inherit autotools xenclient update-rc.d pkgconfig xc-rpcgen-c-1.0
 
 
 INITSCRIPT_NAME = "xenclient-input"

@@ -2,11 +2,9 @@ DESCRIPTION = "XenClient database daemon"
 LICENSE = "GPLv2"
 LIC_FILES_CHKSUM = "file://../COPYING;md5=4641e94ec96f98fabc56ff9cc48be14b"
 DEPENDS = " \
-    xenclient-idl \
     ocaml-dbus \
     xen-ocaml-libs \
     xenclient-toolstack \
-    xenclient-rpcgen-native \
 "
 
 SRCREV = "${AUTOREV}"
@@ -20,7 +18,7 @@ RDEPENDS_${PN} += "bash"
 
 S = "${WORKDIR}/git/dbd"
 
-inherit update-rc.d haskell ocaml findlib
+inherit update-rc.d haskell ocaml findlib xc-rpcgen-ocaml-1.0
 
 INITSCRIPT_NAME = "dbd"
 INITSCRIPT_PARAMS = "defaults 25"
@@ -34,10 +32,10 @@ do_configure() {
     # generate rpc stubs
     mkdir -p autogen
     # Server objects
-    xc-rpcgen --camel -s -o autogen ${STAGING_DATADIR}/idl/db.xml
+    xc-rpcgen --camel --templates-dir=${rpcgendatadir} -s -o autogen ${idldatadir}/db.xml
     # Client objects
-    xc-rpcgen --camel -c -o autogen ${STAGING_DATADIR}/idl/db.xml
-    xc-rpcgen --camel -c -o autogen ${STAGING_DATADIR}/idl/dbus.xml
+    xc-rpcgen --camel --templates-dir=${rpcgendatadir} -c -o autogen ${idldatadir}/db.xml
+    xc-rpcgen --camel --templates-dir=${rpcgendatadir} -c -o autogen ${idldatadir}/dbus.xml
 }
 
 do_compile() {

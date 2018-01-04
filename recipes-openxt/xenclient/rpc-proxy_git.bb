@@ -2,8 +2,6 @@ DESCRIPTION = "XenClient RPC proxy"
 LICENSE = "GPLv2"
 LIC_FILES_CHKSUM = "file://../COPYING;md5=4641e94ec96f98fabc56ff9cc48be14b"
 DEPENDS += " \
-    xenclient-rpcgen-native \
-    xenclient-idl \
     libxchutils \
     libxchwebsocket \
     libxchv4v \
@@ -39,7 +37,7 @@ S = "${WORKDIR}/git/rpc-proxy"
 
 HPV = "1.0"
 require recipes-openxt/xclibs/xclibs.inc
-inherit update-rc.d haskell
+inherit update-rc.d haskell xc-rpcgen-haskell-1.0
 
 INITSCRIPT_NAME = "rpc-proxy"
 INITSCRIPT_PARAMS = "defaults 30"
@@ -49,8 +47,8 @@ INITSCRIPT_PARAMS = "defaults 30"
 do_configure_append() {
 	# generate rpc stubs
 	mkdir -p Rpc/Autogen
-	xc-rpcgen --haskell -s -o Rpc/Autogen --module-prefix=Rpc.Autogen ${STAGING_DATADIR}/idl/rpc_proxy.xml
-	xc-rpcgen --haskell -c -o Rpc/Autogen --module-prefix=Rpc.Autogen ${STAGING_DATADIR}/idl/dbus.xml
+	xc-rpcgen --haskell --templates-dir=${rpcgendatadir} -s -o Rpc/Autogen --module-prefix=Rpc.Autogen ${idldatadir}/rpc_proxy.xml
+	xc-rpcgen --haskell --templates-dir=${rpcgendatadir} -c -o Rpc/Autogen --module-prefix=Rpc.Autogen ${idldatadir}/dbus.xml
 }
 
 do_install_append() {

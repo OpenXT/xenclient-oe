@@ -4,8 +4,6 @@ LIC_FILES_CHKSUM="file://../COPYING;md5=4641e94ec96f98fabc56ff9cc48be14b"
 DEPENDS = " \
     carrier-detect \
     libxchutils \
-    xenclient-rpcgen-native \
-    xenclient-idl \
     hkg-hsyslog \
     libxch-rpc \
     libxchxenstore \
@@ -24,10 +22,7 @@ SRC_URI = "git://${OPENXT_GIT_MIRROR}/network.git;protocol=${OPENXT_GIT_PROTOCOL
 
 S = "${WORKDIR}/git/nws"
 
-IDL_DIR = "${STAGING_DATADIR}/idl"
-NM_IDL_DIR = "${STAGING_DATADIR}/nm-idl"
-
-inherit haskell update-rc.d
+inherit haskell update-rc.d xc-rpcgen-haskell-1.0
 
 INITSCRIPT_PACKAGES = "${PN}"
 INITSCRIPT_NAME_${PN} = "network-slave"
@@ -40,20 +35,20 @@ do_configure_append() {
     mkdir -p ${S}/Rpc/Autogen
 
     # Server objects
-    xc-rpcgen --haskell --server -o ${S}/Rpc/Autogen --module-prefix=Rpc.Autogen ${IDL_DIR}/network_slave.xml
-    xc-rpcgen --haskell --server -o ${S}/Rpc/Autogen --module-prefix=Rpc.Autogen ${IDL_DIR}/network.xml
-    xc-rpcgen --haskell --server -o ${S}/Rpc/Autogen --module-prefix=Rpc.Autogen ${IDL_DIR}/network_nm.xml
+    xc-rpcgen --haskell --templates-dir=${rpcgendatadir} --server -o ${S}/Rpc/Autogen --module-prefix=Rpc.Autogen ${idldatadir}/network_slave.xml
+    xc-rpcgen --haskell --templates-dir=${rpcgendatadir} --server -o ${S}/Rpc/Autogen --module-prefix=Rpc.Autogen ${idldatadir}/network.xml
+    xc-rpcgen --haskell --templates-dir=${rpcgendatadir} --server -o ${S}/Rpc/Autogen --module-prefix=Rpc.Autogen ${idldatadir}/network_nm.xml
 
-    # NetworkManager objects
-    xc-rpcgen --haskell --client -o ${S}/Rpc/Autogen --module-prefix=Rpc.Autogen ${NM_IDL_DIR}/nm-manager.xml -n NmManager
-    xc-rpcgen --haskell --client -o ${S}/Rpc/Autogen --module-prefix=Rpc.Autogen ${NM_IDL_DIR}/nm-device.xml -n NmDevice
-    xc-rpcgen --haskell --client -o ${S}/Rpc/Autogen --module-prefix=Rpc.Autogen ${NM_IDL_DIR}/nm-device-ethernet.xml -n NmDeviceEthernet
-    xc-rpcgen --haskell --client -o ${S}/Rpc/Autogen --module-prefix=Rpc.Autogen ${NM_IDL_DIR}/nm-device-wifi.xml -n NmDeviceWifi
-    xc-rpcgen --haskell --client -o ${S}/Rpc/Autogen --module-prefix=Rpc.Autogen ${NM_IDL_DIR}/nm-device-modem.xml -n NmDeviceModem
-    xc-rpcgen --haskell --client -o ${S}/Rpc/Autogen --module-prefix=Rpc.Autogen ${NM_IDL_DIR}/nm-access-point.xml  -n NmAccessPoint
-    xc-rpcgen --haskell --client -o ${S}/Rpc/Autogen --module-prefix=Rpc.Autogen ${NM_IDL_DIR}/nm-active-connection.xml -n NmActiveConnection
+    # NetworkManager objects (stored in the network-manager specific directory)
+    xc-rpcgen --haskell --templates-dir=${rpcgendatadir} --client -o ${S}/Rpc/Autogen --module-prefix=Rpc.Autogen ${nmidldatadir}/nm-manager.xml -n NmManager
+    xc-rpcgen --haskell --templates-dir=${rpcgendatadir} --client -o ${S}/Rpc/Autogen --module-prefix=Rpc.Autogen ${nmidldatadir}/nm-device.xml -n NmDevice
+    xc-rpcgen --haskell --templates-dir=${rpcgendatadir} --client -o ${S}/Rpc/Autogen --module-prefix=Rpc.Autogen ${nmidldatadir}/nm-device-ethernet.xml -n NmDeviceEthernet
+    xc-rpcgen --haskell --templates-dir=${rpcgendatadir} --client -o ${S}/Rpc/Autogen --module-prefix=Rpc.Autogen ${nmidldatadir}/nm-device-wifi.xml -n NmDeviceWifi
+    xc-rpcgen --haskell --templates-dir=${rpcgendatadir} --client -o ${S}/Rpc/Autogen --module-prefix=Rpc.Autogen ${nmidldatadir}/nm-device-modem.xml -n NmDeviceModem
+    xc-rpcgen --haskell --templates-dir=${rpcgendatadir} --client -o ${S}/Rpc/Autogen --module-prefix=Rpc.Autogen ${nmidldatadir}/nm-access-point.xml  -n NmAccessPoint
+    xc-rpcgen --haskell --templates-dir=${rpcgendatadir} --client -o ${S}/Rpc/Autogen --module-prefix=Rpc.Autogen ${nmidldatadir}/nm-active-connection.xml -n NmActiveConnection
 
-    xc-rpcgen --haskell -o Rpc/Autogen --module-prefix=Rpc.Autogen ${STAGING_DATADIR}/idl/dbus.xml
+    xc-rpcgen --haskell --templates-dir=${rpcgendatadir} -o Rpc/Autogen --module-prefix=Rpc.Autogen ${idldatadir}/dbus.xml
 }
 
 do_install_append() {
