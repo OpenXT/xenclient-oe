@@ -30,7 +30,7 @@ Index: xen-4.9.1/tools/libxl/libxl_blktap3.c
 ===================================================================
 --- /dev/null
 +++ xen-4.9.1/tools/libxl/libxl_blktap3.c
-@@ -0,0 +1,139 @@
+@@ -0,0 +1,136 @@
 +/*
 + * Copyright (C) 2012      Advanced Micro Devices
 + * Author Christoph Egger <Christoph.Egger@amd.com>
@@ -110,7 +110,6 @@ Index: xen-4.9.1/tools/libxl/libxl_blktap3.c
 +	devname = libxl__sprintf(gc, "/dev/xen/blktap-2/tapdev%d", tap.minor);
 +        if (devname)
 +            return devname;
-+		/* return 0; revert-back-changes*/
 +    }
 +
 +    LOG(DEBUG, "tapdisk not found\n");
@@ -119,37 +118,35 @@ Index: xen-4.9.1/tools/libxl/libxl_blktap3.c
 +
 +    params = libxl__sprintf(gc, "%s:%s", type, disk);
 +
-+    /* tap_ctl_create(params, 0, -1, NULL) --> old function call  */
 +    if (!(err = tap_ctl_create(params, &devname, flags, -1, 0, 0))) {
 +        LOG(DEBUG, "created tapdisk\n");
-+        return devname; /*revert-back-changes*/
++        return devname;
 +    }
 +
 +    LOG(ERROR, "error creating tapdisk: %s\n", strerror(err));
 +
-+    return NULL;/*revert-back-changes*/
++    return NULL;
 +}
 +
-+int libxl__device_destroy_tapdisk(libxl__gc *gc, const char *be_path)
++int libxl__device_destroy_tapdisk(libxl__gc *gc, const char *params)
 +{
-+    char *disk;
++    char *type, *disk;
 +    int err;
 +    struct tap_list tap;
 +
-+	LOG(DEBUG, "destroying tapdisk %s\n", be_path);
-+
-+    disk = strchr(be_path, ':');
++    type = libxl__strdup(gc, params);
++    disk = strchr(type, ':');
 +    if (!disk) {
-+        LOG(ERROR, "Unable to parse params %s", be_path);
++        LOG(ERROR, "Unable to parse params %s", params);
 +        return ERROR_INVAL;
 +    }
 +
 +    *disk++ = '\0';
 +
-+    err = blktap_find(be_path, disk, &tap);
++    err = blktap_find(type, disk, &tap);
 +    if (err < 0) {
 +        /* returns -errno */
-+        LOGEV(ERROR, -err, "Unable to find type %s disk %s", be_path, disk);
++        LOGEV(ERROR, -err, "Unable to find type %s disk %s", type, disk);
 +        return ERROR_FAIL;
 +    }
 +
