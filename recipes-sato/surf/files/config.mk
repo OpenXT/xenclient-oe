@@ -1,14 +1,21 @@
 # surf version
-VERSION = 0.7
+VERSION = 2.0
+
+# Customize below to fit your system
 
 # paths
 PREFIX = /usr
 MANPREFIX = ${PREFIX}/share/man
+LIBPREFIX = ${PREFIX}/lib/surf
 
-INCS = `pkg-config --cflags xorg-server gtk+-2.0 webkit-1.0 x11`
-LIBS = `pkg-config --libs xorg-server gtk+-2.0 webkit-1.0 x11`
+GTKINC = `pkg-config --cflags gtk+-3.0 webkit2gtk-4.0 x11`
+GTKLIB = `pkg-config --libs gtk+-3.0 webkit2gtk-4.0 x11`
+
+# includes and libs
+INCS = -I. -I${X11INC} ${GTKINC}
+LIBS = -lc -L${X11LIB} -lX11 ${GTKLIB} -lgthread-2.0
 
 # flags
-CPPFLAGS = -DVERSION=\"${VERSION}\" -D_DEFAULT_SOURCE
-CFLAGS += ${INCS} ${CPPFLAGS}
-LDFLAGS = -g -lc ${LIBS}
+CPPFLAGS += -DVERSION=\"${VERSION}\" -DWEBEXTDIR=\"${LIBPREFIX}\" -D_DEFAULT_SOURCE
+CFLAGS += -std=c99 -pedantic -Wall -Os ${INCS} ${CPPFLAGS}
+LDFLAGS += -s ${LIBS}
