@@ -1,15 +1,17 @@
---- network-manager-applet-0.9.2.0/src/wireless-security/ws-wpa-psk.c	2017-01-13 10:49:45.618800964 -0500
-+++ network-manager-applet-0.9.2.0/src/wireless-security/ws-wpa-psk.c	2017-01-17 15:54:49.099333090 -0500
-@@ -27,6 +27,8 @@
- #include "wireless-security.h"
- #include "helpers.h"
+Index: network-manager-applet-1.4.4/src/wireless-security/ws-wpa-psk.c
+===================================================================
+--- network-manager-applet-1.4.4.orig/src/wireless-security/ws-wpa-psk.c
++++ network-manager-applet-1.4.4/src/wireless-security/ws-wpa-psk.c
+@@ -30,6 +30,8 @@
+ #include "nma-ui-utils.h"
+ #include "utils.h"
  
 +#include <openssl/evp.h>
 +
  #define WPA_PMK_LEN 32
  
  struct _WirelessSecurityWPAPSK {
-@@ -87,6 +89,17 @@
+@@ -100,6 +102,17 @@ add_to_size_group (WirelessSecurity *par
  	gtk_size_group_add_widget (group, widget);
  }
  
@@ -27,9 +29,9 @@
  static void
  fill_connection (WirelessSecurity *parent, NMConnection *connection)
  {
-@@ -112,6 +125,18 @@
- 
+@@ -126,6 +139,18 @@ fill_connection (WirelessSecurity *paren
  	widget = GTK_WIDGET (gtk_builder_get_object (parent->builder, "wpa_psk_entry"));
+ 	passwd_entry = widget;
  	key = gtk_entry_get_text (GTK_ENTRY (widget));
 +
 +	if (strlen (key) < 64) {
@@ -45,4 +47,54 @@
 +
  	g_object_set (s_wireless_sec, NM_SETTING_WIRELESS_SECURITY_PSK, key, NULL);
  
- 	wireless_security_clear_ciphers (connection);
+ 	/* Save PSK_FLAGS to the connection */
+Index: network-manager-applet-1.4.4/configure.ac
+===================================================================
+--- network-manager-applet-1.4.4.orig/configure.ac
++++ network-manager-applet-1.4.4/configure.ac
+@@ -161,6 +161,9 @@ else
+ fi
+ AC_DEFINE_UNQUOTED(NM_MORE_ASSERTS, $more_asserts, [Define if more asserts are enabled])
+ 
++dnl Add libcrypto for PKCS5_PBKDF2_HMAC_SHA1
++dnl OpenXT patch always-use-psk-hash.patch
++PKG_CHECK_MODULES(OPENSSL, libcrypto libssl,, AC_MSG_ERROR([openssl cannot be found.]))
+ 
+ AC_CONFIG_FILES([
+ Makefile
+Index: network-manager-applet-1.4.4/src/wireless-security/Makefile.am
+===================================================================
+--- network-manager-applet-1.4.4.orig/src/wireless-security/Makefile.am
++++ network-manager-applet-1.4.4/src/wireless-security/Makefile.am
+@@ -45,6 +45,7 @@ libwireless_security_libnm_glib_la_CPPFL
+ 	$(GTK_CFLAGS) \
+ 	-DNETWORKMANAGER_COMPILATION=NM_NETWORKMANAGER_COMPILATION_LIB_LEGACY \
+ 	$(LIBNM_GLIB_CFLAGS) \
++	$(OPENSSL_CFLAGS) \
+ 	"-I${top_srcdir}/shared/" \
+ 	-I${top_srcdir}/src/utils \
+ 	-I${top_srcdir}/src/libnma
+@@ -52,6 +53,7 @@ libwireless_security_libnm_glib_la_CPPFL
+ libwireless_security_libnm_glib_la_LIBADD = \
+ 	$(GTK_LIBS) \
+ 	$(LIBNM_GLIB_LIBS) \
++	$(OPENSSL_LIBS) \
+ 	${top_builddir}/src/utils/libutils-libnm-glib.la
+ 
+ libwireless_security_libnm_la_SOURCES = \
+@@ -60,6 +62,7 @@ libwireless_security_libnm_la_SOURCES =
+ libwireless_security_libnm_la_CPPFLAGS = \
+ 	$(GTK_CFLAGS) \
+ 	$(LIBNM_CFLAGS) \
++	$(OPENSSL_CFLAGS) \
+ 	"-I${top_srcdir}/shared/" \
+ 	-I${top_srcdir}/src/utils \
+ 	-I${top_srcdir}/src/libnma
+@@ -67,6 +70,7 @@ libwireless_security_libnm_la_CPPFLAGS =
+ libwireless_security_libnm_la_LIBADD = \
+ 	$(GTK_LIBS) \
+ 	$(LIBNM_LIBS) \
++	$(OPENSSL_LIBS) \
+ 	${top_builddir}/src/utils/libutils-libnm.la
+ 
+ ws-resources.h: $(srcdir)/ws.gresource.xml

@@ -1,40 +1,84 @@
-DESCRIPTION = "GTK+ applet for NetworkManager" 
-LICENSE = "GPLv2"
-LIC_FILES_CHKSUM = "file://COPYING;md5=59530bdf33659b29e73d4adb9f9f6552"
+FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
 
-DEPENDS = "gnome-bluetooth libnotify networkmanager dbus-glib libglade gconf gnome-keyring libgnome-keyring iso-codes openssl"
+SRC_URI += " \
+    file://075_Adhoc_h32bit_22x22.png \
+    file://075_NetworkNoBars_h32bit_22x22.png \
+    file://075_NoConnection_h32bit_22x22.png \
+    file://075_Wired_h32bit_22x22.png \
+    file://075_WWan_h32bit_22x22.png \
+    file://075_Adhoc_h32bit_50x50.png \
+    file://075_Loading1_h32bit_50x50.png \
+    file://075_Loading2_h32bit_50x50.png \
+    file://075_Loading3_h32bit_50x50.png \
+    file://075_Loading4_h32bit_50x50.png \
+    file://075_Loading5_h32bit_50x50.png \
+    file://075_Loading6_h32bit_50x50.png \
+    file://075_Loading7_h32bit_50x50.png \
+    file://075_Loading8_h32bit_50x50.png \
+    file://075_Network1Bar_h32bit_50x50.png \
+    file://075_Network2Bars_h32bit_50x50.png \
+    file://075_Network3Bars_h32bit_50x50.png \
+    file://075_Network4Bars_h32bit_50x50.png \
+    file://075_NetworkNoBars_h32bit_50x50.png \
+    file://075_NoConnection_h32bit_50x50.png \
+    file://075_Wired_h32bit_50x50.png \
+    file://075_WWan_h32bit_50x50.png \
+    file://nm-signal-00.png \
+    file://nm-signal-25.png \
+    file://nm-signal-50.png \
+    file://nm-signal-75.png \
+    file://nm-signal-100.png \
+    file://xc-menus.patch \
+    file://disable_available_to_all_users_checkbox.patch \
+    file://default-certs-dir.patch \
+    file://always-use-psk-hash.patch \
+    file://disable-show-password.patch \
+"
 
-LDFLAGS += "-lcrypto"
-
-inherit gnome
-
-SRC_URI[archive.md5sum] = "feaf2c8427d23924dde7de52ff4c5078"
-SRC_URI[archive.sha256sum] = "287301692224cc1bb20abe8bc52140461f565e58898a99daef11a188bb29b362"
-
-# GTK2.x mode
-EXTRA_OECONF += "--with-gtkver=2 \
-                 --with-bluetooth=yes \
-                "
-
-do_configure_append() {
-        rm config.log
-        # Sigh... --enable-compile-warnings=no doesn't actually turn off -Werror
-        for i in $(find ${S} -name "Makefile") ; do
-            sed -i -e s:-Werror::g $i
-        done
-}
-
-RDEPENDS_${PN} =+ "networkmanager"
-RRECOMMENDS_${PN} =+ "gnome-bluetooth gnome-keyring"
-
-FILES_${PN} += "${datadir}/nm-applet/ \
-        ${datadir}/libnm-gtk/wifi.ui \
-        ${datadir}/gnome-vpn-properties/ \
-        ${datadir}/gnome/autostart/ \
-        "
-
+FILES_${PN} += " \
+    ${datadir}/nm-applet/ \
+    ${datadir}/libnm-gtk/wifi.ui \
+    ${datadir}/gnome-vpn-properties/ \
+    ${datadir}/gnome/autostart/ \
+"
 FILES_${PN} += "${libdir}/gnome-bluetooth/plugins/*.so"
 FILES_${PN}-dev += "${libdir}/gnome-bluetooth/plugins/libnma.la"
 FILES_${PN}-staticdev += "${libdir}/gnome-bluetooth/plugins/libnma.a"
 FILES_${PN}-dbg += "${libdir}/gnome-bluetooth/plugins/.debug/"
 
+inherit gnome
+
+do_install_append() {
+        install -d ${D}${datadir}/icons/hicolor/22x22/xenclient
+
+        install -m 0644 ${WORKDIR}/075_Adhoc_h32bit_22x22.png \
+                        ${WORKDIR}/075_NetworkNoBars_h32bit_22x22.png \
+                        ${WORKDIR}/075_NoConnection_h32bit_22x22.png \
+                        ${WORKDIR}/075_Wired_h32bit_22x22.png \
+                        ${WORKDIR}/075_WWan_h32bit_22x22.png \
+                        ${D}${datadir}/icons/hicolor/22x22/xenclient
+
+        install -d ${D}${datadir}/icons/hicolor/50x50/xenclient
+
+        install -m 0644 ${WORKDIR}/075_Adhoc_h32bit_50x50.png \
+                        ${WORKDIR}/075_Loading1_h32bit_50x50.png \
+                        ${WORKDIR}/075_Loading2_h32bit_50x50.png \
+                        ${WORKDIR}/075_Loading3_h32bit_50x50.png \
+                        ${WORKDIR}/075_Loading4_h32bit_50x50.png \
+                        ${WORKDIR}/075_Loading5_h32bit_50x50.png \
+                        ${WORKDIR}/075_Loading6_h32bit_50x50.png \
+                        ${WORKDIR}/075_Loading7_h32bit_50x50.png \
+                        ${WORKDIR}/075_Loading8_h32bit_50x50.png \
+                        ${WORKDIR}/075_Network1Bar_h32bit_50x50.png \
+                        ${WORKDIR}/075_Network2Bars_h32bit_50x50.png \
+                        ${WORKDIR}/075_Network3Bars_h32bit_50x50.png \
+                        ${WORKDIR}/075_Network4Bars_h32bit_50x50.png \
+                        ${WORKDIR}/075_NetworkNoBars_h32bit_50x50.png \
+                        ${WORKDIR}/075_NoConnection_h32bit_50x50.png \
+                        ${WORKDIR}/075_Wired_h32bit_50x50.png \
+                        ${WORKDIR}/075_WWan_h32bit_50x50.png \
+                        ${D}${datadir}/icons/hicolor/50x50/xenclient
+}
+
+RDEPENDS_${PN} =+ "networkmanager"
+RRECOMMENDS_${PN} =+ "gnome-bluetooth gnome-keyring"
