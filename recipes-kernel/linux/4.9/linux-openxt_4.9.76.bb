@@ -46,10 +46,9 @@ SRC_URI += "${KERNELORG_MIRROR}/linux/kernel/v${PV_MAJOR}.x/linux-${PV}.tar.xz;n
     file://xsa-155-qsb-023-xen-netfront-copy-response-out-of-shared-buffer-befo.patch;patch=1 \
     file://xsa-155-qsb-023-xen-netfront-do-not-use-data-already-exposed-to-back.patch;patch=1 \
     file://defconfig \
-    file://xsa229.patch \
     "
 
-SRC_URI[kernel.md5sum] = "efc35def981d458e57bc0c7b6de0cd72"
-SRC_URI[kernel.sha256sum] = "025767f3652a656c7b5ed2949aef205f88a5acfd70ae3fe77710ad37f1662d9b"
+SRC_URI[kernel.md5sum] = "e0d64263150e36192111caba11e231b5"
+SRC_URI[kernel.sha256sum] = "b82b94332cffaaeade74495264c989dafb96d4748503f87a5b7c436f5de887de"
 
 LIC_FILES_CHKSUM = "file://COPYING;md5=d7810fab7487fb0aad327b76f1be7cd7"
