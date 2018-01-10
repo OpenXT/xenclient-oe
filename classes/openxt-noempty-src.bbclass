@@ -1,0 +1,12 @@
+# prevent tasks from creating empty "${S}" dir
+do_clean[dirs] = "${WORKDIR}"
+do_cleansstate[dirs] = "${WORKDIR}"
+do_cleanall[dirs] = "${WORKDIR}"
+do_fetch[dirs] = "${WORKDIR}"
+#do_unpack[dirs] = "${WORKDIR}"
+sstate_cleanall[dirs] = "${WORKDIR}"
+sstate_unpack_package[dirs] = "${WORKDIR}"
+do_populate_lic_setscene[dirs] = "${WORKDIR}"
+do_populate_sysroot_setscene[dirs] = "${WORKDIR}"
+do_make_scripts[dirs] = "${WORKDIR}"
+#do_repo_clean[dirs] = "${WORKDIR}"
