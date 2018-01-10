@@ -32,10 +32,10 @@ do_configure() {
     # generate rpc stubs
     mkdir -p autogen
     # Server objects
-    xc-rpcgen --camel --templates-dir=${rpcgendatadir} -s -o autogen ${idldatadir}/db.xml
+    xc-rpcgen --camel --templates-dir=${STAGING_RPCGENDATADIR_NATIVE} -s -o autogen ${STAGING_IDLDATADIR}/db.xml
     # Client objects
-    xc-rpcgen --camel --templates-dir=${rpcgendatadir} -c -o autogen ${idldatadir}/db.xml
-    xc-rpcgen --camel --templates-dir=${rpcgendatadir} -c -o autogen ${idldatadir}/dbus.xml
+    xc-rpcgen --camel --templates-dir=${STAGING_RPCGENDATADIR_NATIVE} -c -o autogen ${STAGING_IDLDATADIR}/db.xml
+    xc-rpcgen --camel --templates-dir=${STAGING_RPCGENDATADIR_NATIVE} -c -o autogen ${STAGING_IDLDATADIR}/dbus.xml
 }
 
 do_compile() {

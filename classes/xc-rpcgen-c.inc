@@ -7,6 +7,6 @@ DEPENDS_append += " \
 "
 
 EXTRA_OECONF_append = " \
-    --with-idldir=${idldatadir} \
-    --with-rpcgen-templates=${rpcgendatadir} \
+    --with-idldir=${STAGING_IDLDATADIR} \
+    --with-rpcgen-templates=${STAGING_RPCGENDATADIR_NATIVE} \
 "

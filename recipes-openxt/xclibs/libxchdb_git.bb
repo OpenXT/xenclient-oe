@@ -19,5 +19,5 @@ inherit haskell xc-rpcgen-haskell-1.0
 
 do_configure_append() {
     mkdir -p Rpc/Autogen
-    xc-rpcgen --haskell --templates-dir=${rpcgendatadir} -c -o Rpc/Autogen --module-prefix=Rpc.Autogen ${idldatadir}/db.xml
+    xc-rpcgen --haskell --templates-dir=${STAGING_RPCGENDATADIR_NATIVE} -c -o Rpc/Autogen --module-prefix=Rpc.Autogen ${STAGING_IDLDATADIR}/db.xml
 }

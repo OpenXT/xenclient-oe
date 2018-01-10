@@ -58,19 +58,19 @@ do_configure_append() {
     # generate rpc stubs
     mkdir -p Rpc/Autogen
     # Server objects
-    xc-rpcgen --haskell --templates-dir=${rpcgendatadir} -s -o Rpc/Autogen --module-prefix=Rpc.Autogen ${idldatadir}/xenmgr.xml
-    xc-rpcgen --haskell --templates-dir=${rpcgendatadir} -s -o Rpc/Autogen --module-prefix=Rpc.Autogen ${idldatadir}/xenmgr_vm.xml
-    xc-rpcgen --haskell --templates-dir=${rpcgendatadir} -s -o Rpc/Autogen --module-prefix=Rpc.Autogen ${idldatadir}/xenmgr_host.xml
-    xc-rpcgen --haskell --templates-dir=${rpcgendatadir} -s -o Rpc/Autogen --module-prefix=Rpc.Autogen ${idldatadir}/vm_nic.xml
-    xc-rpcgen --haskell --templates-dir=${rpcgendatadir} -s -o Rpc/Autogen --module-prefix=Rpc.Autogen ${idldatadir}/vm_disk.xml
+    xc-rpcgen --haskell --templates-dir=${STAGING_RPCGENDATADIR_NATIVE} -s -o Rpc/Autogen --module-prefix=Rpc.Autogen ${STAGING_IDLDATADIR}/xenmgr.xml
+    xc-rpcgen --haskell --templates-dir=${STAGING_RPCGENDATADIR_NATIVE} -s -o Rpc/Autogen --module-prefix=Rpc.Autogen ${STAGING_IDLDATADIR}/xenmgr_vm.xml
+    xc-rpcgen --haskell --templates-dir=${STAGING_RPCGENDATADIR_NATIVE} -s -o Rpc/Autogen --module-prefix=Rpc.Autogen ${STAGING_IDLDATADIR}/xenmgr_host.xml
+    xc-rpcgen --haskell --templates-dir=${STAGING_RPCGENDATADIR_NATIVE} -s -o Rpc/Autogen --module-prefix=Rpc.Autogen ${STAGING_IDLDATADIR}/vm_nic.xml
+    xc-rpcgen --haskell --templates-dir=${STAGING_RPCGENDATADIR_NATIVE} -s -o Rpc/Autogen --module-prefix=Rpc.Autogen ${STAGING_IDLDATADIR}/vm_disk.xml
 
-    xc-rpcgen --haskell --templates-dir=${rpcgendatadir} -c -o Rpc/Autogen --module-prefix=Rpc.Autogen ${idldatadir}/input_daemon.xml
-    xc-rpcgen --haskell --templates-dir=${rpcgendatadir} -c -o Rpc/Autogen --module-prefix=Rpc.Autogen ${idldatadir}/surfman.xml
-    xc-rpcgen --haskell --templates-dir=${rpcgendatadir} -c -o Rpc/Autogen --module-prefix=Rpc.Autogen ${idldatadir}/guest.xml
-    xc-rpcgen --haskell --templates-dir=${rpcgendatadir} -c -o Rpc/Autogen --module-prefix=Rpc.Autogen ${idldatadir}/dbus.xml
-    xc-rpcgen --haskell --templates-dir=${rpcgendatadir} -c -o Rpc/Autogen --module-prefix=Rpc.Autogen ${idldatadir}/network_daemon.xml
-    xc-rpcgen --haskell --templates-dir=${rpcgendatadir} -c -o Rpc/Autogen --module-prefix=Rpc.Autogen ${idldatadir}/network.xml
-    xc-rpcgen --haskell --templates-dir=${rpcgendatadir} -c -o Rpc/Autogen --module-prefix=Rpc.Autogen ${idldatadir}/ctxusb_daemon.xml
+    xc-rpcgen --haskell --templates-dir=${STAGING_RPCGENDATADIR_NATIVE} -c -o Rpc/Autogen --module-prefix=Rpc.Autogen ${STAGING_IDLDATADIR}/input_daemon.xml
+    xc-rpcgen --haskell --templates-dir=${STAGING_RPCGENDATADIR_NATIVE} -c -o Rpc/Autogen --module-prefix=Rpc.Autogen ${STAGING_IDLDATADIR}/surfman.xml
+    xc-rpcgen --haskell --templates-dir=${STAGING_RPCGENDATADIR_NATIVE} -c -o Rpc/Autogen --module-prefix=Rpc.Autogen ${STAGING_IDLDATADIR}/guest.xml
+    xc-rpcgen --haskell --templates-dir=${STAGING_RPCGENDATADIR_NATIVE} -c -o Rpc/Autogen --module-prefix=Rpc.Autogen ${STAGING_IDLDATADIR}/dbus.xml
+    xc-rpcgen --haskell --templates-dir=${STAGING_RPCGENDATADIR_NATIVE} -c -o Rpc/Autogen --module-prefix=Rpc.Autogen ${STAGING_IDLDATADIR}/network_daemon.xml
+    xc-rpcgen --haskell --templates-dir=${STAGING_RPCGENDATADIR_NATIVE} -c -o Rpc/Autogen --module-prefix=Rpc.Autogen ${STAGING_IDLDATADIR}/network.xml
+    xc-rpcgen --haskell --templates-dir=${STAGING_RPCGENDATADIR_NATIVE} -c -o Rpc/Autogen --module-prefix=Rpc.Autogen ${STAGING_IDLDATADIR}/ctxusb_daemon.xml
 }
 
 do_install_append() {

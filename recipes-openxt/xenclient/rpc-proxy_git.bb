@@ -47,8 +47,8 @@ INITSCRIPT_PARAMS = "defaults 30"
 do_configure_append() {
 	# generate rpc stubs
 	mkdir -p Rpc/Autogen
-	xc-rpcgen --haskell --templates-dir=${rpcgendatadir} -s -o Rpc/Autogen --module-prefix=Rpc.Autogen ${idldatadir}/rpc_proxy.xml
-	xc-rpcgen --haskell --templates-dir=${rpcgendatadir} -c -o Rpc/Autogen --module-prefix=Rpc.Autogen ${idldatadir}/dbus.xml
+	xc-rpcgen --haskell --templates-dir=${STAGING_RPCGENDATADIR_NATIVE} -s -o Rpc/Autogen --module-prefix=Rpc.Autogen ${STAGING_IDLDATADIR}/rpc_proxy.xml
+	xc-rpcgen --haskell --templates-dir=${STAGING_RPCGENDATADIR_NATIVE} -c -o Rpc/Autogen --module-prefix=Rpc.Autogen ${STAGING_IDLDATADIR}/dbus.xml
 }
 
 do_install_append() {
