@@ -1,7 +1,7 @@
 DESCRIPTION = "db tools"
 LICENSE = "GPLv2"
 LIC_FILES_CHKSUM="file://../COPYING;md5=4641e94ec96f98fabc56ff9cc48be14b"
-DEPENDS = "xenclient-rpcgen-native xenclient-idl ocaml-dbus xenclient-toolstack xen-ocaml-libs"
+DEPENDS = "ocaml-dbus xenclient-toolstack xen-ocaml-libs"
 
 DEPENDS_append_xenclient-nilfvm += " ${@deb_bootstrap_deps(d)} "
 
@@ -22,7 +22,7 @@ SRC_URI += " file://db-exists-dom0 \
 
 S = "${WORKDIR}/git/dbd"
 
-inherit xenclient ocaml findlib
+inherit xenclient ocaml findlib xc-rpcgen-ocaml-1.0
 inherit ${@"xenclient-simple-deb"if(d.getVar("MACHINE",1)=="xenclient-nilfvm")else("null")}
 
 DEB_SUITE = "wheezy"
@@ -36,7 +36,7 @@ DEB_PKG_MAINTAINER = "Citrix Systems <customerservice@citrix.com>"
 
 do_configure_append() {
 	mkdir -p ${S}/autogen
-	xc-rpcgen --camel -c -o ${S}/autogen ${STAGING_DATADIR}/idl/db.xml
+	xc-rpcgen --camel --templates-dir=${STAGING_RPCGENDATADIR_NATIVE} -c -o ${S}/autogen ${STAGING_IDLDATADIR}/db.xml
 }
 
 do_compile() {
