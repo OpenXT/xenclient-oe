@@ -1,0 +1,84 @@
+Index: network-manager-applet-0.9.8.10/src/wireless-security/ws-wpa-psk.c
+===================================================================
+--- network-manager-applet-0.9.8.10.orig/src/wireless-security/ws-wpa-psk.c
++++ network-manager-applet-0.9.8.10/src/wireless-security/ws-wpa-psk.c
+@@ -27,6 +27,8 @@
+ #include "wireless-security.h"
+ #include "helpers.h"
+ 
++#include <openssl/evp.h>
++
+ #define WPA_PMK_LEN 32
+ 
+ struct _WirelessSecurityWPAPSK {
+@@ -87,6 +89,17 @@ add_to_size_group (WirelessSecurity *par
+ 	gtk_size_group_add_widget (group, widget);
+ }
+ 
++//adapted from stackoverflow.com/a/22795472
++static void
++PBKDF2_HMAC_SHA_1nat_string (const char* pass, const char* salt, int iterations, unsigned int outputBytes, char* hexResult)
++{
++	unsigned int i;
++	unsigned char digest[outputBytes];
++	PKCS5_PBKDF2_HMAC_SHA1 (pass, strlen (pass), (const unsigned char*) salt, strlen (salt), iterations, outputBytes, digest);
++	for (i = 0; i < sizeof (digest); i++)
++		snprintf (hexResult + (i * 2), 3, "%02x", digest[i]);
++}
++
+ static void
+ fill_connection (WirelessSecurity *parent, NMConnection *connection)
+ {
+@@ -112,6 +125,18 @@ fill_connection (WirelessSecurity *paren
+ 
+ 	widget = GTK_WIDGET (gtk_builder_get_object (parent->builder, "wpa_psk_entry"));
+ 	key = gtk_entry_get_text (GTK_ENTRY (widget));
++
++	if (strlen (key) < 64) {
++		char keyHash[64 + 1];
++		const GByteArray *ssid = nm_setting_wireless_get_ssid (s_wireless);
++		GString *ssidNullTerminated = g_string_new_len ((const gchar *)ssid->data, ssid->len);
++
++		PBKDF2_HMAC_SHA_1nat_string (key, ssidNullTerminated->str, 4096, 32, keyHash);
++		key = keyHash;
++
++		g_string_free (ssidNullTerminated, TRUE);
++	}
++
+ 	g_object_set (s_wireless_sec, NM_SETTING_WIRELESS_SECURITY_PSK, key, NULL);
+ 
+ 	wireless_security_clear_ciphers (connection);
+Index: network-manager-applet-0.9.8.10/configure.ac
+===================================================================
+--- network-manager-applet-0.9.8.10.orig/configure.ac
++++ network-manager-applet-0.9.8.10/configure.ac
+@@ -241,6 +241,10 @@ GOBJECT_INTROSPECTION_CHECK([0.9.6])
+ 
+ GLIB_CONFIG_NMA
+ 
++dnl Add libcrypto for PKCS5_PBKDF2_HMAC_SHA1
++dnl OpenXT patch always-use-psk-hash.patch
++PKG_CHECK_MODULES(OPENSSL, libcrypto libssl,, AC_MSG_ERROR([openssl cannot be found.]))
++
+ dnl
+ dnl Compiler flags
+ dnl
+Index: network-manager-applet-0.9.8.10/src/wireless-security/Makefile.am
+===================================================================
+--- network-manager-applet-0.9.8.10.orig/src/wireless-security/Makefile.am
++++ network-manager-applet-0.9.8.10/src/wireless-security/Makefile.am
+@@ -34,12 +34,14 @@ libwireless_security_la_CPPFLAGS = \
+ 	$(GTK_CFLAGS) \
+ 	-DUIDIR=\""$(uidir)"\" \
+ 	$(NMA_CFLAGS) \
++	$(OPENSSL_CLFAGS) \
+ 	$(DISABLE_DEPRECATED) \
+ 	-I${top_srcdir}/src/utils
+ 
+ libwireless_security_la_LIBADD = \
+ 	$(GTK_LIBS) \
+ 	$(NMA_LIBS) \
++	$(OPENSSL_LIBS) \
+ 	${top_builddir}/src/utils/libutils.la
+ 
+ uidir = $(datadir)/nm-applet

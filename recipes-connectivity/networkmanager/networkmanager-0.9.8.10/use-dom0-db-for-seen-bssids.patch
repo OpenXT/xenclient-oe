@@ -1,0 +1,66 @@
+Index: NetworkManager-0.9.8.10/src/settings/nm-settings-connection.c
+===================================================================
+--- NetworkManager-0.9.8.10.orig/src/settings/nm-settings-connection.c
++++ NetworkManager-0.9.8.10/src/settings/nm-settings-connection.c
+@@ -23,6 +23,8 @@
+ 
+ #include <string.h>
+ #include <netinet/ether.h>
++#include <errno.h>
++#include <sys/wait.h>
+ 
+ #include <NetworkManager.h>
+ #include <dbus/dbus-glib-lowlevel.h>
+@@ -58,6 +60,7 @@ static void impl_settings_connection_del
+ static void impl_settings_connection_get_secrets (NMSettingsConnection *connection,
+                                                   const gchar *setting_name,
+                                                   DBusGMethodInvocation *context);
++static void update_seen_bssids_db ();
+ 
+ #include "nm-settings-connection-glue.h"
+ 
+@@ -542,6 +545,8 @@ remove_entry_from_db (NMSettingsConnecti
+ 		if (data) {
+ 			g_file_set_contents (db_file, data, len, &error);
+ 			g_free (data);
++                        if (!strcmp (db_name, "seen-bssids"))
++				update_seen_bssids_db ();
+ 		}
+ 		if (error) {
+ 			nm_log_warn (LOGD_SETTINGS, "error writing %s file '%s': %s", db_name, db_file, error->message);
+@@ -1601,6 +1606,27 @@ nm_settings_connection_has_seen_bssid (N
+ 	return !!g_hash_table_lookup (NM_SETTINGS_CONNECTION_GET_PRIVATE (connection)->seen_bssids, bssid);
+ }
+ 
++static void
++update_seen_bssids_db (void)
++{
++	char *argv[6] = { "/usr/bin/nm_sync.sh", "-n", "seen-bssids", "-w", 0, 0 };
++	int err, stat_loc;
++
++	err = fork();
++	if (err == -1) {
++		g_warning("%s.%d: cannot fork to nm_sync.sh: %d", __FILE__, __LINE__, errno);
++	} else if (err) {
++		while ((waitpid(err, &stat_loc, 0) == -1) && (errno == EINTR))
++			;
++		err = WEXITSTATUS(stat_loc);
++		if (err)
++			g_warning("%s.%d: nm_sync.sh failed with code: %d", __FILE__, __LINE__, err);
++	} else {
++		argv[4] = SETTINGS_SEEN_BSSIDS_FILE;
++		_exit(execvp(argv[0], argv));
++	}
++}
++
+ /**
+  * nm_settings_connection_add_seen_bssid:
+  * @connection: the #NMSettingsConnection
+@@ -1658,6 +1684,7 @@ nm_settings_connection_add_seen_bssid (N
+ 	data = g_key_file_to_data (seen_bssids_file, &len, &error);
+ 	if (data) {
+ 		g_file_set_contents (SETTINGS_SEEN_BSSIDS_FILE, data, len, &error);
++		update_seen_bssids_db ();
+ 		g_free (data);
+ 	}
+ 	g_key_file_free (seen_bssids_file);
