@@ -8,7 +8,6 @@ SRC_URI = "git://${OPENXT_GIT_MIRROR}/idl.git;protocol=${OPENXT_GIT_PROTOCOL};br
 S = "${WORKDIR}/git"
 
 inherit allarch
-require conf/xc-rpcgen.conf
 
 do_install() {
     install -m 0755 -d ${D}${idldatadir}

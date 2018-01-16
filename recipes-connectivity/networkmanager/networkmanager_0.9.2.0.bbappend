@@ -31,8 +31,6 @@ EXTRA_OECONF += " \
 
 CFLAGS_append += " -Wno-deprecated-declarations "
 
-require conf/xc-rpcgen.conf
-
 do_install_append () {
         rm -f ${D}/etc/init.d/NetworkManager
         install -m 0755 -d ${D}${nmidldatadir}

@@ -37,7 +37,7 @@ S = "${WORKDIR}/git/rpc-proxy"
 
 HPV = "1.0"
 require recipes-openxt/xclibs/xclibs.inc
-inherit update-rc.d haskell xc-rpcgen-haskell-1.0
+inherit update-rc.d haskell xc-rpcgen
 
 INITSCRIPT_NAME = "rpc-proxy"
 INITSCRIPT_PARAMS = "defaults 30"

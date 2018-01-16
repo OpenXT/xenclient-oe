@@ -22,7 +22,7 @@ SRC_URI += " file://db-exists-dom0 \
 
 S = "${WORKDIR}/git/dbd"
 
-inherit xenclient ocaml findlib xc-rpcgen-ocaml-1.0
+inherit xenclient ocaml findlib xc-rpcgen
 inherit ${@"xenclient-simple-deb"if(d.getVar("MACHINE",1)=="xenclient-nilfvm")else("null")}
 
 DEB_SUITE = "wheezy"

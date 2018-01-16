@@ -42,7 +42,7 @@ SRC_URI = " \
 
 S = "${WORKDIR}/git/xenmgr"
 
-inherit haskell update-rc.d xc-rpcgen-haskell-1.0
+inherit haskell update-rc.d xc-rpcgen
 
 INITSCRIPT_NAME = "xenmgr"
 INITSCRIPT_PARAMS = "start 80 5 . stop 01 0 1 6 ."

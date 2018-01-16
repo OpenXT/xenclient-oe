@@ -20,7 +20,7 @@ SRC_URI = "git://${OPENXT_GIT_MIRROR}/network.git;protocol=${OPENXT_GIT_PROTOCOL
 
 S = "${WORKDIR}/git/nwd"
 
-inherit haskell update-rc.d xc-rpcgen-haskell-1.0
+inherit haskell update-rc.d xc-rpcgen
 
 INITSCRIPT_PACKAGES = "${PN}"
 INITSCRIPT_NAME_${PN} = "network-daemon"

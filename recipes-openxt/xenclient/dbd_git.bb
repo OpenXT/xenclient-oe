@@ -18,7 +18,7 @@ RDEPENDS_${PN} += "bash"
 
 S = "${WORKDIR}/git/dbd"
 
-inherit update-rc.d haskell ocaml findlib xc-rpcgen-ocaml-1.0
+inherit update-rc.d haskell ocaml findlib xc-rpcgen
 
 INITSCRIPT_NAME = "dbd"
 INITSCRIPT_PARAMS = "defaults 25"

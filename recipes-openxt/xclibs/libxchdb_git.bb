@@ -15,7 +15,7 @@ HPN = "xchdb"
 HPV = "0.1"
 
 require xclibs.inc
-inherit haskell xc-rpcgen-haskell-1.0
+inherit haskell xc-rpcgen
 
 do_configure_append() {
     mkdir -p Rpc/Autogen

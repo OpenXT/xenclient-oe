@@ -11,7 +11,7 @@ SRC_URI = "git://${OPENXT_GIT_MIRROR}/xctools.git;protocol=${OPENXT_GIT_PROTOCOL
 
 S = "${WORKDIR}/git/gtk-switcher"
 
-inherit autotools xc-rpcgen-c-1.0
+inherit autotools xc-rpcgen-c
 inherit xenclient
 
 do_install_append() {

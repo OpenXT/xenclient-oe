@@ -17,7 +17,7 @@ EXTRA_OECONF += "--with-libxenstore=${STAGING_LIBDIR}"
 
 S = "${WORKDIR}/git"
 
-inherit autotools xenclient update-rc.d pkgconfig xc-rpcgen-c-1.0
+inherit autotools xenclient update-rc.d pkgconfig xc-rpcgen-c
 
 INITSCRIPT_NAME = "xenclient-vusb-daemon"
 INITSCRIPT_PARAMS = "defaults 60"

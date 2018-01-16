@@ -35,7 +35,7 @@ SRC_URI = " \
 
 S = "${WORKDIR}/git/updatemgr"
 
-inherit update-rc.d haskell xc-rpcgen-haskell-1.0
+inherit update-rc.d haskell xc-rpcgen
 
 INITSCRIPT_PACKAGES = "${PN}"
 INITSCRIPT_NAME_${PN} = "updatemgr"
