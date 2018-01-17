@@ -9,7 +9,7 @@ SRC_URI = "file://${REPO_PROD_CACERT} \
 FILES_${PN} = "${datadir}/xenclient/repo-certs \
                ${bindir}/verify-repo-metadata"
 
-inherit xenclient
+inherit allarch xenclient
 
 do_install() {
     CERTDIR_PROD=${D}${datadir}/xenclient/repo-certs/prod
@@ -17,8 +17,8 @@ do_install() {
     install -d ${CERTDIR_PROD}
     install -d ${CERTDIR_DEV}
 
-    install -m 0644 ${WORKDIR}/$(basename ${REPO_PROD_CACERT}) ${CERTDIR_PROD}/cert.pem
-    install -m 0644 ${WORKDIR}/$(basename ${REPO_DEV_CACERT}) ${CERTDIR_DEV}/cert.pem
+    install -m 0644 ${WORKDIR}/${REPO_PROD_CACERT} ${CERTDIR_PROD}/cert.pem
+    install -m 0644 ${WORKDIR}/${REPO_DEV_CACERT} ${CERTDIR_DEV}/cert.pem
 
     install -d ${D}${bindir}
     install -m 0755 ${WORKDIR}/verify-repo-metadata ${D}${bindir}/
