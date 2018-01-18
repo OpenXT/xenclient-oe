@@ -17,8 +17,6 @@ IMAGE_LINGUAS = ""
 ONLINE_PACKAGE_MANAGEMENT = "none"
 
 inherit image
-inherit xenclient-image-src-info
-inherit xenclient-image-src-package
 inherit xenclient-licences
 require xenclient-version.inc
 

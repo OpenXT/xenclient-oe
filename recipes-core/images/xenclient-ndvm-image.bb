@@ -93,8 +93,6 @@ ROOTFS_POSTPROCESS_COMMAND += " post_rootfs_shell_commands; remove_initscripts; 
 
 inherit openxt-selinux-image
 #inherit validate-package-versions
-inherit xenclient-image-src-info
-inherit xenclient-image-src-package
 inherit xenclient-licences
 require xenclient-version.inc
 

@@ -143,8 +143,6 @@ ROOTFS_POSTPROCESS_COMMAND += " \
 
 inherit openxt-selinux-image
 #inherit validate-package-versions
-inherit xenclient-image-src-info
-inherit xenclient-image-src-package
 inherit xenclient-licences
 require xenclient-version.inc
 

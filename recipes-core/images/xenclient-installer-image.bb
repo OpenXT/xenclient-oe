@@ -150,8 +150,6 @@ do_post_rootfs_items() {
 addtask post_rootfs_items after do_rootfs before do_build
 
 inherit image
-inherit xenclient-image-src-info
-inherit xenclient-image-src-package
 inherit xenclient-licences
 require xenclient-version.inc
 

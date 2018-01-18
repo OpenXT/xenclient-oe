@@ -53,8 +53,6 @@ ROOTFS_POSTPROCESS_COMMAND += " \
 "
 
 inherit image
-inherit xenclient-image-src-info
-inherit xenclient-image-src-package
 
 # Re-enable do_fetch/do_unpack to fetch image specific configuration files
 # (see SRC_URI).
