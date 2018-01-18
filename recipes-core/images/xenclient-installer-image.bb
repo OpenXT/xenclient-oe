@@ -45,6 +45,10 @@ IMAGE_INSTALL = "\
     ${ANGSTROM_EXTRA_INSTALL}"
 
 IMAGE_FSTYPES = "cpio.gz"
+# The entire installer rootfs is passed as the initramfs.
+# Inflate the maximum value to 256M to reflect that (original definition is
+# 128M in bitbake.conf)
+INITRAMFS_MAXSIZE = "262144"
 
 # IMAGE_PREPROCESS_COMMAND = "create_etc_timestamp"
 
