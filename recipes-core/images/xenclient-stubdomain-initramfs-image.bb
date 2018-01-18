@@ -31,7 +31,6 @@ post_rootfs_shell_commands() {
 ROOTFS_POSTPROCESS_COMMAND += " post_rootfs_shell_commands; "
 
 inherit image
-#inherit validate-package-versions
 
 LICENSE = "GPLv2 & MIT"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/GPL-2.0;md5=801f80980d171dd6425610833a22dbe6      \

@@ -177,7 +177,6 @@ remove_initscripts() {
 ROOTFS_POSTPROCESS_COMMAND += " post_rootfs_shell_commands; remove_initscripts; "
 
 inherit image
-#inherit validate-package-versions
 inherit xenclient-licences
 require xenclient-version.inc
 
