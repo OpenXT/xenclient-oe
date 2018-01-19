@@ -20,7 +20,7 @@ inherit image
 inherit xenclient-licences
 require xenclient-version.inc
 
-post_image_installer_part2_mangle() {
+pre_image_mangle() {
 	mv ${IMAGE_ROOTFS}/etc/xenclient.conf ${IMAGE_ROOTFS}/config/;
 	rm -rf ${IMAGE_ROOTFS}/dev;
 	rm -rf ${IMAGE_ROOTFS}/etc;
@@ -32,9 +32,8 @@ post_image_installer_part2_mangle() {
 	rm -rf ${IMAGE_ROOTFS}/run
 	mv -f ${IMAGE_ROOTFS}/run.installer ${IMAGE_ROOTFS}/run
 }
-
-IMAGE_POSTPROCESS_COMMAND += " \
-    post_image_installer_part2_mangle; \
+IMAGE_PREPROCESS_COMMAND += " \
+    pre_image_mangle; \
 "
 
 LICENSE = "GPLv2 & MIT"
