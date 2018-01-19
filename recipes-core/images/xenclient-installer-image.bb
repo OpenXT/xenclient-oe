@@ -21,6 +21,7 @@ SRC_URI += " \
 	    file://isolinux.cfg \
 	    file://grub.cfg \
 	    file://bootmsg.txt \
+	    file://fstab.installer \
 "
 
 ANGSTROM_EXTRA_INSTALL += ""
@@ -69,8 +70,11 @@ post_rootfs_shell_commands() {
 		echo 'ca::ctrlaltdel:/sbin/reboot';
 	} >> ${IMAGE_ROOTFS}/etc/inittab;
 
-	# Update /etc/fstab
-	sed -i '/^\/dev\/mapper\/xenclient/d' ${IMAGE_ROOTFS}/etc/fstab;
+	# Override /etc/fstab
+        # HACK: Sharing dom0's machine has currently some costs:
+        # - collision in sysroot have to be independently managed
+        # - different configuration are harder to deal with.
+        install -m 0644 ${WORKDIR}/fstab.installer ${IMAGE_ROOTFS}/etc/fstab
 
 	# Update /etc/network/interfaces
 	{
