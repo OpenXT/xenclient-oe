@@ -4,6 +4,7 @@ FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}-${PV}:"
 
 SRC_URI += "file://mount-special \
             file://finish.sh \
+            file://volatiles \
 	"
 
 # Override to reduce the number of scripts installed

@@ -12,6 +12,19 @@ dirs2775 = " \
     ${prefix}/src \
     ${localstatedir}/local \
 "
+# Add /var/log back as OpenXT uses encrypted partition for it (... and
+# installer is ramfs)
+# Add /media/ram for the key-functions scripts (mount point).
+dirs755_append = " \
+    ${localstatedir}/log \
+    /media/ram \
+"
+# Remove the volatile directories. OpenXT does not leverage them.
+dirs755_remove = " \
+    ${localstatedir}/volatile/log \
+    ${localstatedir}/volatile/tmp \
+"
+
 volatiles = ""
 conffiles = " \
     ${sysconfdir}/host.conf \
