@@ -1,0 +1,45 @@
+From 46b735c937ce68e72d08997635321bf30240325d Mon Sep 17 00:00:00 2001
+From: Christian Brauner <christian.brauner@canonical.com>
+Date: Sat, 11 Mar 2017 01:08:43 +0100
+Subject: [PATCH] lvmetad: fix segfault on i386
+
+Sending %d as format argument in lvmetad_vg_remove_pending() will cause
+segfaults in config_make_nodes_v() when va_arg() casts to int64_t. Also, it is
+clearly advertised in the lvm source code that using plain %d is prohibited, so
+let's switch to FMTd64.
+
+Signed-off-by: Christian Brauner <christian.brauner@ubuntu.com>
+---
+ lib/cache/lvmetad.c            | 2 +-
+ libdaemon/client/config-util.c | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/lib/cache/lvmetad.c b/lib/cache/lvmetad.c
+index 8e9bb1fd3..843e1c3e8 100644
+--- a/lib/cache/lvmetad.c
++++ b/lib/cache/lvmetad.c
+@@ -1304,7 +1304,7 @@ int lvmetad_vg_remove_pending(struct volume_group *vg)
+ 	reply = _lvmetad_send(vg->cmd, "set_vg_info",
+ 			      "name = %s", vg->name,
+ 			      "uuid = %s", uuid,
+-			      "version = %d", 0,
++			      "version = %"PRId64, (int64_t)0,
+ 			      NULL);
+ 
+ 	if (!_lvmetad_handle_reply(reply, "set_vg_info", vg->name, NULL)) {
+diff --git a/libdaemon/client/config-util.c b/libdaemon/client/config-util.c
+index 93f3d0a93..5b6cfb82a 100644
+--- a/libdaemon/client/config-util.c
++++ b/libdaemon/client/config-util.c
+@@ -260,7 +260,7 @@ struct dm_config_node *config_make_nodes_v(struct dm_config_tree *cft,
+ 		key[fmt - next] = '\0';
+ 		fmt += 2;
+ 
+-		if (!strcmp(fmt, "%d") || !strcmp(fmt, FMTd64)) {
++		if (!strcmp(fmt, FMTd64)) {
+ 			int64_t value = va_arg(ap, int64_t);
+ 			if (!(cn = make_int_node(cft, key, value, parent, pre_sib)))
+ 				return 0;
+-- 
+2.14.2
+
