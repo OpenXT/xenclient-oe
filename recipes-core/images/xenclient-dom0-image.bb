@@ -61,11 +61,6 @@ post_rootfs_shell_commands() {
 	# Add initramfs
 	cat ${DEPLOY_DIR_IMAGE}/xenclient-initramfs-image-xenclient-dom0.cpio.gz > ${IMAGE_ROOTFS}/boot/initramfs.gz ;
 
-	sed -i 's|1:2345:respawn:/sbin/getty 38400 tty1|#1:2345:respawn:/sbin/getty 38400 tty1|' ${IMAGE_ROOTFS}/etc/inittab ;
-
-	# Add dom0 console getty
-	echo '1:2345:respawn:/sbin/getty 38400 tty1' >> ${IMAGE_ROOTFS}/etc/inittab ;
-
 	# Create mountpoint for /mnt/secure
 	mkdir -p ${IMAGE_ROOTFS}/mnt/secure ;
 
@@ -139,6 +134,7 @@ ROOTFS_POSTPROCESS_COMMAND += " \
     activate_xenstored_initscript; \
     activate_lvmetad_initscript; \
     process_tmp_stubdomain_items; \
+    read_only_rootfs_hook; \
 "
 
 inherit openxt-selinux-image
