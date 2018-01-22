@@ -2,7 +2,6 @@ FILESEXTRAPATHS_prepend := "${THISDIR}/${BPN}-${PV}:"
 
 # Configuration.
 SRC_URI += " \
-    file://config \
     file://policy/modules-upstream.conf \
     file://policy/modules-openxt.conf \
 "
@@ -201,23 +200,7 @@ FILES_${PN} += " \
     ${sysconfdir}/selinux \
 "
 
-def get_poltype(f):
-    import re
-    poltype = None
-    config = open (f, "r")
-    regex = re.compile('^[\s]*SELINUXTYPE=[\s]*(\w+)[\s]*$')
-    for line in config:
-        match = regex.match(line)
-        if match is not None:
-            poltype = match.group(1)
-            break
-    config.close()
-    return poltype
-
-# Define policy name from config file.
-conf_file := "${THISDIR}/${BPN}-${PV}/config"
-POL_TYPE = "${@get_poltype(conf_file)}"
-POLICY_NAME = "${POL_TYPE}"
+POLICY_NAME = "xc_policy"
 POLICY_DISTRO = "debian"
 POLICY_UBAC = "y"
 POLICY_DIRECT_INITRC = "y"
@@ -225,7 +208,7 @@ POLICY_QUIET = "n"
 POLICY_MLS_CATS = "256"
 
 # Custom name to reflect modifications.
-EXTRA_OEMAKE += "PKGNAME=xc_policy-${PV}"
+EXTRA_OEMAKE += "PKGNAME=${POLICY_NAME}-${PV}"
 
 do_srctree_copy() {
         cp -r ${WORKDIR}/policy ${S}/
