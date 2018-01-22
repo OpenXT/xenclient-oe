@@ -25,6 +25,12 @@ dirs755_remove = " \
     ${localstatedir}/volatile/tmp \
 "
 
+# OpenXT: Dom0 specific additional directories.
+dirs755_append_xenclient-dom0 = " \
+    /storage \
+    ${localstatedir}/cores \
+"
+
 volatiles = ""
 conffiles = " \
     ${sysconfdir}/host.conf \
