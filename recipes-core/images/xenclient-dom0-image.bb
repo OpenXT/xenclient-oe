@@ -1,7 +1,10 @@
 # XenClient dom0 image
 
 include xenclient-image-common.inc
-IMAGE_FEATURES += "package-management"
+IMAGE_FEATURES += " \
+    package-management \
+    read-only-rootfs \
+"
 
 COMPATIBLE_MACHINE = "(xenclient-dom0)"
 
@@ -134,7 +137,6 @@ ROOTFS_POSTPROCESS_COMMAND += " \
     activate_xenstored_initscript; \
     activate_lvmetad_initscript; \
     process_tmp_stubdomain_items; \
-    read_only_rootfs_hook; \
 "
 
 inherit openxt-selinux-image
