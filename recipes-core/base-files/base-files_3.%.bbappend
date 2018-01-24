@@ -1,6 +1,7 @@
 FILESEXTRAPATHS_prepend := "${THISDIR}/files:"
 SRC_URI += " \
     file://inputrc \
+    file://fstab.early \
 "
 dirs1777 = " \
     /tmp \
@@ -40,3 +41,7 @@ conffiles = " \
     ${sysconfdir}/profile \
     ${sysconfdir}/default \
 "
+
+do_install_append() {
+    install -m 0644 ${WORKDIR}/fstab.early ${D}${sysconfdir}/fstab.early
+}
