@@ -1,8 +1,8 @@
-Index: valgrind-3.10.1/coregrind/m_syswrap/syswrap-linux.c
+Index: valgrind-3.12.0/coregrind/m_syswrap/syswrap-linux.c
 ===================================================================
---- valgrind-3.10.1.orig/coregrind/m_syswrap/syswrap-linux.c	2014-11-25 20:41:20.000000000 +0100
-+++ valgrind-3.10.1/coregrind/m_syswrap/syswrap-linux.c	2016-05-02 17:08:33.123857255 +0200
-@@ -7137,6 +7137,15 @@
+--- valgrind-3.12.0.orig/coregrind/m_syswrap/syswrap-linux.c
++++ valgrind-3.12.0/coregrind/m_syswrap/syswrap-linux.c
+@@ -7471,6 +7471,15 @@ PRE(sys_ioctl)
                      (Addr)args->arr, sizeof(*(args->arr)) * args->num);
        break;
     }
@@ -18,7 +18,7 @@ Index: valgrind-3.10.1/coregrind/m_syswrap/syswrap-linux.c
  
     case VKI_XEN_IOCTL_EVTCHN_BIND_VIRQ: {
           struct vki_xen_ioctl_evtchn_bind_virq *args =
-@@ -9432,6 +9441,9 @@
+@@ -9875,6 +9884,9 @@ POST(sys_ioctl)
         POST_MEM_WRITE((Addr)args->err, sizeof(*(args->err)) * args->num);
        }
        break;
@@ -28,24 +28,45 @@ Index: valgrind-3.10.1/coregrind/m_syswrap/syswrap-linux.c
  
     case VKI_XEN_IOCTL_EVTCHN_BIND_VIRQ:
     case VKI_XEN_IOCTL_EVTCHN_BIND_INTERDOMAIN:
-Index: valgrind-3.10.1/coregrind/m_syswrap/syswrap-xen.c
+Index: valgrind-3.12.0/coregrind/m_syswrap/syswrap-xen.c
 ===================================================================
---- valgrind-3.10.1.orig/coregrind/m_syswrap/syswrap-xen.c	2014-11-25 20:41:20.000000000 +0100
-+++ valgrind-3.10.1/coregrind/m_syswrap/syswrap-xen.c	2016-05-02 17:16:01.952438761 +0200
-@@ -825,6 +825,12 @@
-       PRE_XEN_DOMCTL_READ(debug_op, vcpu);
-       break;
+--- valgrind-3.12.0.orig/coregrind/m_syswrap/syswrap-xen.c
++++ valgrind-3.12.0/coregrind/m_syswrap/syswrap-xen.c
+@@ -389,33 +389,6 @@ PRE(xsm_op)
+ #undef PRE_XEN_XSM_OP_READ
+ }
  
-+   case VKI_XEN_DOMCTL_pin_mem_cacheattr:
-+     PRE_XEN_DOMCTL_READ(pin_mem_cacheattr, start);
-+     PRE_XEN_DOMCTL_READ(pin_mem_cacheattr, end);
-+     PRE_XEN_DOMCTL_READ(pin_mem_cacheattr, type);
-+     break;
-+
-    default:
-       bad_subop(tid, layout, arrghs, status, flags,
-                 "__HYPERVISOR_domctl", domctl->cmd);
-@@ -834,6 +840,59 @@
+-PRE(sched_op)
+-{
+-   PRINT("__HYPERVISOR_sched_op ( %ld, %#lx )", SARG1, ARG2);
+-   void *arg = (void *)(unsigned long)ARG2;
+-
+-#define __PRE_XEN_SCHEDOP_READ(_schedop, _type, _field) \
+-   PRE_MEM_READ("XEN_SCHEDOP_" # _schedop " " #_field,  \
+-                (Addr)&((_type*)arg)->_field,           \
+-                sizeof(((_type*)arg)->_field))
+-#define PRE_XEN_SCHEDOP_READ(_schedop, _field)                          \
+-   __PRE_XEN_SCHEDOP_READ(_schedop, vki_xen_ ## _schedop ## _t, _field)
+-
+-   switch (ARG1) {
+-   case VKI_XEN_SCHEDOP_remote_shutdown:
+-      PRE_XEN_SCHEDOP_READ(remote_shutdown, domain_id);
+-      PRE_XEN_SCHEDOP_READ(remote_shutdown, reason);
+-      break;
+-
+-   default:
+-      bad_subop(tid, layout, arrghs, status, flags,
+-                "__HYPERVISOR_sched_op", ARG1);
+-      break;
+-   }
+-#undef __PRE_XEN_SCHEDOP_READ
+-#undef PRE_XEN_SCHEDOP_READ
+-}
+-
+ static void pre_evtchn_op(ThreadId tid,
+                           SyscallArgLayout*     layout,
+                           /*MOD*/SyscallArgs*   arrghs,
+@@ -1170,6 +1143,59 @@ PRE(domctl)
  #undef __PRE_XEN_DOMCTL_READ
  }
  
@@ -105,16 +126,10 @@ Index: valgrind-3.10.1/coregrind/m_syswrap/syswrap-xen.c
  PRE(hvm_op)
  {
     unsigned long op = ARG1;
-@@ -907,6 +966,32 @@
-        PRE_XEN_HVMOP_READ(inject_trap, cr2);
-        break;
+@@ -1263,6 +1289,26 @@ PRE(hvm_op)
+       PRE_XEN_HVMOP_READ(inject_trap, cr2);
+       break;
  
-+   case VKI_XEN_HVMOP_track_dirty_vram:
-+      PRE_XEN_HVMOP_READ(track_dirty_vram, domid);
-+      PRE_XEN_HVMOP_READ(track_dirty_vram, first_pfn);
-+      PRE_XEN_HVMOP_READ(track_dirty_vram, nr);
-+      break;
-+
 +   case VKI_XEN_HVMOP_modified_memory:
 +      PRE_XEN_HVMOP_READ(modified_memory, domid);
 +      PRE_XEN_HVMOP_READ(modified_memory, first_pfn);
@@ -138,7 +153,7 @@ Index: valgrind-3.10.1/coregrind/m_syswrap/syswrap-xen.c
     default:
        bad_subop(tid, layout, arrghs, status, flags,
                  "__HYPERVISOR_hvm_op", op);
-@@ -1013,6 +1098,14 @@
+@@ -1380,6 +1426,14 @@ POST(memory_op)
     case VKI_XENMEM_get_sharing_shared_pages:
         /* No outputs */
         break;
@@ -153,51 +168,7 @@ Index: valgrind-3.10.1/coregrind/m_syswrap/syswrap-xen.c
     }
  }
  
-@@ -1269,6 +1362,7 @@
-    case VKI_XEN_DOMCTL_cacheflush:
-    case VKI_XEN_DOMCTL_resumedomain:
-    case VKI_XEN_DOMCTL_set_access_required:
-+   case VKI_XEN_DOMCTL_pin_mem_cacheattr:
-       /* No output fields */
-       break;
- 
-@@ -1444,6 +1538,35 @@
- #undef __POST_XEN_DOMCTL_WRITE
- }
- 
-+POST(sched_op)
-+{
-+   unsigned long op = ARG1;
-+   //void *arg = (void *)(unsigned long)ARG2;
-+
-+#define __POST_XEN_SCHEDOP_WRITE(_sched_op, _type, _field)  \
-+      POST_MEM_WRITE((Addr)&((_type*)arg)->_field,      \
-+                     sizeof(((_type*)arg)->_field))
-+#define POST_XEN_SCHEDOP_WRITE(_sched_op, _field) \
-+      __POST_XEN_SCHEDOP_READ(_sched_op, struct vki_xen_sched_ ## _sched_op, _field)
-+
-+   switch (op) {
-+   case VKI_XEN_SCHEDOP_yield:
-+   case VKI_XEN_SCHEDOP_block:
-+   case VKI_XEN_SCHEDOP_shutdown:
-+   case VKI_XEN_SCHEDOP_poll:
-+   case VKI_XEN_SCHEDOP_remote_shutdown:
-+   case VKI_XEN_SCHEDOP_shutdown_code:
-+   case VKI_XEN_SCHEDOP_watchdog:
-+      /* No ouput. */
-+      break;
-+   default:
-+      break;
-+   }
-+
-+#undef POST_XEN_SCHEDOP_WRITE
-+#undef __POST_XEN_SCHEDOP_WRITE
-+}
-+
- POST(hvm_op)
- {
-    unsigned long op = ARG1;
-@@ -1472,6 +1595,21 @@
+@@ -1996,6 +2050,21 @@ POST(hvm_op)
     case VKI_XEN_HVMOP_get_mem_access:
        POST_XEN_HVMOP_WRITE(get_mem_access, hvmmem_access);
        break;
@@ -219,32 +190,23 @@ Index: valgrind-3.10.1/coregrind/m_syswrap/syswrap-xen.c
     }
  #undef __POST_XEN_HVMOP_WRITE
  #undef POST_XEN_HVMOP_WRITE
-@@ -1544,7 +1682,7 @@
-    HYPXY(__VKI_XEN_mmuext_op,               mmuext_op,         2), // 26
-    //    __VKI_XEN_xsm_op                                          // 27
-    //    __VKI_XEN_nmi_op                                          // 28
--   //    __VKI_XEN_sched_op                                        // 29
-+   HYPXY(__VKI_XEN_sched_op,                sched_op,          2), // 29
- 
-    //    __VKI_XEN_callback_op                                     // 30
-    //    __VKI_XEN_xenoprof_op                                     // 31
-Index: valgrind-3.10.1/include/Makefile.am
+Index: valgrind-3.12.0/include/Makefile.am
 ===================================================================
---- valgrind-3.10.1.orig/include/Makefile.am	2014-11-25 20:41:18.000000000 +0100
-+++ valgrind-3.10.1/include/Makefile.am	2016-05-02 16:12:24.045932156 +0200
-@@ -73,6 +73,7 @@
- 	vki/vki-scnums-mips64-linux.h	\
+--- valgrind-3.12.0.orig/include/Makefile.am
++++ valgrind-3.12.0/include/Makefile.am
+@@ -78,6 +78,7 @@ nobase_pkginclude_HEADERS = \
  	vki/vki-scnums-darwin.h         \
+ 	vki/vki-scnums-solaris.h	\
  	vki/vki-xen.h                   \
 +	vki/vki-xen-sched.h		\
  	vki/vki-xen-domctl.h		\
  	vki/vki-xen-evtchn.h		\
  	vki/vki-xen-gnttab.h		\
-Index: valgrind-3.10.1/include/vki/vki-linux.h
+Index: valgrind-3.12.0/include/vki/vki-linux.h
 ===================================================================
---- valgrind-3.10.1.orig/include/vki/vki-linux.h	2014-11-25 20:41:18.000000000 +0100
-+++ valgrind-3.10.1/include/vki/vki-linux.h	2016-05-02 16:12:24.049265456 +0200
-@@ -3234,11 +3234,17 @@
+--- valgrind-3.12.0.orig/include/vki/vki-linux.h
++++ valgrind-3.12.0/include/vki/vki-linux.h
+@@ -3309,11 +3309,17 @@ struct vki_xen_privcmd_mmapbatch_v2 {
          int __user *err;  /* array of error codes */
  };
  
@@ -262,65 +224,14 @@ Index: valgrind-3.10.1/include/vki/vki-linux.h
  
  //----------------------------------------------------------------------
  // Xen evtchn IOCTL
-Index: valgrind-3.10.1/include/vki/vki-xen-domctl.h
+Index: valgrind-3.12.0/include/vki/vki-xen-hvm.h
 ===================================================================
---- valgrind-3.10.1.orig/include/vki/vki-xen-domctl.h	2014-11-25 20:41:18.000000000 +0100
-+++ valgrind-3.10.1/include/vki/vki-xen-domctl.h	2016-05-02 16:12:24.049265456 +0200
-@@ -275,6 +275,12 @@
-     vki_int32_t time_offset_seconds;
+--- valgrind-3.12.0.orig/include/vki/vki-xen-hvm.h
++++ valgrind-3.12.0/include/vki/vki-xen-hvm.h
+@@ -70,6 +70,14 @@ struct vki_xen_hvm_track_dirty_vram {
  };
+ typedef struct vki_xen_hvm_track_dirty_vram vki_xen_hvm_track_dirty_vram_t;
  
-+struct vki_xen_domctl_pin_mem_cacheattr {
-+    vki_xen_uint64_aligned_t start;
-+    vki_xen_uint64_aligned_t end;
-+    vki_uint32_t type;
-+};
-+
- struct vki_xen_domctl_cpuid {
-   vki_uint32_t input[2];
-   vki_uint32_t eax;
-@@ -349,6 +355,10 @@
-     vki_xen_pfn_t start_pfn, nr_pfns;
- };
- 
-+struct vki_xen_domctl_assign_device {
-+    vki_uint32_t machine_sbdf;
-+};
-+
- struct vki_xen_domctl {
-     vki_uint32_t cmd;
-     vki_uint32_t interface_version; /* XEN_DOMCTL_INTERFACE_VERSION */
-@@ -386,11 +396,11 @@
-         struct vki_xen_domctl_address_size      address_size;
-         //struct vki_xen_domctl_sendtrigger       sendtrigger;
-         //struct vki_xen_domctl_get_device_group  get_device_group;
--        //struct vki_xen_domctl_assign_device     assign_device;
-+        struct vki_xen_domctl_assign_device     assign_device;
-         //struct vki_xen_domctl_bind_pt_irq       bind_pt_irq;
-         //struct vki_xen_domctl_memory_mapping    memory_mapping;
-         //struct vki_xen_domctl_ioport_mapping    ioport_mapping;
--        //struct vki_xen_domctl_pin_mem_cacheattr pin_mem_cacheattr;
-+        struct vki_xen_domctl_pin_mem_cacheattr pin_mem_cacheattr;
-         //struct vki_xen_domctl_ext_vcpucontext   ext_vcpucontext;
-         //struct vki_xen_domctl_set_target        set_target;
-         //struct vki_xen_domctl_subscribe         subscribe;
-Index: valgrind-3.10.1/include/vki/vki-xen-hvm.h
-===================================================================
---- valgrind-3.10.1.orig/include/vki/vki-xen-hvm.h	2014-11-25 20:41:18.000000000 +0100
-+++ valgrind-3.10.1/include/vki/vki-xen-hvm.h	2016-05-02 16:12:24.049265456 +0200
-@@ -26,6 +26,23 @@
- };
- typedef struct vki_xen_hvm_set_pci_link_route vki_xen_hvm_set_pci_link_route_t;
- 
-+#define VKI_XEN_HVMOP_track_dirty_vram    6
-+struct vki_xen_hvm_track_dirty_vram {
-+    vki_xen_domid_t  domid;                             /* IN */
-+    vki_xen_uint64_aligned_t first_pfn;                 /* IN */
-+    vki_xen_uint64_aligned_t nr;                        /* IN */
-+    VKI_XEN_GUEST_HANDLE_64(vki_uint8) dirty_bitmap;    /* OUT */
-+};
-+typedef struct vki_xen_hvm_track_dirty_vram vki_xen_hvm_track_dirty_vram_t;
-+
 +#define VKI_XEN_HVMOP_modified_memory    7
 +struct vki_xen_hvm_modified_memory {
 +    vki_xen_domid_t  domid;             /* IN */
@@ -332,7 +243,7 @@ Index: valgrind-3.10.1/include/vki/vki-xen-hvm.h
  #define VKI_XEN_HVMOP_set_mem_type 8
  struct vki_xen_hvm_set_mem_type {
      vki_xen_domid_t  domid;
-@@ -35,6 +52,29 @@
+@@ -79,6 +87,29 @@ struct vki_xen_hvm_set_mem_type {
  };
  typedef struct vki_xen_hvm_set_mem_type vki_xen_hvm_set_mem_type_t;
  
@@ -362,13 +273,13 @@ Index: valgrind-3.10.1/include/vki/vki-xen-hvm.h
  #define VKI_XEN_HVMOP_set_mem_access        12
  struct vki_xen_hvm_set_mem_access {
      vki_xen_domid_t domid;
-Index: valgrind-3.10.1/include/vki/vki-xen-memory.h
+Index: valgrind-3.12.0/include/vki/vki-xen-memory.h
 ===================================================================
---- valgrind-3.10.1.orig/include/vki/vki-xen-memory.h	2014-11-25 20:41:18.000000000 +0100
-+++ valgrind-3.10.1/include/vki/vki-xen-memory.h	2016-05-02 16:12:24.049265456 +0200
-@@ -23,6 +23,18 @@
- #define VKI_XENMEM_access_op                  21
+--- valgrind-3.12.0.orig/include/vki/vki-xen-memory.h
++++ valgrind-3.12.0/include/vki/vki-xen-memory.h
+@@ -51,6 +51,18 @@
  #define VKI_XENMEM_claim_pages                24
+ #define VKI_XENMEM_machphys_compat_mfn_list   25
  
 +#define VKI_XENMEM_translate_gpfn_list	29
 +#define VKI_XENMEM_release_mfn_list	30
@@ -385,10 +296,10 @@ Index: valgrind-3.10.1/include/vki/vki-xen-memory.h
  struct vki_xen_memory_map {
      unsigned int nr_entries;
      VKI_XEN_GUEST_HANDLE(void) buffer;
-Index: valgrind-3.10.1/include/vki/vki-xen-sched.h
+Index: valgrind-3.12.0/include/vki/vki-xen-sched.h
 ===================================================================
---- /dev/null	1970-01-01 00:00:00.000000000 +0000
-+++ valgrind-3.10.1/include/vki/vki-xen-sched.h	2016-05-02 16:12:24.049265456 +0200
+--- /dev/null
++++ valgrind-3.12.0/include/vki/vki-xen-sched.h
 @@ -0,0 +1,36 @@
 +#ifndef __VKI_XEN_SCHED_H
 +#define __VKI_XEN_SCHED_H
@@ -426,14 +337,14 @@ Index: valgrind-3.10.1/include/vki/vki-xen-sched.h
 +/*--- end                                                          ---*/
 +/*--------------------------------------------------------------------*/
 +
-Index: valgrind-3.10.1/include/vki/vki-xen.h
+Index: valgrind-3.12.0/include/vki/vki-xen.h
 ===================================================================
---- valgrind-3.10.1.orig/include/vki/vki-xen.h	2014-11-25 20:41:18.000000000 +0100
-+++ valgrind-3.10.1/include/vki/vki-xen.h	2016-05-02 16:12:24.049265456 +0200
-@@ -86,6 +86,7 @@
- #include <vki/vki-xen-version.h>
- #include <vki/vki-xen-hvm.h>
+--- valgrind-3.12.0.orig/include/vki/vki-xen.h
++++ valgrind-3.12.0/include/vki/vki-xen.h
+@@ -116,6 +116,7 @@ struct vki_xenctl_bitmap {
  #include <vki/vki-xen-tmem.h>
+ #include <vki/vki-xen-xsm.h>
+ #include <vki/vki-xen-physdev.h>
 +#include <vki/vki-xen-sched.h>
  
  #endif // __VKI_XEN_H
