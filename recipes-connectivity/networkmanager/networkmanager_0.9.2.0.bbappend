@@ -33,8 +33,8 @@ CFLAGS_append += " -Wno-deprecated-declarations "
 
 do_install_append () {
         rm -f ${D}/etc/init.d/NetworkManager
-        install -m 0755 -d ${D}/usr/share/nm-idl
-        install -m 0644 ${S}/introspection/*.xml ${D}/usr/share/nm-idl/
+        install -m 0755 -d ${D}${nmidldatadir}
+        install -m 0644 ${S}/introspection/*.xml ${D}${nmidldatadir}
 
         install -m 0644 ${WORKDIR}/NetworkManager.conf ${D}/etc/NetworkManager/
         install -d ${D}/etc/acpi/actions
@@ -42,6 +42,9 @@ do_install_append () {
         install -m 0755 ${WORKDIR}/01ppp ${D}/etc/NetworkManager/dispatcher.d
 
 }
+FILES_${PN}_append = " \
+    ${nmidldatadir} \
+"
 FILES_${PN}_append_xenclient-ndvm += " \
                  /usr/share/xenclient/nm_scripts/db_to_nm.awk \
                  /usr/share/xenclient/nm_scripts/nm_to_db.awk \

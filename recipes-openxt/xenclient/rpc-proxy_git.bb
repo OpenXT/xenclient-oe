@@ -37,7 +37,7 @@ S = "${WORKDIR}/git/rpc-proxy"
 
 HPV = "1.0"
 require recipes-openxt/xclibs/xclibs.inc
-inherit update-rc.d haskell xc-rpcgen-haskell-1.0
+inherit update-rc.d haskell xc-rpcgen
 
 INITSCRIPT_NAME = "rpc-proxy"
 INITSCRIPT_PARAMS = "defaults 30"
@@ -47,8 +47,8 @@ INITSCRIPT_PARAMS = "defaults 30"
 do_configure_append() {
 	# generate rpc stubs
 	mkdir -p Rpc/Autogen
-	xc-rpcgen --haskell --templates-dir=${rpcgendatadir} -s -o Rpc/Autogen --module-prefix=Rpc.Autogen ${idldatadir}/rpc_proxy.xml
-	xc-rpcgen --haskell --templates-dir=${rpcgendatadir} -c -o Rpc/Autogen --module-prefix=Rpc.Autogen ${idldatadir}/dbus.xml
+	xc-rpcgen --haskell --templates-dir=${STAGING_RPCGENDATADIR_NATIVE} -s -o Rpc/Autogen --module-prefix=Rpc.Autogen ${STAGING_IDLDATADIR}/rpc_proxy.xml
+	xc-rpcgen --haskell --templates-dir=${STAGING_RPCGENDATADIR_NATIVE} -c -o Rpc/Autogen --module-prefix=Rpc.Autogen ${STAGING_IDLDATADIR}/dbus.xml
 }
 
 do_install_append() {
