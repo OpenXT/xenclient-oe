@@ -15,7 +15,6 @@ SRC_URI_append = " \
     file://config.patch \
     file://do-not-overwrite-cc-and-ld.patch \
     file://disable-xen-root-check.patch \
-    file://blktap-resume-fix.patch;patch=1 \
     file://hvm-pm-hibernate-s-state.patch;patch=1 \
     file://prune-vga-acpi-dev.patch;patch=1 \
     file://smbios.patch;patch=1 \
@@ -40,14 +39,6 @@ SRC_URI_append = " \
     file://allow-pat-cacheattrs-for-all-domains.patch;patch=1 \
     file://opt-disable-vmcs-shadowing.patch;patch=1 \
     file://hvmloader-legacy-seabios-optionroms.patch;patch=1 \
-    file://blktap2-miscellaneous-oxt-fixes.patch \
-    file://blktap2-libvhd-atomic-write-helpers.patch \
-    file://blktap2-vhd-marker-flag.patch \
-    file://blktap2-vhd-print-allocated-virtblock-list.patch \
-    file://blktap2-tap-ctl-optional-pid-ro-mount.patch \
-    file://blktap2-vhd-keyhash-support.patch \
-    file://blktap2-vhd-encryption-support.patch \
-    file://blktap2-vhd-icbinn-support.patch \
     file://gpt-s3-resume-reason.patch;patch=1 \
     file://fix-memcpy-in-x86-emulate.patch;patch=1 \
     file://stubdomain-msi-irq-access.patch;patch=1 \
