@@ -112,11 +112,6 @@ remove_initscripts() {
         rm -f ${IMAGE_ROOTFS}${sysconfdir}/init.d/finish.sh
         update-rc.d -r ${IMAGE_ROOTFS} finish.sh remove
     fi
-
-    if [ -f ${IMAGE_ROOTFS}${sysconfdir}/init.d/mount-special ]; then
-        rm -f ${IMAGE_ROOTFS}${sysconfdir}/init.d/mount-special
-        update-rc.d -r ${IMAGE_ROOTFS} mount-special remove
-    fi
 }
 
 # After ensuring that the correct number of xenstored daemon(s) are installed,
