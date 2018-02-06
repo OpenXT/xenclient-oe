@@ -25,3 +25,10 @@ do_compile_prepend() {
     done
 }
 EXTRA_OEMAKE = "CFLAGS+=-DOPENXT_BRANDING"
+
+# We need a read-only rootfs...
+# Disable:
+# gtk-query-immodules-2.0 > /etc/gtk-2.0/gtk.immodules
+pkg_postinst_uim-gtk2.0() {
+    :
+}

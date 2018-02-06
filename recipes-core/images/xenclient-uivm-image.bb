@@ -1,18 +1,26 @@
 # XenClient UIVM image
 
 include xenclient-image-common.inc
-IMAGE_FEATURES += "package-management"
+IMAGE_FEATURES += " \
+    package-management \
+    read-only-rootfs \
+"
 
 COMPATIBLE_MACHINE = "(xenclient-uivm)"
 
 IMAGE_FSTYPES = "ext3.vhd.gz"
 
-BAD_RECOMMENDATIONS += "avahi-daemon avahi-autoipd"
+BAD_RECOMMENDATIONS += " \
+    avahi-daemon \
+    avahi-autoipd \
+"
 # The above seems to be broken and we *really* don't want avahi!
-PACKAGE_REMOVE = "avahi-daemon avahi-autoipd busybox-hwclock"
+PACKAGE_REMOVE = " \
+    avahi-daemon \
+    avahi-autoipd \
+    busybox-hwclock \
+"
 
-ANGSTROM_EXTRA_INSTALL += " \
-			  " 
 XSERVER ?= "xserver-kdrive-fbdev"
 
 export IMAGE_BASENAME = "xenclient-uivm-image"
@@ -85,53 +93,7 @@ IMAGE_INSTALL = "\
     uim-gtk2.0 \
     matchbox-keyboard \
     matchbox-keyboard-im \
-    ${ANGSTROM_EXTRA_INSTALL}"
-
-# these cause a python dictionary changed size during iteration error
-#    gtk+-locale-de \
-#    gtk+-locale-es \
-#    gtk+-locale-fr \
-#    gtk+-locale-ja \
-#    gtk+-locale-zh-cn \
-#
-
-# OE upgrade - temporarly disabled:
-
-# angstrom-x11-base-depends \
-# packagegroup-xfce46-base \
-# angstrom-gnome-icon-theme-enable \
-# battery-applet-4-xfce4 \
-# battery-applet-4-xfce4-locale-de \
-# battery-applet-4-xfce4-locale-es \
-# battery-applet-4-xfce4-locale-fr \
-# battery-applet-4-xfce4-locale-ja \
-# battery-applet-4-xfce4-locale-zh-cn \
-# xsetroot \
-# gconf-dbus \
-# xkbd \
-#
-
-
-#    angstrom-gpe-packagegroup-base \
-#    ${SPLASH} \
-#
-
-#IMAGE_INSTALL = "\
-#    ${XSERVER} \
-#    packagegroup-base-extended \
-#    coreutils \
-#    bash \
-#    angstrom-x11-base-depends \
-#    angstrom-gpe-packagegroup-base \
-#    angstrom-gpe-packagegroup-settings \
-#    kernel-modules \
-#    hal \
-#    devilspie \
-#    surf \
-#    ${SPLASH} \
-#    ${ANGSTROM_EXTRA_INSTALL}"
-
-# IMAGE_PREPROCESS_COMMAND = "create_etc_timestamp"
+"
 
 #zap root password for release images
 ROOTFS_POSTPROCESS_COMMAND += '${@base_conditional("DISTRO_TYPE", "release", "zap_root_password; ", "",d)}'
@@ -172,9 +134,20 @@ remove_initscripts() {
         rm -f ${IMAGE_ROOTFS}${sysconfdir}/init.d/urandom
         update-rc.d -r ${IMAGE_ROOTFS} urandom remove
     fi
+    if [ -f ${IMAGE_ROOTFS}${sysconfdir}/init.d/save-rtc.sh ]; then
+        rm -f ${IMAGE_ROOTFS}${sysconfdir}/init.d/save-rtc.sh
+        update-rc.d -r ${IMAGE_ROOTFS} save-rtc.sh remove
+    fi
+    if [ -f ${IMAGE_ROOTFS}${sysconfdir}/init.d/networking ]; then
+        rm -f ${IMAGE_ROOTFS}${sysconfdir}/init.d/networking
+        update-rc.d -r ${IMAGE_ROOTFS} networking remove
+    fi
 }
 
-ROOTFS_POSTPROCESS_COMMAND += " post_rootfs_shell_commands; remove_initscripts; "
+ROOTFS_POSTPROCESS_COMMAND += " \
+     post_rootfs_shell_commands; \
+     remove_initscripts; \
+"
 
 inherit image
 inherit xenclient-licences

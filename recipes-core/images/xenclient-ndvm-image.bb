@@ -1,7 +1,10 @@
 # XenClient secure backend-domain image
 
 include xenclient-image-common.inc
-IMAGE_FEATURES += "package-management"
+IMAGE_FEATURES += " \
+    package-management \
+    read-only-rootfs \
+"
 
 COMPATIBLE_MACHINE = "(xenclient-ndvm)"
 
@@ -71,9 +74,6 @@ post_rootfs_shell_commands() {
 	# NDVM doesn't have a /dev/tty1, disable the login shell on it
 	sed -i 's/[^#].*getty.*tty1$/#&/' ${IMAGE_ROOTFS}/etc/inittab ;
 
-	# Move resolv.conf to /var/volatile/etc, as rootfs is readonly
-	rm -f ${IMAGE_ROOTFS}/etc/resolv.conf; ln -s /var/volatile/etc/resolv.conf ${IMAGE_ROOTFS}/etc/resolv.conf;
-
 	opkg -f ${IPKGCONF_TARGET} -o ${IMAGE_ROOTFS} ${OPKG_ARGS} -force-depends remove ${PACKAGE_REMOVE};
 }
 
@@ -86,6 +86,14 @@ remove_initscripts() {
     if [ -f ${IMAGE_ROOTFS}${sysconfdir}/init.d/sshd ]; then
         rm -f ${IMAGE_ROOTFS}${sysconfdir}/init.d/sshd
         update-rc.d -r ${IMAGE_ROOTFS} sshd remove
+    fi
+    if [ -f ${IMAGE_ROOTFS}${sysconfdir}/init.d/save-rtc.sh ]; then
+        rm -f ${IMAGE_ROOTFS}${sysconfdir}/init.d/save-rtc.sh
+        update-rc.d -r ${IMAGE_ROOTFS} save-rtc.sh remove
+    fi
+    if [ -f ${IMAGE_ROOTFS}${sysconfdir}/init.d/save-rtc.sh ]; then
+        rm -f ${IMAGE_ROOTFS}${sysconfdir}/init.d/hwclock.sh
+        update-rc.d -r ${IMAGE_ROOTFS} hwclock.sh remove
     fi
 }
 
