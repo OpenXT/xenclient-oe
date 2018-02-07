@@ -40,6 +40,7 @@ do_install () {
 	install -m 0755    ${WORKDIR}/save-rtc.sh	${D}${sysconfdir}/init.d
 	install -m 0644    ${WORKDIR}/volatiles		${D}${sysconfdir}/default/volatiles/00_core
 	install -m 0755    ${WORKDIR}/finish.sh		${D}${sysconfdir}/init.d
+	install -m 0755    ${WORKDIR}/mountearly.sh	${D}${sysconfdir}/init.d
 
 #
 # Install device dependent scripts
@@ -62,11 +63,7 @@ do_install () {
 	update-rc.d -r ${D} bootmisc.sh start 55 S .
 	update-rc.d -r ${D} populate-volatile.sh start 37 S .
 	update-rc.d -r ${D} finish.sh start 99 S .
-}
-
-do_install_append_xenclient-dom0() {
-    install -m 0755 ${WORKDIR}/mountearly.sh ${D}${sysconfdir}/init.d
-    update-rc.d -r ${D} mountearly.sh start 01 S .
+	update-rc.d -r ${D} mountearly.sh start 01 S .
 }
 
 pkg_postinst_${PN}_append() {

@@ -19,7 +19,8 @@ if [ ! -e "${EARLY_FSTAB}" ]; then
     exit 0
 fi
 
-if ! mount -a --fstab "${EARLY_FSTAB}" ; then
+# With busybox, requires: CONFIG_FEATURE_MOUNT_OTHERTAB
+if ! mount -a -T "${EARLY_FSTAB}" ; then
     failure "Failed to mount early filesystems."
     exit 1
 fi
