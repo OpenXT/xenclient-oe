@@ -1,28 +1,37 @@
 # XenClient dom0 image
 
-include xenclient-image-common.inc
+LICENSE = "GPLv2 & MIT"
+LIC_FILES_CHKSUM = " \
+    file://${COMMON_LICENSE_DIR}/GPL-2.0;md5=801f80980d171dd6425610833a22dbe6 \
+    file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302 \
+"
+
 IMAGE_FEATURES += " \
     package-management \
     read-only-rootfs \
 "
+IMAGE_FSTYPES = "ext3.gz"
+export IMAGE_BASENAME = "xenclient-dom0-image"
 
 COMPATIBLE_MACHINE = "(xenclient-dom0)"
 
-IMAGE_FSTYPES = "ext3.gz"
 
 # No thanks, we provide our own xorg.conf with the hacked Intel driver
 # And we don't need Avahi
-BAD_RECOMMENDATIONS += "xserver-xorg avahi-daemon avahi-autoipd ${@bb.utils.contains('IMAGE_FEATURES', 'web-certificates', '', 'ca-certificates', d)}"
+BAD_RECOMMENDATIONS += " \
+    xserver-xorg \
+    avahi-daemon \
+    avahi-autoipd \
+    ${@bb.utils.contains('IMAGE_FEATURES', 'web-certificates', '', 'ca-certificates', d)} \
+"
 # The above seems to be broken and we *really* don't want avahi!
 # Also remove the unwanted version of xenstored
-PACKAGE_REMOVE = "avahi-daemon avahi-autoipd xen-xenstored-ocaml"
+PACKAGE_REMOVE = " \
+    avahi-daemon \
+    avahi-autoipd \
+    xen-xenstored-ocaml \
+"
 
-ANGSTROM_EXTRA_INSTALL += " \
-			  " 
-export IMAGE_BASENAME = "xenclient-dom0-image"
-export STAGING_KERNEL_DIR
-
-DEPENDS = "packagegroup-base packagegroup-xenclient-dom0"
 IMAGE_INSTALL = "\
     ${ROOTFS_PKGMANAGE} \
     initscripts \
@@ -35,11 +44,15 @@ IMAGE_INSTALL = "\
     v4v-module \
     xenclient-preload-hs-libs \
     linux-firmware-i915 \
-    ${ANGSTROM_EXTRA_INSTALL}"
+"
 
-# IMAGE_PREPROCESS_COMMAND = "create_etc_timestamp"
+inherit openxt-selinux-image
+inherit xenclient-licences
 
-#zap root password for release images
+require xenclient-image-common.inc
+require xenclient-version.inc
+
+# zap root password for release images
 ROOTFS_POSTPROCESS_COMMAND += '${@base_conditional("DISTRO_TYPE", "release", "zap_root_password; ", "",d)}'
 
 post_rootfs_shell_commands() {
@@ -90,6 +103,7 @@ post_rootfs_shell_commands() {
 	# Write coredumps in /var/cores
 	echo 'kernel.core_pattern = /var/cores/%e-%t.%p.core' >> ${IMAGE_ROOTFS}/etc/sysctl.conf ;
 }
+ROOTFS_POSTPROCESS_COMMAND += "post_rootfs_shell_commands; "
 
 ### Stubdomain stuff - temporary
 STUBDOMAIN_DEPLOY_DIR_IMAGE = "${DEPLOY_DIR}/images/xenclient-stubdomain"
@@ -100,6 +114,7 @@ process_tmp_stubdomain_items() {
 	cat ${STUBDOMAIN_IMAGE} > ${IMAGE_ROOTFS}/usr/lib/xen/boot/stubdomain-initramfs ;
 	cat ${STUBDOMAIN_KERNEL} > ${IMAGE_ROOTFS}/usr/lib/xen/boot/stubdomain-bzImage ; 
 }
+ROOTFS_POSTPROCESS_COMMAND += "process_tmp_stubdomain_items; "
 
 # Get rid of unneeded initscripts
 remove_initscripts() {
@@ -113,31 +128,38 @@ remove_initscripts() {
         update-rc.d -r ${IMAGE_ROOTFS} finish.sh remove
     fi
 }
+ROOTFS_POSTPROCESS_COMMAND += "remove_initscripts; "
 
 # After ensuring that the correct number of xenstored daemon(s) are installed,
 # enforce that the init script is active:
 activate_xenstored_initscript() {
     update-rc.d -r ${IMAGE_ROOTFS} xenstored defaults 05
 }
+ROOTFS_POSTPROCESS_COMMAND += "activate_xenstored_initscript; "
 
 # packagegroup-xenclient-dom0 provides lvm2, so have lvmetad running as lvm2
 # utilities try to use it and warn in its absence.
 activate_lvmetad_initscript() {
     update-rc.d -r ${IMAGE_ROOTFS} lvm2-lvmetad defaults 06
 }
+ROOTFS_POSTPROCESS_COMMAND += "activate_lvmetad_initscript; "
 
-ROOTFS_POSTPROCESS_COMMAND += " \
-    post_rootfs_shell_commands; \
-    remove_initscripts; \
-    activate_xenstored_initscript; \
-    activate_lvmetad_initscript; \
-    process_tmp_stubdomain_items; \
-"
+# Handle required configuration of the rootfs to store persistent files on
+# encripted /config partition.
+rw_config_partition() {
+    # If we are using openssh but want the persistent data to be stored in the
+    # encrypted config partition, replace or append SYSCONFDIR in
+    # /etc/default/ssh.
+    # This should only be done after read_only_rootfs_hook(s) have been done.
+    if [ -d ${IMAGE_ROOTFS}${sysconfdir}/ssh ]; then
+        sed -i -e '/^SYSCONFDIR=/{h;s/=.*/=\$\{SYSCONFDIR:-\/config\/etc\/ssh\}/};${x;/^$/{s//SYSCONFDIR=\$\{SYSCONFDIR:-\/config\/etc\/ssh\}/;H};x}' ${IMAGE_ROOTFS}${sysconfdir}/default/ssh
+        sed -i -e 's/HostKey .*\/ssh\/ssh_host_\(.*\)key/HostKey \/config\/etc\/ssh\/ssh_host_\1key/' ${IMAGE_ROOTFS}${sysconfdir}/ssh/sshd_config_readonly
+        echo "HostKey /config/etc/ssh/ssh_host_dsa_key" >> ${IMAGE_ROOTFS}${sysconfdir}/ssh/sshd_config
+        echo "HostKey /config/etc/ssh/ssh_host_rsa_key" >> ${IMAGE_ROOTFS}${sysconfdir}/ssh/sshd_config
+        echo "HostKey /config/etc/ssh/ssh_host_ecdsa_key" >> ${IMAGE_ROOTFS}${sysconfdir}/ssh/sshd_config
+        echo "HostKey /config/etc/ssh/ssh_host_ed25519_key" >> ${IMAGE_ROOTFS}${sysconfdir}/ssh/sshd_config
+    fi
+}
+ROOTFS_POSTPROCESS_COMMAND += "rw_config_partition; "
 
-inherit openxt-selinux-image
-inherit xenclient-licences
-require xenclient-version.inc
 
-LICENSE = "GPLv2 & MIT"
-LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/GPL-2.0;md5=801f80980d171dd6425610833a22dbe6      \
-                    file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302"

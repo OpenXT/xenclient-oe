@@ -112,10 +112,10 @@ fi
 if [ -r ${INSTALL_CONF}/ssh.conf ] ; then
     SSH_ENABLED="$(awk -F\' '/^SSH_ENABLED=/ { print $2 }' ${INSTALL_CONF}/ssh.conf)"
     if [ "$SSH_ENABLED" = "true" ]; then
-        mkdir -p /config/etc/ssh
-        touch /config/etc/ssh/enabled
+        rm -f /config/etc/ssh/sshd_not_to_be_run
     else
-        rm -f /config/etc/ssh/enabled
+        mkdir -p /config/etc/ssh
+        touch /config/etc/ssh/sshd_not_to_be_run
     fi
     mv -f ${INSTALL_CONF}/ssh.conf ${INSTALL_CONF}/ssh.conf.DONE
 fi
