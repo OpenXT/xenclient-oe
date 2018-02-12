@@ -4,6 +4,16 @@ IMAGE_CLASSES += " \
 
 export STAGING_KERNEL_DIR
 
+# Helper to avoid redundancy in image recipes.
+remove_initscript() {
+    local script="$1"
+
+    if [ -f "${IMAGE_ROOTFS}${sysconfdir}/init.d/${script}" ]; then
+        rm -f "${IMAGE_ROOTFS}${sysconfdir}/init.d/${script}"
+        update-rc.d -r ${IMAGE_ROOTFS} ${script} remove
+    fi
+}
+
 # Make sysvinit verbose if debug-tweaks is enabled
 activate_verbose_sysvinit() {
     sed -i -e 's/^VERBOSE=no$/VERBOSE=yes/' ${IMAGE_ROOTFS}${sysconfdir}/default/rcS
@@ -21,3 +31,8 @@ read_only_rootfs_hook_extend() {
     fi
 }
 ROOTFS_POSTPROCESS_COMMAND += '${@bb.utils.contains("IMAGE_FEATURES", "read-only-rootfs", "read_only_rootfs_hook_extend; ", "",d)}'
+
+# Add and entry to /etc/inittab to start a tty on hvc0 (debug).
+start_tty_on_hvc0() {
+	echo 'hvc0:12345:respawn:/bin/start_getty 115200 hvc0 vt102' >> ${IMAGE_ROOTFS}/etc/inittab;
+}

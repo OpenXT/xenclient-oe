@@ -1,4 +1,4 @@
-# XenClient dom0 image
+# XenClient dom0 image.
 
 LICENSE = "GPLv2 & MIT"
 LIC_FILES_CHKSUM = " \
@@ -16,19 +16,15 @@ export IMAGE_BASENAME = "xenclient-dom0-image"
 COMPATIBLE_MACHINE = "(xenclient-dom0)"
 
 
-# No thanks, we provide our own xorg.conf with the hacked Intel driver
-# And we don't need Avahi
+# xserver-xorg should not live in dom0, but UIVM.
 BAD_RECOMMENDATIONS += " \
     xserver-xorg \
     avahi-daemon \
     avahi-autoipd \
     ${@bb.utils.contains('IMAGE_FEATURES', 'web-certificates', '', 'ca-certificates', d)} \
 "
-# The above seems to be broken and we *really* don't want avahi!
-# Also remove the unwanted version of xenstored
+# List of packages removed at rootfs-postprocess.
 PACKAGE_REMOVE = " \
-    avahi-daemon \
-    avahi-autoipd \
     xen-xenstored-ocaml \
 "
 
@@ -56,52 +52,51 @@ require xenclient-version.inc
 ROOTFS_POSTPROCESS_COMMAND += '${@base_conditional("DISTRO_TYPE", "release", "zap_root_password; ", "",d)}'
 
 post_rootfs_shell_commands() {
-	# zap root password in shadow
-	sed -i 's%^root:[^:]*:%root:*:%' ${IMAGE_ROOTFS}/etc/shadow;
+    # Change root shell.
+    sed -i 's|root:x:0:0:root:/root:/bin/sh|root:x:0:0:root:/root:/bin/bash|' ${IMAGE_ROOTFS}/etc/passwd
 
-	sed -i 's|root:x:0:0:root:/root:/bin/sh|root:x:0:0:root:/root:/bin/bash|' ${IMAGE_ROOTFS}/etc/passwd;
+    mkdir -p ${IMAGE_ROOTFS}/config/etc
+    mv ${IMAGE_ROOTFS}/etc/passwd ${IMAGE_ROOTFS}/config/etc
+    mv ${IMAGE_ROOTFS}/etc/shadow ${IMAGE_ROOTFS}/config/etc
+    ln -s ../config/etc/passwd ${IMAGE_ROOTFS}/etc/passwd
+    ln -s ../config/etc/shadow ${IMAGE_ROOTFS}/etc/shadow
+    ln -s ../config/etc/.pwd.lock ${IMAGE_ROOTFS}/etc/.pwd.lock
+    ln -s ../var/volatile/etc/asound ${IMAGE_ROOTFS}/etc/asound
 
-	mkdir -p ${IMAGE_ROOTFS}/config/etc;
-	mv ${IMAGE_ROOTFS}/etc/passwd ${IMAGE_ROOTFS}/config/etc;
-	mv ${IMAGE_ROOTFS}/etc/shadow ${IMAGE_ROOTFS}/config/etc;
-	ln -s ../config/etc/passwd ${IMAGE_ROOTFS}/etc/passwd;
-	ln -s ../config/etc/shadow ${IMAGE_ROOTFS}/etc/shadow;
-	ln -s ../config/etc/.pwd.lock ${IMAGE_ROOTFS}/etc/.pwd.lock;
-	ln -s ../var/volatile/etc/asound ${IMAGE_ROOTFS}/etc/asound;
+    rm ${IMAGE_ROOTFS}/etc/hosts
+    ln -s /var/run/hosts ${IMAGE_ROOTFS}/etc/hosts
+    ln -s /var/volatile/etc/resolv.conf ${IMAGE_ROOTFS}/etc/resolv.conf
 
-	rm ${IMAGE_ROOTFS}/etc/hosts; ln -s /var/run/hosts ${IMAGE_ROOTFS}/etc/hosts;
-	ln -s /var/volatile/etc/resolv.conf ${IMAGE_ROOTFS}/etc/resolv.conf;
+    echo 'kernel.printk_ratelimit = 0' >> ${IMAGE_ROOTFS}/etc/sysctl.conf
 
-	echo 'kernel.printk_ratelimit = 0' >> ${IMAGE_ROOTFS}/etc/sysctl.conf;
+    # Add initramfs
+    cat ${DEPLOY_DIR_IMAGE}/xenclient-initramfs-image-xenclient-dom0.cpio.gz > ${IMAGE_ROOTFS}/boot/initramfs.gz
 
-	# Add initramfs
-	cat ${DEPLOY_DIR_IMAGE}/xenclient-initramfs-image-xenclient-dom0.cpio.gz > ${IMAGE_ROOTFS}/boot/initramfs.gz ;
+    # Create mountpoint for /mnt/secure
+    mkdir -p ${IMAGE_ROOTFS}/mnt/secure
 
-	# Create mountpoint for /mnt/secure
-	mkdir -p ${IMAGE_ROOTFS}/mnt/secure ;
+    # Create mountpoint for /mnt/upgrade
+    mkdir -p ${IMAGE_ROOTFS}/mnt/upgrade
 
-	# Create mountpoint for /mnt/upgrade
-	mkdir -p ${IMAGE_ROOTFS}/mnt/upgrade ;
+    # Create mountpoint for boot/system
+    mkdir -p ${IMAGE_ROOTFS}/boot/system
 
-	# Create mountpoint for boot/system
-	mkdir -p ${IMAGE_ROOTFS}/boot/system ;
+    # Create XL-related files and directories
+    mkdir -p ${IMAGE_ROOTFS}/var/lib/xen
+    mkdir -p ${IMAGE_ROOTFS}/etc/xen
+    touch ${IMAGE_ROOTFS}/etc/xen/xl.conf
 
-	# Create XL-related files and directories
-	mkdir -p ${IMAGE_ROOTFS}/var/lib/xen ;
-	mkdir -p ${IMAGE_ROOTFS}/etc/xen ;
-	touch ${IMAGE_ROOTFS}/etc/xen/xl.conf ;
+    # Remove unwanted packages specified above
+    opkg -f ${IPKGCONF_TARGET} -o ${IMAGE_ROOTFS} ${OPKG_ARGS} -force-depends remove ${PACKAGE_REMOVE}
 
-	# Remove unwanted packages specified above
-	opkg -f ${IPKGCONF_TARGET} -o ${IMAGE_ROOTFS} ${OPKG_ARGS} -force-depends remove ${PACKAGE_REMOVE};
+    # Remove network modules except netfront
+    for x in `find ${IMAGE_ROOTFS}/lib/modules -name *.ko | grep drivers/net | grep -v xen-netfront`; do
+        pkg="kernel-module-`basename $x .ko | sed s/_/-/g`"
+        opkg ${IPKG_ARGS} -force-depends remove $pkg
+    done
 
-	# Remove network modules except netfront
-	for x in `find ${IMAGE_ROOTFS}/lib/modules -name *.ko | grep drivers/net | grep -v xen-netfront`; do
-		pkg="kernel-module-`basename $x .ko | sed s/_/-/g`";
-		opkg ${IPKG_ARGS} -force-depends remove $pkg;
-	done;
-
-	# Write coredumps in /var/cores
-	echo 'kernel.core_pattern = /var/cores/%e-%t.%p.core' >> ${IMAGE_ROOTFS}/etc/sysctl.conf ;
+    # Write coredumps in /var/cores
+    echo 'kernel.core_pattern = /var/cores/%e-%t.%p.core' >> ${IMAGE_ROOTFS}/etc/sysctl.conf
 }
 ROOTFS_POSTPROCESS_COMMAND += "post_rootfs_shell_commands; "
 
@@ -110,23 +105,16 @@ STUBDOMAIN_DEPLOY_DIR_IMAGE = "${DEPLOY_DIR}/images/xenclient-stubdomain"
 STUBDOMAIN_IMAGE = "${STUBDOMAIN_DEPLOY_DIR_IMAGE}/xenclient-stubdomain-initramfs-image-xenclient-stubdomain.cpio.gz"
 STUBDOMAIN_KERNEL = "${STUBDOMAIN_DEPLOY_DIR_IMAGE}/bzImage-xenclient-stubdomain.bin"
 process_tmp_stubdomain_items() {
-	mkdir -p ${IMAGE_ROOTFS}/usr/lib/xen/boot ;
-	cat ${STUBDOMAIN_IMAGE} > ${IMAGE_ROOTFS}/usr/lib/xen/boot/stubdomain-initramfs ;
-	cat ${STUBDOMAIN_KERNEL} > ${IMAGE_ROOTFS}/usr/lib/xen/boot/stubdomain-bzImage ; 
+    mkdir -p ${IMAGE_ROOTFS}/usr/lib/xen/boot
+    cat ${STUBDOMAIN_IMAGE} > ${IMAGE_ROOTFS}/usr/lib/xen/boot/stubdomain-initramfs
+    cat ${STUBDOMAIN_KERNEL} > ${IMAGE_ROOTFS}/usr/lib/xen/boot/stubdomain-bzImage
 }
 ROOTFS_POSTPROCESS_COMMAND += "process_tmp_stubdomain_items; "
 
 # Get rid of unneeded initscripts
 remove_initscripts() {
-    if [ -f ${IMAGE_ROOTFS}${sysconfdir}/init.d/rmnologin.sh ]; then
-        rm -f ${IMAGE_ROOTFS}${sysconfdir}/init.d/rmnologin.sh
-        update-rc.d -r ${IMAGE_ROOTFS} rmnologin.sh remove
-    fi
-
-    if [ -f ${IMAGE_ROOTFS}${sysconfdir}/init.d/finish.sh ]; then
-        rm -f ${IMAGE_ROOTFS}${sysconfdir}/init.d/finish.sh
-        update-rc.d -r ${IMAGE_ROOTFS} finish.sh remove
-    fi
+    remove_initscript "rmnologin.sh"
+    remove_initscript "finish.sh"
 }
 ROOTFS_POSTPROCESS_COMMAND += "remove_initscripts; "
 
@@ -161,5 +149,3 @@ rw_config_partition() {
     fi
 }
 ROOTFS_POSTPROCESS_COMMAND += "rw_config_partition; "
-
-

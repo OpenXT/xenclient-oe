@@ -4,37 +4,41 @@
 # and running part 2 of the host installer, which contains the logic to install
 # or upgrade a specific version of XenClient.
 
-include xenclient-image-common.inc
-
-COMPATIBLE_MACHINE = "(openxt-installer)"
-IMAGE_INITSCRIPTS = "initscripts"
+LICENSE = "GPLv2 & MIT"
+LIC_FILES_CHKSUM = " \
+    file://${COMMON_LICENSE_DIR}/GPL-2.0;md5=801f80980d171dd6425610833a22dbe6 \
+    file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302 \
+"
 
 PR = "r15"
 
 SRC_URI += " \
-	    file://network.ans \
-            file://network_upgrade.ans \
-            file://network_manual.ans \
-            file://network_download_win.ans \
-            file://network_manual_download_win.ans \
-	    file://pxelinux.cfg \
-	    file://isolinux.cfg \
-	    file://grub.cfg \
-	    file://bootmsg.txt \
-	    file://fstab.installer \
+    file://network.ans \
+    file://network_upgrade.ans \
+    file://network_manual.ans \
+    file://network_download_win.ans \
+    file://network_manual_download_win.ans \
+    file://pxelinux.cfg \
+    file://isolinux.cfg \
+    file://bootmsg.txt \
+    file://fstab.installer \
 "
 
-ANGSTROM_EXTRA_INSTALL += ""
-
+IMAGE_FSTYPES = "cpio.gz"
 export IMAGE_BASENAME = "xenclient-installer-image"
 
-BAD_RECOMMENDATIONS += "${@bb.utils.contains('IMAGE_FEATURES', 'web-certificates', '', 'ca-certificates', d)}"
+COMPATIBLE_MACHINE = "(openxt-installer)"
 
-DEPENDS = "packagegroup-base packagegroup-xenclient-installer grub-efi-cross"
+DEPENDS = " \
+    grub-efi-cross \
+"
+
+BAD_RECOMMENDATIONS += " \
+    ${@bb.utils.contains('IMAGE_FEATURES', 'web-certificates', '', 'ca-certificates', d)} \
+"
 
 IMAGE_INSTALL = "\
-    ${ROOTFS_PKGMANAGE} \
-    ${IMAGE_INITSCRIPTS} \
+    initscripts \
     modules-installer \
     packagegroup-core-boot \
     packagegroup-base \
@@ -43,130 +47,146 @@ IMAGE_INSTALL = "\
     linux-firmware-iwlwifi \
     linux-firmware-bnx2 \
     linux-firmware-i915 \
-    ${ANGSTROM_EXTRA_INSTALL}"
-
-IMAGE_FSTYPES = "cpio.gz"
+"
 # The entire installer rootfs is passed as the initramfs.
 # Inflate the maximum value to 256M to reflect that (original definition is
 # 128M in bitbake.conf)
 INITRAMFS_MAXSIZE = "262144"
 
-# IMAGE_PREPROCESS_COMMAND = "create_etc_timestamp"
+inherit image
+inherit xenclient-licences
+
+require xenclient-image-common.inc
+require xenclient-version.inc
 
 post_rootfs_shell_commands() {
-	# Create /init symlink
-	ln -s sbin/init ${IMAGE_ROOTFS}/init;
+    # Create /init symlink
+    ln -s sbin/init ${IMAGE_ROOTFS}/init;
 
-	# Update /etc/inittab
-	sed -i '/^1:/d' ${IMAGE_ROOTFS}/etc/inittab; 
-	{
-		echo '1:2345:once:/install/part1/autostart-main < /dev/tty1 > /dev/tty1';
-		echo '2:2345:respawn:/usr/bin/tail -F /var/log/installer > /dev/tty2';
-		echo '3:2345:respawn:/sbin/getty 38400 tty3';
-		echo '4:2345:respawn:/usr/bin/tail -F /var/log/messages > /dev/tty4';
-		echo '5:2345:respawn:/sbin/getty 38400 tty5';
-		echo '6:2345:respawn:/sbin/getty 38400 tty6';
-		echo '7:2345:respawn:/install/part1/autostart-status < /dev/tty7 > /dev/tty7';
-		echo 'ca::ctrlaltdel:/sbin/reboot';
-	} >> ${IMAGE_ROOTFS}/etc/inittab;
+    # Update /etc/inittab
+    sed -i '/^1:/d' ${IMAGE_ROOTFS}/etc/inittab;
+    {
+        echo '1:2345:once:/install/part1/autostart-main < /dev/tty1 > /dev/tty1';
+        echo '2:2345:respawn:/usr/bin/tail -F /var/log/installer > /dev/tty2';
+        echo '3:2345:respawn:/sbin/getty 38400 tty3';
+        echo '4:2345:respawn:/usr/bin/tail -F /var/log/messages > /dev/tty4';
+        echo '5:2345:respawn:/sbin/getty 38400 tty5';
+        echo '6:2345:respawn:/sbin/getty 38400 tty6';
+        echo '7:2345:respawn:/install/part1/autostart-status < /dev/tty7 > /dev/tty7';
+        echo 'ca::ctrlaltdel:/sbin/reboot';
+    } >> ${IMAGE_ROOTFS}/etc/inittab;
 
-	# Override /etc/fstab
+    # Override /etc/fstab
         # HACK: Sharing dom0's machine has currently some costs:
         # - collision in sysroot have to be independently managed
         # - different configuration are harder to deal with.
         install -m 0644 ${WORKDIR}/fstab.installer ${IMAGE_ROOTFS}/etc/fstab
 
-	# Update /etc/network/interfaces
-	{
-		echo 'auto lo';
-		echo 'iface lo inet loopback';
-	} > ${IMAGE_ROOTFS}/etc/network/interfaces;
+    # Update /etc/network/interfaces
+    {
+        echo 'auto lo';
+        echo 'iface lo inet loopback';
+    } > ${IMAGE_ROOTFS}/etc/network/interfaces;
 
-	# Password files are expected in /config
-	mkdir -p ${IMAGE_ROOTFS}/config/etc;
-	mv ${IMAGE_ROOTFS}/etc/shadow ${IMAGE_ROOTFS}/config/etc/shadow;
-	mv ${IMAGE_ROOTFS}/etc/passwd ${IMAGE_ROOTFS}/config/etc/passwd;
-	ln -s /config/etc/shadow ${IMAGE_ROOTFS}/etc/shadow;
-	ln -s /config/etc/passwd ${IMAGE_ROOTFS}/etc/passwd;
+    # Password files are expected in /config
+    mkdir -p ${IMAGE_ROOTFS}/config/etc;
+    mv ${IMAGE_ROOTFS}/etc/shadow ${IMAGE_ROOTFS}/config/etc/shadow;
+    mv ${IMAGE_ROOTFS}/etc/passwd ${IMAGE_ROOTFS}/config/etc/passwd;
+    ln -s /config/etc/shadow ${IMAGE_ROOTFS}/etc/shadow;
+    ln -s /config/etc/passwd ${IMAGE_ROOTFS}/etc/passwd;
 
-	# Use bash as login shell
-	sed -i 's|root:x:0:0:root:/root:/bin/sh|root:x:0:0:root:/root:/bin/bash|' ${IMAGE_ROOTFS}/config/etc/passwd;
+    # Use bash as login shell
+    sed -i 's|root:x:0:0:root:/root:/bin/sh|root:x:0:0:root:/root:/bin/bash|' ${IMAGE_ROOTFS}/config/etc/passwd;
 
-	# Don't start blktapctrl daemon
-	rm -f ${IMAGE_ROOTFS}/etc/init.d/blktap; 
-	rm -f ${IMAGE_ROOTFS}/etc/rc*.d/*blktap;
+    # Don't start blktapctrl daemon
+    rm -f ${IMAGE_ROOTFS}/etc/init.d/blktap;
+    rm -f ${IMAGE_ROOTFS}/etc/rc*.d/*blktap;
 
-	# Create file to identify this as the host installer filesystem
-	touch ${IMAGE_ROOTFS}/etc/xenclient-host-installer;
+    # Create file to identify this as the host installer filesystem
+    touch ${IMAGE_ROOTFS}/etc/xenclient-host-installer;
 }
+ROOTFS_POSTPROCESS_COMMAND += "post_rootfs_shell_commands; "
+
+# Remove initscripts pulled-in by dependencies or not required for operation.
+remove_nonessential_initscripts() {
+    remove_initscript "blktap"
+}
+ROOTFS_POSTPROCESS_COMMAND += "remove_nonessential_initscripts; "
 
 # packagegroup-xenclient-dom0 provides lvm2, so have lvmetad running as lvm2
 # utilities try to use it and warn in its absence.
 activate_lvmetad_initscript() {
     update-rc.d -r ${IMAGE_ROOTFS} lvm2-lvmetad defaults 06
 }
+ROOTFS_POSTPROCESS_COMMAND += "activate_lvmetad_initscript; "
 
-ROOTFS_POSTPROCESS_COMMAND += " \
-    activate_lvmetad_initscript; \
-    post_rootfs_shell_commands; \
-"
+# Copy syslinux modules and configuration files.
+syslinux_install_files() {
+    # Netboot.
+    mkdir -p ${DEPLOY_DIR_IMAGE}/${IMAGE_LINK_NAME}/netboot
+    cp -f ${IMAGE_ROOTFS}/${datadir}/syslinux/ldlinux.c32 ${DEPLOY_DIR_IMAGE}/${IMAGE_LINK_NAME}/netboot/
+    cp -f ${IMAGE_ROOTFS}/${datadir}/syslinux/mboot.c32 ${DEPLOY_DIR_IMAGE}/${IMAGE_LINK_NAME}/netboot/
+    cp -f ${IMAGE_ROOTFS}/${datadir}/syslinux/libcom32.c32 ${DEPLOY_DIR_IMAGE}/${IMAGE_LINK_NAME}/netboot/
+    cp -f ${WORKDIR}/pxelinux.cfg ${DEPLOY_DIR_IMAGE}/${IMAGE_LINK_NAME}/netboot/
 
-do_post_rootfs_items() {
-	install -d ${DEPLOY_DIR_IMAGE}/${IMAGE_LINK_NAME}/netboot
-	install -m 0644 ${IMAGE_ROOTFS}/${datadir}/syslinux/ldlinux.c32 ${DEPLOY_DIR_IMAGE}/${IMAGE_LINK_NAME}/netboot/
-	install -m 0644 ${IMAGE_ROOTFS}/${datadir}/syslinux/mboot.c32 ${DEPLOY_DIR_IMAGE}/${IMAGE_LINK_NAME}/netboot/
-	install -m 0644 ${IMAGE_ROOTFS}/${datadir}/syslinux/libcom32.c32 ${DEPLOY_DIR_IMAGE}/${IMAGE_LINK_NAME}/netboot/
-	for i in ${WORKDIR}/*.ans ; do 
-		install -m 0644 ${i} ${DEPLOY_DIR_IMAGE}/${IMAGE_LINK_NAME}/netboot/
-	done
-	install -m 0644 ${WORKDIR}/pxelinux.cfg ${DEPLOY_DIR_IMAGE}/${IMAGE_LINK_NAME}/netboot/
-	install -d ${DEPLOY_DIR_IMAGE}/${IMAGE_LINK_NAME}/iso
-	install -m 0644 ${IMAGE_ROOTFS}/${datadir}/syslinux/ldlinux.c32 ${DEPLOY_DIR_IMAGE}/${IMAGE_LINK_NAME}/iso/
-	install -m 0644 ${IMAGE_ROOTFS}/${datadir}/syslinux/mboot.c32 ${DEPLOY_DIR_IMAGE}/${IMAGE_LINK_NAME}/iso/
-	install -m 0644 ${IMAGE_ROOTFS}/${datadir}/syslinux/libcom32.c32 ${DEPLOY_DIR_IMAGE}/${IMAGE_LINK_NAME}/iso/
-	install -m 0644 ${IMAGE_ROOTFS}/${datadir}/syslinux/pxelinux.0 ${DEPLOY_DIR_IMAGE}/${IMAGE_LINK_NAME}/iso/
-	install -m 0644 ${WORKDIR}/bootmsg.txt ${DEPLOY_DIR_IMAGE}/${IMAGE_LINK_NAME}/iso/
-	install -m 0644 ${IMAGE_ROOTFS}/${datadir}/syslinux/isolinux.bin ${DEPLOY_DIR_IMAGE}/${IMAGE_LINK_NAME}/iso/
-	install -m 0644 ${WORKDIR}/isolinux.cfg ${DEPLOY_DIR_IMAGE}/${IMAGE_LINK_NAME}/iso/
-	install -m 0644 ${WORKDIR}/grub.cfg ${DEPLOY_DIR_IMAGE}/${IMAGE_LINK_NAME}/iso/
-
-	# Force the copy in case this has already run before
-	cp -f ${IMAGE_ROOTFS}/boot/tboot.gz ${DEPLOY_DIR_IMAGE}/
-	cp -f ${IMAGE_ROOTFS}/boot/xen.gz ${DEPLOY_DIR_IMAGE}/
-	cp -f ${IMAGE_ROOTFS}/boot/GM45_GS45_PM45_SINIT_51.BIN ${DEPLOY_DIR_IMAGE}/gm45.acm
-	cp -f ${IMAGE_ROOTFS}/boot/4th_gen_i5_i7_SINIT_75.BIN ${DEPLOY_DIR_IMAGE}/hsw.acm
-	cp -f ${IMAGE_ROOTFS}/boot/i5_i7_DUAL_SINIT_51.BIN ${DEPLOY_DIR_IMAGE}/duali.acm
-	cp -f ${IMAGE_ROOTFS}/boot/i7_QUAD_SINIT_51.BIN ${DEPLOY_DIR_IMAGE}/quadi.acm
-	cp -f ${IMAGE_ROOTFS}/boot/Q35_SINIT_51.BIN ${DEPLOY_DIR_IMAGE}/q35.acm
-	cp -f ${IMAGE_ROOTFS}/boot/Q45_Q43_SINIT_51.BIN ${DEPLOY_DIR_IMAGE}/q45q43.acm
-	cp -f ${IMAGE_ROOTFS}/boot/Xeon-5600-3500-SINIT-v1.1.bin ${DEPLOY_DIR_IMAGE}/xeon56.acm
-	cp -f ${IMAGE_ROOTFS}/boot/Xeon-E7-8800-4800-2800-SINIT-v1.1.bin ${DEPLOY_DIR_IMAGE}/xeone7.acm
-	cp -f ${IMAGE_ROOTFS}/boot/3rd_gen_i5_i7_SINIT_67.BIN ${DEPLOY_DIR_IMAGE}/ivb_snb.acm
-	cp -f ${IMAGE_ROOTFS}/boot/5th_gen_i5_i7_SINIT_79.BIN ${DEPLOY_DIR_IMAGE}/bdw.acm
-	cp -f ${IMAGE_ROOTFS}/boot/6th_gen_i5_i7_SINIT_71.BIN ${DEPLOY_DIR_IMAGE}/skl.acm
-	cp -f ${IMAGE_ROOTFS}/boot/7th_gen_i5_i7-SINIT_74.bin ${DEPLOY_DIR_IMAGE}/kbl.acm
-	cp -f ${IMAGE_ROOTFS}/boot/license-SINIT-ACMs.txt ${DEPLOY_DIR_IMAGE}/license-SINIT-ACMs.txt
-
-	# Add the microcode to the installer
-	cp -f ${IMAGE_ROOTFS}/boot/microcode_intel.bin ${DEPLOY_DIR_IMAGE}/microcode_intel.bin
+    # Iso.
+    mkdir -p ${DEPLOY_DIR_IMAGE}/${IMAGE_LINK_NAME}/iso
+    cp -f ${IMAGE_ROOTFS}/${datadir}/syslinux/ldlinux.c32 ${DEPLOY_DIR_IMAGE}/${IMAGE_LINK_NAME}/iso/
+    cp -f ${IMAGE_ROOTFS}/${datadir}/syslinux/mboot.c32 ${DEPLOY_DIR_IMAGE}/${IMAGE_LINK_NAME}/iso/
+    cp -f ${IMAGE_ROOTFS}/${datadir}/syslinux/libcom32.c32 ${DEPLOY_DIR_IMAGE}/${IMAGE_LINK_NAME}/iso/
+    cp -f ${IMAGE_ROOTFS}/${datadir}/syslinux/isolinux.bin ${DEPLOY_DIR_IMAGE}/${IMAGE_LINK_NAME}/iso/
+    cp -f ${WORKDIR}/bootmsg.txt ${DEPLOY_DIR_IMAGE}/${IMAGE_LINK_NAME}/iso/
+    cp -f ${WORKDIR}/isolinux.cfg ${DEPLOY_DIR_IMAGE}/${IMAGE_LINK_NAME}/iso/
+    # isohybrid: should not be shipped.
+    cp -f ${IMAGE_ROOTFS}/${bindir}/isohybrid ${DEPLOY_DIR_IMAGE}/${IMAGE_LINK_NAME}/iso/
 }
+IMAGE_POSTPROCESS_COMMAND += "syslinux_install_files; "
 
-addtask post_rootfs_items after do_rootfs before do_build
+# Install TBoot image and ACMs.
+tboot_install_files() {
+    cp -f ${IMAGE_ROOTFS}/boot/tboot.gz ${DEPLOY_DIR_IMAGE}/
+    cp -f ${IMAGE_ROOTFS}/boot/GM45_GS45_PM45_SINIT_51.BIN ${DEPLOY_DIR_IMAGE}/gm45.acm
+    cp -f ${IMAGE_ROOTFS}/boot/4th_gen_i5_i7_SINIT_75.BIN ${DEPLOY_DIR_IMAGE}/hsw.acm
+    cp -f ${IMAGE_ROOTFS}/boot/i5_i7_DUAL_SINIT_51.BIN ${DEPLOY_DIR_IMAGE}/duali.acm
+    cp -f ${IMAGE_ROOTFS}/boot/i7_QUAD_SINIT_51.BIN ${DEPLOY_DIR_IMAGE}/quadi.acm
+    cp -f ${IMAGE_ROOTFS}/boot/Q35_SINIT_51.BIN ${DEPLOY_DIR_IMAGE}/q35.acm
+    cp -f ${IMAGE_ROOTFS}/boot/Q45_Q43_SINIT_51.BIN ${DEPLOY_DIR_IMAGE}/q45q43.acm
+    cp -f ${IMAGE_ROOTFS}/boot/Xeon-5600-3500-SINIT-v1.1.bin ${DEPLOY_DIR_IMAGE}/xeon56.acm
+    cp -f ${IMAGE_ROOTFS}/boot/Xeon-E7-8800-4800-2800-SINIT-v1.1.bin ${DEPLOY_DIR_IMAGE}/xeone7.acm
+    cp -f ${IMAGE_ROOTFS}/boot/3rd_gen_i5_i7_SINIT_67.BIN ${DEPLOY_DIR_IMAGE}/ivb_snb.acm
+    cp -f ${IMAGE_ROOTFS}/boot/5th_gen_i5_i7_SINIT_79.BIN ${DEPLOY_DIR_IMAGE}/bdw.acm
+    cp -f ${IMAGE_ROOTFS}/boot/6th_gen_i5_i7_SINIT_71.BIN ${DEPLOY_DIR_IMAGE}/skl.acm
+    cp -f ${IMAGE_ROOTFS}/boot/7th_gen_i5_i7-SINIT_74.bin ${DEPLOY_DIR_IMAGE}/kbl.acm
+    cp -f ${IMAGE_ROOTFS}/boot/license-SINIT-ACMs.txt ${DEPLOY_DIR_IMAGE}/license-SINIT-ACMs.txt
+}
+IMAGE_POSTPROCESS_COMMAND += "tboot_install_files; "
 
-inherit image
-inherit xenclient-licences
-require xenclient-version.inc
+# Install Xen in the installer image.
+# This is a legacy procedure as the installer does not require Xen to run,
+# presumably this was done so that users would know immediately before
+# installing that Xen cannot be run on the hardware.
+xen_install() {
+    cp -f ${IMAGE_ROOTFS}/boot/xen.gz ${DEPLOY_DIR_IMAGE}/
+}
+IMAGE_POSTPROCESS_COMMAND += "xen_install; "
 
-LICENSE = "GPLv2 & MIT"
-LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/GPL-2.0;md5=801f80980d171dd6425610833a22dbe6      \
-                    file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302"
+# Install the microcode binary blob in the installer image.
+microcode_install() {
+    cp -f ${IMAGE_ROOTFS}/boot/microcode_intel.bin ${DEPLOY_DIR_IMAGE}/microcode_intel.bin
+}
+IMAGE_POSTPROCESS_COMMAND += "microcode_install; "
 
+# Install Answerfiles used to configure the OpenXT installer.
+openxt_install_answerfiles() {
+    for i in ${WORKDIR}/*.ans ; do
+        cp -f ${i} ${DEPLOY_DIR_IMAGE}/${IMAGE_LINK_NAME}/netboot/
+    done
+}
+IMAGE_POSTPROCESS_COMMAND += "openxt_install_answerfiles; "
+
+# Re-enable do_fetch/do_unpack to fetch image specific configuration files
+# (see SRC_URI).
 python () {
     d.delVarFlag("do_fetch", "noexec");
     d.delVarFlag("do_unpack", "noexec");
-    d.delVarFlag("do_patch", "noexec");
-    d.delVarFlag("do_configure", "noexec");
-    d.delVarFlag("do_compile", "noexec");
-    d.delVarFlag("do_install", "noexec");
 }
-do_rootfs[depends] += "xenclient-installer-image:do_install"

@@ -1,31 +1,31 @@
 # XenClient UIVM image
 
-include xenclient-image-common.inc
+LICENSE = "GPLv2 & MIT"
+LIC_FILES_CHKSUM = " \
+    file://${COMMON_LICENSE_DIR}/GPL-2.0;md5=801f80980d171dd6425610833a22dbe6 \
+    file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302 \
+"
+
 IMAGE_FEATURES += " \
     package-management \
     read-only-rootfs \
 "
+IMAGE_FSTYPES = "ext3.vhd.gz"
+export IMAGE_BASENAME = "xenclient-uivm-image"
 
 COMPATIBLE_MACHINE = "(xenclient-uivm)"
 
-IMAGE_FSTYPES = "ext3.vhd.gz"
 
 BAD_RECOMMENDATIONS += " \
     avahi-daemon \
     avahi-autoipd \
 "
-# The above seems to be broken and we *really* don't want avahi!
+# List of packages removed at rootfs-postprocess.
 PACKAGE_REMOVE = " \
-    avahi-daemon \
-    avahi-autoipd \
     busybox-hwclock \
 "
 
 XSERVER ?= "xserver-kdrive-fbdev"
-
-export IMAGE_BASENAME = "xenclient-uivm-image"
-
-DEPENDS = "packagegroup-base"
 
 # Specifies the list of locales to install into the image during the root
 # filesystem construction process.
@@ -95,64 +95,42 @@ IMAGE_INSTALL = "\
     matchbox-keyboard-im \
 "
 
+require xenclient-image-common.inc
+require xenclient-version.inc
+inherit xenclient-licences
+inherit image
+
 #zap root password for release images
 ROOTFS_POSTPROCESS_COMMAND += '${@base_conditional("DISTRO_TYPE", "release", "zap_root_password; ", "",d)}'
 
 post_rootfs_shell_commands() {
-	echo 'x:5:respawn:/bin/su - root -c /usr/bin/startxfce4' >> ${IMAGE_ROOTFS}/etc/inittab;
+    # Start WM right away.
+    echo 'x:5:respawn:/bin/su - root -c /usr/bin/startxfce4' >> ${IMAGE_ROOTFS}/etc/inittab
 
-	# enable ctrlaltdel reboot because PV driver uses ctrl+alt+del to interpret reboot issued via xenstore
-	echo 'ca:12345:ctrlaltdel:/sbin/shutdown -t1 -a -r now' >> ${IMAGE_ROOTFS}/etc/inittab;
+    # enable ctrlaltdel reboot because PV driver uses ctrl+alt+del to interpret reboot issued via xenstore
+    echo 'ca:12345:ctrlaltdel:/sbin/shutdown -t1 -a -r now' >> ${IMAGE_ROOTFS}/etc/inittab
 
-	sed -i 's|root:x:0:0:root:/root:/bin/sh|root:x:0:0:root:/root:/bin/bash|' ${IMAGE_ROOTFS}/etc/passwd;
+    # Change root shell.
+    sed -i 's|root:x:0:0:root:/root:/bin/sh|root:x:0:0:root:/root:/bin/bash|' ${IMAGE_ROOTFS}/etc/passwd
 
-	echo '1.0.0.0 dom0' >> ${IMAGE_ROOTFS}/etc/hosts;
+    # Trick to resolve dom0 name with V4V.
+    echo '1.0.0.0 dom0' >> ${IMAGE_ROOTFS}/etc/hosts
 
-	opkg -f ${IPKGCONF_TARGET} -o ${IMAGE_ROOTFS} ${OPKG_ARGS} -force-depends remove ${PACKAGE_REMOVE}
-
-	# readonly rootfs prevents sshd from creating dirs
-	mkdir ${IMAGE_ROOTFS}/root/.ssh;
-	
-	mkdir ${IMAGE_ROOTFS}/root/.cache;
+    # HACK: Force remove unwanted packages.
+    # These should not be installed in the first place?
+    opkg -f ${IPKGCONF_TARGET} -o ${IMAGE_ROOTFS} ${OPKG_ARGS} -force-depends remove ${PACKAGE_REMOVE}
 }
+ROOTFS_POSTPROCESS_COMMAND += "post_rootfs_shell_commands; "
 
-remove_initscripts() {
-    # Remove unneeded initscripts
-    if [ -f ${IMAGE_ROOTFS}${sysconfdir}/init.d/finish.sh ]; then
-        rm -f ${IMAGE_ROOTFS}${sysconfdir}/init.d/finish.sh
-        update-rc.d -r ${IMAGE_ROOTFS} finish.sh remove
-    fi
-    if [ -f ${IMAGE_ROOTFS}${sysconfdir}/init.d/rmnologin.sh ]; then
-        rm -f ${IMAGE_ROOTFS}${sysconfdir}/init.d/rmnologin.sh
-        update-rc.d -r ${IMAGE_ROOTFS} rmnologin.sh remove
-    fi
-    if [ -f ${IMAGE_ROOTFS}${sysconfdir}/init.d/sshd ]; then
-        rm -f ${IMAGE_ROOTFS}${sysconfdir}/init.d/sshd
-        update-rc.d -r ${IMAGE_ROOTFS} sshd remove
-    fi
-    if [ -f ${IMAGE_ROOTFS}${sysconfdir}/init.d/urandom ]; then
-        rm -f ${IMAGE_ROOTFS}${sysconfdir}/init.d/urandom
-        update-rc.d -r ${IMAGE_ROOTFS} urandom remove
-    fi
-    if [ -f ${IMAGE_ROOTFS}${sysconfdir}/init.d/save-rtc.sh ]; then
-        rm -f ${IMAGE_ROOTFS}${sysconfdir}/init.d/save-rtc.sh
-        update-rc.d -r ${IMAGE_ROOTFS} save-rtc.sh remove
-    fi
-    if [ -f ${IMAGE_ROOTFS}${sysconfdir}/init.d/networking ]; then
-        rm -f ${IMAGE_ROOTFS}${sysconfdir}/init.d/networking
-        update-rc.d -r ${IMAGE_ROOTFS} networking remove
-    fi
+# Get a tty on hvc0 when in debug mode.
+ROOTFS_POSTPROCESS_COMMAND += '${@bb.utils.contains("IMAGE_FEATURES", "debug-tweaks", "start_tty_on_hvc0; ", "",d)}'
+
+remove_nonessential_initscripts() {
+    remove_initscript "finish.sh"
+    remove_initscript "rmnologin.sh"
+    remove_initscript "sshd"
+    remove_initscript "urandom"
+    remove_initscript "save-rtc.sh"
+    remove_initscript "networking"
 }
-
-ROOTFS_POSTPROCESS_COMMAND += " \
-     post_rootfs_shell_commands; \
-     remove_initscripts; \
-"
-
-inherit image
-inherit xenclient-licences
-require xenclient-version.inc
-
-LICENSE = "GPLv2 & MIT"
-LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/GPL-2.0;md5=801f80980d171dd6425610833a22dbe6      \
-                    file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302"
+ROOTFS_POSTPROCESS_COMMAND += "remove_nonessential_initscripts; "

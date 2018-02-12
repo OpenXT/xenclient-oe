@@ -41,18 +41,13 @@ IMAGE_INSTALL = " \
     policycoreutils-setfiles \
 "
 IMAGE_LINGUAS = "en-us"
-# udev is widely depended upon... odds are it will still be around.
-IMAGE_DEV_MANAGER = "busybox-mdev"
-IMAGE_BOOT = "${IMAGE_DEV_MANAGER}"
+
+inherit image
 
 write_initramfs_config_files() {
     install -m 0644 ${WORKDIR}/initramfs-lvm.conf ${IMAGE_ROOTFS}/${sysconfdir}/lvm/lvm.conf
 }
-ROOTFS_POSTPROCESS_COMMAND += " \
-    write_initramfs_config_files; \
-"
-
-inherit image
+ROOTFS_POSTPROCESS_COMMAND += " write_initramfs_config_files; "
 
 # Re-enable do_fetch/do_unpack to fetch image specific configuration files
 # (see SRC_URI).
