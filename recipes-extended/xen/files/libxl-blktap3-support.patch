@@ -295,31 +295,28 @@ Index: xen-4.9.1/tools/libxl/libxl_disk.c
 -                             disk->pdev_path);
 -                        rc = ERROR_FAIL;
 -                        goto out;
--                    }
--                }
--                flexarray_append(back, "tapdisk-params");
-+		dev = libxl__blktap_devpath(gc, disk->pdev_path,
-+					    disk->format);
-+		if (!dev) {
-+		     LOGD(ERROR, domid, "failed to get blktap devpath for %s: %s\n",
-+			  disk->pdev_path, strerror(rc));
-+		     rc = ERROR_FAIL;
-+		     goto out;
-+		}
-+		LOG(DEBUG,"\nBLKTAP3_DEBUG: dev path = %s \n", dev);
-+		if (!disk->script && disk->backend_domid == LIBXL_TOOLSTACK_DOMID) {
-+		    int major, minor;
-+		    if (!libxl__device_physdisk_major_minor(dev, &major, &minor)) {
-+			LOG(DEBUG, "\nBLKTAP3_DEBUG: major:minor = %x:%x\n",major,minor);
-+			flexarray_append_pair(back, "physical-device",
-+				GCSPRINTF("%x:%x", major, minor));
-+		    }
-+		}
-+		flexarray_append(back, "tapdisk-params");
++                dev = libxl__blktap_devpath(gc, disk->pdev_path,
++                                            disk->format);
++                if (!dev) {
++                     LOGD(ERROR, domid, "failed to get blktap devpath for %s: %s\n",
++                          disk->pdev_path, strerror(rc));
++                     rc = ERROR_FAIL;
++                     goto out;
++                }
++                LOG(DEBUG,"\nBLKTAP3_DEBUG: dev path = %s \n", dev);
++                if (!disk->script && disk->backend_domid == LIBXL_TOOLSTACK_DOMID) {
++                    int major, minor;
++                    if (!libxl__device_physdisk_major_minor(dev, &major, &minor)) {
++                        LOG(DEBUG, "\nBLKTAP3_DEBUG: major:minor = %x:%x\n",major,minor);
++                        flexarray_append_pair(back, "physical-device",
++                                GCSPRINTF("%x:%x", major, minor));
+                     }
+                 }
+                 flexarray_append(back, "tapdisk-params");
                  flexarray_append(back, GCSPRINTF("%s:%s",
                      libxl__device_disk_string_of_format(disk->format),
                      disk->pdev_path));
-+		break;
++                break;
  
 -                /* tap backends with scripts are rejected by
 -                 * libxl__device_disk_set_backend */
@@ -330,10 +327,14 @@ Index: xen-4.9.1/tools/libxl/libxl_disk.c
              case LIBXL_DISK_BACKEND_QDISK:
                  flexarray_append(back, "params");
                  flexarray_append(back, GCSPRINTF("%s:%s",
-@@ -547,6 +548,12 @@ static int libxl__device_disk_from_xenst
+@@ -547,6 +548,16 @@ static int libxl__device_disk_from_xenst
      }
      libxl_string_to_backend(ctx, tmp, &(disk->backend));
  
++    /* NOTE: Below workaround is required while dealing with iso hotswap.
++     * Trying to fix this inside libxl_string_to_backend() will break the
++     * initial disk setup during domain start-up.
++     */
 +    tmp = libxl__xs_read(gc, XBT_NULL,
 +                         GCSPRINTF("%s/tapdisk-params", libxl_path));
 +    if (tmp && strcmp(tmp, "")) {
@@ -343,7 +344,7 @@ Index: xen-4.9.1/tools/libxl/libxl_disk.c
      disk->vdev = xs_read(ctx->xsh, XBT_NULL,
                           GCSPRINTF("%s/dev", libxl_path), &len);
      if (!disk->vdev) {
-@@ -834,6 +841,7 @@ int libxl_cdrom_change(libxl_ctx *ctx, u
+@@ -834,6 +845,7 @@ int libxl_cdrom_change(libxl_ctx *ctx, u
  
      libxl__ao_complete(egc, ao, 0);
  out:

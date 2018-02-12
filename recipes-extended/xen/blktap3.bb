@@ -7,7 +7,7 @@ PV = "0+git${SRCPV}"
 
 SRCREV = "${AUTOREV}"
 SRC_URI = "git://${OPENXT_GIT_MIRROR}/blktap3.git;protocol=${OPENXT_GIT_PROTOCOL};branch=${OPENXT_BRANCH} \
-	file://tapback.initscript \
+    file://tapback.initscript \
 "
 
 S = "${WORKDIR}/git"
