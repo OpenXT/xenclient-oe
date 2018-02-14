@@ -70,6 +70,7 @@ RDEPENDS_${PN} = " \
     libtctisocket \
     tpm2-tools \
     ${@bb.utils.contains('DISTRO_FEATURES', 'blktap2', 'xen-blktap xen-libblktapctl xen-libvhd', 'blktap3', d)} \
+    gptfdisk \
 "
 
 # open-iscsi-user \
