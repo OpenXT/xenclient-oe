@@ -22,7 +22,9 @@ do_configure_prepend() {
 }
 
 do_install_append() {
-	rm -rf ${D}/usr/lib/systemd
+	if ${@bb.utils.contains('DISTRO_FEATURES', 'systemd', 'false', 'true', d)}; then
+		rm -rf ${D}/usr/lib/systemd
+	fi
 	install -d ${D}/etc/init.d
 	install -m 0755 ${WORKDIR}/tapback.initscript \
 		${D}/etc/init.d/tapback-daemon
