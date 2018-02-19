@@ -27,4 +27,5 @@ RDEPENDS_${PN} = "\
     xenclient-devscripts \
     xenclient-rpcgen \
     lsof \
+    evtest \
 "
