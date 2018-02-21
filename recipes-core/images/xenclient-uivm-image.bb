@@ -89,6 +89,7 @@ IMAGE_INSTALL = "\
     ttf-dejavu-sans \
     ttf-dejavu-sans-mono \
     uim \
+    uim-common \
     anthy \
     uim-gtk2.0 \
     matchbox-keyboard \
