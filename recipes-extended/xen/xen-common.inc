@@ -97,6 +97,7 @@ SRC_URI_append = " \
     file://efi-hardcode-openxt-cfg.patch \
     file://efi-load-option-support.patch \
     file://shim-support-for-shim-lock-measure.patch \
+    file://efi-require-shim.patch \
 "
 
 COMPATIBLE_HOST = 'i686-oe-linux|(x86_64.*).*-linux|aarch64.*-linux'
