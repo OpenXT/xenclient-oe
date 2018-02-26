@@ -56,7 +56,7 @@ do_install () {
     install -d ${D}/root/.config/xfce4/mcs_settings
     install -m 644 ${WORKDIR}/workspaces.xml ${D}/root/.config/xfce4/mcs_settings/
 
-    install -f ${D}/root/.config/xfce4/xfwm4
+    install -d ${D}/root/.config/xfce4/xfwm4
 
     install -d ${D}/root/.local/share/xfce4/helpers
     install -m 644 ${WORKDIR}/custom-WebBrowser.desktop ${D}/root/.local/share/xfce4/helpers
