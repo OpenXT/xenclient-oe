@@ -235,12 +235,12 @@ sysroot_stage_all_append () {
 
 pkg_postinst_${PN} () {
     if [ -z "$D" ]; then
-        /sbin/setfiles /etc/selinux/${POL_TYPE}/contexts/files/file_contexts /
+        ${base_sbindir}/setfiles "${sysconfdir}/selinux/${POLICY_NAME}/contexts/files/file_contexts" /
     fi
 }
 
 pkg_postinst_${PN}_append_xenclient-dom0 () {
     if [ -z "$D" ]; then
-        /sbin/setfiles /etc/selinux/${POL_TYPE}/contexts/files/file_contexts /config /storage
+        ${base_sbindir}/setfiles "${sysconfdir}/selinux/${POLICY_NAME}/contexts/files/file_contexts" /config /storage
     fi
 }
