@@ -32,7 +32,6 @@ SRC_URI += "${KERNELORG_MIRROR}/linux/kernel/v${PV_MAJOR}.x/linux-${PV}.tar.xz;n
     file://fbcon-do-not-drag-detect-primary-option.patch;patch=1 \
     file://usbback-base.patch;patch=1 \
     file://hvc-kgdb-fix.patch;patch=1 \
-    file://xenstore-no-read-vs-write-atomicity.patch;patch=1 \
     file://pciback-restrictive-attr.patch;patch=1 \
     file://thorough-reset-interface-to-pciback-s-sysfs.patch;patch=1 \
     file://tpm-tis-force-ioremap.patch;patch=1 \
