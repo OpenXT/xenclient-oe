@@ -34,6 +34,11 @@ do_install_append() {
     echo "HostKey /var/run/ssh/ssh_host_ed25519_key_v4v" >> ${D}${sysconfdir}/ssh/sshd_config_readonly_v4v
 
     install -m 0644 ${WORKDIR}/volatiles.99_ssh-keygen ${D}${sysconfdir}/default/volatiles/99_ssh-keygen
+
+    # CONFIG_IPV6 is not set in every linux-openxt.
+    sed -i -e 's/^[#]AddressFamily .\+/AddressFamily inet/' \
+        ${D}${sysconfdir}/ssh/sshd_config \
+        ${D}${sysconfdir}/ssh/sshd_config_readonly
 }
 
 FILES_${PN}-ssh += " \
