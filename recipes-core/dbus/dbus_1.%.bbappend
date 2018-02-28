@@ -33,4 +33,11 @@ do_install_append() {
     # (which requires an auth mecanism in place anyway).
     sed -i -e 's|<deny own="\*"/>|<allow own="*"/>|' ${D}${datadir}/dbus-1/system.conf
     sed -i -e 's|<deny send_type="method_call"/>|<allow send_type="method_call"/>|' ${D}${datadir}/dbus-1/system.conf
+
+    # Inscrease the amount of pending replies per connections. The UI is
+    # dispatching messages in parallel.
+    sed -i -e '/<\/busconfig>/ i\  <limit name="max_replies_per_connection">2000</limit>' ${D}${datadir}/dbus-1/system.conf
+    # Double number of allowed dbus connections per user (default is 256).
+    # The UI and Toolstack are demanding.
+    sed -i -e '/<\/busconfig>/ i\  <limit name="max_connections_per_user">512</limit>' ${D}${datadir}/dbus-1/system.conf
 }
