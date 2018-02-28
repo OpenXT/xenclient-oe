@@ -40,6 +40,7 @@ IMAGE_INSTALL = "\
     v4v-module \
     xenclient-preload-hs-libs \
     linux-firmware-i915 \
+    ${@bb.utils.contains('IMAGE_FEATURES', 'debug-tweaks', 'packagegroup-selinux-policycoreutils audit', '' ,d)} \
 "
 
 inherit openxt-selinux-image
