@@ -73,6 +73,8 @@ EXTRA_OEMAKE += "CONFIG_IOEMU=n"
 EXTRA_OEMAKE += "CONFIG_TESTS=n"
 EXTRA_OEMAKE += "DESTDIR=${D}"
 
+EXTRA_OECONF += " --enable-blktap2 "
+
 #Make sure we disable all compiler optimizations to avoid a nasty segfault in the 
 #reboot case.
 BUILD_LDFLAGS += " -Wl,-O0 -O0"
@@ -94,9 +96,12 @@ do_configure_prepend() {
 	#remove optimizations in the config files
 	sed -i 's/-O2//g' ${WORKDIR}/xen-${XEN_VERSION}/Config.mk
 	sed -i 's/-O2//g' ${WORKDIR}/xen-${XEN_VERSION}/config/StdGNU.mk
+
+	cp "${WORKDIR}/defconfig" "${B}/xen/.config"
 }
 
 do_compile() {
+    oe_runmake -C tools/libs subdir-all-toolcore
     oe_runmake -C tools subdir-all-include
     oe_runmake LDLIBS_libxenctrl='-lxenctrl' \
 		       LDLIBS_libxenstore='-lxenstore' \
