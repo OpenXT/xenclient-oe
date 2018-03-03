@@ -20,18 +20,16 @@ RPROVIDES_xen-xenstored-ocaml = "xen-xenstored xen-xenstored-ocaml"
 DEPENDS += " \
     util-linux \
     xen \
-    blktap3 \
+    ${@bb.utils.contains('DISTRO_FEATURES', 'blktap2', 'xen-blktap', 'blktap3', d)} \
     libnl \
     "
 
-RDEPENDS_${PN}-base_remove = "\
-    ${PN}-blktap \
-    ${PN}-libblktapctl \
-    ${PN}-libvhd \
+RDEPENDS_${PN}-base_remove = " \
+    ${@bb.utils.contains('DISTRO_FEATURES', 'blktap2', '', '${PN}-blktap ${PN}-libblktapctl ${PN}-libvhd', d)} \
     "
 
 RRECOMMENDS_${PN}-base_remove = " \
-    ${PN}-libblktap \
+    ${@bb.utils.contains('DISTRO_FEATURES', 'blktap2', '', '${PN}-libblktap', d)} \
     "
 
 EXTRA_OECONF_remove = "--disable-ocamltools"
@@ -50,11 +48,7 @@ PACKAGES = " \
     "
 
 PACKAGES_remove = " \
-    ${PN}-blktap \
-    ${PN}-libblktap \
-    ${PN}-libblktapctl \
-    ${PN}-libblktapctl-dev \
-    ${PN}-libblktap-dev \
+    ${@bb.utils.contains('DISTRO_FEATURES', 'blktap2', '', '${PN}-blktap ${PN}-libblktap ${PN}-libblktapctl ${PN}-libblktapctl-dev ${PN}-libblktap-dev', d)} \
     "
 
 FILES_${PN}-dev = "${ocamllibdir}/*/*.so"

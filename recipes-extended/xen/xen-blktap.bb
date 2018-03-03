@@ -63,3 +63,6 @@ do_install() {
 }
 
 RDEPENDS_${PN} += "glibc-gconv-utf-16"
+RCONFLICTS_xen-blktap = "blktap3"
+RCONFLICTS_xen-blktapctl = "blktap3"
+RCONFLICTS_xen-libvhd = "blktap3"

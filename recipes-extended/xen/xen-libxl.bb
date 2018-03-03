@@ -32,18 +32,16 @@ python () {
 DEPENDS += " \
     util-linux \
     xen \
-    blktap3 \
+    ${@bb.utils.contains('DISTRO_FEATURES', 'blktap2', 'xen-blktap', 'blktap3', d)} \
     libnl \
     "
 
-RDEPENDS_${PN}-base_remove = "\
-    ${PN}-blktap \
-    ${PN}-libblktapctl \
-    ${PN}-libvhd \
+RDEPENDS_${PN}-base_remove = " \
+    ${@bb.utils.contains('DISTRO_FEATURES', 'blktap2', '', '${PN}-blktap ${PN}-libblktapctl ${PN}-libvhd', d)} \
     "
 
 RRECOMMENDS_${PN}-base_remove = " \
-    ${PN}-libblktap \
+    ${@bb.utils.contains('DISTRO_FEATURES', 'blktap2', '', '${PN}-libblktap', d)} \
     "
 
 SRC_URI_append = " \
@@ -63,11 +61,7 @@ PACKAGES = " \
     "
 
 PACKAGES_remove = " \
-    ${PN}-blktap \
-    ${PN}-libblktap \
-    ${PN}-libblktapctl \
-    ${PN}-libblktapctl-dev \
-    ${PN}-libblktap-dev \
+    ${@bb.utils.contains('DISTRO_FEATURES', 'blktap2', '', '${PN}-blktap ${PN}-libblktap ${PN}-libblktapctl ${PN}-libblktapctl-dev ${PN}-libblktap-dev', d)} \
     "
 
 FILES_${PN}-staticdev = " \
@@ -87,7 +81,7 @@ FILES_${PN}-dbg += " \
     /usr/src/debug \
 "
 
-CFLAGS_prepend += " -I${STAGING_INCDIR}/blktap "
+CFLAGS_prepend += "${@bb.utils.contains('DISTRO_FEATURES', 'blktap2', '', '-I${STAGING_INCDIR}/blktap',d)}"
 
 EXTRA_OEMAKE += "CROSS_SYS_ROOT=${STAGING_DIR_HOST} CROSS_COMPILE=${HOST_PREFIX}"
 EXTRA_OEMAKE += "CONFIG_IOEMU=n"

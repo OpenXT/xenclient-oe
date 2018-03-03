@@ -22,7 +22,6 @@ RDEPENDS_${PN} = " \
     xen-libxlutil \
     xen-xenstat \
     xen-xl \
-    blktap3 \
     dialog \
     e2fsprogs \
     e2fsprogs-e2fsck \
@@ -70,6 +69,7 @@ RDEPENDS_${PN} = " \
     libtctidevice \
     libtctisocket \
     tpm2-tools \
+    ${@bb.utils.contains('DISTRO_FEATURES', 'blktap2', 'xen-blktap xen-libblktapctl xen-libvhd', 'blktap3', d)} \
 "
 
 # open-iscsi-user \

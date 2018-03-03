@@ -25,7 +25,6 @@ RDEPENDS_${PN} = " \
     xen-xenstored \
     xen-xl \
     xen-xsm-policy \
-    blktap3 \
     grub \
     tboot \
     tboot-utils \
@@ -119,6 +118,7 @@ RDEPENDS_${PN} = " \
     libtctidevice \
     libtctisocket \
     tpm2-tools \
+    ${@bb.utils.contains('DISTRO_FEATURES', 'blktap2', 'xen-blktap xen-libblktapctl xen-libvhd', 'blktap3', d)} \
 "
 
 # OE upgrade - temporarly disabled:

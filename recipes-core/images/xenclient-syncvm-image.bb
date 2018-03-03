@@ -25,11 +25,11 @@ IMAGE_INSTALL = "\
     libv4v-bin \
     rsyslog \
     openssh \
-    blktap3 \
     wget \
     sync-client \
     ifplugd \
     xenclient-syncvm-tweaks \
+    ${@bb.utils.contains('DISTRO_FEATURES', 'blktap2', 'xen-blktap', 'blktap3', d)} \
     ${ANGSTROM_EXTRA_INSTALL}"
 
 #IMAGE_PREPROCESS_COMMAND = "create_etc_timestamp"

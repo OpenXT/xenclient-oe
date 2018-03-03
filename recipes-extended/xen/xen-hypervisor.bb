@@ -27,14 +27,6 @@ PACKAGES = " \
     xen-hypervisor \
     "
 
-PACKAGES_remove = " \
-    ${PN}-blktap \
-    ${PN}-libblktap \
-    ${PN}-libblktapctl \
-    ${PN}-libblktapctl-dev \
-    ${PN}-libblktap-dev \
-    "
-
 FILES_xen-efi = "\
     ${exec_prefix}/lib64 \
     ${exec_prefix}/lib64/xen* \
@@ -47,16 +39,6 @@ INSANE_SKIP_${PN}-dbg = "arch"
 
 INITSCRIPT_PACKAGES = ""
 SYSTEMD_PACKAGES = ""
-
-RDEPENDS_${PN}-base_remove = "\
-    ${PN}-blktap \
-    ${PN}-libblktapctl \
-    ${PN}-libvhd \
-    "
-
-RRECOMMENDS_${PN}-base_remove = " \
-    ${PN}-libblktap \
-    "
 
 # Undo some of the upstream xen.inc configuration to retain
 # the classic OpenXT Xen build configuration:

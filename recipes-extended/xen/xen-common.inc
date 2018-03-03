@@ -10,6 +10,8 @@ SRC_URI[sha256sum] := "${XEN_SRC_SHA256SUM}"
 # This ensures that any collisions with other patches get addressed
 # by modifying the OpenXT-specific patches, not the XSA patches.
 
+require ${@bb.utils.contains('DISTRO_FEATURES', 'blktap2', 'xen-blktap2.inc', 'xen-blktap3.inc', d)}
+
 SRC_URI_append = " \
     file://defconfig \
     file://config.patch \
@@ -87,12 +89,8 @@ SRC_URI_append = " \
     file://libxl-allow-non-qdisk-cdrom.patch \
     file://libxl-fix-flr.patch \
     file://libxl-disable-vnc-query-when-disabled.patch \
-    file://libxl-blktap3-support.patch \
-    file://libxl-crypto-key-dir.patch \
-    file://libxl-blktap3-do-not-destroy-in-use-tapdevs.patch \
-    file://libxl-blktap3-iso-hotswap.patch \
     file://xl-shutdown-wait-for-domain-death.patch \
-    file://enable-out-of-tree-blktap3.patch \
+    ${BLKTAP_PATCHQUEUE} \
     file://xsa246-4.9.patch \
     file://xsa247-4.9/0001-p2m-Always-check-to-see-if-removing-a-p2m-entry-actu.patch \
     file://xsa247-4.9/0002-p2m-Check-return-value-of-p2m_set_entry-when-decreas.patch \

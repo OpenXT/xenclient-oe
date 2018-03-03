@@ -31,3 +31,4 @@ do_install_append() {
 }
 
 RDEPENDS_${PN} += "glibc-gconv-utf-16"
+RCONFLICTS_${PN} = "xen-blktap xen-libblktap xen-libblktapctl xen-libvhd"
