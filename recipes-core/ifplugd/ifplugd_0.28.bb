@@ -12,7 +12,11 @@ LICENSE = "GPLv2"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=94d55d512a9ba36caa9b7df079bae19f"
 PR = "r1"
 
-SRC_URI = "${OPENXT_MIRROR}/ifplugd-0.28.tar.gz \
+
+MIRRORS_append += " \
+    http://.*/.*      https://openxt.ainfosec.com/mirror/ \
+"
+SRC_URI = "${OPENXT_MIRROR}/openxt/ifplugd-0.28.tar.gz \
            file://kernel-types.patch \
            file://nobash.patch \
            file://ifplugd.conf"

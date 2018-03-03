@@ -4,7 +4,10 @@ XENCLIENT_BUILD_SRC_PACKAGES = "0"
 
 SSTATETASKS= ""
 
-SRC_URI = "${OPENXT_MIRROR}/debootstrap_${DEBOOTSTRAP_SUITE}_${DEBOOTSTRAP_ARCH}_${PV}.tar.gz"
+MIRRORS_append += " \
+    http://.*/.*    https://openxt.ainfosec.com/mirror/ \
+"
+SRC_URI = "${OPENXT_MIRROR}/openxt/debootstrap_${DEBOOTSTRAP_SUITE}_${DEBOOTSTRAP_ARCH}_${PV}.tar.gz"
 
 S = "${WORKDIR}/${DEBOOTSTRAP_SUITE}_${DEBOOTSTRAP_ARCH}"
 	
