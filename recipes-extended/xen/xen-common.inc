@@ -24,10 +24,8 @@ SRC_URI_append = " \
     file://hvm-rtc-refresh-time.patch;patch=1 \
     file://acpi-pm-feature.patch \
     file://xenconsoled-syslog.patch;patch=1 \
-    file://tboot-shutdown-disable-irqs.patch;patch=1 \
     file://Dell-980-txt-shutdown-acpi-access-width.patch;patch=1 \
     file://parse-video-from-mbi.patch;patch=1 \
-    file://cores-per-socket.patch;patch=1 \
     file://hide-cores-from-cpuid.patch;patch=1 \
     file://openxt-xci-cpuid-signature.patch;patch=1 \
     file://allow-mwait-cstate.patch;patch=1 \
@@ -57,7 +55,6 @@ SRC_URI_append = " \
     file://openxt-xen-xsmv4vuse.patch \
     file://xenstat-disable-tmem-use.patch;patch=1 \
     file://acpi-slic-support.patch \
-    file://xsm-for-vtd.patch \
     file://tboot-xen-evtlog-support.patch \
     file://disable-cpuid-hle-rtm.patch \
     file://allow-stubdoms-cacheattr-control.patch \
@@ -87,7 +84,6 @@ SRC_URI_append = " \
     file://libxl-xenmgr-support.patch \
     file://libxl-move-extra-qemu-args-to-the-end.patch \
     file://libxl-stubdom-options.patch \
-    file://libxl-add-cores-per-socket-support.patch \
     file://libxl-support-hvm-readonly-disks.patch \
     file://libxl-pci-passthrough-fixes.patch \
     file://libxl-vwif-support.patch \
@@ -97,9 +93,6 @@ SRC_URI_append = " \
     file://libxl-allow-non-qdisk-cdrom.patch \
     file://libxl-fix-flr.patch \
     file://libxl-disable-vnc-query-when-disabled.patch \
-    file://xsa246-4.9.patch \
-    file://xsa247-4.9/0001-p2m-Always-check-to-see-if-removing-a-p2m-entry-actu.patch \
-    file://xsa247-4.9/0002-p2m-Check-return-value-of-p2m_set_entry-when-decreas.patch \
 "
 
 COMPATIBLE_HOST = 'i686-oe-linux|(x86_64.*).*-linux|aarch64.*-linux'

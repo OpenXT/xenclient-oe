@@ -11,6 +11,8 @@ SRC_URI_append = "\
 PACKAGES += " \
     ${PN}-toolstack-headers \
     ${PN}-xenstored-c \
+    ${PN}-libxentoolcore \
+    ${PN}-libxentoolcore-dev \
     "
 
 PACKAGES_remove = " \
@@ -65,6 +67,11 @@ FILES_${PN}-xenstored-c = " \
     ${sysconfdir}/xen/xenstored.conf \
     "
 
+FILES_${PN}-libxentoolcore = "${libdir}/libxentoolcore.so.*"
+FILES_${PN}-libxentoolcore-dev = " \
+    ${libdir}/libxentoolcore.so \
+    ${datadir}/pkgconfig/xentoolcore.pc \
+    "
 INITSCRIPT_PACKAGES =+ "${PN}-console ${PN}-xenstored-c"
 INITSCRIPT_NAME_${PN}-console = "xenconsoled"
 INITSCRIPT_PARAMS_${PN}-console = "defaults 20"

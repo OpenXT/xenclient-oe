@@ -34,11 +34,11 @@ libxl-RFC-*.patch
 ################################################################################
 PATCHES
 ################################################################################
-Index: xen-4.9.0/tools/libxl/libxl_dm.c
+Index: xen-4.10.0/tools/libxl/libxl_dm.c
 ===================================================================
---- xen-4.9.0.orig/tools/libxl/libxl_dm.c
-+++ xen-4.9.0/tools/libxl/libxl_dm.c
-@@ -2029,6 +2029,11 @@ void libxl__spawn_stub_dm(libxl__egc *eg
+--- xen-4.10.0.orig/tools/libxl/libxl_dm.c
++++ xen-4.10.0/tools/libxl/libxl_dm.c
+@@ -2100,6 +2100,11 @@ void libxl__spawn_stub_dm(libxl__egc *eg
                                     libxl__xs_get_dompath(gc, guest_domid)),
                          "%s",
                          libxl_bios_type_to_string(LIBXL_BIOS_TYPE_SEABIOS));
@@ -50,7 +50,7 @@ Index: xen-4.9.0/tools/libxl/libxl_dm.c
      }
      ret = xc_domain_set_target(ctx->xch, dm_domid, guest_domid);
      if (ret<0) {
-@@ -2053,6 +2058,12 @@ retry_transaction:
+@@ -2124,6 +2129,12 @@ retry_transaction:
          if (errno == EAGAIN)
              goto retry_transaction;
  
@@ -63,7 +63,7 @@ Index: xen-4.9.0/tools/libxl/libxl_dm.c
      libxl__multidev_begin(ao, &sdss->multidev);
      sdss->multidev.callback = spawn_stub_launch_dm;
      /* OpenXT: Again, no disk for the stubdom itself */
-@@ -2071,7 +2082,6 @@ static void spawn_stub_launch_dm(libxl__
+@@ -2142,7 +2153,6 @@ static void spawn_stub_launch_dm(libxl__
  {
      libxl__stub_dm_spawn_state *sdss = CONTAINER_OF(multidev, *sdss, multidev);
      STATE_AO_GC(sdss->dm.spawn.ao);
@@ -71,9 +71,9 @@ Index: xen-4.9.0/tools/libxl/libxl_dm.c
      int i, num_console = STUBDOM_SPECIAL_CONSOLES;
      libxl__device_console *console;
  
-@@ -2117,21 +2127,16 @@ static void spawn_stub_launch_dm(libxl__
+@@ -2192,21 +2202,16 @@ static void spawn_stub_launch_dm(libxl__
+ 
      for (i = 0; i < num_console; i++) {
-         libxl__device device;
          console[i].devid = i;
 -        console[i].consback = LIBXL__CONSOLE_BACKEND_IOEMU;
 +        /* OpenXT: our console backend is xenconsoled */
@@ -94,10 +94,10 @@ Index: xen-4.9.0/tools/libxl/libxl_dm.c
 -                console[i].output = GCSPRINTF("file:%s", filename);
 -                free(filename);
 +                console[i].output = "pty";
-                 break;
-             case STUBDOM_CONSOLE_SAVE:
-                 if (guest_config->b_info.stubdomain_version
-@@ -2211,7 +2216,6 @@ static void stubdom_pvqemu_cb(libxl__egc
+                 /* will be changed back to LIBXL__CONSOLE_BACKEND_IOEMU if qemu
+                  * will be in use */
+                 console[i].consback = LIBXL__CONSOLE_BACKEND_XENCONSOLED;
+@@ -2296,7 +2301,6 @@ static void stubdom_pvqemu_cb(libxl__egc
      libxl__stub_dm_spawn_state *sdss = CONTAINER_OF(multidev, *sdss, multidev);
      STATE_AO_GC(sdss->dm.spawn.ao);
      uint32_t dm_domid = sdss->pvqemu.guest_domid;
@@ -105,7 +105,7 @@ Index: xen-4.9.0/tools/libxl/libxl_dm.c
  
      libxl__xswait_init(&sdss->xswait);
  
-@@ -2335,6 +2339,17 @@ void libxl__spawn_local_dm(libxl__egc *e
+@@ -2420,6 +2424,17 @@ void libxl__spawn_local_dm(libxl__egc *e
                           b_info->device_model_version==LIBXL_DEVICE_MODEL_VERSION_QEMU_XEN_TRADITIONAL &&
                           !libxl__vnuma_configured(b_info));
          free(path);
@@ -123,17 +123,17 @@ Index: xen-4.9.0/tools/libxl/libxl_dm.c
      }
  
      path = DEVICE_MODEL_XS_PATH(gc, LIBXL_TOOLSTACK_DOMID, domid, "");
-Index: xen-4.9.0/tools/libxl/libxl_domain.c
+Index: xen-4.10.0/tools/libxl/libxl_domain.c
 ===================================================================
---- xen-4.9.0.orig/tools/libxl/libxl_domain.c
-+++ xen-4.9.0/tools/libxl/libxl_domain.c
-@@ -577,7 +577,8 @@ int libxl_domain_unpause(libxl_ctx *ctx,
-             if (rc < 0) {
-                 LOGD(ERROR, domid, "Failed to unpause device model for domain:%d",
-                      rc);
--                goto out;
+--- xen-4.10.0.orig/tools/libxl/libxl_domain.c
++++ xen-4.10.0/tools/libxl/libxl_domain.c
+@@ -575,7 +575,8 @@ int libxl_domain_unpause(libxl_ctx *ctx,
+         if (rc < 0) {
+             LOGD(ERROR, domid,
+                  "Failed to unpause device model for domain: %d", rc);
+-            goto out;
 +                /* OpenXT: This is not fatal, xc_domain_unpause() is enough */
 +                /* goto out; */
-             }
          }
      }
+     ret = xc_domain_unpause(ctx->xch, domid);
