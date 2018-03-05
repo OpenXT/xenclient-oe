@@ -26,6 +26,10 @@ do_compile_prepend() {
 }
 EXTRA_OEMAKE = "CFLAGS+=-DOPENXT_BRANDING"
 
+# do_install fails intermitently:
+# https://github.com/uim/uim/issues/44
+PARALLEL_MAKE = ""
+
 # We need a read-only rootfs...
 # Disable:
 # gtk-query-immodules-2.0 > /etc/gtk-2.0/gtk.immodules
