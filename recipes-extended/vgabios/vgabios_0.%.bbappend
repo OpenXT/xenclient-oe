@@ -14,3 +14,8 @@ SRC_URI += " \
     file://vbe-extended-edid-modes.patch                        \
     file://vbe-xenvesa.patch                                    \
 "
+
+do_install_append() {
+    install -m 0644 VGABIOS-lgpl-latest.debug.bin ${D}/usr/share/firmware/${PN}-${PV}.debug.bin
+    install -m 0644 VGABIOS-lgpl-latest.cirrus.debug.bin ${D}/usr/share/firmware/${PN}-${PV}.cirrus.debug.bin
+}
