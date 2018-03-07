@@ -8,7 +8,7 @@ RDEPENDS_${PN} += "python-io \
 
 S = "${WORKDIR}/python-daemon-${PV}" 
 
-SRC_URI = "http://pypi.python.org/packages/source/p/python-daemon/python-daemon-${PV}.tar.gz;name=tarball"
+SRC_URI = "https://pypi.python.org/packages/source/p/python-daemon/python-daemon-${PV}.tar.gz;name=tarball"
 SRC_URI[tarball.md5sum] = "1f6cd41473c2e201021a0aeef395b2b1"
 SRC_URI[tarball.sha256sum] = "1406962e48ce03642c6057f40f9ffd49493792a7b34357fe9e264708748c83c0"
 
