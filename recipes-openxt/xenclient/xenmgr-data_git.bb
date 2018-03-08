@@ -14,8 +14,8 @@
 
 DESCRIPTION = "XenClient xenmgr data"
 LICENSE = "GPLv2"
-LIC_FILES_CHKSUM="file://COPYING;md5=4641e94ec96f98fabc56ff9cc48be14b"
-DEPENDS = "xenclient-rpcgen-native xenclient-idl dojosdk-native"
+LIC_FILES_CHKSUM = "file://COPYING;md5=4641e94ec96f98fabc56ff9cc48be14b"
+DEPENDS = "dojosdk-native"
 
 PV = "0+git${SRCPV}"
 
@@ -23,16 +23,13 @@ SRCREV = "${AUTOREV}"
 SRC_URI = "git://${OPENXT_GIT_MIRROR}/toolstack-data.git;protocol=${OPENXT_GIT_PROTOCOL};branch=${OPENXT_BRANCH}"
 
 S = "${WORKDIR}/git"
-OUTPUT_DIR = "${S}/dist/script/services"
-IDL_DIR = "${STAGING_DATADIR}/idl"
 
-export IDL_DIR
+export STAGING_IDLDATADIR
+export STAGING_RPCGENDATADIR_NATIVE
 
-inherit xenclient
+inherit xc-rpcgen
 
-do_configure() {
-	:
-}
+do_configure[noexec] = "1"
 
 do_compile() {
     make
@@ -42,4 +39,6 @@ do_install() {
     make DESTDIR=${D} install
 }
 
-FILES_${PN} = "/usr/lib/xui"
+FILES_${PN} = " \
+    /usr/lib/xui \
+"
