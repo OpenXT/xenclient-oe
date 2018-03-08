@@ -28,10 +28,10 @@ INTERNAL DEPENDENCIES
 ################################################################################
 PATCHES
 ################################################################################
-Index: xen-4.9.0/tools/libxl/libxl.h
+Index: xen-4.9.1/tools/libxl/libxl.h
 ===================================================================
---- xen-4.9.0.orig/tools/libxl/libxl.h
-+++ xen-4.9.0/tools/libxl/libxl.h
+--- xen-4.9.1.orig/tools/libxl/libxl.h
++++ xen-4.9.1/tools/libxl/libxl.h
 @@ -1809,6 +1809,9 @@ libxl_device_usbdev_list(libxl_ctx *ctx,
  
  void libxl_device_usbdev_list_free(libxl_device_usbdev *list, int nr);
@@ -42,10 +42,10 @@ Index: xen-4.9.0/tools/libxl/libxl.h
  /* Network Interfaces */
  int libxl_device_nic_add(libxl_ctx *ctx, uint32_t domid, libxl_device_nic *nic,
                           const libxl_asyncop_how *ao_how)
-Index: xen-4.9.0/tools/libxl/libxl_blktap2.c
+Index: xen-4.9.1/tools/libxl/libxl_blktap2.c
 ===================================================================
---- xen-4.9.0.orig/tools/libxl/libxl_blktap2.c
-+++ xen-4.9.0/tools/libxl/libxl_blktap2.c
+--- xen-4.9.1.orig/tools/libxl/libxl_blktap2.c
++++ xen-4.9.1/tools/libxl/libxl_blktap2.c
 @@ -23,6 +23,18 @@ int libxl__blktap_enabled(libxl__gc *gc)
      return !tap_ctl_check(&msg);
  }
@@ -64,8 +64,8 @@ Index: xen-4.9.0/tools/libxl/libxl_blktap2.c
 +
  char *libxl__blktap_devpath(libxl__gc *gc,
                              const char *disk,
-                             libxl_disk_format format,
-@@ -57,7 +69,7 @@ char *libxl__blktap_devpath(libxl__gc *g
+                             libxl_disk_format format)
+@@ -51,7 +63,7 @@ char *libxl__blktap_devpath(libxl__gc *g
      return NULL;
  }
  
@@ -74,10 +74,10 @@ Index: xen-4.9.0/tools/libxl/libxl_blktap2.c
  {
      char **domids, **vbds;
      char *tp;
-Index: xen-4.9.0/tools/libxl/libxl_device.c
+Index: xen-4.9.1/tools/libxl/libxl_device.c
 ===================================================================
---- xen-4.9.0.orig/tools/libxl/libxl_device.c
-+++ xen-4.9.0/tools/libxl/libxl_device.c
+--- xen-4.9.1.orig/tools/libxl/libxl_device.c
++++ xen-4.9.1/tools/libxl/libxl_device.c
 @@ -18,7 +18,7 @@
  
  #include "libxl_internal.h"
@@ -87,11 +87,11 @@ Index: xen-4.9.0/tools/libxl/libxl_device.c
  {
      char *dom_path = libxl__xs_get_dompath(gc, device->domid);
  
-Index: xen-4.9.0/tools/libxl/libxl_disk.c
+Index: xen-4.9.1/tools/libxl/libxl_disk.c
 ===================================================================
---- xen-4.9.0.orig/tools/libxl/libxl_disk.c
-+++ xen-4.9.0/tools/libxl/libxl_disk.c
-@@ -732,6 +732,132 @@ int libxl_device_disk_getinfo(libxl_ctx
+--- xen-4.9.1.orig/tools/libxl/libxl_disk.c
++++ xen-4.9.1/tools/libxl/libxl_disk.c
+@@ -732,6 +732,126 @@ int libxl_device_disk_getinfo(libxl_ctx
      return rc;
  }
  
@@ -107,8 +107,6 @@ Index: xen-4.9.0/tools/libxl/libxl_disk.c
 +    char *be_path = NULL;
 +    char *fe_path = NULL;
 +    char *tmp = NULL;
-+    char *be_state = NULL;
-+    char *fe_state = NULL;
 +    uint32_t stubdomid = libxl_get_stubdom_id(ctx, domid);
 +    libxl__domain_userdata_lock *lock = NULL;
 +
@@ -158,13 +156,9 @@ Index: xen-4.9.0/tools/libxl/libxl_disk.c
 +    } while (xs_transaction_end(ctx->xsh, t, false) == false && errno == EAGAIN);
 +
 +    /* make sure we're disconnected */
-+    while(1) {
-+        be_state = libxl__xs_read(gc, XBT_NULL, libxl__sprintf(gc, "%s/state", be_path));
-+        fe_state = libxl__xs_read(gc, XBT_NULL, libxl__sprintf(gc, "%s/state", fe_path));
-+        if(!strcmp(be_state, "6") && !strcmp(fe_state, "6"))
-+            break;
-+        sleep(1);
-+    }
++    rc = libxl__wait_for_backend(gc, be_path, GCSPRINTF("%d", XenbusStateClosed));
++    if (rc < 0)
++        goto out;
 +
 +    /* Destroy old xenbus */
 +    do {
@@ -224,10 +218,10 @@ Index: xen-4.9.0/tools/libxl/libxl_disk.c
  int libxl_cdrom_insert(libxl_ctx *ctx, uint32_t domid, libxl_device_disk *disk,
                         const libxl_asyncop_how *ao_how)
  {
-Index: xen-4.9.0/tools/libxl/libxl_internal.h
+Index: xen-4.9.1/tools/libxl/libxl_internal.h
 ===================================================================
---- xen-4.9.0.orig/tools/libxl/libxl_internal.h
-+++ xen-4.9.0/tools/libxl/libxl_internal.h
+--- xen-4.9.1.orig/tools/libxl/libxl_internal.h
++++ xen-4.9.1/tools/libxl/libxl_internal.h
 @@ -1218,6 +1218,7 @@ _hidden int libxl__device_exists(libxl__
  _hidden int libxl__device_generic_add(libxl__gc *gc, xs_transaction_t t,
          libxl__device *device, char **bents, char **fents, char **ro_fents);
@@ -236,9 +230,9 @@ Index: xen-4.9.0/tools/libxl/libxl_internal.h
  _hidden char *libxl__device_libxl_path(libxl__gc *gc, libxl__device *device);
  _hidden int libxl__parse_backend_path(libxl__gc *gc, const char *path,
                                        libxl__device *dev);
-@@ -1765,6 +1766,9 @@ _hidden char *libxl__blktap_devpath(libx
-                                     libxl_disk_format format,
-                                     char *keydir);
+@@ -1764,6 +1765,9 @@ _hidden char *libxl__blktap_devpath(libx
+                                     const char *disk,
+                                     libxl_disk_format format);
  
 +_hidden int libxl__get_tap_minor(libxl__gc *gc, libxl_disk_format format, const char *disk);
 +_hidden bool tapdev_is_shared(libxl__gc *gc, const char *params);
@@ -246,7 +240,7 @@ Index: xen-4.9.0/tools/libxl/libxl_internal.h
  /* libxl__device_destroy_tapdisk:
   *   Destroys any tapdisk process associated with the backend represented
   *   by be_path.
-@@ -1836,6 +1840,7 @@ _hidden int libxl__qmp_restore(libxl__gc
+@@ -1835,6 +1839,7 @@ _hidden int libxl__qmp_restore(libxl__gc
  /* Set dirty bitmap logging status */
  _hidden int libxl__qmp_set_global_dirty_log(libxl__gc *gc, int domid, bool enable);
  _hidden int libxl__qmp_insert_cdrom(libxl__gc *gc, int domid, const libxl_device_disk *disk);
@@ -254,10 +248,10 @@ Index: xen-4.9.0/tools/libxl/libxl_internal.h
  /* Add a virtual CPU */
  _hidden int libxl__qmp_cpu_add(libxl__gc *gc, int domid, int index);
  /* Query the bitmap of CPUs */
-Index: xen-4.9.0/tools/libxl/libxl_qmp.c
+Index: xen-4.9.1/tools/libxl/libxl_qmp.c
 ===================================================================
---- xen-4.9.0.orig/tools/libxl/libxl_qmp.c
-+++ xen-4.9.0/tools/libxl/libxl_qmp.c
+--- xen-4.9.1.orig/tools/libxl/libxl_qmp.c
++++ xen-4.9.1/tools/libxl/libxl_qmp.c
 @@ -975,6 +975,17 @@ int libxl__qmp_set_global_dirty_log(libx
                             NULL, NULL);
  }
@@ -276,10 +270,10 @@ Index: xen-4.9.0/tools/libxl/libxl_qmp.c
  int libxl__qmp_insert_cdrom(libxl__gc *gc, int domid,
                              const libxl_device_disk *disk)
  {
-Index: xen-4.9.0/tools/libxl/libxl_utils.c
+Index: xen-4.9.1/tools/libxl/libxl_utils.c
 ===================================================================
---- xen-4.9.0.orig/tools/libxl/libxl_utils.c
-+++ xen-4.9.0/tools/libxl/libxl_utils.c
+--- xen-4.9.1.orig/tools/libxl/libxl_utils.c
++++ xen-4.9.1/tools/libxl/libxl_utils.c
 @@ -1383,6 +1383,12 @@ int libxl__random_bytes(libxl__gc *gc, u
      return ret;
  }
@@ -293,10 +287,10 @@ Index: xen-4.9.0/tools/libxl/libxl_utils.c
  /*
   * Local variables:
   * mode: C
-Index: xen-4.9.0/tools/libxl/libxl_utils.h
+Index: xen-4.9.1/tools/libxl/libxl_utils.h
 ===================================================================
---- xen-4.9.0.orig/tools/libxl/libxl_utils.h
-+++ xen-4.9.0/tools/libxl/libxl_utils.h
+--- xen-4.9.1.orig/tools/libxl/libxl_utils.h
++++ xen-4.9.1/tools/libxl/libxl_utils.h
 @@ -170,6 +170,8 @@ int libxl_cpumap_to_nodemap(libxl_ctx *c
                              const libxl_bitmap *cpumap,
                              libxl_bitmap *nodemap);
@@ -306,10 +300,10 @@ Index: xen-4.9.0/tools/libxl/libxl_utils.h
   static inline uint32_t libxl__sizekb_to_mb(uint32_t s) {
      return (s + 1023) / 1024;
  }
-Index: xen-4.9.0/tools/xl/xl_cdrom.c
+Index: xen-4.9.1/tools/xl/xl_cdrom.c
 ===================================================================
---- xen-4.9.0.orig/tools/xl/xl_cdrom.c
-+++ xen-4.9.0/tools/xl/xl_cdrom.c
+--- xen-4.9.1.orig/tools/xl/xl_cdrom.c
++++ xen-4.9.1/tools/xl/xl_cdrom.c
 @@ -32,36 +32,86 @@ static int cd_insert(uint32_t domid, con
      XLU_Config *config = 0;
      struct stat b;

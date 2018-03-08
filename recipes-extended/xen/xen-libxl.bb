@@ -32,9 +32,18 @@ python () {
 DEPENDS += " \
     util-linux \
     xen \
-    xen-blktap \
+    ${@bb.utils.contains('DISTRO_FEATURES', 'blktap2', 'xen-blktap', 'blktap3', d)} \
     libnl \
     "
+
+RDEPENDS_${PN}-base_remove = " \
+    ${@bb.utils.contains('DISTRO_FEATURES', 'blktap2', '', '${PN}-blktap ${PN}-libblktapctl ${PN}-libvhd', d)} \
+    "
+
+RRECOMMENDS_${PN}-base_remove = " \
+    ${@bb.utils.contains('DISTRO_FEATURES', 'blktap2', '', '${PN}-libblktap', d)} \
+    "
+
 SRC_URI_append = " \
     file://xen-init-dom0.initscript \
     file://xl.conf \
@@ -49,6 +58,10 @@ PACKAGES = " \
     xen-libxenlight-dev \
     xen-libxl-staticdev \
     ${PN}-dbg \
+    "
+
+PACKAGES_remove = " \
+    ${@bb.utils.contains('DISTRO_FEATURES', 'blktap2', '', '${PN}-blktap ${PN}-libblktap ${PN}-libblktapctl ${PN}-libblktapctl-dev ${PN}-libblktap-dev', d)} \
     "
 
 FILES_${PN}-staticdev = " \
@@ -67,6 +80,8 @@ FILES_${PN}-dbg += " \
     ${libdir}/.debug \
     /usr/src/debug \
 "
+
+CFLAGS_prepend += "${@bb.utils.contains('DISTRO_FEATURES', 'blktap2', '', '-I${STAGING_INCDIR}/blktap',d)}"
 
 EXTRA_OEMAKE += "CROSS_SYS_ROOT=${STAGING_DIR_HOST} CROSS_COMPILE=${HOST_PREFIX}"
 EXTRA_OEMAKE += "CONFIG_IOEMU=n"

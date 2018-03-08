@@ -20,9 +20,18 @@ RPROVIDES_xen-xenstored-ocaml = "xen-xenstored xen-xenstored-ocaml"
 DEPENDS += " \
     util-linux \
     xen \
-    xen-blktap \
+    ${@bb.utils.contains('DISTRO_FEATURES', 'blktap2', 'xen-blktap', 'blktap3', d)} \
     libnl \
     "
+
+RDEPENDS_${PN}-base_remove = " \
+    ${@bb.utils.contains('DISTRO_FEATURES', 'blktap2', '', '${PN}-blktap ${PN}-libblktapctl ${PN}-libvhd', d)} \
+    "
+
+RRECOMMENDS_${PN}-base_remove = " \
+    ${@bb.utils.contains('DISTRO_FEATURES', 'blktap2', '', '${PN}-libblktap', d)} \
+    "
+
 EXTRA_OECONF_remove = "--disable-ocamltools"
 
 SRC_URI_append = " \
@@ -36,7 +45,19 @@ PACKAGES = " \
     ${PN}-dbg \
     ${PN}-staticdev \
     ${PN} \
-"
+    "
+
+PACKAGES_remove = " \
+    ${@bb.utils.contains('DISTRO_FEATURES', 'blktap2', '', '${PN}-blktap ${PN}-libblktap ${PN}-libblktapctl ${PN}-libblktapctl-dev ${PN}-libblktap-dev', d)} \
+    "
+
+FILES_${PN}-dev = "${ocamllibdir}/*/*.so"
+FILES_${PN}-dbg += "${ocamllibdir}/*/.debug/*"
+FILES_${PN}-staticdev = "${ocamllibdir}/*/*.a"
+FILES_${PN} = "${ocamllibdir}/*"
+
+CFLAGS_prepend += " -I${STAGING_INCDIR}/blktap "
+
 EXTRA_OEMAKE += "CROSS_SYS_ROOT=${STAGING_DIR_HOST} CROSS_COMPILE=${HOST_PREFIX}"
 EXTRA_OEMAKE += "CONFIG_IOEMU=n"
 EXTRA_OEMAKE += "DESTDIR=${D}"

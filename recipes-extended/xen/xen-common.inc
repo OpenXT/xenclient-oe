@@ -10,12 +10,13 @@ SRC_URI[sha256sum] := "${XEN_SRC_SHA256SUM}"
 # This ensures that any collisions with other patches get addressed
 # by modifying the OpenXT-specific patches, not the XSA patches.
 
+require ${@bb.utils.contains('DISTRO_FEATURES', 'blktap2', 'xen-blktap2.inc', 'xen-blktap3.inc', d)}
+
 SRC_URI_append = " \
     file://defconfig \
     file://config.patch \
     file://do-not-overwrite-cc-and-ld.patch \
     file://disable-xen-root-check.patch \
-    file://blktap-resume-fix.patch;patch=1 \
     file://hvm-pm-hibernate-s-state.patch;patch=1 \
     file://prune-vga-acpi-dev.patch;patch=1 \
     file://smbios.patch;patch=1 \
@@ -40,14 +41,6 @@ SRC_URI_append = " \
     file://allow-pat-cacheattrs-for-all-domains.patch;patch=1 \
     file://opt-disable-vmcs-shadowing.patch;patch=1 \
     file://hvmloader-legacy-seabios-optionroms.patch;patch=1 \
-    file://blktap2-miscellaneous-oxt-fixes.patch \
-    file://blktap2-libvhd-atomic-write-helpers.patch \
-    file://blktap2-vhd-marker-flag.patch \
-    file://blktap2-vhd-print-allocated-virtblock-list.patch \
-    file://blktap2-tap-ctl-optional-pid-ro-mount.patch \
-    file://blktap2-vhd-keyhash-support.patch \
-    file://blktap2-vhd-encryption-support.patch \
-    file://blktap2-vhd-icbinn-support.patch \
     file://gpt-s3-resume-reason.patch;patch=1 \
     file://fix-memcpy-in-x86-emulate.patch;patch=1 \
     file://stubdomain-msi-irq-access.patch;patch=1 \
@@ -81,7 +74,6 @@ SRC_URI_append = " \
     file://libxl-openxt-tweaks.patch \
     file://libxl-domain-state.patch \
     file://libxl-fixup-cmdline-ops.patch \
-    file://libxl-crypto-key-dir.patch \
     file://libxl-fix-reboot.patch \
     file://libxl-display-manager-support.patch \
     file://libxl-xenmgr-support.patch \
@@ -97,6 +89,8 @@ SRC_URI_append = " \
     file://libxl-allow-non-qdisk-cdrom.patch \
     file://libxl-fix-flr.patch \
     file://libxl-disable-vnc-query-when-disabled.patch \
+    file://xl-shutdown-wait-for-domain-death.patch \
+    ${BLKTAP_PATCHQUEUE} \
     file://xsa246-4.9.patch \
     file://xsa247-4.9/0001-p2m-Always-check-to-see-if-removing-a-p2m-entry-actu.patch \
     file://xsa247-4.9/0002-p2m-Check-return-value-of-p2m_set_entry-when-decreas.patch \

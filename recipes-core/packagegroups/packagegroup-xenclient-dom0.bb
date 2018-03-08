@@ -11,13 +11,10 @@ RDEPENDS_${PN} = " \
     openssh-sshd-tcp-init \
     util-linux-mount \
     util-linux-umount \
-    xen-blktap \
     xen-console \
     xen-hvmloader \
     xen-hypervisor \
     xen-flask-tools \
-    xen-libblktapctl \
-    xen-libvhd \
     xen-libxenctrl \
     xen-libxenguest \
     xen-libxenlight \
@@ -121,6 +118,7 @@ RDEPENDS_${PN} = " \
     libtctidevice \
     libtctisocket \
     tpm2-tools \
+    ${@bb.utils.contains('DISTRO_FEATURES', 'blktap2', 'xen-blktap xen-libblktapctl xen-libvhd', 'blktap3', d)} \
 "
 
 # OE upgrade - temporarly disabled:
