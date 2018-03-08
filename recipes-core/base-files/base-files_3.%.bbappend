@@ -2,6 +2,7 @@ FILESEXTRAPATHS_prepend := "${THISDIR}/files:"
 SRC_URI += " \
     file://inputrc \
     file://fstab.early \
+    file://openxt-aliases.sh \
 "
 dirs1777 = " \
     /tmp \
@@ -51,4 +52,6 @@ conffiles = " \
 
 do_install_append() {
     install -m 0644 ${WORKDIR}/fstab.early ${D}${sysconfdir}/fstab.early
+    install -m 0755 -d ${D}${sysconfdir}/profile.d
+    install -m 0644 ${WORKDIR}/openxt-aliases.sh ${D}${sysconfdir}/profile.d/openxt-aliases.sh
 }
