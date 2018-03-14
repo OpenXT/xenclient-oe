@@ -51,11 +51,6 @@ PACKAGES_remove = " \
     ${@bb.utils.contains('DISTRO_FEATURES', 'blktap2', '', '${PN}-blktap ${PN}-libblktap ${PN}-libblktapctl ${PN}-libblktapctl-dev ${PN}-libblktap-dev', d)} \
     "
 
-FILES_${PN}-dev = "${ocamllibdir}/*/*.so"
-FILES_${PN}-dbg += "${ocamllibdir}/*/.debug/*"
-FILES_${PN}-staticdev = "${ocamllibdir}/*/*.a"
-FILES_${PN} = "${ocamllibdir}/*"
-
 CFLAGS_prepend += " -I${STAGING_INCDIR}/blktap "
 
 EXTRA_OEMAKE += "CROSS_SYS_ROOT=${STAGING_DIR_HOST} CROSS_COMPILE=${HOST_PREFIX}"
