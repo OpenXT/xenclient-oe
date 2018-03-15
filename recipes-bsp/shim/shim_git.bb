@@ -50,10 +50,12 @@ COMPATIBLE_HOST = 'i686-oe-linux|(x86_64.*).*-linux|aarch64.*-linux'
 do_install() {
     install -d ${D}/boot/
     install -m 0600 "${B}/shimx64.efi" ${D}/boot/
+    install -m 0600 "${B}/fbx64.efi" ${D}/boot/
 }
 
 FILES_${PN} += "\
     /boot/shimx64.efi \
+    /boot/fbx64.efi \
 "
 
 BBCLASSEXTEND="native"
