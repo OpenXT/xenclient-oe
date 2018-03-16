@@ -90,6 +90,7 @@ SRC_URI_append = " \
     file://libxl-fix-flr.patch \
     file://libxl-disable-vnc-query-when-disabled.patch \
     file://xl-shutdown-wait-for-domain-death.patch \
+    file://xl-uivm-reboot-fix.patch \
     ${BLKTAP_PATCHQUEUE} \
     file://xsa246-4.9.patch \
     file://xsa247-4.9/0001-p2m-Always-check-to-see-if-removing-a-p2m-entry-actu.patch \
