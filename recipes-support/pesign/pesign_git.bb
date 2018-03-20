@@ -10,7 +10,8 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/GPL-2.0;md5=801f80980d171dd6425
 
 FILESEXTRAPATHS_prepend := "${THISDIR}/files:"
 
-DEPENDS += "\
+DEPENDS += " \
+    util-linux \
     efivar nss nspr popt \
 "
 
@@ -25,6 +26,8 @@ SRC_URI = "git://github.com/rhboot/pesign \
 
 S = "${WORKDIR}/git"
 
+inherit pkgconfig
+
 COMPATIBLE_HOST = 'i686-oe-linux|(x86_64.*).*-linux|aarch64.*-linux'
 
 EXTRA_OEMAKE += "\
@@ -33,8 +36,6 @@ EXTRA_OEMAKE += "\
 "
 
 do_install() {
-    install -d ${D}/usr/bin
-    install "${B}/src/pesign" ${D}/usr/bin
+    install -d ${D}${bindir}
+    install "${B}/src/pesign" ${D}${bindir}
 }
-
-FILES_${PN} = "/usr/bin/pesign"
