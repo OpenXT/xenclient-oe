@@ -114,7 +114,6 @@ RDEPENDS_${PN} = " \
     dm-agent \
     xenmgr \
     xen-xenstore \
-    xen-xenstored-c \
     libtss2 \
     libtctidevice \
     libtctisocket \

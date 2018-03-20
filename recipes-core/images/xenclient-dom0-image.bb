@@ -23,10 +23,6 @@ BAD_RECOMMENDATIONS += " \
     avahi-autoipd \
     ${@bb.utils.contains('IMAGE_FEATURES', 'web-certificates', '', 'ca-certificates', d)} \
 "
-# List of packages removed at rootfs-postprocess.
-PACKAGE_REMOVE = " \
-    xen-xenstored-ocaml \
-"
 
 IMAGE_INSTALL = "\
     ${ROOTFS_PKGMANAGE} \
@@ -86,9 +82,6 @@ post_rootfs_shell_commands() {
     mkdir -p ${IMAGE_ROOTFS}/var/lib/xen
     mkdir -p ${IMAGE_ROOTFS}/etc/xen
     touch ${IMAGE_ROOTFS}/etc/xen/xl.conf
-
-    # Remove unwanted packages specified above
-    opkg -f ${IPKGCONF_TARGET} -o ${IMAGE_ROOTFS} ${OPKG_ARGS} -force-depends remove ${PACKAGE_REMOVE}
 
     # Remove network modules except netfront
     for x in `find ${IMAGE_ROOTFS}/lib/modules -name *.ko | grep drivers/net | grep -v xen-netfront`; do

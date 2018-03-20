@@ -13,9 +13,8 @@ FILES_xen-xenstored-ocaml = " \
     ${sysconfdir}/init.d/xenstored.xen-xenstored-ocaml \
     ${sysconfdir}/xen/oxenstored.conf \
     "
-
-PROVIDES =+ "xen-xenstored xen-xenstored-ocaml"
-RPROVIDES_xen-xenstored-ocaml = "xen-xenstored xen-xenstored-ocaml"
+PROVIDES =+ "xen-xenstored-ocaml"
+RPROVIDES_${PN}-xenstored-ocaml = "xen-xenstored"
 
 DEPENDS += " \
     util-linux \

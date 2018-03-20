@@ -7,15 +7,64 @@ PR = "r11"
 inherit packagegroup
 
 RDEPENDS_${PN} = " \
+    acms \
+    bc \
+    cryptsetup \
+    dialog \
+    dmidecode \
+    dosfstools \
+    e2fsprogs \
+    e2fsprogs-e2fsck \
+    e2fsprogs-mke2fs \
+    e2fsprogs-tune2fs \
+    efibootmgr \
+    eject \
+    ethtool \
+    falloc \
+    gptfdisk \
+    intel-microcode \
     kernel-modules \
+    libtctidevice \
+    libtctisocket \
+    libtss2 \
+    lvm2 \
+    ncurses \
+    netcat \
     openssh \
     openssh-sshd-tcp-init \
+    openssl \
+    openxt-keymanagement \
+    openxt-measuredlaunch \
+    pciutils-ids \
+    read-edid \
+    refpolicy-mcs \
+    rsyslog \
+    shim \
+    syslinux \
+    syslinux-isolinux \
+    syslinux-ldlinux \
+    syslinux-mboot \
+    syslinux-pxelinux \
+    tboot \
+    tboot-utils \
+    tpm2-tools \
+    tpm-tools \
+    trousers \
+    trousers-data \
     util-linux-mount \
+    util-linux-sfdisk \
     util-linux-umount \
+    wget \
+    xenclient-get-config-key \
+    xenclient-installer \
+    xenclient-installer-tweaks \
+    xenclient-pcrdiff \
+    xenclient-tpm-scripts \
+    xenclient-udev-force-discreet-net-to-eth0 \
     xen-console \
-    xen-hypervisor \
     xen-efi \
     xen-flask-tools \
+    xen-hypervisor \
     xen-libxenctrl \
     xen-libxenguest \
     xen-libxenlight \
@@ -23,59 +72,5 @@ RDEPENDS_${PN} = " \
     xen-libxlutil \
     xen-xenstat \
     xen-xl \
-    xen-xenstored-ocaml \
-    dialog \
-    e2fsprogs \
-    e2fsprogs-e2fsck \
-    e2fsprogs-mke2fs \
-    e2fsprogs-tune2fs \
-    eject \
-    lvm2 \
-    util-linux-sfdisk \
-    xenclient-installer \
-    xenclient-installer-tweaks \
-    cryptsetup \
-    xenclient-get-config-key \
-    falloc \
-    openssl \
-    xenclient-toolstack \
-    read-edid \
-    pciutils-ids \
-    dosfstools \
-    syslinux \
-    syslinux-isolinux \
-    syslinux-ldlinux \
-    syslinux-mboot \
-    syslinux-pxelinux \
-    ethtool \
-    rsyslog \
-    xenclient-udev-force-discreet-net-to-eth0 \
-    bc \
-    wget \
-    refpolicy-mcs \
-    dmidecode \
-    netcat \
-    tboot \
-    tboot-utils \
-    acms \
-    trousers \
-    trousers-data \
-    tpm-tools \
-    xenclient-pcrdiff \
-    xenclient-tpm-scripts \
-    openxt-keymanagement \
-    openxt-measuredlaunch \
-    ncurses \
-    intel-microcode \
-    libtss2 \
-    libtctidevice \
-    libtctisocket \
-    tpm2-tools \
     ${@bb.utils.contains('DISTRO_FEATURES', 'blktap2', 'xen-blktap xen-libblktapctl xen-libvhd', 'blktap3', d)} \
-    gptfdisk \
-    efibootmgr \
-    shim \
 "
-
-# open-iscsi-user \
-# 
