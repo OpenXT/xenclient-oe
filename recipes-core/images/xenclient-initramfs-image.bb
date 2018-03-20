@@ -24,11 +24,6 @@ IMAGE_INSTALL = " \
     kernel-module-tpm \
     kernel-module-tpm-tis \
     kernel-module-tpm-tis-core \
-    kernel-module-fbcon \
-    kernel-module-tileblit \
-    kernel-module-font \
-    kernel-module-bitblit \
-    kernel-module-softcursor \
     kernel-module-usbhid \
     kernel-module-ehci-hcd \
     kernel-module-ehci-pci \
