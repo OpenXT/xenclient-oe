@@ -44,6 +44,7 @@ RDEPENDS_${PN} = " \
     dosfstools \
     syslinux \
     syslinux-isolinux \
+    syslinux-ldlinux \
     syslinux-mboot \
     syslinux-pxelinux \
     ethtool \
