@@ -21,7 +21,6 @@ SRC_URI += " \
     file://pxelinux.cfg \
     file://isolinux.cfg \
     file://bootmsg.txt \
-    file://fstab.installer \
 "
 
 IMAGE_FSTYPES = "cpio.gz"
@@ -75,12 +74,6 @@ post_rootfs_shell_commands() {
         echo '7:2345:respawn:/install/part1/autostart-status < /dev/tty7 > /dev/tty7';
         echo 'ca::ctrlaltdel:/sbin/reboot';
     } >> ${IMAGE_ROOTFS}/etc/inittab;
-
-    # Override /etc/fstab
-        # HACK: Sharing dom0's machine has currently some costs:
-        # - collision in sysroot have to be independently managed
-        # - different configuration are harder to deal with.
-        install -m 0644 ${WORKDIR}/fstab.installer ${IMAGE_ROOTFS}/etc/fstab
 
     # Update /etc/network/interfaces
     {
