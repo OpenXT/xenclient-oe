@@ -51,6 +51,7 @@ RDEPENDS_${PN} = " \
     tpm-tools \
     trousers \
     trousers-data \
+    util-linux-fdisk \
     util-linux-mount \
     util-linux-sfdisk \
     util-linux-umount \
