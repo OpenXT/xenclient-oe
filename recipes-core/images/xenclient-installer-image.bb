@@ -91,10 +91,6 @@ post_rootfs_shell_commands() {
     # Use bash as login shell
     sed -i 's|root:x:0:0:root:/root:/bin/sh|root:x:0:0:root:/root:/bin/bash|' ${IMAGE_ROOTFS}/config/etc/passwd;
 
-    # Don't start blktapctrl daemon
-    rm -f ${IMAGE_ROOTFS}/etc/init.d/blktap;
-    rm -f ${IMAGE_ROOTFS}/etc/rc*.d/*blktap;
-
     # Create file to identify this as the host installer filesystem
     touch ${IMAGE_ROOTFS}/etc/xenclient-host-installer;
 }
