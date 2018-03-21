@@ -21,7 +21,6 @@ PV = "14+git${SRCPV}"
 
 SRC_URI = " \
     git://github.com/tklengyel/shim;branch=openxt \
-    file://gnu-efi-3.0.5.patch \
 "
 
 SRCREV = "${AUTOREV}"
