@@ -36,6 +36,8 @@ BAD_RECOMMENDATIONS += " \
     ${@bb.utils.contains('IMAGE_FEATURES', 'web-certificates', '', 'ca-certificates', d)} \
 "
 
+IMAGE_FEATURES += "empty-root-password"
+
 IMAGE_INSTALL = "\
     initscripts \
     modules-installer \
