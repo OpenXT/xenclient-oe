@@ -21,6 +21,7 @@ SRC_URI += " \
     file://pxelinux.cfg \
     file://isolinux.cfg \
     file://bootmsg.txt \
+    file://installer-lvm.conf \
 "
 
 IMAGE_FSTYPES = "cpio.gz"
@@ -105,12 +106,23 @@ remove_nonessential_initscripts() {
 }
 ROOTFS_POSTPROCESS_COMMAND += "remove_nonessential_initscripts; "
 
+## Work-around:
+## Disable lvmetad in the installer. There seem to be a race with eudev and
+## lvmetad that reproduce consistently with NVMe:
+## Fresh-install on an existing OpenXT installation will fail with:
+##   Can't open /dev/<nvme-symlink> exclusively.  Mounted filesystem?
+##
 # packagegroup-xenclient-dom0 provides lvm2, so have lvmetad running as lvm2
 # utilities try to use it and warn in its absence.
-activate_lvmetad_initscript() {
-    update-rc.d -r ${IMAGE_ROOTFS} lvm2-lvmetad defaults 06
+#activate_lvmetad_initscript() {
+#    update-rc.d -r ${IMAGE_ROOTFS} lvm2-lvmetad defaults 06
+#}
+#ROOTFS_POSTPROCESS_COMMAND += "activate_lvmetad_initscript; "
+write_installer_config_files() {
+    # Overwrite the existing configuration.
+    install -m 0644 ${WORKDIR}/installer-lvm.conf ${IMAGE_ROOTFS}${sysconfdir}/lvm/lvm.conf
 }
-ROOTFS_POSTPROCESS_COMMAND += "activate_lvmetad_initscript; "
+ROOTFS_POSTPROCESS_COMMAND += "write_installer_config_files; "
 
 # Copy syslinux modules and configuration files.
 syslinux_install_files() {
