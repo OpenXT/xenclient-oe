@@ -22,6 +22,7 @@ SRC_URI += " \
     file://isolinux.cfg \
     file://bootmsg.txt \
     file://installer-lvm.conf \
+    file://grub.cfg \
 "
 
 IMAGE_FSTYPES = "cpio.gz"
@@ -137,6 +138,7 @@ syslinux_install_files() {
     cp -f ${IMAGE_ROOTFS}/${datadir}/syslinux/isolinux.bin ${DEPLOY_DIR_IMAGE}/${IMAGE_LINK_NAME}/iso/
     cp -f ${WORKDIR}/bootmsg.txt ${DEPLOY_DIR_IMAGE}/${IMAGE_LINK_NAME}/iso/
     cp -f ${WORKDIR}/isolinux.cfg ${DEPLOY_DIR_IMAGE}/${IMAGE_LINK_NAME}/iso/
+    cp -f ${WORKDIR}/grub.cfg ${DEPLOY_DIR_IMAGE}/${IMAGE_LINK_NAME}/iso/
 }
 IMAGE_POSTPROCESS_COMMAND += "syslinux_install_files; "
 
