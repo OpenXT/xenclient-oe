@@ -143,7 +143,10 @@ if [ -r ${INSTALL_CONF}/repo-cert.conf ] ; then
     fi
     mv -f ${INSTALL_CONF}/repo-cert.conf ${INSTALL_CONF}/repo-cert.conf.DONE
 fi
-restore -r ${INSTALL_CONF} /config/deferred_*
+
+if compgen -G /config/deferred_*; then
+    restore -r ${INSTALL_CONF} /config/deferred_*
+fi
 
 if [ -r ${INSTALL_CONF}/uivm-gconf,aes-xts-plain,256.key ] ; then
     KEY_FOLDER="/config/platform-crypto-keys"
