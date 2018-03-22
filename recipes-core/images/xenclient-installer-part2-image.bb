@@ -4,7 +4,7 @@
 # XenClient. The resulting image is copied to the control.tar.bz2 file
 # in the XenClient repository.
 
-COMPATIBLE_MACHINE = "(xenclient-dom0)"
+COMPATIBLE_MACHINE = "(openxt-installer)"
 
 export IMAGE_BASENAME = "xenclient-installer-part2-image"
 

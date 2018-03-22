@@ -28,8 +28,7 @@ PACKAGES = " \
     "
 
 FILES_xen-efi = "\
-    ${exec_prefix}/lib64 \
-    ${exec_prefix}/lib64/xen* \
+    /boot/xen.efi \
     "
 
 PROVIDES_xen-efi = "xen-efi"
@@ -80,15 +79,23 @@ do_configure() {
 
 do_compile() {
     unset CFLAGS
+    export CC="${HOST_PREFIX}gcc ${TOOLCHAIN_OPTIONS}"
+    export CPP="${HOST_PREFIX}cpp ${TOOLCHAIN_OPTIONS}"
+
     oe_runmake -C xen olddefconfig
-    oe_runmake -C xen
+    oe_runmake dist-xen
 }
 
 do_install() {
     unset CFLAGS
+    export CC="${HOST_PREFIX}gcc ${TOOLCHAIN_OPTIONS}"
+    export CPP="${HOST_PREFIX}cpp ${TOOLCHAIN_OPTIONS}"
     install -d ${D}/boot
     oe_runmake DESTDIR=${D} install-xen
     ln -sf "`basename ${D}/boot/xen-*xc.gz`" ${D}/boot/xen-debug.gz
+    install -m 600 ${B}/xen/xen.efi ${D}/boot/
+
+    rm -rf ${D}/usr/lib64
 }
 
 RPROVIDES_xen-efi = "xen-efi"

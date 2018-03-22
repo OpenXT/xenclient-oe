@@ -14,6 +14,7 @@ RDEPENDS_${PN} = " \
     util-linux-umount \
     xen-console \
     xen-hypervisor \
+    xen-efi \
     xen-flask-tools \
     xen-libxenctrl \
     xen-libxenguest \
@@ -22,6 +23,7 @@ RDEPENDS_${PN} = " \
     xen-libxlutil \
     xen-xenstat \
     xen-xl \
+    xen-xenstored-ocaml \
     dialog \
     e2fsprogs \
     e2fsprogs-e2fsck \
@@ -41,7 +43,6 @@ RDEPENDS_${PN} = " \
     pciutils-ids \
     dosfstools \
     syslinux \
-    syslinux-isohybrid \
     syslinux-isolinux \
     syslinux-mboot \
     syslinux-pxelinux \
@@ -70,6 +71,9 @@ RDEPENDS_${PN} = " \
     libtctisocket \
     tpm2-tools \
     ${@bb.utils.contains('DISTRO_FEATURES', 'blktap2', 'xen-blktap xen-libblktapctl xen-libvhd', 'blktap3', d)} \
+    gptfdisk \
+    efibootmgr \
+    shim \
 "
 
 # open-iscsi-user \

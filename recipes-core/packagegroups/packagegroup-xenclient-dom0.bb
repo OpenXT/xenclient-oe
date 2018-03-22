@@ -14,6 +14,7 @@ RDEPENDS_${PN} = " \
     xen-console \
     xen-hvmloader \
     xen-hypervisor \
+    xen-efi \
     xen-flask-tools \
     xen-libxenctrl \
     xen-libxenguest \
@@ -26,6 +27,7 @@ RDEPENDS_${PN} = " \
     xen-xl \
     xen-xsm-policy \
     grub \
+    shim \
     tboot \
     tboot-utils \
     e2fsprogs-tune2fs \
@@ -119,6 +121,7 @@ RDEPENDS_${PN} = " \
     libtctisocket \
     tpm2-tools \
     ${@bb.utils.contains('DISTRO_FEATURES', 'blktap2', 'xen-blktap xen-libblktapctl xen-libvhd', 'blktap3', d)} \
+    pesign \
 "
 
 # OE upgrade - temporarly disabled:

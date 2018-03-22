@@ -95,6 +95,10 @@ SRC_URI_append = " \
     file://xsa246-4.9.patch \
     file://xsa247-4.9/0001-p2m-Always-check-to-see-if-removing-a-p2m-entry-actu.patch \
     file://xsa247-4.9/0002-p2m-Check-return-value-of-p2m_set_entry-when-decreas.patch \
+    file://efi-hardcode-openxt-cfg.patch \
+    file://efi-load-option-support.patch \
+    file://shim-support-for-shim-lock-measure.patch \
+    file://efi-require-shim.patch \
 "
 
 COMPATIBLE_HOST = 'i686-oe-linux|(x86_64.*).*-linux|aarch64.*-linux'

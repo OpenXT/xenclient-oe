@@ -12,6 +12,8 @@ SRC_URI = "file://enter-s3.sh \
 	   file://xenstore-init \
 	   file://netcon \
 	   file://grub.cfg \
+	   file://openxt.cfg \
+	   file://BOOT.CSV \
 	   file://unifont.pf2 \
 	   file://firstboot.sh \
 	   file://firstboot.initscript \
@@ -74,6 +76,10 @@ do_install () {
 	# Useless cruft should be in installer
 	install -d ${D}/usr/share/xenclient/bootloader
 	install -m 0644 ${WORKDIR}/grub.cfg \
+		${D}/usr/share/xenclient/bootloader
+	install -m 0644 ${WORKDIR}/openxt.cfg \
+		${D}/usr/share/xenclient/bootloader
+	install -m 0644 ${WORKDIR}/BOOT.CSV \
 		${D}/usr/share/xenclient/bootloader
 	install -m 0644 ${WORKDIR}/unifont.pf2 \
 		${D}/usr/share/xenclient/bootloader
