@@ -11,16 +11,39 @@ SECTION = "bootloaders"
 LICENSE = "GPLv3"
 LIC_FILES_CHKSUM = "file://COPYING;md5=d32239bcb673463ab874e80d47fae504"
 
-SRC_URI = "https://ftp.gnu.org/gnu/grub/grub-${PV}.tar.gz"
+SRC_URI = "https://ftp.gnu.org/gnu/grub/grub-${PV}.tar.gz \
+           file://0001-Disable-mfpmath-sse-as-well-when-SSE-is-disabled.patch \
+           file://0001-Unset-need_charset_alias-when-building-for-musl.patch \
+           file://autogen.sh-exclude-pc.patch \
+           file://grub-module-explicitly-keeps-symbole-.module_license.patch \
+           file://0001-grub.d-10_linux.in-add-oe-s-kernel-name.patch \
+	   file://fix.build.with.gcc-7.patch \
+"
 SRC_URI[md5sum] = "1116d1f60c840e6dbd67abbc99acb45d"
 SRC_URI[sha256sum] = "660ee136fbcee08858516ed4de2ad87068bfe1b6b8b37896ce3529ff054a726d"
 
 DEPENDS = "flex-native bison-native"
 
 COMPATIBLE_HOST = '(x86_64.*|i.86.*|arm.*|aarch64.*)-(linux.*|freebsd.*)'
+COMPATIBLE_HOST_armv7a = 'null'
+COMPATIBLE_HOST_armv7ve = 'null'
 
 # configure.ac has code to set this automagically from the target tuple
 # but the OE freeform one (core2-foo-bar-linux) don't work with that.
+
+GRUBPLATFORM_arm = "uboot"
+GRUBPLATFORM_aarch64 = "efi"
+GRUBPLATFORM ??= "pc"
+
+inherit autotools gettext texinfo
+
+EXTRA_OECONF = "--with-platform=${GRUBPLATFORM} \
+                --disable-grub-mkfont \
+                --program-prefix="" \
+                --enable-liblzma=no \
+                --enable-libzfs=no \
+                --enable-largefile \
+"
 
 PACKAGECONFIG ??= ""
 PACKAGECONFIG[grub-mount] = "--enable-grub-mount,--disable-grub-mount,fuse"
@@ -35,20 +58,6 @@ BUILD_CFLAGS = ""
 BUILD_CXXFLAGS = ""
 BUILD_LDFLAGS = ""
 
-# ldm.c:114:7: error: trampoline generated for nested function 'hook' [-Werror=trampolines]
-# and many other places in the grub code when compiled with some native gcc compilers (specifically, gentoo)
-CFLAGS_append_class-native = " -Wno-error=trampolines"
-
-EXTRA_OECONF = "--with-platform=efi \
-		--target=x86_64 \
-		--disable-grub-mkfont \
-		--program-prefix="" \
-		--enable-liblzma=no \
-		--enable-libzfs=no \
-		--enable-largefile=no \
-		--enable-efiemu=no \
-"
-
 do_configure_prepend() {
 	# The grub2 configure script uses variables such as TARGET_CFLAGS etc
 	# for its own purposes. Remove the OE versions from the environment to
@@ -62,42 +71,8 @@ do_configure_prepend() {
 # conflicted, remove it since no one uses it.
 SYSROOT_DIRS_BLACKLIST += "${datadir}/grub/grub-mkconfig_lib"
 
-FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
+PACKAGES =+ "${PN}-editenv"
 
-S = "${WORKDIR}/grub-${PV}"
-
-SRC_URI += " \
-    file://grub-efi-early.cfg \
-    file://0001-Only-check-for-large-file-support-when-needed.patch \
-    "
-
-GRUB_BUILDIN = "all_video boot btrfs cat chain configfile echo \
-                efinet ext2 fat font gfxmenu gfxterm gzio halt \
-                hfsplus iso9660 jpeg loadenv loopback lvm mdraid09 mdraid1x \
-                minicmd normal part_apple part_msdos part_gpt \
-                password_pbkdf2 png \
-                reboot search search_fs_uuid search_fs_file search_label \
-                serial sleep test tftp video xfs \
-                linux backtrace usb usbserial_common \
-                usbserial_pl2303 usbserial_ftdi \
-                multiboot multiboot2"
-
-inherit autotools
-inherit gettext
-inherit native
-inherit deploy
-
-do_deploy() {
-        # Search for the grub.cfg on the local boot media by using the
-        # built in cfg file provided via this recipe
-        ${B}/grub-mkimage -c ${WORKDIR}/grub-efi-early.cfg -p /EFI/BOOT -d ${B}/grub-core/ \
-                     -O x86_64-efi -o ${B}/grubx64.efi \
-                     ${GRUB_BUILDIN}
-        install -m 644 ${B}/grubx64.efi ${DEPLOYDIR}/
-}
-
-addtask deploy after do_install before do_build
-
-do_install[noexec] = "1"
-do_populate_sysroot[noexec] = "1"
-BBCLASSEXTEND = "native"
+FILES_${PN}-editenv = "${bindir}/grub-editenv"
+RDEPENDS_${PN} += "${PN}-editenv"
+RDEPENDS_${PN}_class-native = ""

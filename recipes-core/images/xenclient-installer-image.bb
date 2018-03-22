@@ -29,10 +29,6 @@ export IMAGE_BASENAME = "xenclient-installer-image"
 
 COMPATIBLE_MACHINE = "(openxt-installer)"
 
-DEPENDS = " \
-    grub-efi-cross \
-"
-
 BAD_RECOMMENDATIONS += " \
     ${@bb.utils.contains('IMAGE_FEATURES', 'web-certificates', '', 'ca-certificates', d)} \
 "

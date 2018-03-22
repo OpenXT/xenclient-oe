@@ -22,6 +22,7 @@ RDEPENDS_${PN} = " \
     ethtool \
     falloc \
     gptfdisk \
+    grub-efi \
     intel-microcode \
     kernel-modules \
     libtctidevice \
