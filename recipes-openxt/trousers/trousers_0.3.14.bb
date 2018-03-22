@@ -9,6 +9,7 @@ PR = "r0"
 SRC_URI = "http://downloads.sourceforge.net/${PN}/${PN}-${PV}.tar.gz;subdir=${PN}-${PV} \
            file://trousers-tcsd-conf.patch;patch=1 \
            file://trousers-standalone.patch;patch=1 \
+           file://trousers-tcsd-dont-pthread-exit.patch;patch=1 \
            file://trousers.initscript \
            file://45-trousers.rules \
 "
