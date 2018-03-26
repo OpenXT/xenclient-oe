@@ -26,6 +26,8 @@ PACKAGE_REMOVE = " \
     hicolor-icon-theme \
 "
 
+IMAGE_FEATURES += "empty-root-password"
+
 IMAGE_INSTALL = " \
     ${ROOTFS_PKGMANAGE} \
     modules \

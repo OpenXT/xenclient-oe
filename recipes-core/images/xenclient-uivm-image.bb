@@ -39,6 +39,8 @@ IMAGE_LINGUAS = " \
     zh-cn \
 "
 
+IMAGE_FEATURES += "empty-root-password"
+
 IMAGE_INSTALL = "\
     ${ROOTFS_PKGMANAGE} \
     ${XSERVER} \
