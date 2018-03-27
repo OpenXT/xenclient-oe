@@ -17,7 +17,6 @@ INITSCRIPT_PARAMS = "start 40 S . stop 40 0 6 1 ."
 
 do_install () {
     install -d ${D}${sysconfdir}/init.d
-    install -d ${D}${sbindir}
     install -d ${D}${mandir}/man8
     install -d ${D}${sysconfdir}/network/if-pre-up.d
     install -d ${D}${sysconfdir}/network/if-up.d
