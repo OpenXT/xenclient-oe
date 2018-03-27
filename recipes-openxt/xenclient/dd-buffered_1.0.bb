@@ -11,7 +11,6 @@ S = "${WORKDIR}"
 
 do_compile() {
 	oe_runmake dd-buffered
-	${STRIP} dd-buffered
 }
 
 do_install() {
