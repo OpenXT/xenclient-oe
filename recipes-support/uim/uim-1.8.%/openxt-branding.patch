@@ -1,0 +1,175 @@
+Index: uim-1.8.6/gtk2/toolbar/common-gtk.c
+===================================================================
+--- uim-1.8.6.orig/gtk2/toolbar/common-gtk.c
++++ uim-1.8.6/gtk2/toolbar/common-gtk.c
+@@ -52,6 +52,8 @@
+ #define OBJECT_DATA_BUTTON_TYPE "BUTTON_TYPE"
+ #define OBJECT_DATA_COMMAND "COMMAND"
+ 
++#define OXT_ICON_SIZE GTK_ICON_SIZE_SMALL_TOOLBAR
++
+ /* exported functions */
+ GtkWidget *uim_toolbar_standalone_new(void);
+ GtkWidget *uim_toolbar_trayicon_new(void);
+@@ -615,7 +617,11 @@ prop_button_create(GtkWidget *widget, co
+   sg = g_object_get_data(G_OBJECT(widget), OBJECT_DATA_SIZE_GROUP);
+ 
+   if (register_icon(icon_name)) {
++#ifdef OPENXT_BRANDING
++    GtkWidget *img = gtk_image_new_from_stock(icon_name, OXT_ICON_SIZE);
++#else /* !OPENXT_BRANDING */
+     GtkWidget *img = gtk_image_new_from_stock(icon_name, GTK_ICON_SIZE_MENU);
++#endif /* OPENXT_BRANDING */
+     button = gtk_button_new();
+     gtk_container_add(GTK_CONTAINER(button), img);
+   } else {
+@@ -837,10 +843,15 @@ helper_toolbar_prop_list_update(GtkWidge
+ 		      GINT_TO_POINTER(BUTTON_TOOL));
+     g_object_set_data(G_OBJECT(tool_button), OBJECT_DATA_COMMAND,
+ 		      (gpointer)command_entry[i].command);
+-    if (command_entry[i].icon)
++    if (command_entry[i].icon) {
++#ifdef OPENXT_BRANDING
++      img = gtk_image_new_from_stock(command_entry[i].icon,
++				     OXT_ICON_SIZE);
++#else /* !OPENXT_BRANDING */
+       img = gtk_image_new_from_stock(command_entry[i].icon,
+ 				     GTK_ICON_SIZE_MENU);
+-    else {
++#endif /* OPENXT_BRANDING */
++    } else {
+       img = gtk_label_new("");
+       gtk_label_set_markup(GTK_LABEL(img), command_entry[i].label);
+     }
+@@ -1103,7 +1114,11 @@ toolbar_new(gint type)
+ 
+   /* prop menu button */
+   if (register_icon("uim-icon")) {
++#ifdef OPENXT_BRANDING
++    GtkWidget *img = gtk_image_new_from_stock("uim-icon", OXT_ICON_SIZE);
++#else /* !OPENXT_BRANDING */
+     GtkWidget *img = gtk_image_new_from_stock("uim-icon", GTK_ICON_SIZE_MENU);
++#endif /* OPENXT_BRANDING */
+     button = gtk_button_new();
+     gtk_container_add(GTK_CONTAINER(button), img);
+   } else {
+Index: uim-1.8.6/gtk2/toolbar/standalone-gtk.c
+===================================================================
+--- uim-1.8.6.orig/gtk2/toolbar/standalone-gtk.c
++++ uim-1.8.6/gtk2/toolbar/standalone-gtk.c
+@@ -42,6 +42,9 @@
+ #include <gtk/gtk.h>
+ #include "uim/uim.h"
+ 
++#define OXT_TOOLBAR_HEIGHT 35
++#define OXT_TOOLBAR_POSITION_LEFT 10
++
+ extern GtkWidget *uim_toolbar_standalone_new(void);
+ 
+ static gboolean toolbar_dragging = FALSE;
+@@ -282,8 +285,10 @@ main(int argc, char *argv[])
+   GtkWidget *toolbar;
+   GtkWidget *window;
+   GtkWidget *hbox;
++#ifndef OPENXT_BRANDING
+   GtkWidget *handle;
+   GtkWidget *frame;
++#endif /* OPENXT_BRANDING */
+ 
+   setlocale(LC_ALL, "");
+   bindtextdomain(PACKAGE, LOCALEDIR);
+@@ -296,6 +301,10 @@ main(int argc, char *argv[])
+ 
+   window = gtk_window_new(GTK_WINDOW_POPUP);
+ 
++#ifdef OPENXT_BRANDING
++  gtk_widget_set_name(GTK_WIDGET(window), "uim-toolbar");
++#endif /*OPENXT_BRANDING */
++
+   gtk_window_set_type_hint(GTK_WINDOW(window), GDK_WINDOW_TYPE_HINT_DOCK);
+ 
+   gtk_window_set_skip_taskbar_hint(GTK_WINDOW(window), TRUE);
+@@ -304,24 +313,34 @@ main(int argc, char *argv[])
+ 
+   gtk_widget_add_events(window, GDK_BUTTON_PRESS_MASK);
+ 
++#ifndef OPENXT_BRANDING
+   frame = gtk_frame_new(NULL);
+   gtk_frame_set_shadow_type(GTK_FRAME(frame), GTK_SHADOW_OUT);
+   gtk_container_add(GTK_CONTAINER(window), frame);
++#endif /* OPENXT_BRANDING */
+ 
+ #if GTK_CHECK_VERSION(3, 2, 0)
+   hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+ #else
+   hbox = gtk_hbox_new(FALSE, 0);
+ #endif
++
++#ifdef OPENXT_BRANDING
++  gtk_container_add(GTK_CONTAINER(window), hbox);
++#else /* !OPENXT_BRANDING */
+   gtk_container_add(GTK_CONTAINER(frame), hbox);
++#endif /* OPENXT_BRANDING */
+ 
++#ifndef OPENXT_BRANDING
+   handle = gtk_drawing_area_new();
+   gtk_widget_set_size_request(handle, 8, -1);
+   gtk_box_pack_start(GTK_BOX(hbox), handle, FALSE, FALSE, 0);
++#endif /* OPENXT_BRANDING */
+ 
+   toolbar = (GtkWidget*)uim_toolbar_standalone_new();
+   gtk_box_pack_start(GTK_BOX(hbox), toolbar, FALSE, FALSE, 0);
+ 
++#ifndef OPENXT_BRANDING
+ #if GTK_CHECK_VERSION(2, 90, 0)
+   g_signal_connect(G_OBJECT(handle), "draw",
+ 		   G_CALLBACK(handle_draw_cb), NULL);
+@@ -329,15 +348,20 @@ main(int argc, char *argv[])
+   g_signal_connect(G_OBJECT(handle), "expose-event",
+ 		   G_CALLBACK(handle_expose_event_cb), NULL);
+ #endif
++#endif /* OPENXT_BRANDING */
+ 
+   g_signal_connect(G_OBJECT(window), "delete_event",
+ 		   G_CALLBACK(delete_event), NULL);
++
++#ifndef OPENXT_BRANDING
+   g_signal_connect(G_OBJECT(window), "button-press-event",
+ 		   G_CALLBACK(button_press_event_cb), toolbar);
+   g_signal_connect(G_OBJECT(window), "button-release-event",
+ 		   G_CALLBACK(button_release_event_cb), NULL);
+   g_signal_connect(G_OBJECT(window), "motion-notify-event",
+ 		   G_CALLBACK(motion_notify_event_cb), NULL);
++#endif /* OPENXT_BRANDING */
++
+   g_signal_connect(G_OBJECT(window), "size-allocate",
+ 		   G_CALLBACK(size_allocate_cb), NULL);
+ #if !GTK_CHECK_VERSION(2, 90, 0)
+@@ -347,6 +371,13 @@ main(int argc, char *argv[])
+ 
+   gtk_widget_show_all(GTK_WIDGET(window));
+ 
++#ifdef OPENXT_BRANDING
++  GdkGeometry geometry = {-1, OXT_TOOLBAR_HEIGHT, 0, 0, 0, 0, 0, 0, 0.0, 0.0,
++                          GDK_GRAVITY_NORTH_WEST};
++  gtk_window_set_geometry_hints(GTK_WIDGET(window), window, &geometry,
++	                        GDK_HINT_MIN_SIZE);
++#endif /* OPENXT_BRANDING */
++
+   if (argc > 1) {
+     gint x, y;
+     if (!gtk_window_parse_geometry(GTK_WINDOW(window), argv[1])) {
+@@ -368,8 +399,13 @@ main(int argc, char *argv[])
+     sc_w = gdk_screen_width();
+     sc_h = gdk_screen_height();
+ 
++#ifndef OPENXT_BRANDING
++    x = OXT_TOOLBAR_POSITION_LEFT;
++    y = sc_h - h;
++#else /* !OPENXT_BRANDING */
+     x = sc_w - w;
+     y = sc_h - h - panel_height; /* FIXME! */
++#endif /* OPENXT_BRANDING */
+     helper_win_set_position(window, x, y);
+   }
+ 

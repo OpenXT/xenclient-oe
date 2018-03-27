@@ -1,0 +1,192 @@
+Index: refpolicy/policy/modules/contrib/qemu.fc
+===================================================================
+--- refpolicy.orig/policy/modules/contrib/qemu.fc
++++ refpolicy/policy/modules/contrib/qemu.fc
+@@ -2,7 +2,11 @@
+ /usr/bin/qemu-system-.*	--	gen_context(system_u:object_r:qemu_exec_t,s0)
+ /usr/bin/qemu-kvm	--	gen_context(system_u:object_r:qemu_exec_t,s0)
+ /usr/bin/kvm		--	gen_context(system_u:object_r:qemu_exec_t,s0)
++/usr/lib/xen/bin/qemu-dm       --      gen_context(system_u:object_r:qemu_exec_t,s0)
++/usr/bin/qemu-dm-wrapper-old       --      gen_context(system_u:object_r:qemu_exec_t,s0)
+ 
+ /usr/lib/systemd/system/[^/]*qemu-guest-agent.*	--	gen_context(system_u:object_r:qemu_unit_t,s0)
+ 
+ /usr/libexec/qemu.*	--	gen_context(system_u:object_r:qemu_exec_t,s0)
++
++/var/lock/xen-cd-exclusive     --      gen_context(system_u:object_r:qemu_lock_t,s0)
+Index: refpolicy/policy/modules/contrib/qemu.if
+===================================================================
+--- refpolicy.orig/policy/modules/contrib/qemu.if
++++ refpolicy/policy/modules/contrib/qemu.if
+@@ -324,6 +324,43 @@ interface(`qemu_manage_tmp_files',`
+ 
+ ########################################
+ ## <summary>
++##	Read and write xen-cd-exclusive lock created by qemu.
++## </summary>
++## <param name="domain">
++##	<summary>
++##	Domain allowed access.
++##	</summary>
++## </param>
++#
++interface(`qemu_rw_lock_files',`
++	gen_require(`
++		type qemu_lock_t;
++	')
++
++	allow $1 qemu_lock_t:file rw_file_perms;
++')
++
++########################################
++## <summary>
++##	Read and write to qemu tmpfs files.
++## </summary>
++## <param name="domain">
++##	<summary>
++##	Domain allowed access.
++##	</summary>
++## </param>
++#
++interface(`qemu_rw_tmpfs_files',`
++	gen_require(`
++		type qemu_tmpfs_t;
++	')
++
++	fs_search_tmpfs($1)
++	allow $1 qemu_tmpfs_t:file rw_file_perms;
++')
++
++########################################
++## <summary>
+ ##	Execute qemu in a specified domain.
+ ## </summary>
+ ## <desc>
+@@ -374,3 +411,39 @@ interface(`qemu_entry_type',`
+ 
+ 	domain_entry_file($1, qemu_exec_t)
+ ')
++
++########################################
++## <summary>
++##     Allow child to signal parent qemu process.
++## </summary>
++## <param name="domain">
++##     <summary>
++##     Domain allowed access.
++##     </summary>
++## </param>
++#
++interface(`qemu_sigchld',`
++       gen_require(`
++               type qemu_t;
++       ')
++
++       allow $1 qemu_t:process sigchld;
++')
++
++########################################
++## <summary>
++##     Send a signull to qemu
++## </summary>
++## <param name="domain">
++##     <summary>
++##     Domain allowed access.
++##     </summary>
++## </param>
++#
++interface(`qemu_signull',`
++       gen_require(`
++               type qemu_t;
++       ')
++
++       allow $1 qemu_t:process signull;
++')
+Index: refpolicy/policy/modules/contrib/qemu.te
+===================================================================
+--- refpolicy.orig/policy/modules/contrib/qemu.te
++++ refpolicy/policy/modules/contrib/qemu.te
+@@ -30,6 +30,61 @@ init_unit_file(qemu_unit_t)
+ # Local policy
+ #
+ 
++dbus_system_bus_client(qemu_t)
++dbus_connect_system_bus(qemu_t)
++
++xc_read_etc_files(qemu_t)
++
++# For appending to /var/log/xen/qemu-dm-linux.log.
++# The init module does not provide any interfaces for this type.
++gen_require(`
++	type initrc_var_log_t;
++')
++allow qemu_t initrc_var_log_t:file append;
++# Likely isatty() check.
++allow qemu_t initrc_var_log_t:file ioctl;
++
++# Create /var/run/qmp-libxl-N socket
++type qemu_var_run_t;
++files_pid_file(qemu_var_run_t)
++files_pid_filetrans(qemu_t, qemu_var_run_t, sock_file)
++allow qemu_t qemu_var_run_t:sock_file manage_file_perms;
++
++# XC begin: qmeu reads & writes /dev/bsg/stuff
++storage_read_scsi_generic(qemu_t)
++storage_write_scsi_generic(qemu_t)
++dev_read_raw_memory(qemu_t)
++dbus_system_bus_client(qemu_t)
++dbus_connect_session_bus(qemu_t)
++alsa_read_rw_config(qemu_t)
++
++# qemu wrapper: allow to call db_read
++db_cmd_exec(qemu_t)
++dbd_dbus_chat(qemu_t)
++dbus_connect_system_bus(qemu_t)
++dbus_system_bus_client(qemu_t)
++
++# leaked file descriptors
++xen_dontaudit_rw_unix_stream_sockets(qemu_t)
++dev_rw_xen(qemu_t)
++dev_read_sysfs(qemu_t)
++xen_stream_connect_xenstore(qemu_t)
++allow qemu_t qemu_exec_t:file execute_no_trans;
++allow qemu_t self:capability { sys_resource ipc_lock sys_admin net_admin sys_rawio };
++allow qemu_t self:capability2 { block_suspend };
++allow qemu_t self:process setrlimit;
++allow qemu_t self:tun_socket create_socket_perms;
++allow qemu_t self:sem create_sem_perms;
++
++allow qemu_t qemu_lock_t:file create_file_perms;
++qemu_rw_lock_files(qemu_t)
++
++# needed for nvidia passthrough
++dev_rw_sysfs(qemu_t)
++
++xen_dbus_chat(qemu_t)
++# XC end
++
+ tunable_policy(`qemu_full_network',`
+ 	corenet_udp_sendrecv_generic_if(qemu_t)
+ 	corenet_udp_sendrecv_generic_node(qemu_t)
+@@ -44,6 +99,21 @@ optional_policy(`
+ 	xserver_user_x_domain_template(qemu, qemu_t, qemu_tmpfs_t)
+ ')
+ 
++# lock file: /var/lock/xen-cd-exclusive
++type qemu_lock_t;
++files_lock_file(qemu_lock_t)
++files_lock_filetrans(qemu_t, qemu_lock_t, file)
++ifdef(`enable_mcs',`
++	files_lock_ranged_filetrans(qemu_t, qemu_lock_t, file, s0)
++')
++ifdef(`enable_mls',`
++	files_lock_ranged_filetrans(qemu_t, qemu_lock_t, file, s0)
++')
++
++optional_policy(`
++	fs_manage_xenfs_files(qemu_t)
++')
++
+ ########################################
+ #
+ # Unconfined local policy

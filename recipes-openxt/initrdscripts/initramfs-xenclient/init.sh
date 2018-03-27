@@ -48,14 +48,22 @@ pcr_bank_exists () {
 }
 
 early_setup() {
-    mkdir -p /proc /sys /mnt /tmp
+    # initialize /proc, /sys, /run/lock and /var/lock /mnt /tmp
+    mkdir -p /proc /sys /run/lock /var/lock /mnt /tmp
     mount -t proc proc /proc
     mount -t sysfs sysfs /sys
 }
 
 dev_setup()
 {
-    mount -t devtmpfs none /dev
+    if grep -q devtmpfs /proc/filesystems; then
+        mkdir -p /dev
+        mount -t devtmpfs devtmpfs /dev
+    else
+        if [ ! -d /dev ]; then
+            fatal "ERROR: /dev doesn't exist and kernel doesn't has devtmpfs enabled."
+        fi
+    fi
 
     echo "initramfs: Configuring LVM"
     lvm vgscan --mknodes
@@ -168,11 +176,22 @@ mount_boot() {
 }
 
 boot_root() {
+    if [ ! -d /root ]; then
+        fatal "/root does not exist."
+    fi
+    if [ ! -x /root/sbin/selinux-load.sh ]; then
+        fatal "/sbin/selinux-load.sh does not exist in new root filesystem."
+    fi
+
     [ -z "$ROOT_READONLY" ] && mount -o remount,rw $ROOT_DEVICE /root
-    mount --bind /dev /root/dev
-    mount --bind /proc /root/proc
+
+    echo "Switching root to '/root'..."
+
+    mount --move /dev /root/dev
+    mount --move /proc /root/proc
     mount --move /sys /root/sys
 
+    cd /root
     exec switch_root -c /dev/console /root /sbin/selinux-load.sh ${INIT:-$DEFINIT}
 }
 

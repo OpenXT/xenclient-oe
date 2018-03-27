@@ -1,11 +1,12 @@
 PACKAGES =+ " \
+    ${PN}-ldlinux \
     ${PN}-mboot \
 "
 
 # Since version 5.00, all Syslinux variants require an additional module,
 # ldlinux, to be loaded too.
 # (http://www.syslinux.org/wiki/index.php?title=Library_modules).
-FILES_${PN} += "\
+FILES_${PN}-ldlinux += "\
 	${datadir}/${BPN}/ldlinux.c32 \
 "
 
@@ -15,6 +16,10 @@ FILES_${PN}-mboot = " \
     ${datadir}/${BPN}/mboot.c32 \
     ${datadir}/${BPN}/libcom32.c32 \
 "
+
+# Don't let the sanity checker trip on the 32 bit real mode BIOS binaries
+INSANE_SKIP_${PN}-ldlinux = "arch"
+INSANE_SKIP_${PN}-mboot = "arch"
 
 inherit deploy
 

@@ -30,5 +30,15 @@ do_install_append() {
 		${D}/etc/init.d/tapback-daemon
 }
 
+# QA dev-elf: libvhdio-3.5.0.so does not honor the SOLIBSDEV format.
+FILES_SOLIBSDEV = ""
+FILES_${PN}-dev += " \
+    ${libdir}/libblktapctl.so \
+    ${libdir}/libvhd.so \
+    ${libdir}/libvhdio.so \
+"
+FILES_${PN} += " \
+    ${libdir}/libvhdio-*.so \
+"
 RDEPENDS_${PN} += "glibc-gconv-utf-16"
 RCONFLICTS_${PN} = "xen-blktap xen-libblktap xen-libblktapctl xen-libvhd"

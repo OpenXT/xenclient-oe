@@ -2,9 +2,11 @@ PR .= ".1"
 
 FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}-${PV}:"
 
-SRC_URI += "file://mount-special \
-            file://finish.sh \
-	"
+SRC_URI += " \
+    file://mountearly.sh \
+    file://finish.sh \
+    file://volatiles \
+"
 
 # Override to reduce the number of scripts installed
 do_install () {
@@ -37,8 +39,8 @@ do_install () {
 	install -m 0755    ${WORKDIR}/populate-volatile.sh ${D}${sysconfdir}/init.d
 	install -m 0755    ${WORKDIR}/save-rtc.sh	${D}${sysconfdir}/init.d
 	install -m 0644    ${WORKDIR}/volatiles		${D}${sysconfdir}/default/volatiles/00_core
-	install -m 0755    ${WORKDIR}/mount-special	${D}${sysconfdir}/init.d
 	install -m 0755    ${WORKDIR}/finish.sh		${D}${sysconfdir}/init.d
+	install -m 0755    ${WORKDIR}/mountearly.sh	${D}${sysconfdir}/init.d
 
 #
 # Install device dependent scripts
@@ -60,8 +62,8 @@ do_install () {
 	update-rc.d -r ${D} hostname.sh start 39 S .
 	update-rc.d -r ${D} bootmisc.sh start 55 S .
 	update-rc.d -r ${D} populate-volatile.sh start 37 S .
-	update-rc.d -r ${D} mount-special start 00 S .
 	update-rc.d -r ${D} finish.sh start 99 S .
+	update-rc.d -r ${D} mountearly.sh start 01 S .
 }
 
 pkg_postinst_${PN}_append() {

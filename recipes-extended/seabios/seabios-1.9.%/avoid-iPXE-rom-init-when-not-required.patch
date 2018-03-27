@@ -1,0 +1,42 @@
+################################################################################
+SHORT DESCRIPTION: 
+################################################################################
+Work-around to avoid loading the iPXE ROM if we are not trying to netboot.
+
+################################################################################
+LONG DESCRIPTION: 
+################################################################################
+When initialising the option ROM, if ROM PNP extensions header product name
+matches "iPXE", do not run the ROM.
+Asking to boot from the network (via the toolstack) will follow a different
+path to boot the BEV type provided and boot from the ROM directly.
+
+################################################################################
+PATCHES
+################################################################################
+Index: seabios-1.9.1/src/optionroms.c
+===================================================================
+--- seabios-1.9.1.orig/src/optionroms.c
++++ seabios-1.9.1/src/optionroms.c
+@@ -135,10 +135,18 @@ init_optionrom(struct rom_header *rom, u
+ 
+     tpm_option_rom(newrom, rom->size * 512);
+ 
+-    if (isvga || get_pnp_rom(newrom))
+-        // Only init vga and PnP roms here.
++    struct pnp_data *pnp = get_pnp_rom(newrom);
++    if (isvga || pnp) {
++        if (pnp->productname) {
++            char *productname = (char*)rom + pnp->productname;
++            if (!strcmp(productname, "iPXE")) {
++                dprintf(1, "Ignoring iPXE rom.\n");
++                goto leave;
++            }
++        }
+         callrom(newrom, bdf);
+-
++    }
++leave:
+     return rom_confirm(newrom->size * 512);
+ }
+ 

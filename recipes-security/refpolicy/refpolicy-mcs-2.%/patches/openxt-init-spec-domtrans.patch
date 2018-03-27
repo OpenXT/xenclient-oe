@@ -1,0 +1,81 @@
+Index: refpolicy/policy/modules/system/init.if
+===================================================================
+--- refpolicy.orig/policy/modules/system/init.if
++++ refpolicy/policy/modules/system/init.if
+@@ -250,6 +250,76 @@ interface(`init_daemon_domain',`
+ ########################################
+ ## <summary>
+ ##	Create a domain for long running processes
++##	(daemons/services) which are started by init scripts
++##	with an explicitly specified security context.
++## </summary>
++## <desc>
++##	<p>
++##	Create a domain for long running processes (daemons/services)
++##	which are started by init scripts. Short running processes
++##	should use the init_system_domain() interface instead.
++##	Typically all long running processes started by an init
++##	script (usually in /etc/init.d) will need to use this
++##	interface.
++##	</p>
++##	<p>
++##	The types will be made usable as a domain and file, making
++##	calls to domain_type() and files_type() redundant.
++##	</p>
++##	<p>
++##	If the process must also run in a specific MLS/MCS level,
++##	the init_ranged_daemon_domain() should be used instead.
++##	</p>
++## </desc>
++## <param name="domain">
++##	<summary>
++##	Type to be used as a daemon domain.
++##	</summary>
++## </param>
++## <param name="entry_point">
++##	<summary>
++##	Type of the program to be used as an entry point to this domain.
++##	</summary>
++## </param>
++## <infoflow type="read" weight="10"/>
++#
++interface(`init_daemon_domain_spec_domtrans',`
++	gen_require(`
++		type initrc_t;
++		role system_r;
++		attribute daemon;
++	')
++
++	typeattribute $1 daemon;
++
++	domain_type($1)
++	domain_entry_file($1, $2)
++
++	role system_r types $1;
++
++	spec_domtrans_pattern(initrc_t, $2, $1)
++
++	# daemons started from init will
++	# inherit fds from init for the console
++	init_dontaudit_use_fds($1)
++	term_dontaudit_use_console($1)
++
++	# init script ptys are the stdin/out/err
++	# when using run_init
++	init_use_script_ptys($1)
++
++	ifdef(`direct_sysadm_daemon',`
++		userdom_dontaudit_use_user_terminals($1)
++	')
++
++	optional_policy(`
++		nscd_use($1)
++	')
++')
++
++########################################
++## <summary>
++##	Create a domain for long running processes
+ ##	(daemons/services) which are started by init scripts,
+ ##	running at a specified MLS/MCS range.
+ ## </summary>

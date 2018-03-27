@@ -1,0 +1,94 @@
+Index: refpolicy/policy/modules/contrib/dnsmasq.fc
+===================================================================
+--- refpolicy.orig/policy/modules/contrib/dnsmasq.fc
++++ refpolicy/policy/modules/contrib/dnsmasq.fc
+@@ -2,11 +2,13 @@
+ /etc/dnsmasq\.d(/.*)?   gen_context(system_u:object_r:dnsmasq_etc_t,s0)
+ 
+ /etc/rc\.d/init\.d/dnsmasq	--	gen_context(system_u:object_r:dnsmasq_initrc_exec_t,s0)
++/etc/dnsmasq-config(/.*)?	gen_context(system_u:object_r:dnsmasq_etc_t, s0)
+ 
+ # Systemd unit file
+ /usr/lib/systemd/system/[^/]*dnsmasq.*	--	gen_context(system_u:object_r:dnsmasq_unit_t,s0)
+ 
+ /usr/sbin/dnsmasq	--	gen_context(system_u:object_r:dnsmasq_exec_t,s0)
++/usr/bin/dnsmasq	--	gen_context(system_u:object_r:dnsmasq_exec_t,s0)
+ 
+ /var/lib/misc/dnsmasq\.leases	--	gen_context(system_u:object_r:dnsmasq_lease_t,s0)
+ /var/lib/dnsmasq(/.*)?	gen_context(system_u:object_r:dnsmasq_lease_t,s0)
+Index: refpolicy/policy/modules/contrib/dnsmasq.if
+===================================================================
+--- refpolicy.orig/policy/modules/contrib/dnsmasq.if
++++ refpolicy/policy/modules/contrib/dnsmasq.if
+@@ -137,6 +137,25 @@ interface(`dnsmasq_write_config',`
+ 
+ ########################################
+ ## <summary>
++##     Manage dnsmasq config files.
++## </summary>
++## <param name="domain">
++## <summary>
++##     Domain allowed.
++## </summary>
++## </param>
++#
++interface(`dnsmasq_manage_config',`
++	gen_require(`
++		type dnsmasq_etc_t;
++	')
++
++	manage_files_pattern($1, dnsmasq_etc_t, dnsmasq_etc_t)
++	files_search_etc($1)
++')
++
++########################################
++## <summary>
+ ##	Delete dnsmasq pid files.
+ ## </summary>
+ ## <param name="domain">
+Index: refpolicy/policy/modules/contrib/dnsmasq.te
+===================================================================
+--- refpolicy.orig/policy/modules/contrib/dnsmasq.te
++++ refpolicy/policy/modules/contrib/dnsmasq.te
+@@ -14,6 +14,7 @@ init_script_file(dnsmasq_initrc_exec_t)
+ 
+ type dnsmasq_etc_t;
+ files_config_file(dnsmasq_etc_t)
++files_mountpoint(dnsmasq_etc_t)
+ 
+ type dnsmasq_lease_t;
+ files_type(dnsmasq_lease_t)
+@@ -27,6 +28,10 @@ logging_log_file(dnsmasq_var_log_t)
+ type dnsmasq_var_run_t;
+ files_pid_file(dnsmasq_var_run_t)
+ 
++type dnsmasq_tmp_t;
++files_tmp_file(dnsmasq_tmp_t)
++files_tmp_filetrans(dnsmasq_t, dnsmasq_tmp_t, file)
++
+ ########################################
+ #
+ # Local policy
+@@ -39,6 +44,7 @@ allow dnsmasq_t self:fifo_file rw_fifo_f
+ allow dnsmasq_t self:tcp_socket { accept listen };
+ allow dnsmasq_t self:packet_socket create_socket_perms;
+ allow dnsmasq_t self:rawip_socket create_socket_perms;
++allow dnsmasq_t dnsmasq_tmp_t:file manage_file_perms;
+ 
+ read_files_pattern(dnsmasq_t, dnsmasq_etc_t, dnsmasq_etc_t)
+ 
+@@ -54,6 +60,14 @@ manage_dirs_pattern(dnsmasq_t, dnsmasq_v
+ manage_files_pattern(dnsmasq_t, dnsmasq_var_run_t, dnsmasq_var_run_t)
+ files_pid_filetrans(dnsmasq_t, dnsmasq_var_run_t, { dir file })
+ 
++# most likely due to fd leaks from dnsmasq into db-ls-dom0 script
++dontaudit db_cmd_t dnsmasq_t:netlink_route_socket rw_socket_perms;
++
++# dnsmasq executes /etc/dnsmasq-config/*
++allow dnsmasq_t dnsmasq_etc_t:file { execute execute_no_trans };
++corecmd_exec_shell(dnsmasq_t)
++corecmd_exec_bin(dnsmasq_t)
++
+ kernel_read_kernel_sysctls(dnsmasq_t)
+ kernel_read_net_sysctls(dnsmasq_t)
+ kernel_read_network_state(dnsmasq_t)

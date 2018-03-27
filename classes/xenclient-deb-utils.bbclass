@@ -102,7 +102,7 @@ do_clean_append() {
                 if suite == '': continue
                 for arch in deb_arch.split():
                         if arch == '' : continue
-                        print "I: cleaning chroot build of %s_%s" % (suite, arch)
+                        print("I: cleaning chroot build of %s_%s" % (suite, arch))
                         os.system("sudo rm -rf '%s/%s_%s/%s'" % (chroot_path, suite, arch, WORKDIR))
                         os.system("sudo rm -rf '%s/%s_%s/%s'" % (chroot_path, suite, arch, D))
 }

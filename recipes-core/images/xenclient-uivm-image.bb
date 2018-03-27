@@ -1,24 +1,46 @@
 # XenClient UIVM image
 
-include xenclient-image-common.inc
-IMAGE_FEATURES += "package-management"
+LICENSE = "GPLv2 & MIT"
+LIC_FILES_CHKSUM = " \
+    file://${COMMON_LICENSE_DIR}/GPL-2.0;md5=801f80980d171dd6425610833a22dbe6 \
+    file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302 \
+"
+
+IMAGE_FEATURES += " \
+    package-management \
+    read-only-rootfs \
+"
+IMAGE_FSTYPES = "ext3.vhd.gz"
+export IMAGE_BASENAME = "xenclient-uivm-image"
 
 COMPATIBLE_MACHINE = "(xenclient-uivm)"
 
-IMAGE_FSTYPES = "xc.ext3.vhd.gz"
 
-BAD_RECOMMENDATIONS += "avahi-daemon avahi-autoipd"
-# The above seems to be broken and we *really* don't want avahi!
-PACKAGE_REMOVE = "avahi-daemon avahi-autoipd busybox-hwclock"
+BAD_RECOMMENDATIONS += " \
+    avahi-daemon \
+    avahi-autoipd \
+"
+# List of packages removed at rootfs-postprocess.
+PACKAGE_REMOVE = " \
+    busybox-hwclock \
+"
 
-ANGSTROM_EXTRA_INSTALL += " \
-			  " 
 XSERVER ?= "xserver-kdrive-fbdev"
-#SPLASH ?= ' ${@base_contains("MACHINE_FEATURES", "screen", "psplash-angstrom", "",d)}'
 
-export IMAGE_BASENAME = "xenclient-uivm-image"
+# Specifies the list of locales to install into the image during the root
+# filesystem construction process.
+# http://www.yoctoproject.org/docs/current/ref-manual/ref-manual.html#var-IMAGE_LINGUAS
+IMAGE_LINGUAS = " \
+    de-de \
+    en-us \
+    es-es \
+    fr-fr \
+    ja-jp \
+    zh-cn \
+"
 
-DEPENDS = "packagegroup-base"
+IMAGE_FEATURES += "empty-root-password"
+
 IMAGE_INSTALL = "\
     ${ROOTFS_PKGMANAGE} \
     ${XSERVER} \
@@ -64,120 +86,54 @@ IMAGE_INSTALL = "\
     rsyslog \
     glibc-gconv-libjis \
     glibc-gconv-euc-jp \
-    glibc-localedata-translit-cjk-variants \
-    glibc-localedata-ja-jp \
-    locale-base-ja-jp \
-    locale-base-de-de \
-    locale-base-es-es \
-    locale-base-fr-fr \
-    locale-base-zh-cn \
     mobile-broadband-provider-info \
     shutdown-screen \
     ttf-dejavu-sans \
     ttf-dejavu-sans-mono \
     uim \
+    uim-common \
     anthy \
     uim-gtk2.0 \
     matchbox-keyboard \
     matchbox-keyboard-im \
-    ${ANGSTROM_EXTRA_INSTALL}"
+"
 
-# these cause a python dictionary changed size during iteration error
-#    gtk+-locale-de \
-#    gtk+-locale-es \
-#    gtk+-locale-fr \
-#    gtk+-locale-ja \
-#    gtk+-locale-zh-cn \
-#
-
-# OE upgrade - temporarly disabled:
-
-# angstrom-x11-base-depends \
-# packagegroup-xfce46-base \
-# angstrom-gnome-icon-theme-enable \
-# battery-applet-4-xfce4 \
-# battery-applet-4-xfce4-locale-de \
-# battery-applet-4-xfce4-locale-es \
-# battery-applet-4-xfce4-locale-fr \
-# battery-applet-4-xfce4-locale-ja \
-# battery-applet-4-xfce4-locale-zh-cn \
-# xsetroot \
-# gconf-dbus \
-# xkbd \
-#
-
-
-#    angstrom-gpe-packagegroup-base \
-#    ${SPLASH} \
-#
-
-#IMAGE_INSTALL = "\
-#    ${XSERVER} \
-#    packagegroup-base-extended \
-#    coreutils \
-#    bash \
-#    angstrom-x11-base-depends \
-#    angstrom-gpe-packagegroup-base \
-#    angstrom-gpe-packagegroup-settings \
-#    kernel-modules \
-#    hal \
-#    devilspie \
-#    surf \
-#    ${SPLASH} \
-#    ${ANGSTROM_EXTRA_INSTALL}"
-
-# IMAGE_PREPROCESS_COMMAND = "create_etc_timestamp"
+require xenclient-image-common.inc
+require xenclient-version.inc
+inherit xenclient-licences
+inherit image
 
 #zap root password for release images
 ROOTFS_POSTPROCESS_COMMAND += '${@base_conditional("DISTRO_TYPE", "release", "zap_root_password; ", "",d)}'
 
 post_rootfs_shell_commands() {
-	echo 'x:5:respawn:/bin/su - root -c /usr/bin/startxfce4' >> ${IMAGE_ROOTFS}/etc/inittab;
+    # Start WM right away.
+    echo 'x:5:respawn:/bin/su - root -c /usr/bin/startxfce4' >> ${IMAGE_ROOTFS}/etc/inittab
 
-	# enable ctrlaltdel reboot because PV driver uses ctrl+alt+del to interpret reboot issued via xenstore
-	echo 'ca:12345:ctrlaltdel:/sbin/shutdown -t1 -a -r now' >> ${IMAGE_ROOTFS}/etc/inittab;
+    # enable ctrlaltdel reboot because PV driver uses ctrl+alt+del to interpret reboot issued via xenstore
+    echo 'ca:12345:ctrlaltdel:/sbin/shutdown -t1 -a -r now' >> ${IMAGE_ROOTFS}/etc/inittab
 
-	sed -i 's|root:x:0:0:root:/root:/bin/sh|root:x:0:0:root:/root:/bin/bash|' ${IMAGE_ROOTFS}/etc/passwd;
+    # Change root shell.
+    sed -i 's|root:x:0:0:root:/root:/bin/sh|root:x:0:0:root:/root:/bin/bash|' ${IMAGE_ROOTFS}/etc/passwd
 
-	echo '1.0.0.0 dom0' >> ${IMAGE_ROOTFS}/etc/hosts;
+    # Trick to resolve dom0 name with V4V.
+    echo '1.0.0.0 dom0' >> ${IMAGE_ROOTFS}/etc/hosts
 
-	opkg -f ${IPKGCONF_TARGET} -o ${IMAGE_ROOTFS} ${OPKG_ARGS} -force-depends remove ${PACKAGE_REMOVE}
-
-	# readonly rootfs prevents sshd from creating dirs
-	mkdir ${IMAGE_ROOTFS}/root/.ssh;
-	
-	mkdir ${IMAGE_ROOTFS}/root/.cache;
+    # HACK: Force remove unwanted packages.
+    # These should not be installed in the first place?
+    opkg -f ${IPKGCONF_TARGET} -o ${IMAGE_ROOTFS} ${OPKG_ARGS} -force-depends remove ${PACKAGE_REMOVE}
 }
+ROOTFS_POSTPROCESS_COMMAND += "post_rootfs_shell_commands; "
 
-remove_initscripts() {
-    # Remove unneeded initscripts
-    if [ -f ${IMAGE_ROOTFS}${sysconfdir}/init.d/finish.sh ]; then
-        rm -f ${IMAGE_ROOTFS}${sysconfdir}/init.d/finish.sh
-        update-rc.d -r ${IMAGE_ROOTFS} finish.sh remove
-    fi
-    if [ -f ${IMAGE_ROOTFS}${sysconfdir}/init.d/rmnologin.sh ]; then
-        rm -f ${IMAGE_ROOTFS}${sysconfdir}/init.d/rmnologin.sh
-        update-rc.d -r ${IMAGE_ROOTFS} rmnologin.sh remove
-    fi
-    if [ -f ${IMAGE_ROOTFS}${sysconfdir}/init.d/sshd ]; then
-        rm -f ${IMAGE_ROOTFS}${sysconfdir}/init.d/sshd
-        update-rc.d -r ${IMAGE_ROOTFS} sshd remove
-    fi
-    if [ -f ${IMAGE_ROOTFS}${sysconfdir}/init.d/urandom ]; then
-        rm -f ${IMAGE_ROOTFS}${sysconfdir}/init.d/urandom
-        update-rc.d -r ${IMAGE_ROOTFS} urandom remove
-    fi
+# Get a tty on hvc0 when in debug mode.
+ROOTFS_POSTPROCESS_COMMAND += '${@bb.utils.contains("IMAGE_FEATURES", "debug-tweaks", "start_tty_on_hvc0; ", "",d)}'
+
+remove_nonessential_initscripts() {
+    remove_initscript "finish.sh"
+    remove_initscript "rmnologin.sh"
+    remove_initscript "sshd"
+    remove_initscript "urandom"
+    remove_initscript "save-rtc.sh"
+    remove_initscript "networking"
 }
-
-ROOTFS_POSTPROCESS_COMMAND += " post_rootfs_shell_commands; remove_initscripts; "
-
-inherit image
-#inherit validate-package-versions
-inherit xenclient-image-src-info
-inherit xenclient-image-src-package
-inherit xenclient-licences
-require xenclient-version.inc
-
-LICENSE = "GPLv2 & MIT"
-LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/GPL-2.0;md5=801f80980d171dd6425610833a22dbe6      \
-                    file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302"
+ROOTFS_POSTPROCESS_COMMAND += "remove_nonessential_initscripts; "

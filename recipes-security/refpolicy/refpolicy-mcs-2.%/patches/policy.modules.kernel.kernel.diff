@@ -1,0 +1,148 @@
+Index: refpolicy/policy/modules/kernel/kernel.if
+===================================================================
+--- refpolicy.orig/policy/modules/kernel/kernel.if
++++ refpolicy/policy/modules/kernel/kernel.if
+@@ -499,6 +499,26 @@ interface(`kernel_dontaudit_link_key',`
+ 
+ ########################################
+ ## <summary>
++##	Read the process state of kernel_t stuff.
++## </summary>
++## <param name="domain">
++##	<summary>
++##	Domain allowed access.
++##	</summary>
++## </param>
++#
++interface(`kernel_read_state',`
++	gen_require(`
++		type kernel_t;
++	')
++
++	allow $1 kernel_t:dir search_dir_perms;
++	allow $1 kernel_t:file read_file_perms;
++	allow $1 kernel_t:lnk_file read_lnk_file_perms;
++')
++
++########################################
++## <summary>
+ ##	Allows caller to read the ring buffer.
+ ## </summary>
+ ## <param name="domain">
+@@ -1477,6 +1497,25 @@ interface(`kernel_read_xen_state',`
+ 
+ ########################################
+ ## <summary>
++##	Do not audit attempts to read xen state.
++## </summary>
++## <param name="domain">
++##	<summary>
++##	The process type reading the state.
++##	</summary>
++## </param>
++##
++#
++interface(`kernel_dontaudit_read_xen_state',`
++	gen_require(`
++		type proc_xen_t;
++	')
++
++	dontaudit $1 proc_xen_t:file read_file_perms;
++')
++
++########################################
++## <summary>
+ ##	Allow caller to read the xen state symbolic links.
+ ## </summary>
+ ## <param name="domain">
+@@ -1517,6 +1556,25 @@ interface(`kernel_write_xen_state',`
+ 
+ ########################################
+ ## <summary>
++##	Do not audit attempts to write xen state information.
++## </summary>
++## <param name="domain">
++##	<summary>
++##	The process type writing the state.
++##	</summary>
++## </param>
++##
++#
++interface(`kernel_dontaudit_write_xen_state',`
++	gen_require(`
++		type proc_xen_t;
++	')
++
++	dontaudit $1 proc_xen_t:file write_file_perms;
++')
++
++########################################
++## <summary>
+ ##	Allow attempts to list all proc directories.
+ ## </summary>
+ ## <param name="domain">
+@@ -3181,6 +3239,24 @@ interface(`kernel_dontaudit_udp_recvfrom
+ 	dontaudit $1 unlabeled_t:udp_socket recvfrom;
+ ')
+ 
++#######################################
++## <summary>
++##      Unconfined readonly access to kernel module resources.
++## </summary>
++## <param name="domain">
++##      <summary>
++##      Domain allowed access.
++##      </summary>
++## </param>
++#
++interface(`kernel_unconfined_readonly',`
++        gen_require(`
++                attribute kern_unconfined_readonly;
++        ')
++
++        typeattribute $1 kern_unconfined_readonly;
++')
++
+ ########################################
+ ## <summary>
+ ##	Receive Raw IP packets from an unlabeled connection.
+Index: refpolicy/policy/modules/kernel/kernel.te
+===================================================================
+--- refpolicy.orig/policy/modules/kernel/kernel.te
++++ refpolicy/policy/modules/kernel/kernel.te
+@@ -22,6 +22,9 @@ neverallow ~can_load_kernmodule self:cap
+ # domains with unconfined access to kernel resources
+ attribute kern_unconfined;
+ 
++# domains with unconfined readonly access to kernel resources
++attribute kern_unconfined_readonly;
++
+ # regular entries in proc
+ attribute proc_type;
+ 
+@@ -320,7 +323,10 @@ files_mounton_etc_runtime_dirs(kernel_t)
+ files_list_home(kernel_t)
+ files_read_usr_files(kernel_t)
+ 
++kernel_request_load_module(kernel_t)
++
+ mcs_process_set_categories(kernel_t)
++mcs_file_read_all(kernel_t)
+ 
+ mls_process_read_all_levels(kernel_t)
+ mls_process_write_all_levels(kernel_t)
+@@ -499,3 +505,14 @@ allow kern_unconfined unlabeled_t:filesy
+ allow kern_unconfined unlabeled_t:association *;
+ allow kern_unconfined unlabeled_t:packet *;
+ allow kern_unconfined unlabeled_t:process ~{ transition dyntransition execmem execstack execheap };
++
++########################################
++#
++# Rules for unconfined readonly access to this module
++#
++allow kern_unconfined_readonly proc_type: file { read open getattr };
++allow kern_unconfined_readonly proc_type: dir { search_dir_perms getattr_dir_perms list_dir_perms };
++allow kern_unconfined_readonly proc_type: lnk_file { getattr_lnk_file_perms read_lnk_file_perms };
++
++allow kern_unconfined_readonly sysctl_type: file { read open getattr };
++allow kern_unconfined_readonly sysctl_type: dir { search_dir_perms getattr_dir_perms list_dir_perms };

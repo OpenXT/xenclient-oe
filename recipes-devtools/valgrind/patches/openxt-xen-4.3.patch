@@ -1,0 +1,351 @@
+Index: valgrind-3.12.0/coregrind/m_syswrap/syswrap-linux.c
+===================================================================
+--- valgrind-3.12.0.orig/coregrind/m_syswrap/syswrap-linux.c
++++ valgrind-3.12.0/coregrind/m_syswrap/syswrap-linux.c
+@@ -7471,6 +7471,15 @@ PRE(sys_ioctl)
+                     (Addr)args->arr, sizeof(*(args->arr)) * args->num);
+       break;
+    }
++   case VKI_XEN_IOCTL_PRIVCMD_MMAPCACHEATTR: {
++       struct vki_xen_privcmd_mmapcacheattr *args =
++           (struct vki_xen_privcmd_mmapcacheattr *)(ARG3);
++       PRE_MEM_READ("VKI_XEN_IOCTL_PRIVCMD_MMAPCACHEATTR(addr)",
++                    (Addr)&args->addr, sizeof(args->addr));
++       PRE_MEM_READ("VKI_XEN_IOCTL_PRIVCMD_MMAPCACHEATTR(type)",
++                    (Addr)args->type, sizeof(args->type));
++      break;
++   }
+ 
+    case VKI_XEN_IOCTL_EVTCHN_BIND_VIRQ: {
+          struct vki_xen_ioctl_evtchn_bind_virq *args =
+@@ -9875,6 +9884,9 @@ POST(sys_ioctl)
+        POST_MEM_WRITE((Addr)args->err, sizeof(*(args->err)) * args->num);
+       }
+       break;
++   case VKI_XEN_IOCTL_PRIVCMD_MMAPCACHEATTR:
++      /* No output. */
++      break;
+ 
+    case VKI_XEN_IOCTL_EVTCHN_BIND_VIRQ:
+    case VKI_XEN_IOCTL_EVTCHN_BIND_INTERDOMAIN:
+Index: valgrind-3.12.0/coregrind/m_syswrap/syswrap-xen.c
+===================================================================
+--- valgrind-3.12.0.orig/coregrind/m_syswrap/syswrap-xen.c
++++ valgrind-3.12.0/coregrind/m_syswrap/syswrap-xen.c
+@@ -389,33 +389,6 @@ PRE(xsm_op)
+ #undef PRE_XEN_XSM_OP_READ
+ }
+ 
+-PRE(sched_op)
+-{
+-   PRINT("__HYPERVISOR_sched_op ( %ld, %#lx )", SARG1, ARG2);
+-   void *arg = (void *)(unsigned long)ARG2;
+-
+-#define __PRE_XEN_SCHEDOP_READ(_schedop, _type, _field) \
+-   PRE_MEM_READ("XEN_SCHEDOP_" # _schedop " " #_field,  \
+-                (Addr)&((_type*)arg)->_field,           \
+-                sizeof(((_type*)arg)->_field))
+-#define PRE_XEN_SCHEDOP_READ(_schedop, _field)                          \
+-   __PRE_XEN_SCHEDOP_READ(_schedop, vki_xen_ ## _schedop ## _t, _field)
+-
+-   switch (ARG1) {
+-   case VKI_XEN_SCHEDOP_remote_shutdown:
+-      PRE_XEN_SCHEDOP_READ(remote_shutdown, domain_id);
+-      PRE_XEN_SCHEDOP_READ(remote_shutdown, reason);
+-      break;
+-
+-   default:
+-      bad_subop(tid, layout, arrghs, status, flags,
+-                "__HYPERVISOR_sched_op", ARG1);
+-      break;
+-   }
+-#undef __PRE_XEN_SCHEDOP_READ
+-#undef PRE_XEN_SCHEDOP_READ
+-}
+-
+ static void pre_evtchn_op(ThreadId tid,
+                           SyscallArgLayout*     layout,
+                           /*MOD*/SyscallArgs*   arrghs,
+@@ -1170,6 +1143,59 @@ PRE(domctl)
+ #undef __PRE_XEN_DOMCTL_READ
+ }
+ 
++PRE(sched_op)
++{
++   unsigned long op = ARG1;
++   void *arg = (void *)(unsigned long)ARG2;
++
++   PRINT("__HYPERVISOR_sched_op ( %ld, %p )", op, arg);
++
++#define __PRE_XEN_SCHEDOP_READ(_sched_op, _type, _field)    \
++   PRE_MEM_READ("XEN_SCHEDOP_" # _sched_op "." #_field,     \
++                (Addr)&((_type*)arg)->_field,               \
++                sizeof(((_type*)arg)->_field))
++#define PRE_XEN_SCHEDOP_READ(_sched_op, _field) \
++   __PRE_XEN_SCHEDOP_READ(_sched_op, struct vki_xen_sched_ ## _sched_op, _field)
++
++   switch (op) {
++   case VKI_XEN_SCHEDOP_yield:
++   case VKI_XEN_SCHEDOP_block:
++      /* No input argument. */
++      break;
++
++   case VKI_XEN_SCHEDOP_shutdown:
++      PRE_XEN_SCHEDOP_READ(shutdown, reason);
++      break;
++
++   case VKI_XEN_SCHEDOP_poll:
++      PRE_XEN_SCHEDOP_READ(poll, ports);
++      PRE_XEN_SCHEDOP_READ(poll, nr_ports);
++      PRE_XEN_SCHEDOP_READ(poll, timeout);
++      break;
++
++   case VKI_XEN_SCHEDOP_remote_shutdown:
++      PRE_XEN_SCHEDOP_READ(remote_shutdown, domain_id);
++      PRE_XEN_SCHEDOP_READ(remote_shutdown, reason);
++      break;
++
++   case VKI_XEN_SCHEDOP_shutdown_code:
++      /* No input argument. */
++      break;
++
++   case VKI_XEN_SCHEDOP_watchdog:
++      PRE_XEN_SCHEDOP_READ(watchdog, timeout);
++      break;
++
++   default:
++      bad_subop(tid, layout, arrghs, status, flags,
++                "__HYPERVISOR_sched_op", op);
++      break;
++   }
++
++#undef PRE_XEN_SCHEDOP_READ
++#undef __PRE_XEN_SHCEDOP_READ
++}
++
+ PRE(hvm_op)
+ {
+    unsigned long op = ARG1;
+@@ -1263,6 +1289,26 @@ PRE(hvm_op)
+       PRE_XEN_HVMOP_READ(inject_trap, cr2);
+       break;
+ 
++   case VKI_XEN_HVMOP_modified_memory:
++      PRE_XEN_HVMOP_READ(modified_memory, domid);
++      PRE_XEN_HVMOP_READ(modified_memory, first_pfn);
++      PRE_XEN_HVMOP_READ(modified_memory, nr);
++      break;
++
++   case VKI_XEN_HVMOP_pagetable_dying:
++      PRE_XEN_HVMOP_READ(pagetable_dying, domid);
++      PRE_XEN_HVMOP_READ(pagetable_dying, gpa);
++      break;
++
++   case VKI_XEN_HVMOP_get_time:
++      /* No input argument */
++      break;
++
++   case VKI_XEN_HVMOP_xentrace:
++      PRE_XEN_HVMOP_READ(xentrace, event);
++      //__PRE_XEN_HVMOP_READ(xentrace, struct vki_xen_hvm_xentrace, extra_bytes);
++      break;
++
+    default:
+       bad_subop(tid, layout, arrghs, status, flags,
+                 "__HYPERVISOR_hvm_op", op);
+@@ -1380,6 +1426,14 @@ POST(memory_op)
+    case VKI_XENMEM_get_sharing_shared_pages:
+        /* No outputs */
+        break;
++
++   case VKI_XENMEM_translate_gpfn_list: {
++       struct vki_xen_translate_gpfn_list *memory_reservation =
++           (struct vki_xen_translate_gpfn_list *)ARG2;
++       POST_MEM_WRITE((Addr)&memory_reservation->mfn_list,
++                      sizeof(vki_xen_pfn_t) * memory_reservation->nr_gpfns);
++       break;
++   }
+    }
+ }
+ 
+@@ -1996,6 +2050,21 @@ POST(hvm_op)
+    case VKI_XEN_HVMOP_get_mem_access:
+       POST_XEN_HVMOP_WRITE(get_mem_access, hvmmem_access);
+       break;
++
++   case VKI_XEN_HVMOP_modified_memory:
++   case VKI_XEN_HVMOP_pagetable_dying:
++   case VKI_XEN_HVMOP_xentrace:
++      /* No output parameter */
++      break;
++
++   case VKI_XEN_HVMOP_track_dirty_vram:
++      POST_XEN_HVMOP_WRITE(track_dirty_vram, dirty_bitmap);
++      break;
++
++   case VKI_XEN_HVMOP_get_time:
++      POST_XEN_HVMOP_WRITE(get_time, now);
++      break;
++
+    }
+ #undef __POST_XEN_HVMOP_WRITE
+ #undef POST_XEN_HVMOP_WRITE
+Index: valgrind-3.12.0/include/Makefile.am
+===================================================================
+--- valgrind-3.12.0.orig/include/Makefile.am
++++ valgrind-3.12.0/include/Makefile.am
+@@ -78,6 +78,7 @@ nobase_pkginclude_HEADERS = \
+ 	vki/vki-scnums-darwin.h         \
+ 	vki/vki-scnums-solaris.h	\
+ 	vki/vki-xen.h                   \
++	vki/vki-xen-sched.h		\
+ 	vki/vki-xen-domctl.h		\
+ 	vki/vki-xen-evtchn.h		\
+ 	vki/vki-xen-gnttab.h		\
+Index: valgrind-3.12.0/include/vki/vki-linux.h
+===================================================================
+--- valgrind-3.12.0.orig/include/vki/vki-linux.h
++++ valgrind-3.12.0/include/vki/vki-linux.h
+@@ -3309,11 +3309,17 @@ struct vki_xen_privcmd_mmapbatch_v2 {
+         int __user *err;  /* array of error codes */
+ };
+ 
++struct vki_xen_privcmd_mmapcacheattr {
++	__vki_u64 addr;
++	int type;
++};
++
+ #define VKI_XEN_IOCTL_PRIVCMD_HYPERCALL    _VKI_IOC(_VKI_IOC_NONE, 'P', 0, sizeof(struct vki_xen_privcmd_hypercall))
+ #define VKI_XEN_IOCTL_PRIVCMD_MMAP         _VKI_IOC(_VKI_IOC_NONE, 'P', 2, sizeof(struct vki_xen_privcmd_mmap))
+ 
+ #define VKI_XEN_IOCTL_PRIVCMD_MMAPBATCH    _VKI_IOC(_VKI_IOC_NONE, 'P', 3, sizeof(struct vki_xen_privcmd_mmapbatch))
+ #define VKI_XEN_IOCTL_PRIVCMD_MMAPBATCH_V2 _VKI_IOC(_VKI_IOC_NONE, 'P', 4, sizeof(struct vki_xen_privcmd_mmapbatch_v2))
++#define VKI_XEN_IOCTL_PRIVCMD_MMAPCACHEATTR	_VKI_IOC(_VKI_IOC_NONE, 'P', 200, sizeof (struct vki_xen_privcmd_mmapcacheattr))
+ 
+ //----------------------------------------------------------------------
+ // Xen evtchn IOCTL
+Index: valgrind-3.12.0/include/vki/vki-xen-hvm.h
+===================================================================
+--- valgrind-3.12.0.orig/include/vki/vki-xen-hvm.h
++++ valgrind-3.12.0/include/vki/vki-xen-hvm.h
+@@ -70,6 +70,14 @@ struct vki_xen_hvm_track_dirty_vram {
+ };
+ typedef struct vki_xen_hvm_track_dirty_vram vki_xen_hvm_track_dirty_vram_t;
+ 
++#define VKI_XEN_HVMOP_modified_memory    7
++struct vki_xen_hvm_modified_memory {
++    vki_xen_domid_t  domid;             /* IN */
++    vki_xen_uint64_aligned_t first_pfn; /* IN */
++    vki_xen_uint64_aligned_t nr;        /* IN */
++};
++typedef struct vki_xen_hvm_modified_memory vki_xen_hvm_modified_memory_t;
++
+ #define VKI_XEN_HVMOP_set_mem_type 8
+ struct vki_xen_hvm_set_mem_type {
+     vki_xen_domid_t  domid;
+@@ -79,6 +87,29 @@ struct vki_xen_hvm_set_mem_type {
+ };
+ typedef struct vki_xen_hvm_set_mem_type vki_xen_hvm_set_mem_type_t;
+ 
++#define VKI_XEN_HVMOP_pagetable_dying        9
++struct vki_xen_hvm_pagetable_dying {
++    vki_xen_domid_t  domid;         /* IN */
++    vki_uint16_t pad[3];            /* align next field on 8-byte boundary */
++    vki_uint64_t gpa;               /* IN */
++};
++typedef struct vki_xen_hvm_pagetable_dying vki_xen_hvm_pagetable_dying_t;
++
++#define VKI_XEN_HVMOP_get_time              10
++struct vki_xen_hvm_get_time {
++    vki_uint64_t now;   /* OUT */
++};
++typedef struct vki_xen_hvm_get_time vki_xen_hvm_get_time_t;
++
++#define VKI_XEN_HVMOP_xentrace              11
++struct vki_xen_hvm_xentrace {
++    vki_uint16_t event;                                                     /* IN */
++    vki_uint16_t extra_bytes;                                               /* IN */
++#define __XEN_HVM_TRACE_EXTRA_MAX 7
++    vki_uint8_t extra[__XEN_HVM_TRACE_EXTRA_MAX * sizeof(vki_uint32_t)];    /* IN */
++};
++typedef struct vki_xen_hvm_xentrace vki_xen_hvm_xentrace_t;
++
+ #define VKI_XEN_HVMOP_set_mem_access        12
+ struct vki_xen_hvm_set_mem_access {
+     vki_xen_domid_t domid;
+Index: valgrind-3.12.0/include/vki/vki-xen-memory.h
+===================================================================
+--- valgrind-3.12.0.orig/include/vki/vki-xen-memory.h
++++ valgrind-3.12.0/include/vki/vki-xen-memory.h
+@@ -51,6 +51,18 @@
+ #define VKI_XENMEM_claim_pages                24
+ #define VKI_XENMEM_machphys_compat_mfn_list   25
+ 
++#define VKI_XENMEM_translate_gpfn_list	29
++#define VKI_XENMEM_release_mfn_list	30
++
++struct vki_xen_translate_gpfn_list {
++    /* IN parameters */
++    vki_xen_domid_t domid;
++    vki_xen_ulong_t nr_gpfns;
++    VKI_XEN_GUEST_HANDLE(vki_xen_pfn_t) gpfn_list;
++    /* OUT parameter */
++    VKI_XEN_GUEST_HANDLE(vki_xen_pfn_t) mfn_list;
++};
++
+ struct vki_xen_memory_map {
+     unsigned int nr_entries;
+     VKI_XEN_GUEST_HANDLE(void) buffer;
+Index: valgrind-3.12.0/include/vki/vki-xen-sched.h
+===================================================================
+--- /dev/null
++++ valgrind-3.12.0/include/vki/vki-xen-sched.h
+@@ -0,0 +1,36 @@
++#ifndef __VKI_XEN_SCHED_H
++#define __VKI_XEN_SCHED_H
++
++#define VKI_XEN_SCHEDOP_yield           0
++#define VKI_XEN_SCHEDOP_block           1
++#define VKI_XEN_SCHEDOP_shutdown        2
++struct vki_xen_sched_shutdown {
++   unsigned int reason;
++};
++
++#define VKI_XEN_SCHEDOP_poll            3
++struct vki_xen_sched_poll {
++   VKI_XEN_GUEST_HANDLE(vki_xen_evtchn_port_t) ports;
++   unsigned int nr_ports;
++   vki_uint64_t timeout;
++};
++
++#define VKI_XEN_SCHEDOP_remote_shutdown 4
++struct vki_xen_sched_remote_shutdown {
++   vki_xen_domid_t domain_id;
++   unsigned int reason;
++};
++
++#define VKI_XEN_SCHEDOP_shutdown_code   5
++#define VKI_XEN_SCHEDOP_watchdog        6
++struct vki_xen_sched_watchdog {
++   vki_uint32_t id;
++   vki_uint32_t timeout;
++};
++
++
++#endif	// __VKI_XEN_SCHED_H
++/*--------------------------------------------------------------------*/
++/*--- end                                                          ---*/
++/*--------------------------------------------------------------------*/
++
+Index: valgrind-3.12.0/include/vki/vki-xen.h
+===================================================================
+--- valgrind-3.12.0.orig/include/vki/vki-xen.h
++++ valgrind-3.12.0/include/vki/vki-xen.h
+@@ -116,6 +116,7 @@ struct vki_xenctl_bitmap {
+ #include <vki/vki-xen-tmem.h>
+ #include <vki/vki-xen-xsm.h>
+ #include <vki/vki-xen-physdev.h>
++#include <vki/vki-xen-sched.h>
+ 
+ #endif // __VKI_XEN_H
+ 

@@ -19,7 +19,9 @@ DEPENDS += "\
 
 PV = "14+git${SRCPV}"
 
-SRC_URI = "git://github.com/tklengyel/shim;branch=openxt"
+SRC_URI = " \
+    git://github.com/tklengyel/shim;branch=openxt \
+"
 
 SRCREV = "${AUTOREV}"
 

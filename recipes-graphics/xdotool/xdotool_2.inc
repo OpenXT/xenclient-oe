@@ -6,16 +6,17 @@ manager supports it, you can use xdotool to switch desktops, move windows \
 between desktops, and change the number of desktops."
 LICENSE = "BSD-3-Clause"
 LIC_FILES_CHKSUM = "file://COPYRIGHT;md5=2f9cbf7e9401cec8a38666a08851ce6b"
-DEPENDS = "libx11 libxtst"
+DEPENDS = "virtual/libx11 libxtst"
+
+inherit distro_features_check pkgconfig
+# depends on virtual/libx11
+REQUIRED_DISTRO_FEATURES = "x11"
 
 SRC_URI = "https://storage.googleapis.com/google-code-archive-downloads/v2/code.google.com/semicomplete/xdotool-${PV}.tar.gz"
 
-S = "${WORKDIR}/xdotool-${PV}"
-
 LDFLAGS += "-lX11"
+EXTRA_OEMAKE = "PREFIX=${prefix} INSTALLLIB=${libdir} INSTALLMAN=${mandir}"
 
-do_install_prepend() {
-  export PREFIX=/usr
+do_install() {
+    oe_runmake -e install DESTDIR=${D} PREFIX=${prefix}
 }
-
-inherit autotools-brokensep

@@ -4,9 +4,23 @@ SECTION = "bootloaders"
 PRIORITY = "optional"
 DEPENDS = "trousers"
 
+COMPATIBLE_HOST = "(i.86|x86_64).*-linux"
+COMPATIBLE_MACHINE = "(-)"
+COMPATIBLE_MACHINE_x86 = ".*"
+COMPATIBLE_MACHINE_x86-64 = ".*"
+
+require tboot-arch.inc
+
+export TBOOT_TARGET_ARCH = "${@map_tboot_arch(d.getVar('TARGET_ARCH'), d)}"
+
+python () {
+    if d.getVar('TBOOT_TARGET_ARCH') == 'INVALID':
+        raise bb.parse.SkipPackage('Cannot map `%s` to a xen architecture' % d.getVar('TARGET_ARCH'))
+}
+
 do_compile() {
-	oe_runmake SUBDIRS="tboot" CC="${HOST_PREFIX}gcc ${TOOLCHAIN_OPTIONS}" CPP="${HOST_PREFIX}cpp ${TOOLCHAIN_OPTIONS}" LDFLAGS="" CFLAGS=""
-	oe_runmake SUBDIRS="lcptools lcptools-v2 tb_polgen utils pcr-calc" CFLAGS+="-std=c99" TARGET_ARCH="x86_32"
+	oe_runmake SUBDIRS="tboot" CC="${HOST_PREFIX}gcc ${TOOLCHAIN_OPTIONS}" CPP="${HOST_PREFIX}cpp ${TOOLCHAIN_OPTIONS}"
+	oe_runmake SUBDIRS="lcptools lcptools-v2 tb_polgen utils pcr-calc" TARGET_ARCH="${TBOOT_TARGET_ARCH}"
 }
 
 do_install() {

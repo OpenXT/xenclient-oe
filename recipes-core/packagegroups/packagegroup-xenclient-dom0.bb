@@ -75,7 +75,6 @@ RDEPENDS_${PN} = " \
     pmtools \
     svirt-interpose \
     selinux-load \
-    ustr \
     ethtool \
     intel-microcode \
     rsyslog \
@@ -115,7 +114,6 @@ RDEPENDS_${PN} = " \
     dm-agent \
     xenmgr \
     xen-xenstore \
-    xen-xenstored-c \
     libtss2 \
     libtctidevice \
     libtctisocket \

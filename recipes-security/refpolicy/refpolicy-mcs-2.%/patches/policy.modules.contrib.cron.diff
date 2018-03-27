@@ -1,0 +1,73 @@
+Index: refpolicy/policy/modules/contrib/cron.fc
+===================================================================
+--- refpolicy.orig/policy/modules/contrib/cron.fc
++++ refpolicy/policy/modules/contrib/cron.fc
+@@ -55,6 +55,9 @@ ifdef(`distro_debian',`
+ /var/spool/cron/atjobs	-d	gen_context(system_u:object_r:cron_spool_t,s0)
+ /var/spool/cron/atjobs/[^/]*	--	<<none>>
+ /var/spool/cron/atspool	-d	gen_context(system_u:object_r:cron_spool_t,s0)
++/var/cron                      -d      gen_context(system_u:object_r:cron_spool_t,s0)
++/var/cron/tabs(/*.)?                   gen_context(system_u:object_r:cron_spool_t,s0)
++/var/cron/log                  --      gen_context(system_u:object_r:cron_log_t,s0)
+ ')
+ 
+ ifdef(`distro_gentoo',`
+Index: refpolicy/policy/modules/contrib/cron.if
+===================================================================
+--- refpolicy.orig/policy/modules/contrib/cron.if
++++ refpolicy/policy/modules/contrib/cron.if
+@@ -891,3 +891,33 @@ interface(`cron_admin',`
+ 	files_search_spool($1)
+ 	admin_pattern($1, cron_spool_type)
+ ')
++
++########################################
++## <summary>
++##	Create logging file in cron spool directory
++##	with a private type.
++## </summary>
++## <param name="domain">
++##	<summary>
++##	Domain allowed access.
++##	</summary>
++## </param>
++## <param name="private type">
++##	<summary>
++##	The type of the object to be created.
++##	</summary>
++## </param>
++## <param name="object">
++##	<summary>
++##	The object class of the object being created.
++##	</summary>
++## </param>
++#
++interface(`cron_filetrans',`
++	gen_require(`
++		type cron_spool_t;
++	')
++
++	cron_search_spool($1)
++	filetrans_pattern($1, cron_spool_t, $2, $3)
++')
+Index: refpolicy/policy/modules/contrib/cron.te
+===================================================================
+--- refpolicy.orig/policy/modules/contrib/cron.te
++++ refpolicy/policy/modules/contrib/cron.te
+@@ -52,7 +52,7 @@ type cron_var_run_t;
+ files_pid_file(cron_var_run_t)
+ 
+ type cron_log_t;
+-logging_log_file(cron_log_t)
++files_type(cron_log_t)
+ 
+ type cronjob_t;
+ typealias cronjob_t alias { user_crond_t staff_crond_t sysadm_crond_t };
+@@ -67,6 +67,7 @@ type crond_exec_t;
+ init_daemon_domain(crond_t, crond_exec_t)
+ domain_interactive_fd(crond_t)
+ domain_cron_exemption_source(crond_t)
++cron_filetrans(crond_t, cron_log_t, { file })
+ 
+ type crond_initrc_exec_t;
+ init_script_file(crond_initrc_exec_t)

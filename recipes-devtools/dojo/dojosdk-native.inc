@@ -1,4 +1,4 @@
-DEPENDS = "icedtea6-native"
+DEPENDS = "icedtea7-native"
 
 inherit native
 

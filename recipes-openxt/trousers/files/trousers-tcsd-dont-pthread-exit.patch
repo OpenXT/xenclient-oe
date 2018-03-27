@@ -1,0 +1,33 @@
+pthread_exit() will not unwind the stack properly and SIGSEGV:
+==965== Invalid read of size 8
+==965==    at 0x686F867: ??? (in /lib/libgcc_s.so.1)
+==965==    by 0x68700B7: ??? (in /lib/libgcc_s.so.1)
+==965==    by 0x6870392: ??? (in /lib/libgcc_s.so.1)
+==965==    by 0x687099B: _Unwind_ForcedUnwind (in /lib/libgcc_s.so.1)
+==965==    by 0x4E4895F: __pthread_unwind (unwind.c:121)
+==965==    by 0x4E40554: __do_cancel (pthreadP.h:297)
+==965==    by 0x4E40554: pthread_exit (pthread_exit.c:28)
+==965==    by 0x110695: tcsd_thread_run (tcsd_threads.c:358)
+==965==    by 0x4E3F40E: start_thread (pthread_create.c:456)
+==965==    by 0x5590EAE: clone (clone.S:97)
+==965==    by 0x4E3F32F: ??? (pthread_create.c:353)
+==965==  Address 0x0 is not stack'd, malloc'd or (recently) free'd
+
+From the pthread_exit(3):
+>Performing a return from the start function of any thread other than the main
+>thread results in an implicit call to pthread_exit()
+Threads created are joined in tcsd_threads_final so this should not be
+necessary.
+
+Index: trousers-0.3.14/src/tcsd/tcsd_threads.c
+===================================================================
+--- trousers-0.3.14.orig/src/tcsd/tcsd_threads.c
++++ trousers-0.3.14/src/tcsd/tcsd_threads.c
+@@ -355,7 +355,6 @@ no_mem_error:
+ 	free(data->thread_id);
+ 	data->thread_id = THREAD_NULL;
+ 	pthread_mutex_unlock(&(tm->lock));
+-	pthread_exit(NULL);
+ #endif
+ 	return NULL;
+ }

@@ -9,6 +9,7 @@ PR = "r0"
 SRC_URI = "http://downloads.sourceforge.net/${PN}/${PN}-${PV}.tar.gz;subdir=${PN}-${PV} \
            file://trousers-tcsd-conf.patch;patch=1 \
            file://trousers-standalone.patch;patch=1 \
+           file://trousers-tcsd-dont-pthread-exit.patch;patch=1 \
            file://trousers.initscript \
            file://45-trousers.rules \
 "
@@ -47,7 +48,6 @@ do_install_append() {
         install -m 0644 ${WORKDIR}/45-trousers.rules ${D}/etc/udev/rules.d
 }
 
-RPROVIDES_${PN} =+ "${PN}-data"
 RDEPENDS_${PN} = "libgcc"
 PACKAGES =+ "${PN}-data"
 FILES_${PN}-data = "${datadir}/trousers/system.data.auth \

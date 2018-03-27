@@ -1,0 +1,81 @@
+Index: refpolicy/policy/modules/system/selinuxutil.te
+===================================================================
+--- refpolicy.orig/policy/modules/system/selinuxutil.te
++++ refpolicy/policy/modules/system/selinuxutil.te
+@@ -119,6 +119,9 @@ type setfiles_t alias restorecon_t, can_
+ type setfiles_exec_t alias restorecon_exec_t;
+ init_system_domain(setfiles_t, setfiles_exec_t)
+ domain_obj_id_change_exemption(setfiles_t)
++term_read_console(setfiles_t)
++dev_read_urand(setfiles_t)
++dev_rw_generic_chr_files(setfiles_t)
+ 
+ ########################################
+ #
+@@ -170,6 +173,7 @@ allow load_policy_t self:capability dac_
+ # only allow read of policy config files
+ read_files_pattern(load_policy_t, { policy_src_t policy_config_t }, policy_config_t)
+ 
++dev_dontaudit_search_sysfs(load_policy_t)
+ domain_use_interactive_fds(load_policy_t)
+ 
+ # for mcs.conf
+@@ -215,6 +219,17 @@ optional_policy(`
+ 	portage_dontaudit_use_fds(load_policy_t)
+ ')
+ 
++# XC init leaks fds
++init_dontaudit_use_fds(load_policy_t)
++
++# leaked by opkg
++ifdef(`distro_debian',`
++	optional_policy(`
++		dpkg_dontaudit_manage_db(load_policy_t)
++		dpkg_dontaudit_lock_db(load_policy_t)
++	')
++')
++
+ ########################################
+ #
+ # Newrole local policy
+@@ -280,6 +295,7 @@ auth_use_nsswitch(newrole_t)
+ auth_run_chk_passwd(newrole_t, newrole_roles)
+ auth_run_upd_passwd(newrole_t, newrole_roles)
+ auth_rw_faillog(newrole_t)
++auth_read_shadow(newrole_t)
+ 
+ # Write to utmp.
+ init_rw_utmp(newrole_t)
+@@ -460,6 +476,7 @@ kernel_read_kernel_sysctls(semanage_t)
+ corecmd_exec_bin(semanage_t)
+ 
+ dev_read_urand(semanage_t)
++dev_dontaudit_search_sysfs(semanage_t)
+ 
+ domain_use_interactive_fds(semanage_t)
+ 
+@@ -545,6 +562,14 @@ dev_relabel_all_dev_nodes(setfiles_t)
+ # to handle when /dev/console needs to be relabeled
+ dev_rw_generic_chr_files(setfiles_t)
+ 
++# leaked by opkg
++ifdef(`distro_debian',`
++	optional_policy(`
++		dpkg_dontaudit_manage_db(setfiles_t)
++		dpkg_dontaudit_lock_db(setfiles_t)
++	')
++')
++
+ domain_use_interactive_fds(setfiles_t)
+ domain_dontaudit_search_all_domains_state(setfiles_t)
+ 
+@@ -633,3 +658,9 @@ ifdef(`hide_broken_symptoms',`
+ optional_policy(`
+ 	hotplug_use_fds(setfiles_t)
+ ')
++
++# leaked FDs from input-server
++optional_policy(`
++	kernel_dontaudit_read_xen_state(setfiles_t)
++	kernel_dontaudit_write_xen_state(setfiles_t)
++')

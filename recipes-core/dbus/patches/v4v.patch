@@ -1,0 +1,103 @@
+Index: dbus-1.10.14/configure.ac
+===================================================================
+--- dbus-1.10.14.orig/configure.ac
++++ dbus-1.10.14/configure.ac
+@@ -184,6 +184,7 @@ AC_ARG_ENABLE(libaudit,AS_HELP_STRING([-
+ AC_ARG_ENABLE(inotify, AS_HELP_STRING([--enable-inotify],[build with inotify support (linux only)]),enable_inotify=$enableval,enable_inotify=auto)
+ AC_ARG_ENABLE(kqueue, AS_HELP_STRING([--enable-kqueue],[build with kqueue support]),enable_kqueue=$enableval,enable_kqueue=auto)
+ AC_ARG_ENABLE(console-owner-file, AS_HELP_STRING([--enable-console-owner-file],[enable console owner file]),enable_console_owner_file=$enableval,enable_console_owner_file=auto)
++AC_ARG_ENABLE(v4v, AS_HELP_STRING([--enable-v4v],[build with v4v support]),enable_v4v=$enableval,enable_v4v=auto)
+ AC_ARG_ENABLE(launchd, AS_HELP_STRING([--enable-launchd],[build with launchd auto-launch support]),enable_launchd=$enableval,enable_launchd=auto)
+ AC_ARG_ENABLE(systemd, AS_HELP_STRING([--enable-systemd],[build with systemd at_console support]),enable_systemd=$enableval,enable_systemd=auto)
+ 
+@@ -1292,6 +1293,23 @@ if test x$with_valgrind != xno; then
+   AC_DEFINE([WITH_VALGRIND], [1], [Define to add Valgrind instrumentation])
+ fi
+ 
++# v4v checks
++if test x$enable_v4v = xno ; then
++    have_v4v=no
++else
++    AC_CHECK_HEADER(libv4v.h, have_v4v=yes, have_v4v=no)
++
++    if test x$enable_v4v = xyes -a x$have_v4v = xno; then
++        AC_MSG_ERROR(v4v support explicitly enabled but not available)
++    fi
++fi
++
++if test x$have_v4v = xyes ; then
++    AC_DEFINE(HAVE_V4V,1,[v4v support])
++fi
++
++AM_CONDITIONAL(HAVE_V4V, test x$have_v4v = xyes)
++
+ if test -z "$with_dbus_default_reply_timeout" ; then
+     DBUS_DEFAULT_REPLY_TIMEOUT=25000
+ else
+@@ -1949,6 +1967,7 @@ echo "
+         Building Doxygen docs:    ${enable_doxygen_docs}
+         Building Ducktype docs:   ${enable_ducktype_docs}
+         Building XML docs:        ${enable_xml_docs}
++        Building v4v support:     ${enable_v4v}
+         Building launchd support: ${have_launchd}
+         Init scripts style:       ${with_init_scripts}
+         Default reply timeout:    ${DBUS_DEFAULT_REPLY_TIMEOUT}
+Index: dbus-1.10.14/dbus/dbus-sysdeps-unix.c
+===================================================================
+--- dbus-1.10.14.orig/dbus/dbus-sysdeps-unix.c
++++ dbus-1.10.14/dbus/dbus-sysdeps-unix.c
+@@ -86,6 +86,10 @@
+ #include <systemd/sd-daemon.h>
+ #endif
+ 
++#ifdef HAVE_V4V
++#include <libv4v.h>
++#endif
++
+ #if !DBUS_USE_SYNC
+ #include <pthread.h>
+ #endif
+@@ -1363,6 +1367,10 @@ _dbus_connect_tcp_socket_with_nonce (con
+     hints.ai_family = AF_INET;
+   else if (!strcmp(family, "ipv6"))
+     hints.ai_family = AF_INET6;
++#ifdef HAVE_V4V
++  else if (!strcmp(family, "v4v"))
++    hints.ai_family = AF_UNSPEC;
++#endif
+   else
+     {
+       dbus_set_error (error,
+@@ -1386,6 +1394,10 @@ _dbus_connect_tcp_socket_with_nonce (con
+   tmp = ai;
+   while (tmp)
+     {
++#ifdef HAVE_V4V
++      if (family && !strcmp(family, "v4v"))
++        tmp->ai_family = PF_XENV4V;
++#endif
+       if (!_dbus_open_socket (&fd.fd, tmp->ai_family, SOCK_STREAM, 0, error))
+         {
+           freeaddrinfo(ai);
+@@ -1482,6 +1494,10 @@ _dbus_listen_tcp_socket (const char
+     hints.ai_family = AF_INET;
+   else if (!strcmp(family, "ipv6"))
+     hints.ai_family = AF_INET6;
++#ifdef HAVE_V4V
++  else if (!strcmp(family, "v4v"))
++    hints.ai_family = AF_UNSPEC;
++#endif
+   else
+     {
+       dbus_set_error (error,
+@@ -1511,6 +1527,10 @@ _dbus_listen_tcp_socket (const char
+       int fd = -1, tcp_nodelay_on;
+       DBusSocket *newlisten_fd;
+ 
++#ifdef HAVE_V4V
++      if (family && !strcmp(family, "v4v"))
++        tmp->ai_family = PF_XENV4V;
++#endif
+       if (!_dbus_open_socket (&fd, tmp->ai_family, SOCK_STREAM, 0, error))
+         {
+           _DBUS_ASSERT_ERROR_IS_SET(error);

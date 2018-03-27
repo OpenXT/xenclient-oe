@@ -112,10 +112,10 @@ fi
 if [ -r ${INSTALL_CONF}/ssh.conf ] ; then
     SSH_ENABLED="$(awk -F\' '/^SSH_ENABLED=/ { print $2 }' ${INSTALL_CONF}/ssh.conf)"
     if [ "$SSH_ENABLED" = "true" ]; then
-        mkdir -p /config/etc/ssh
-        touch /config/etc/ssh/enabled
+        rm -f /config/etc/ssh/sshd_not_to_be_run
     else
-        rm -f /config/etc/ssh/enabled
+        mkdir -p /config/etc/ssh
+        touch /config/etc/ssh/sshd_not_to_be_run
     fi
     mv -f ${INSTALL_CONF}/ssh.conf ${INSTALL_CONF}/ssh.conf.DONE
 fi
@@ -143,7 +143,10 @@ if [ -r ${INSTALL_CONF}/repo-cert.conf ] ; then
     fi
     mv -f ${INSTALL_CONF}/repo-cert.conf ${INSTALL_CONF}/repo-cert.conf.DONE
 fi
-restore -r ${INSTALL_CONF} /config/deferred_*
+
+if compgen -G /config/deferred_*; then
+    restore -r ${INSTALL_CONF} /config/deferred_*
+fi
 
 if [ -r ${INSTALL_CONF}/uivm-gconf,aes-xts-plain,256.key ] ; then
     KEY_FOLDER="/config/platform-crypto-keys"

@@ -3,7 +3,7 @@ DESCRIPTION = "Script to manage module configuration files"
 LICENSE = "GPLv2"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/GPL-2.0;md5=801f80980d171dd6425610833a22dbe6"
 PACKAGE_ARCH = "all"
-RDEPENDS_${PN} = "${@base_contains("MACHINE_FEATURES", "kernel26",  "module-init-tools-depmod","modutils-depmod",d)} "
+RDEPENDS_${PN} = "${@bb.utils.contains("MACHINE_FEATURES", "kernel26",  "module-init-tools-depmod","modutils-depmod",d)} "
 PR = "r9xc1"
 
 SRC_URI = "file://update-modules"

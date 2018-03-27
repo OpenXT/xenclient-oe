@@ -11,6 +11,7 @@ DEPENDS = " \
     zlib \
     libcap-ng \
     libdmbus \
+    pixman \
 "
 
 # Leave this in it's own definition so that it can be replaced with a local
@@ -67,7 +68,7 @@ SRC_URI[sha256sum] = "9a7ec64f147b9e1e570c410e00ebe271869b5d4c85392ba047db7617c2
 
 S = "${WORKDIR}/qemu-${PV}"
 
-inherit xenclient autotools-brokensep
+inherit xenclient autotools-brokensep pkgconfig
 
 # Include a minimal amount of blobs by default.
 FILES_${PN} += "/usr/share/qemu/keymaps/en-us       \
@@ -85,7 +86,7 @@ PACKAGES += "${PN}-extra-keymaps ${PN}-extra-roms ${PN}-utils"
 EXTRA_OECONF += " \
     --enable-xen \
     --target-list=i386-softmmu \
-    --without-system-pixman \
+    --with-system-pixman \
     --disable-sdl \
     --disable-vnc \
     --disable-docs \

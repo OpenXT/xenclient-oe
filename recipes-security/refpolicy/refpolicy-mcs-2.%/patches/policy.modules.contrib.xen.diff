@@ -1,0 +1,535 @@
+Index: refpolicy/policy/modules/contrib/xen.fc
+===================================================================
+--- refpolicy.orig/policy/modules/contrib/xen.fc
++++ refpolicy/policy/modules/contrib/xen.fc
+@@ -8,10 +8,16 @@
+ 
+ /usr/sbin/blktapctrl	--	gen_context(system_u:object_r:blktap_exec_t,s0)
+ /usr/sbin/evtchnd	--	gen_context(system_u:object_r:evtchnd_exec_t,s0)
++/etc/xen/xenstored.conf   --      gen_context(system_u:object_r:xenstored_etc_t,s0)
++/etc/xen/oxenstored.conf   --      gen_context(system_u:object_r:xenstored_etc_t,s0)
+ /usr/sbin/tapdisk	--	gen_context(system_u:object_r:blktap_exec_t,s0)
+ /usr/sbin/xenconsoled	--	gen_context(system_u:object_r:xenconsoled_exec_t,s0)
+ /usr/sbin/xend	--	gen_context(system_u:object_r:xend_exec_t,s0)
++/usr/bin/xenmgr         --      gen_context(system_u:object_r:xend_exec_t,s0)
++/usr/bin/xenstored      --      gen_context(system_u:object_r:xenstored_exec_t,s0)
+ /usr/sbin/xenstored	--	gen_context(system_u:object_r:xenstored_exec_t,s0)
++/usr/sbin/xenstored.xen-xenstored-c	--	gen_context(system_u:object_r:xenstored_exec_t,s0)
++/usr/sbin/xenstored.xen-xenstored-ocaml	--	gen_context(system_u:object_r:xenstored_exec_t,s0)
+ /usr/sbin/xl	--	gen_context(system_u:object_r:xm_exec_t,s0)
+ /usr/sbin/xm	--	gen_context(system_u:object_r:xm_exec_t,s0)
+ 
+@@ -19,12 +25,15 @@
+ /var/lib/xen/images(/.*)?	gen_context(system_u:object_r:xen_image_t,s0)
+ /var/lib/xend(/.*)?	gen_context(system_u:object_r:xend_var_lib_t,s0)
+ /var/lib/xenstored(/.*)?	gen_context(system_u:object_r:xenstored_var_lib_t,s0)
++/var/lib/xenvm(/.*)?            gen_context(system_u:object_r:xend_var_lib_t,s0)
+ 
++/var/lock/xen-buildvm-lock      --      gen_context(system_u:object_r:xend_lock_t,s0)
+ /var/log/evtchnd\.log.*	--	gen_context(system_u:object_r:evtchnd_var_log_t,s0)
+ /var/log/xen(/.*)?	gen_context(system_u:object_r:xend_var_log_t,s0)
+ /var/log/xen-hotplug\.log.*	--	gen_context(system_u:object_r:xend_var_log_t,s0)
+ /var/log/xend\.log.*	--	gen_context(system_u:object_r:xend_var_log_t,s0)
+ /var/log/xend-debug\.log.*	--	gen_context(system_u:object_r:xend_var_log_t,s0)
++/var/log/xenstored.*            gen_context(system_u:object_r:xenstored_var_log_t,s0)
+ 
+ /run/evtchnd	-s	gen_context(system_u:object_r:evtchnd_var_run_t,s0)
+ /run/evtchnd\.pid	--	gen_context(system_u:object_r:evtchnd_var_run_t,s0)
+@@ -36,3 +45,6 @@
+ /run/xenstored(/.*)?	gen_context(system_u:object_r:xenstored_var_run_t,s0)
+ 
+ /xen(/.*)?	gen_context(system_u:object_r:xen_image_t,s0)
++
++# config flags
++/config/system/dom0-networking-disabled         --              gen_context(system_u:object_r:xend_config_t,s0)
+Index: refpolicy/policy/modules/contrib/xen.if
+===================================================================
+--- refpolicy.orig/policy/modules/contrib/xen.if
++++ refpolicy/policy/modules/contrib/xen.if
+@@ -211,7 +211,7 @@ interface(`xen_dontaudit_rw_unix_stream_
+ 		type xend_t;
+ 	')
+ 
+-	dontaudit $1 xend_t:unix_stream_socket { read write };
++	dontaudit $1 xend_t:unix_stream_socket { read write ioctl };
+ ')
+ 
+ ########################################
+@@ -231,6 +231,7 @@ interface(`xen_stream_connect_xenstore',
+ 	')
+ 
+ 	files_search_pids($1)
++	allow $1 xenstored_var_run_t:dir search_dir_perms;
+ 	stream_connect_pattern($1, xenstored_var_run_t, xenstored_var_run_t, xenstored_t)
+ ')
+ 
+@@ -295,3 +296,136 @@ interface(`xen_stream_connect_xm',`
+ 	files_search_pids($1)
+ 	stream_connect_pattern($1, xenstored_var_run_t, xenstored_var_run_t, xm_t)
+ ')
++
++########################################
++## <summary>
++##      Allow the specified domain to associate
++##      with xend's semaphores.
++## </summary>
++## <param name="domain">
++##      <summary>
++##      Domain allowed access.
++##      </summary>
++## </param>
++#
++interface(`xen_sem_use',`
++	gen_require(`
++		type xend_t;
++	')
++
++	allow $1 xend_t:sem { associate };
++')
++
++#####################################
++## <summary>
++##      Allow read and write access to xend semaphores.
++##      Added for dmsetup (lvm_t) run by xend.
++## </summary>
++## <param name="domain">
++##      <summary>
++##      Domain allowed access.
++##      </summary>
++## </param>
++#
++interface(`xend_rw_semaphores',`
++	gen_require(`
++		type xend_t;
++	')
++
++	allow $1 xend_t:sem rw_sem_perms;
++')
++
++########################################
++## <summary>
++##      Do not audit attempts to read and write
++##      Xen fifo files.  These are leaked file descriptors.
++## </summary>
++## <param name="domain">
++##      <summary>
++##      Domain to not audit.
++##      </summary>
++## </param>
++#
++interface(`xen_dontaudit_rw_unix_fifo_files',`
++	gen_require(`
++		type xend_t;
++	')
++
++	dontaudit $1 xend_t:fifo_file { read write };
++')
++
++#######################################
++## <summary>
++##      Exchange messages with xend over dbus.
++## </summary>
++## <param name="domain">
++##      <summary>
++##      The type of the process chatting with xend over dbus.
++##      </summary>
++## </param>
++#
++interface(`xen_dbus_chat',`
++	gen_require(`
++		type xend_t;
++		class dbus send_msg;
++	')
++
++	allow $1 xend_t:dbus	send_msg;
++	allow xend_t $1:dbus	send_msg;
++')
++
++#######################################
++## <summary>
++##      Send messages to xend over dbus.
++## </summary>
++## <param name="domain">
++##      <summary>
++##      The type of the process chatting with xend over dbus.
++##      </summary>
++## </param>
++#
++interface(`xen_dbus_send',`
++	gen_require(`
++		type xend_t;
++		class dbus send_msg;
++	')
++
++	allow $1 xend_t:dbus	send_msg;
++')
++
++########################################
++## <summary>
++##      Write to xen tmp files.
++## </summary>
++## <param name="domain">
++##      <summary>
++##      Domain allowed access.
++##      </summary>
++## </param>
++#
++interface(`xen_write_tmp',`
++	gen_require(`
++		type xend_tmp_t;
++	')
++
++	files_search_tmp($1)
++	allow $1 xend_tmp_t:file { write_file_perms };
++')
++
++########################################
++## <summary>
++##      Get attributes of files marked as xen config files
++## </summary>
++## <param name="domain">
++##      <summary>
++##      Domain allowed access.
++##      </summary>
++## </param>
++#
++interface(`xen_geattr_config_files',`
++	gen_require(`
++		type xend_config_t;
++	')
++
++	getattr_files_pattern($1, xend_config_t, xend_config_t)
++')
+Index: refpolicy/policy/modules/contrib/xen.te
+===================================================================
+--- refpolicy.orig/policy/modules/contrib/xen.te
++++ refpolicy/policy/modules/contrib/xen.te
+@@ -75,8 +75,13 @@ type xend_t;
+ type xend_exec_t;
+ init_daemon_domain(xend_t, xend_exec_t)
+ 
++ifdef(`enable_mcs',`
++        init_ranged_daemon_domain(xend_t, xend_exec_t, s0 - mcs_systemhigh)
++')
++
+ type xend_tmp_t;
+ files_tmp_file(xend_tmp_t)
++files_mountpoint(xend_tmp_t)
+ 
+ type xend_var_lib_t;
+ files_type(xend_var_lib_t)
+@@ -89,10 +94,21 @@ type xend_var_run_t;
+ files_pid_file(xend_var_run_t)
+ files_mountpoint(xend_var_run_t)
+ 
++# lock files
++type xend_lock_t;
++files_lock_file(xend_lock_t);
++files_lock_filetrans(xend_t, xend_lock_t, file)
++
+ type xenstored_t;
+ type xenstored_exec_t;
+ init_daemon_domain(xenstored_t, xenstored_exec_t)
+ 
++# config file
++type xenstored_etc_t;
++files_config_file(xenstored_etc_t);
++allow xenstored_t xenstored_etc_t:file read_file_perms;
++files_search_etc(xenstored_t)
++
+ type xenstored_tmp_t;
+ files_tmp_file(xenstored_tmp_t)
+ 
+@@ -117,6 +133,11 @@ files_pid_file(xenconsoled_var_run_t)
+ type xm_t;
+ type xm_exec_t;
+ init_system_domain(xm_t, xm_exec_t)
++domain_type(xm_t)
++
++# XenClient /config files
++type xend_config_t;
++files_type(xend_config_t);
+ 
+ ########################################
+ #
+@@ -165,14 +186,20 @@ files_pid_filetrans(evtchnd_t, evtchnd_v
+ 
+ allow xend_t self:capability { dac_override ipc_lock net_admin setuid sys_admin sys_nice sys_tty_config net_raw sys_resource sys_rawio };
+ dontaudit xend_t self:capability { sys_ptrace };
+-allow xend_t self:process { setrlimit signal sigkill };
++allow xend_t self:process { setrlimit signal sigkill execmem setsched };
+ dontaudit xend_t self:process ptrace;
+ allow xend_t self:fifo_file rw_fifo_file_perms;
+-allow xend_t self:unix_stream_socket { accept listen };
+-allow xend_t self:tcp_socket { accept listen };
++allow xend_t self:unix_stream_socket { accept listen create_stream_socket_perms};
++allow xend_t self:tcp_socket { accept listen create_stream_socket_perms};
++allow xend_t self:unix_dgram_socket create_socket_perms;
++allow xend_t self:netlink_route_socket r_netlink_socket_perms;
+ allow xend_t self:packet_socket create_socket_perms;
+ allow xend_t self:tun_socket create_socket_perms;
+ 
++# XenClient /config files
++manage_dirs_pattern(xend_t, xend_config_t, xend_config_t)
++manage_files_pattern(xend_t, xend_config_t, xend_config_t)
++
+ allow xend_t xen_image_t:dir list_dir_perms;
+ manage_dirs_pattern(xend_t, xen_image_t, xen_image_t)
+ manage_fifo_files_pattern(xend_t, xen_image_t, xen_image_t)
+@@ -196,6 +223,7 @@ manage_sock_files_pattern(xend_t, xend_v
+ manage_fifo_files_pattern(xend_t, xend_var_run_t, xend_var_run_t)
+ files_pid_filetrans(xend_t, xend_var_run_t, { file sock_file fifo_file dir })
+ 
++manage_files_pattern(xend_t, xend_var_log_t, xend_var_log_t)
+ manage_dirs_pattern(xend_t, xend_var_log_t, xend_var_log_t)
+ append_files_pattern(xend_t, xend_var_log_t, xend_var_log_t)
+ create_files_pattern(xend_t, xend_var_log_t, xend_var_log_t)
+@@ -203,6 +231,9 @@ setattr_files_pattern(xend_t, xend_var_l
+ manage_sock_files_pattern(xend_t, xend_var_log_t, xend_var_log_t)
+ logging_log_filetrans(xend_t, xend_var_log_t, { sock_file file dir })
+ 
++# lock files
++manage_files_pattern(xend_t, xend_lock_t, xend_lock_t)
++
+ manage_dirs_pattern(xend_t, xend_var_lib_t, xend_var_lib_t)
+ manage_files_pattern(xend_t, xend_var_lib_t, xend_var_lib_t)
+ manage_sock_files_pattern(xend_t, xend_var_lib_t, xend_var_lib_t)
+@@ -218,6 +249,14 @@ domtrans_pattern(xend_t, xenstored_exec_
+ 
+ xen_stream_connect_xenstore(xend_t)
+ 
++# transition to qemu
++qemu_domtrans(xend_t)
++qemu_signal(xend_t)
++qemu_signull(xend_t)
++
++# transition to dmidecode
++dmidecode_domtrans(xend_t)
++
+ kernel_read_kernel_sysctls(xend_t)
+ kernel_read_system_state(xend_t)
+ kernel_write_xen_state(xend_t)
+@@ -260,6 +299,10 @@ dev_read_urand(xend_t)
+ dev_filetrans_xen(xend_t)
+ dev_rw_sysfs(xend_t)
+ dev_rw_xen(xend_t)
++dev_read_rand(xend_t)
++dev_search_xen(xend_t)
++dev_manage_xen(xend_t)
++dev_read_raw_memory(xend_t)
+ 
+ domain_dontaudit_read_all_domains_state(xend_t)
+ domain_dontaudit_ptrace_all_domains(xend_t)
+@@ -272,6 +315,13 @@ files_etc_filetrans_etc_runtime(xend_t,
+ files_read_usr_files(xend_t)
+ files_read_default_symlinks(xend_t)
+ files_search_mnt(xend_t)
++files_rw_etc_files(xend_t)
++#fs_getattr_all_f_exec_usr_files(xend_t)
++
++# accessing vmlinuz from service VM disks
++files_read_isid_type_files(xend_t)
++files_read_isid_type_symlinks(xend_t)
++files_search_isid_type_dirs(xend_t)
+ 
+ fs_getattr_all_fs(xend_t)
+ fs_list_auto_mountpoints(xend_t)
+@@ -281,6 +331,24 @@ fs_manage_xenfs_dirs(xend_t)
+ fs_manage_xenfs_files(xend_t)
+ 
+ storage_read_scsi_generic(xend_t)
++storage_raw_read_fixed_disk(xend_t)
++storage_raw_write_fixed_disk(xend_t)
++storage_raw_read_removable_device(xend_t)
++sysnet_domtrans_dhcpc(xend_t)
++sysnet_signal_dhcpc(xend_t)
++sysnet_domtrans_ifconfig(xend_t)
++sysnet_dns_name_resolve(xend_t)
++sysnet_delete_dhcpc_pid(xend_t)
++sysnet_read_dhcpc_pid(xend_t)
++sysnet_rw_dhcp_config(xend_t)
++
++# adding v4v addresses?
++sysnet_write_config(xend_t)
++# restart ssh daemons
++ssh_initrc_domtrans(xend_t)
++
++seutil_read_config(xend_t)
++seutil_read_default_contexts(xend_t)
+ 
+ term_setattr_generic_ptys(xend_t)
+ term_getattr_all_ptys(xend_t)
+@@ -289,14 +357,24 @@ term_use_generic_ptys(xend_t)
+ term_use_ptmx(xend_t)
+ term_getattr_pty_fs(xend_t)
+ 
+++# runlevel stuff
++init_rw_utmp(xend_t)
++init_telinit(xend_t)
+ init_stream_connect_script(xend_t)
+ 
+ locallogin_dontaudit_use_fds(xend_t)
+ 
+ logging_send_syslog_msg(xend_t)
++lvm_domtrans(xend_t)
+ 
+ miscfiles_read_localization(xend_t)
+ miscfiles_read_hwdata(xend_t)
++mount_domtrans(xend_t)
++
++netutils_domtrans(xend_t)
++networkmanager_domtrans(xend_t)
++networkmanager_dbus_chat(xend_t)
++networkmanager_signal(xend_t)
+ 
+ sysnet_domtrans_dhcpc(xend_t)
+ sysnet_signal_dhcpc(xend_t)
+@@ -307,6 +385,25 @@ sysnet_read_dhcpc_pid(xend_t)
+ sysnet_rw_dhcp_config(xend_t)
+ 
+ userdom_dontaudit_search_user_home_dirs(xend_t)
++userdom_dontaudit_use_user_terminals(xend_t)
++
++xen_stream_connect_xenstore(xend_t)
++
++# act as a dbus client
++dbus_connect_system_bus(xend_t)
++dbus_system_bus_client(xend_t)
++
++# stubdom helpers
++optional_policy(`
++        atapi_helper_domtrans(xend_t)
++        atapi_helper_signal(xend_t)
++        audio_helper_domtrans(xend_t)
++        audio_helper_signal(xend_t)
++')
++
++optional_policy(`
++        tcsd_search_lib(xend_t)
++')
+ 
+ tunable_policy(`xen_use_fusefs',`
+ 	fs_manage_fusefs_dirs(xend_t)
+@@ -360,12 +457,14 @@ optional_policy(`
+ # Xen console local policy
+ #
+ 
+-allow xenconsoled_t self:capability { dac_override fsetid ipc_lock };
++allow xenconsoled_t self:capability { dac_override fsetid ipc_lock sys_tty_config sys_resource };
+ allow xenconsoled_t self:process setrlimit;
+ allow xenconsoled_t self:unix_stream_socket create_stream_socket_perms;
+ allow xenconsoled_t self:fifo_file rw_fifo_file_perms;
++allow xenconsoled_t self:unix_dgram_socket create_socket_perms;
+ 
+ allow xenconsoled_t xen_devpts_t:chr_file { rw_term_perms setattr_chr_file_perms };
++allow xenconsoled_t xen_devpts_t:chr_file rw_term_perms;
+ 
+ manage_dirs_pattern(xenconsoled_t, xend_var_log_t, xend_var_log_t)
+ append_files_pattern(xenconsoled_t, xend_var_log_t, xend_var_log_t)
+@@ -401,10 +500,12 @@ init_use_fds(xenconsoled_t)
+ init_use_script_ptys(xenconsoled_t)
+ 
+ logging_search_logs(xenconsoled_t)
++logging_send_syslog_msg(xenconsoled_t)
+ 
+ miscfiles_read_localization(xenconsoled_t)
+ 
+ xen_stream_connect_xenstore(xenconsoled_t)
++xen_manage_log(xenconsoled_t)
+ 
+ optional_policy(`
+ 	ptchown_domtrans(xenconsoled_t)
+@@ -416,7 +517,9 @@ optional_policy(`
+ #
+ 
+ allow xenstored_t self:capability { dac_override ipc_lock sys_resource };
+-allow xenstored_t self:unix_stream_socket { accept listen };
++allow xenstored_t self:unix_stream_socket { accept listen create_stream_socket_perms };
++allow xenstored_t self:unix_dgram_socket create_socket_perms;
++allow xenstored_t self:process { setrlimit signal };
+ 
+ manage_files_pattern(xenstored_t, xenstored_tmp_t, xenstored_tmp_t)
+ manage_dirs_pattern(xenstored_t, xenstored_tmp_t, xenstored_tmp_t)
+@@ -430,6 +533,7 @@ files_pid_filetrans(xenstored_t, xenstor
+ manage_dirs_pattern(xenstored_t, xenstored_var_log_t, xenstored_var_log_t)
+ append_files_pattern(xenstored_t, xenstored_var_log_t, xenstored_var_log_t)
+ create_files_pattern(xenstored_t, xenstored_var_log_t, xenstored_var_log_t)
++manage_files_pattern(xenstored_t, xenstored_var_log_t, xenstored_var_log_t)
+ setattr_files_pattern(xenstored_t, xenstored_var_log_t, xenstored_var_log_t)
+ manage_sock_files_pattern(xenstored_t, xenstored_var_log_t, xenstored_var_log_t)
+ logging_log_filetrans(xenstored_t, xenstored_var_log_t, { sock_file file dir })
+@@ -447,6 +551,11 @@ kernel_read_xen_state(xenstored_t)
+ dev_filetrans_xen(xenstored_t)
+ dev_rw_xen(xenstored_t)
+ dev_read_sysfs(xenstored_t)
++dev_create_generic_dirs(xenstored_t)
++dev_manage_xen(xenstored_t)
++corecmd_search_bin(xenstored_t)
++kernel_read_fs_sysctls(xenstored_t)
++virt_search_dirs(xenstored_t)
+ 
+ files_read_etc_files(xenstored_t)
+ files_read_usr_files(xenstored_t)
+@@ -455,6 +564,7 @@ fs_search_xenfs(xenstored_t)
+ fs_manage_xenfs_files(xenstored_t)
+ 
+ term_use_generic_ptys(xenstored_t)
++term_use_console(xenconsoled_t)
+ 
+ init_use_fds(xenstored_t)
+ init_use_script_ptys(xenstored_t)
+@@ -465,6 +575,8 @@ miscfiles_read_localization(xenstored_t)
+ 
+ xen_append_log(xenstored_t)
+ 
++files_create_core_dump(xenstored_t)
++
+ ########################################
+ #
+ # xm local policy
+@@ -473,8 +585,8 @@ xen_append_log(xenstored_t)
+ allow xm_t self:capability { setpcap dac_override ipc_lock sys_nice sys_tty_config };
+ allow xm_t self:process { getcap getsched setsched setcap signal };
+ allow xm_t self:fifo_file rw_fifo_file_perms;
+-allow xm_t self:unix_stream_socket { accept connectto listen };
+-allow xm_t self:tcp_socket { accept listen };
++allow xm_t self:unix_stream_socket {  create_stream_socket_perms accept connectto listen };
++allow xm_t self:tcp_socket {create_stream_socket_perms accept listen };
+ 
+ manage_files_pattern(xm_t, xend_var_lib_t, xend_var_lib_t)
+ manage_fifo_files_pattern(xm_t, xend_var_lib_t, xend_var_lib_t)
+@@ -544,6 +656,10 @@ miscfiles_read_localization(xm_t)
+ 
+ sysnet_dns_name_resolve(xm_t)
+ 
++xen_append_log(xm_t)
++xen_stream_connect(xm_t)
++xen_stream_connect_xenstore(xm_t)
++
+ tunable_policy(`xen_use_fusefs',`
+ 	fs_manage_fusefs_dirs(xm_t)
+ 	fs_manage_fusefs_files(xm_t)
+@@ -601,4 +717,23 @@ optional_policy(`
+ 
+ 	fs_manage_xenfs_dirs(xm_ssh_t)
+ 	fs_manage_xenfs_files(xm_ssh_t)
++
++        #Should have a boolean wrapping these
++        fs_list_auto_mountpoints(xend_t)
++        files_search_mnt(xend_t)
++        fs_getattr_all_fs(xend_t)
++        fs_read_dos_files(xend_t)
++        fs_manage_xenfs_dirs(xend_t)
++        fs_manage_xenfs_files(xend_t)
++
++        tunable_policy(`xen_use_nfs',`
++                fs_manage_nfs_files(xend_t)
++                fs_read_nfs_symlinks(xend_t)
++        ')
++
++        optional_policy(`
++                unconfined_domain(xend_t)
++        ')
++
++
+ ')

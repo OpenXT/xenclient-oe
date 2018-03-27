@@ -1,0 +1,86 @@
+Index: NetworkManager-0.9.8.10/src/settings/plugins/keyfile/utils.c
+===================================================================
+--- NetworkManager-0.9.8.10.orig/src/settings/plugins/keyfile/utils.c
++++ NetworkManager-0.9.8.10/src/settings/plugins/keyfile/utils.c
+@@ -21,6 +21,8 @@
+ #include <glib.h>
+ #include <stdlib.h>
+ #include <string.h>
++#include <errno.h>
++#include <sys/wait.h>
+ #include "utils.h"
+ 
+ 
+@@ -104,3 +106,24 @@ nm_keyfile_plugin_utils_should_ignore_fi
+ 	return ignore;
+ }
+ 
++void
++xc_connections_update (char *path)
++{
++	char *argv[6] = { "/usr/bin/nm_sync.sh", "-n", "nm-connections", "-w", 0, 0 };
++	int err, stat_loc;
++
++	err = fork();
++	if (err == -1) {
++		g_warning("%s.%d: cannot fork to nm_sync.sh: %d", __FILE__, __LINE__, errno);
++
++	} else if (err) {
++		while ((waitpid(err, &stat_loc, 0) == -1) && (errno == EINTR))
++			;
++		err = WEXITSTATUS(stat_loc);
++		if (err)
++			g_warning("%s.%d: nm_sync.sh failed with code: %d", __FILE__, __LINE__, err);
++	} else {
++		argv[4] = path;
++		_exit(execvp(argv[0], argv));
++	}
++}
+Index: NetworkManager-0.9.8.10/src/settings/plugins/keyfile/utils.h
+===================================================================
+--- NetworkManager-0.9.8.10.orig/src/settings/plugins/keyfile/utils.h
++++ NetworkManager-0.9.8.10/src/settings/plugins/keyfile/utils.h
+@@ -25,6 +25,7 @@
+ #include "common.h"
+ 
+ gboolean nm_keyfile_plugin_utils_should_ignore_file (const char *filename);
++void	xc_connections_update (char *path);
+ 
+ #endif  /* _UTILS_H_ */
+ 
+Index: NetworkManager-0.9.8.10/src/nm-manager.c
+===================================================================
+--- NetworkManager-0.9.8.10.orig/src/nm-manager.c
++++ NetworkManager-0.9.8.10/src/nm-manager.c
+@@ -1537,6 +1537,7 @@ write_value_to_state_file (const char *f
+ 	data = g_key_file_to_data (key_file, &len, NULL);
+ 	if (data) {
+ 		ret = g_file_set_contents (filename, data, len, error);
++		nm_log_dbg (LOGD_SETTINGS, "(%s): update state file", filename);
+ 		g_free (data);
+ 	}
+ 	g_key_file_free (key_file);
+Index: NetworkManager-0.9.8.10/src/settings/plugins/keyfile/nm-keyfile-connection.c
+===================================================================
+--- NetworkManager-0.9.8.10.orig/src/settings/plugins/keyfile/nm-keyfile-connection.c
++++ NetworkManager-0.9.8.10/src/settings/plugins/keyfile/nm-keyfile-connection.c
+@@ -150,6 +150,7 @@ do_delete (NMSettingsConnection *connect
+ 	NM_SETTINGS_CONNECTION_CLASS (nm_keyfile_connection_parent_class)->delete (connection,
+ 	                                                                           callback,
+ 	                                                                           user_data);
++	xc_connections_update (priv->path);
+ }
+ 
+ /* GObject */
+Index: NetworkManager-0.9.8.10/src/settings/plugins/keyfile/writer.c
+===================================================================
+--- NetworkManager-0.9.8.10.orig/src/settings/plugins/keyfile/writer.c
++++ NetworkManager-0.9.8.10/src/settings/plugins/keyfile/writer.c
+@@ -1084,6 +1084,7 @@ _internal_write_connection (NMConnection
+ 			success = TRUE;
+ 		}
+ 	}
++	xc_connections_update (filename);
+ 	g_free (path);
+ 
+ out:

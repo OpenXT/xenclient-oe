@@ -1,0 +1,66 @@
+################################################################################
+SHORT DESCRIPTION: 
+################################################################################
+Halt when no bootable device is found.
+
+################################################################################
+LONG DESCRIPTION: 
+################################################################################
+SeaBIOS, by default, will reboot the system when no bootable device is found.
+We prefered to halt instead, avoiding VM rebooting continuously, triggering
+graphic and input switches as they do.
+
+################################################################################
+CHANGELOG 
+################################################################################
+Ported to SeaBIOS 1.7.5: Eric Chanudet, chanudete@ainfosec.com, 01/03/2015
+
+################################################################################
+REMOVAL 
+################################################################################
+This patch can be removed safely if the feature is not wanted anymore.
+
+################################################################################
+UPSTREAM PLAN 
+################################################################################
+This is an OpenXT work-around. There is no plan to upstream this patch.
+
+################################################################################
+INTERNAL DEPENDENCIES 
+################################################################################
+None.
+
+################################################################################
+PATCHES
+################################################################################
+Index: seabios-1.9.1/src/boot.c
+===================================================================
+--- seabios-1.9.1.orig/src/boot.c
++++ seabios-1.9.1/src/boot.c
+@@ -691,17 +691,21 @@ boot_fail(void)
+     if (BootRetryTime == (u32)-1)
+         printf("No bootable device.\n");
+     else
+-        printf("No bootable device.  Retrying in %d seconds.\n"
++        printf("No bootable device.  Halt in %d seconds.\n"
+                , BootRetryTime/1000);
+-    // Wait for 'BootRetryTime' milliseconds and then reboot.
++    // Wait for 'BootRetryTime' milliseconds and then halt.
+     u32 end = irqtimer_calc(BootRetryTime);
+     for (;;) {
+-        if (BootRetryTime != (u32)-1 && irqtimer_check(end))
++        if (irqtimer_check(end))
+             break;
+         yield_toirq();
+     }
+-    printf("Rebooting.\n");
+-    reset();
++    /* Halt cpu */
++    printf("Halt.\n");
++    irq_disable();
++    for (;;) {
++        hlt();
++    }
+ }
+ 
+ // Determine next boot method and attempt a boot using it.

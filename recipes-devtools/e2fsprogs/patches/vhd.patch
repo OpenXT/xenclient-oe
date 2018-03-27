@@ -1,0 +1,797 @@
+Index: git/e2fsck/Makefile.in
+===================================================================
+--- git.orig/e2fsck/Makefile.in
++++ git/e2fsck/Makefile.in
+@@ -16,20 +16,21 @@ MANPAGES=	e2fsck.8
+ FMANPAGES=	e2fsck.conf.5
+ 
+ LIBS= $(LIBSUPPORT) $(LIBEXT2FS) $(LIBCOM_ERR) $(LIBBLKID) $(LIBUUID) \
+-	$(LIBINTL) $(LIBE2P) $(LIBMAGIC) $(SYSLIBS)
++	$(LIBINTL) $(LIBE2P) $(LIBMAGIC) $(SYSLIBS) @BVHD_LIBS@
+ DEPLIBS= $(DEPLIBSUPPORT) $(LIBEXT2FS) $(DEPLIBCOM_ERR) $(DEPLIBBLKID) \
+ 	 $(DEPLIBUUID) $(DEPLIBE2P)
+ 
+ STATIC_LIBS= $(STATIC_LIBSUPPORT) $(STATIC_LIBEXT2FS) $(STATIC_LIBCOM_ERR) \
+ 	     $(STATIC_LIBBLKID) $(STATIC_LIBUUID) $(LIBINTL) $(STATIC_LIBE2P) \
+-	     $(LIBMAGIC) $(SYSLIBS)
++	     $(LIBMAGIC) $(SYSLIBS) @BVHD_LIBS@
+ STATIC_DEPLIBS= $(DEPSTATIC_LIBSUPPORT) $(STATIC_LIBEXT2FS) \
+ 		$(DEPSTATIC_LIBCOM_ERR) $(DEPSTATIC_LIBBLKID) \
+ 		$(DEPSTATIC_LIBUUID) $(DEPSTATIC_LIBE2P)
+ 
+ PROFILED_LIBS= $(PROFILED_LIBSUPPORT) $(PROFILED_LIBEXT2FS) \
+ 	       $(PROFILED_LIBCOM_ERR) $(PROFILED_LIBBLKID) $(PROFILED_LIBUUID) \
+-	       $(PROFILED_LIBE2P) $(LIBINTL) $(LIBMAGIC) $(SYSLIBS)
++	       $(PROFILED_LIBE2P) $(LIBINTL) $(LIBMAGIC) $(SYSLIBS) \
++	       @BVHD_LIBS@
+ PROFILED_DEPLIBS= $(DEPPROFILED_LIBSUPPORT) $(PROFILED_LIBEXT2FS) \
+ 		  $(DEPPROFILED_LIBCOM_ERR) $(DEPPROFILED_LIBBLKID) \
+ 		  $(DEPPROFILED_LIBUUID) $(DEPPROFILED_LIBE2P)
+@@ -63,7 +64,7 @@ OBJS= unix.o e2fsck.o super.o pass1.o pa
+ 	dx_dirinfo.o ehandler.o problem.o message.o quota.o recovery.o \
+ 	region.o revoke.o ea_refcount.o rehash.o \
+ 	logfile.o sigcatcher.o $(MTRACE_OBJ) readahead.o \
+-	extents.o
++	extents.o ../misc/vhdio.o
+ 
+ PROFILED_OBJS= profiled/unix.o profiled/e2fsck.o \
+ 	profiled/super.o profiled/pass1.o profiled/pass1b.o \
+@@ -103,8 +104,10 @@ SRCS= $(srcdir)/e2fsck.c \
+ 	$(srcdir)/logfile.c \
+ 	$(srcdir)/quota.c \
+ 	$(srcdir)/extents.c \
++	$(srcdir)/../misc/vhdio.c \
+ 	$(MTRACE_SRC)
+ 
++
+ all:: profiled $(PROGS) e2fsck $(MANPAGES) $(FMANPAGES)
+ 
+ @PROFILE_CMT@all:: e2fsck.profiled
+Index: git/e2fsck/unix.c
+===================================================================
+--- git.orig/e2fsck/unix.c
++++ git/e2fsck/unix.c
+@@ -55,8 +55,14 @@ extern int optind;
+ #include "problem.h"
+ #include "jfs_user.h"
+ #include "../version.h"
++#include "../misc/vhdio.h"
++
++#include <budgetvhd.h>
+ 
+ /* Command line options */
++static int use_vhd;
++__u64 vhd_size;
++
+ static int cflag;		/* check disk */
+ static int show_version_only;
+ static int verbose;
+@@ -804,7 +810,7 @@ static errcode_t PRS(int argc, char *arg
+ 
+ 	phys_mem_kb = get_memory_size() / 1024;
+ 	ctx->readahead_kb = ~0ULL;
+-	while ((c = getopt(argc, argv, "panyrcC:B:dE:fvtFVM:b:I:j:P:l:L:N:SsDkz:")) != EOF)
++	while ((c = getopt(argc, argv, "panyrcC:B:dE:fvtFVM:b:I:j:P:l:L:N:SsDkz:Z")) != EOF)
+ 		switch (c) {
+ 		case 'C':
+ 			ctx->progress = e2fsck_update_progress;
+@@ -866,6 +872,9 @@ static errcode_t PRS(int argc, char *arg
+ 				"supported on this version of e2fsck.\n"));
+ #endif
+ 			break;
++		case 'Z':
++			use_vhd++;
++			break;
+ 		case 'c':
+ 			if (cflag++)
+ 				ctx->options |= E2F_OPT_WRITECHECK;
+@@ -1405,6 +1414,12 @@ int main (int argc, char *argv[])
+ 	}
+ 	ctx->superblock = ctx->use_superblock;
+ 
++	if (use_vhd) {
++		BVHD *v = bvhd_open(ctx->filesystem_name, 1);
++		vhd_size = bvhd_size(v);
++		bvhd_close(v);
++	}
++
+ 	flags = EXT2_FLAG_SKIP_MMP;
+ restart:
+ #ifdef CONFIG_TESTIO_DEBUG
+@@ -1413,7 +1428,7 @@ restart:
+ 		test_io_backing_manager = unix_io_manager;
+ 	} else
+ #endif
+-		io_ptr = unix_io_manager;
++		io_ptr = use_vhd ? vhd_io_manager : unix_io_manager;
+ 	flags |= EXT2_FLAG_NOFREE_ON_ERROR;
+ 	profile_get_boolean(ctx->profile, "options", "old_bitmaps", 0, 0,
+ 			    &old_bitmaps);
+@@ -1557,6 +1572,13 @@ failure:
+ 	 */
+ 	fs->flags |= EXT2_FLAG_MASTER_SB_ONLY;
+ 
++	if (use_vhd) {
++		__u32 blocksize = EXT2_BLOCK_SIZE(fs->super);
++
++		ctx->flags |= E2F_FLAG_GOT_DEVSIZE;
++		ctx->num_blocks = vhd_size / blocksize;
++	}
++
+ 	if (!(ctx->flags & E2F_FLAG_GOT_DEVSIZE)) {
+ 		__u32 blocksize = EXT2_BLOCK_SIZE(fs->super);
+ 		int need_restart = 0;
+Index: git/misc/Makefile.in
+===================================================================
+--- git.orig/misc/Makefile.in
++++ git/misc/Makefile.in
+@@ -48,10 +48,11 @@ UMANPAGES+=	@FUSE_CMT@ fuse2fs.1
+ 
+ LPROGS=		@E2INITRD_PROG@
+ 
+-TUNE2FS_OBJS=	tune2fs.o util.o journal.o recovery.o revoke.o
++TUNE2FS_OBJS=	tune2fs.o util.o journal.o recovery.o revoke.o \
++			vhdio.o
+ MKLPF_OBJS=	mklost+found.o
+ MKE2FS_OBJS=	mke2fs.o util.o default_profile.o mk_hugefiles.o \
+-			create_inode.o
++			create_inode.o vhdio.o
+ CHATTR_OBJS=	chattr.o
+ LSATTR_OBJS=	lsattr.o
+ UUIDGEN_OBJS=	uuidgen.o
+@@ -171,7 +172,7 @@ tune2fs: $(TUNE2FS_OBJS) $(DEPLIBS) $(DE
+ 	$(E) "	LD $@"
+ 	$(Q) $(CC) $(ALL_LDFLAGS) -o tune2fs $(TUNE2FS_OBJS) $(LIBS) \
+ 		$(LIBBLKID) $(LIBUUID) $(LIBEXT2FS) $(LIBS_E2P) \
+-		$(LIBINTL) $(SYSLIBS) $(LIBBLKID) $(LIBMAGIC)
++		$(LIBINTL) $(SYSLIBS) $(LIBBLKID) $(LIBMAGIC) @BVHD_LIBS@
+ 
+ tune2fs.static: $(TUNE2FS_OBJS) $(STATIC_DEPLIBS) $(STATIC_LIBE2P) $(DEPSTATIC_LIBBLKID)
+ 	$(E) "	LD $@"
+@@ -266,7 +267,7 @@ mke2fs: $(MKE2FS_OBJS) $(DEPLIBS) $(LIBE
+ 	$(E) "	LD $@"
+ 	$(Q) $(CC) $(ALL_LDFLAGS) -o mke2fs $(MKE2FS_OBJS) $(LIBS) $(LIBBLKID) \
+ 		$(LIBUUID) $(LIBEXT2FS) $(LIBE2P) $(LIBINTL) \
+-		$(SYSLIBS) $(LIBMAGIC)
++		$(SYSLIBS) $(LIBMAGIC) @BVHD_LIBS@
+ 
+ mke2fs.static: $(MKE2FS_OBJS) $(STATIC_DEPLIBS) $(STATIC_LIBE2P) $(DEPSTATIC_LIBUUID) \
+ 		$(DEPSTATIC_LIBBLKID)
+Index: git/misc/mke2fs.c
+===================================================================
+--- git.orig/misc/mke2fs.c
++++ git/misc/mke2fs.c
+@@ -61,6 +61,9 @@ extern int optind;
+ #include "mke2fs.h"
+ #include "create_inode.h"
+ 
++#include <budgetvhd.h>
++#include "vhdio.h"
++
+ #define STRIDE_LENGTH 8
+ 
+ #define MAX_32_NUM ((((unsigned long long) 1) << 32) - 1)
+@@ -78,6 +81,7 @@ const char * program_name = "mke2fs";
+ static const char * device_name /* = NULL */;
+ 
+ /* Command line options */
++int	use_vhd;
+ static int	cflag;
+ int	verbose;
+ int	quiet;
+@@ -1557,7 +1561,7 @@ profile_error:
+ 	}
+ 
+ 	while ((c = getopt (argc, argv,
+-		    "b:cd:e:g:i:jl:m:no:qr:s:t:vC:DE:FG:I:J:KL:M:N:O:R:ST:U:Vz:")) != EOF) {
++		    "b:cd:e:g:i:jl:m:no:qr:s:t:vC:DE:FG:I:J:KL:M:N:O:R:ST:U:Vz:Z")) != EOF) {
+ 		switch (c) {
+ 		case 'b':
+ 			blocksize = parse_num_blocks2(optarg, -1);
+@@ -1580,6 +1584,9 @@ profile_error:
+ 		case 'c':	/* Check for bad blocks */
+ 			cflag++;
+ 			break;
++		case 'Z':
++			use_vhd++;
++			break;
+ 		case 'C':
+ 			cluster_size = parse_num_blocks2(optarg, -1);
+ 			if (cluster_size <= EXT2_MIN_CLUSTER_SIZE ||
+@@ -1891,10 +1898,17 @@ profile_error:
+ 	if (noaction && fs_blocks_count) {
+ 		dev_size = fs_blocks_count;
+ 		retval = 0;
+-	} else
+-		retval = ext2fs_get_device_size2(device_name,
++	} else {
++		if (use_vhd) {
++			BVHD *v = bvhd_open(device_name, 1);
++			dev_size = bvhd_size(v) / EXT2_BLOCK_SIZE(&fs_param);
++			bvhd_close(v);
++		} else {
++			retval = ext2fs_get_device_size2(device_name,
+ 						 EXT2_BLOCK_SIZE(&fs_param),
+ 						 &dev_size);
++		}
++	}
+ 
+ 	if (retval && (retval != EXT2_ET_UNIMPLEMENTED)) {
+ 		com_err(program_name, retval, "%s",
+@@ -2802,7 +2816,7 @@ int main (int argc, char *argv[])
+ 		test_io_backing_manager = unix_io_manager;
+ 	} else
+ #endif
+-		io_ptr = unix_io_manager;
++		io_ptr = use_vhd ? vhd_io_manager : unix_io_manager;
+ 
+ 	if (undo_file != NULL || should_do_undo(device_name)) {
+ 		retval = mke2fs_setup_tdb(device_name, &io_ptr);
+Index: git/misc/tune2fs.c
+===================================================================
+--- git.orig/misc/tune2fs.c
++++ git/misc/tune2fs.c
+@@ -64,6 +64,8 @@ extern int optind;
+ #include "util.h"
+ #include "blkid/blkid.h"
+ 
++#include "vhdio.h"
++
+ #include "../version.h"
+ #include "support/nls-enable.h"
+ 
+@@ -106,6 +108,8 @@ int journal_size, journal_flags;
+ char *journal_device;
+ static blk64_t journal_location = ~0LL;
+ 
++static int use_vhd = 0;
++
+ static struct list_head blk_move_list;
+ 
+ struct blk_move {
+@@ -1645,7 +1649,7 @@ static void parse_tune2fs_options(int ar
+ 	struct group *gr;
+ 	struct passwd *pw;
+ 	int ret;
+-	char optstring[100] = "c:e:fg:i:jlm:o:r:s:u:C:E:I:J:L:M:O:T:U:z:Q:";
++	char optstring[100] = "c:e:fg:i:jlm:o:r:s:u:C:E:I:J:L:M:O:T:U:z:Q:Z";
+ 
+ 	open_flag = 0;
+ 	printf("tune2fs %s (%s)\n", E2FSPROGS_VERSION, E2FSPROGS_DATE);
+@@ -1878,6 +1882,9 @@ static void parse_tune2fs_options(int ar
+ 		case 'z':
+ 			undo_file = optarg;
+ 			break;
++		case 'Z':
++			use_vhd++;
++			break;
+ 		default:
+ 			usage();
+ 		}
+@@ -2769,7 +2776,7 @@ int tune2fs_main(int argc, char **argv)
+ 		test_io_backing_manager = unix_io_manager;
+ 	} else
+ #endif
+-		io_ptr = unix_io_manager;
++		io_ptr = use_vhd ? vhd_io_manager : unix_io_manager;
+ 
+ retry_open:
+ 	if ((open_flag & EXT2_FLAG_RW) == 0 || f_flag)
+Index: git/misc/vhdio.c
+===================================================================
+--- /dev/null
++++ git/misc/vhdio.c
+@@ -0,0 +1,476 @@
++/*
++ * vhdio_io.c --- io to a vhd
++ */
++
++#define _XOPEN_SOURCE 600 /* for inclusion of PATH_MAX in Solaris */
++
++#include <stdio.h>
++#include <string.h>
++#include <strings.h>
++#include <fcntl.h>
++#include <ctype.h>
++#include <time.h>
++#ifdef __linux__
++#include <sys/utsname.h>
++#endif
++#ifdef HAVE_GETOPT_H
++#include <getopt.h>
++#else
++extern char *optarg;
++extern int optind;
++#endif
++#ifdef HAVE_UNISTD_H
++#include <unistd.h>
++#endif
++#ifdef HAVE_STDLIB_H
++#include <stdlib.h>
++#endif
++#ifdef HAVE_ERRNO_H
++#include <errno.h>
++#endif
++#ifdef HAVE_MNTENT_H
++#include <mntent.h>
++#endif
++#include <sys/ioctl.h>
++#include <sys/types.h>
++#include <libgen.h>
++#include <limits.h>
++
++
++#include "ext2fs/ext2_fs.h"
++#include "ext2fs/ext2fs.h"
++#include <budgetvhd.h>
++
++#include "vhdio.h"
++
++#define EXT2_ET_MAGIC_VHD_IO_CHANNEL 0x1928419a
++
++struct vhdio_private_data
++{
++  int magic;
++#if 0
++  int fd;
++#endif
++  int sectors_per_block;
++  BVHD *vhd;
++  struct struct_io_stats io_stats;
++};
++
++static struct struct_io_manager struct_vhd_manager;
++
++io_manager vhd_io_manager = &struct_vhd_manager;
++
++
++static errcode_t
++vhdio_get_stats (io_channel channel, io_stats * stats)
++{
++  struct vhdio_private_data *data;
++
++  EXT2_CHECK_MAGIC (channel, EXT2_ET_MAGIC_IO_CHANNEL);
++  data = (struct vhdio_private_data *) channel->private_data;
++  EXT2_CHECK_MAGIC (data, EXT2_ET_MAGIC_VHD_IO_CHANNEL);
++
++
++  if (stats)
++    *stats = &data->io_stats;
++
++
++  return 0;
++}
++
++static errcode_t
++vhdio_open (const char *name, int flags, io_channel * channel)
++{
++
++  io_channel io = NULL;
++  struct vhdio_private_data *data = NULL;
++  errcode_t retval;
++
++
++  do
++    {
++      retval = ext2fs_get_mem (sizeof (struct struct_io_channel), &io);
++      if (retval)
++        break;
++
++      memset (io, 0, sizeof (struct struct_io_channel));
++      io->magic = EXT2_ET_MAGIC_IO_CHANNEL;
++
++      retval = ext2fs_get_mem (sizeof (struct vhdio_private_data), &data);
++      if (retval)
++        break;
++
++      io->manager = vhd_io_manager;
++
++      retval = ext2fs_get_mem (strlen (name) + 1, &io->name);
++      if (retval)
++        break;
++
++      strcpy (io->name, name);
++      io->private_data = data;
++
++
++      io->block_size = 1024;
++      io->read_error = 0;
++      io->write_error = 0;
++      io->refcount = 1;
++
++      memset (data, 0, sizeof (struct vhdio_private_data));
++      data->magic = EXT2_ET_MAGIC_VHD_IO_CHANNEL;
++      data->io_stats.num_fields = 2;
++      data->sectors_per_block = io->block_size / 512;
++
++
++#if 0
++      data->fd = open ("../test/vhdfs", O_RDWR);
++#endif
++
++      data->vhd = bvhd_open (io->name, (flags & IO_FLAG_RW) ? 0 : 1);
++
++      if (!data->vhd)
++        break;
++
++
++      *channel = io;
++      return 0;
++    }
++  while (0);
++
++  if (data)
++    ext2fs_free_mem (&data);
++
++  if (io)
++    ext2fs_free_mem (&io);
++  return EXT2_ET_BAD_DEVICE_NAME;
++}
++
++static errcode_t
++vhdio_close (io_channel channel)
++{
++  struct vhdio_private_data *data;
++
++  EXT2_CHECK_MAGIC (channel, EXT2_ET_MAGIC_IO_CHANNEL);
++  data = (struct vhdio_private_data *) channel->private_data;
++  EXT2_CHECK_MAGIC (data, EXT2_ET_MAGIC_VHD_IO_CHANNEL);
++
++  if (--channel->refcount > 0)
++    return 0;
++
++  bvhd_close (data->vhd);
++
++  ext2fs_free_mem (&channel->private_data);
++  if (channel->name)
++    ext2fs_free_mem (&channel->name);
++  ext2fs_free_mem (&channel);
++
++  return 0;
++}
++
++static errcode_t
++vhdio_set_blksize (io_channel channel, int blksize)
++{
++  struct vhdio_private_data *data;
++
++  EXT2_CHECK_MAGIC (channel, EXT2_ET_MAGIC_IO_CHANNEL);
++  data = (struct vhdio_private_data *) channel->private_data;
++  EXT2_CHECK_MAGIC (data, EXT2_ET_MAGIC_VHD_IO_CHANNEL);
++
++  channel->block_size = blksize;
++  data->sectors_per_block = channel->block_size / 512;
++  return 0;
++}
++
++
++static errcode_t
++vhdio_read_blk64 (io_channel channel, unsigned long long block, int count,
++                  void *buf)
++{
++  struct vhdio_private_data *data;
++  int slop = 0;
++  uint64_t sector = block;
++
++  EXT2_CHECK_MAGIC (channel, EXT2_ET_MAGIC_IO_CHANNEL);
++  data = (struct vhdio_private_data *) channel->private_data;
++  EXT2_CHECK_MAGIC (data, EXT2_ET_MAGIC_VHD_IO_CHANNEL);
++
++#if 0
++  {
++    uint32_t size = (count < 0) ? -count : count * channel->block_size;
++    uint64_t location = (uint64_t) block * channel->block_size;
++    int actual;
++
++    data->io_stats.bytes_read += size;
++
++    if (lseek (data->fd, location, SEEK_SET) != location)
++      {
++        return EXT2_ET_LLSEEK_FAILED;
++      }
++    actual = read (data->fd, buf, size);
++
++    if (actual != size)
++      return EXT2_ET_SHORT_READ;
++
++
++    return 0;
++
++  }
++#endif
++
++
++  sector *= data->sectors_per_block;
++
++  if (count < 0)
++    {
++      count = -count;
++      slop = count & 0x1ff;
++      count >>= 9;
++    }
++  else
++    {
++      count *= data->sectors_per_block;
++    }
++
++  if (bvhd_read (data->vhd, buf, sector, count) != count)
++    {
++      printf ("Short read\n");
++      return EXT2_ET_SHORT_READ;
++    }
++
++  data->io_stats.bytes_read += count * 512;
++
++  if (slop)
++    {
++      char tmp[512];
++      uint8_t *ptr = buf;
++
++      ptr += count * 512;
++
++      if (bvhd_read (data->vhd, tmp, sector + count, 1) != 1)
++        return EXT2_ET_SHORT_READ;
++
++      memcpy (ptr, tmp, slop);
++      data->io_stats.bytes_read += slop;
++
++    }
++
++  return 0;
++}
++
++static errcode_t
++vhdio_read_blk (io_channel channel, unsigned long block, int count, void *buf)
++{
++  return vhdio_read_blk64 (channel, block, count, buf);
++}
++
++
++static errcode_t
++vhdio_write_blk64 (io_channel channel, unsigned long long block, int count,
++                   const void *buf)
++{
++  struct vhdio_private_data *data;
++  int ret;
++  int slop = 0;
++  uint64_t sector = block;
++
++  EXT2_CHECK_MAGIC (channel, EXT2_ET_MAGIC_IO_CHANNEL);
++  data = (struct vhdio_private_data *) channel->private_data;
++  EXT2_CHECK_MAGIC (data, EXT2_ET_MAGIC_VHD_IO_CHANNEL);
++
++#if 0
++  {
++    uint32_t size = (count < 0) ? -count : count * channel->block_size;
++    uint64_t location = (uint64_t) block * channel->block_size;
++    int actual;
++
++    data->io_stats.bytes_read += size;
++
++    if (lseek (data->fd, location, SEEK_SET) != location)
++      {
++        return EXT2_ET_LLSEEK_FAILED;
++      }
++    actual = write (data->fd, buf, size);
++
++    if (actual != size)
++      return EXT2_ET_SHORT_WRITE;
++
++
++    return 0;
++
++  }
++#endif
++
++  if (count < 0)
++    {
++      count = -count;
++      slop = count & 0x1ff;
++      count >>= 9;
++    }
++  else
++    {
++      count *= data->sectors_per_block;
++    }
++
++  sector *= data->sectors_per_block;
++
++  if ((ret = bvhd_write (data->vhd, buf, sector, count)) != count)
++    {
++      return EXT2_ET_SHORT_WRITE;
++    }
++
++  data->io_stats.bytes_written += count * 512;
++
++  if (slop)
++    {
++      char tmp[512];
++      const uint8_t *ptr = buf;
++
++      ptr += count * 512;
++
++      if (bvhd_read (data->vhd, tmp, sector + count, 1) != 1)
++        return EXT2_ET_SHORT_WRITE;
++
++      memcpy (tmp, ptr, slop);
++
++      if (bvhd_write (data->vhd, tmp, sector + count, 1) != 1)
++        return EXT2_ET_SHORT_WRITE;
++
++      data->io_stats.bytes_written += slop;
++    }
++
++
++  return 0;
++}
++
++
++static errcode_t
++vhdio_write_blk (io_channel channel, unsigned long block,
++                 int count, const void *buf)
++{
++  return vhdio_write_blk64 (channel, block, count, buf);
++}
++
++/* This is unnecessarily miserable */
++
++static errcode_t
++vhdio_write_byte (io_channel channel, unsigned long offset, int size,
++                  const void *buf)
++{
++  struct vhdio_private_data *data;
++  uint64_t location = (uint64_t) offset;
++  const uint8_t *ptr = buf;
++  uint64_t sector = offset >> 9;
++  uint32_t slop = offset & 0x1ff;
++
++  EXT2_CHECK_MAGIC (channel, EXT2_ET_MAGIC_IO_CHANNEL);
++  data = (struct vhdio_private_data *) channel->private_data;
++  EXT2_CHECK_MAGIC (data, EXT2_ET_MAGIC_VHD_IO_CHANNEL);
++
++#if 0
++  {
++    int actual;
++
++    data->io_stats.bytes_written += size;
++
++    if (lseek (data->fd, location, SEEK_SET) != location)
++      {
++        return EXT2_ET_LLSEEK_FAILED;
++      }
++    actual = write (data->fd, buf, size);
++
++    if (actual != size)
++      return EXT2_ET_SHORT_WRITE;
++
++    return 0;
++  }
++#endif
++
++
++  while (size)
++    {
++      uint32_t count = 512 - slop;
++      if (count > size)
++        count = size;
++
++      if (!slop && (count == 512))
++        {
++          if (bvhd_write (data->vhd, ptr, sector, 1) != 1)
++            {
++              return EXT2_ET_SHORT_WRITE;
++            }
++        }
++      else
++        {
++          char tmp[512];
++          if (bvhd_read (data->vhd, tmp, sector, 1) != 1)
++            {
++              return EXT2_ET_SHORT_WRITE;
++            }
++          memcpy (tmp + slop, ptr, count);
++          if (bvhd_write (data->vhd, tmp, sector, 1) != 1)
++            {
++              return EXT2_ET_SHORT_WRITE;
++            }
++        }
++
++      slop = 0;
++      sector++;
++      ptr += count;
++      size -= count;
++      data->io_stats.bytes_written += count;
++    }
++
++  return 0;
++}
++
++
++
++static errcode_t
++vhdio_flush (io_channel channel)
++{
++  struct vhdio_private_data *data;
++
++  EXT2_CHECK_MAGIC (channel, EXT2_ET_MAGIC_IO_CHANNEL);
++  data = (struct vhdio_private_data *) channel->private_data;
++  EXT2_CHECK_MAGIC (data, EXT2_ET_MAGIC_VHD_IO_CHANNEL);
++
++  bvhd_flush (data->vhd);
++
++  return 0;
++}
++
++
++static errcode_t
++vhdio_set_option (io_channel channel, const char *option, const char *arg)
++{
++  return EXT2_ET_INVALID_ARGUMENT;
++}
++
++#ifdef HAVE_DISCARD
++
++static errcode_t
++vhdio_discard (io_channel channel, unsigned long long block,
++               unsigned long long count)
++{
++  return EXT2_ET_UNIMPLEMENTED;
++}
++#endif
++
++
++static struct struct_io_manager struct_vhd_manager = {
++  EXT2_ET_MAGIC_IO_MANAGER,
++  "VHD I/O Manager",
++  vhdio_open,
++  vhdio_close,
++  vhdio_set_blksize,
++  vhdio_read_blk,
++  vhdio_write_blk,
++  vhdio_flush,
++  vhdio_write_byte,
++  vhdio_set_option,
++  vhdio_get_stats,
++  vhdio_read_blk64,
++  vhdio_write_blk64,
++#if HAVE_DISCARD
++  vhdio_discard,
++#endif
++};
+Index: git/misc/vhdio.h
+===================================================================
+--- /dev/null
++++ git/misc/vhdio.h
+@@ -0,0 +1,2 @@
++/* vhdio.c */
++extern io_manager vhd_io_manager;
+Index: git/MCONFIG.in
+===================================================================
+--- git.orig/MCONFIG.in
++++ git/MCONFIG.in
+@@ -77,7 +77,7 @@ CFLAGS = @CFLAGS@
+ CFLAGS_SHLIB = @CFLAGS_SHLIB@
+ CFLAGS_STLIB = @CFLAGS_STLIB@
+ CPPFLAGS = @INCLUDES@
+-ALL_CFLAGS = $(CPPFLAGS) $(CFLAGS) $(CFLAGS_WARN) @DEFS@ $(LOCAL_CFLAGS)
++ALL_CFLAGS = $(CPPFLAGS) $(CFLAGS) $(CFLAGS_WARN) @DEFS@ $(LOCAL_CFLAGS) @BVHD_CFLAGS@
+ ALL_CFLAGS_SHLIB = $(CPPFLAGS) $(CFLAGS_SHLIB) $(CFLAGS_WARN) @DEFS@ $(LOCAL_CFLAGS)
+ ALL_CFLAGS_STLIB = $(CPPFLAGS) $(CFLAGS_STLIB) $(CFLAGS_WARN) @DEFS@ $(LOCAL_CFLAGS)
+ LDFLAGS = @LDFLAGS@
+Index: git/configure.ac
+===================================================================
+--- git.orig/configure.ac
++++ git/configure.ac
+@@ -106,6 +106,12 @@ if test "$GCC" = yes; then
+ fi
+ AC_PROG_CPP
+ dnl
++dnl Check for libbudgetvhd.
++dnl
++PKG_CHECK_MODULES([BVHD], [libbudgetvhd])
++AC_SUBST(BVHD_CFLAGS)
++AC_SUBST(BVHD_LIBS)
++dnl
+ dnl Alpha computers use fast and imprecise floating point code that may
+ dnl miss exceptions by default. Force sane options if we're using GCC.
+ AC_MSG_CHECKING(for additional special compiler flags)

@@ -19,8 +19,8 @@ do_install_headers() {
         install -m 0755 -d ${D}/usr/include
 	install -m 644 fbtap.h ${D}/usr/include/fbtap.h
 }
-
 addtask install_headers after do_install before do_package do_populate_sysroot
+do_install_headers[dirs] = "${B}"
 
 inherit module-compat
 inherit xenclient

@@ -6,11 +6,11 @@ DEPENDS = " \
     hkg-mtl \
     hkg-network \
     hkg-json \
+    hkg-utf8-string \
+    openssl \
 "
 RDEPENDS_${PN} += " \
     glibc-gconv-utf-32 \
-    libcrypto \
-    hkg-utf8-string \
 "
 
 PV = "0+git${SRCPV}"

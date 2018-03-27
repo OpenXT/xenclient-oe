@@ -99,11 +99,9 @@ FULL_OPTIMIZATION = "-pipe ${DEBUG_FLAGS}"
 TARGET_CC_ARCH += "${LDFLAGS}"
 CC_FOR_OCAML="i686-oe-linux-gcc"
 
-INITSCRIPT_PACKAGES = "xen-xl xen-xenstored-ocaml"
+INITSCRIPT_PACKAGES = "xen-xl"
 INITSCRIPT_NAME_xen-xl = "xen-init-dom0"
 INITSCRIPT_PARAMS_xen-xl = "defaults 21"
-INITSCRIPT_NAME_xen-xenstored-ocaml = "xenstored"
-INITSCRIPT_PARAMS_xen-xenstored-ocaml = "defaults 05"
 
 do_configure_prepend() {
 	#remove optimizations in the config files

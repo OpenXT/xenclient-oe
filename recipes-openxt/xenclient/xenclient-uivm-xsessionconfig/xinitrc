@@ -1,175 +1,154 @@
 #!/bin/sh
-#
-# Copyright (c) 2013 Citrix Systems, Inc.
-# 
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-# 
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-# 
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-#
-
-LANG="en_US.UTF-8"
-export LANG
 
 # fix broken $UID on some system...
 if test "x$UID" = "x"; then
-	if test -x /usr/xpg4/bin/id; then
-		UID=`/usr/xpg4/bin/id -u`;
-	else
-		UID=`id -u`;
-	fi
+  if test -x /usr/xpg4/bin/id; then
+    UID=`/usr/xpg4/bin/id -u`;
+  else
+    UID=`id -u`;
+  fi
 fi
 
 # Keep keyboard layout in sync with dom0.
 keymap-sync &
 
-# $XDG_CONFIG_HOME defines the base directory relative to which user specific 
-# configuration files should be stored. If $XDG_CONFIG_HOME is either not set 
+# set $XDG_MENU_PREFIX to "xfce-" so that "xfce-applications.menu" is picked
+# over "applications.menu" in all Xfce applications.
+if test "x$XDG_MENU_PREFIX" = "x"; then
+  XDG_MENU_PREFIX="xfce-"
+  export XDG_MENU_PREFIX
+fi
+
+# set DESKTOP_SESSION so that one can detect easily if an Xfce session is running
+if test "x$DESKTOP_SESSION" = "x"; then
+  DESKTOP_SESSION="xfce"
+  export DESKTOP_SESSION
+fi
+
+# set XDG_CURRENT_DESKTOP so that Qt 5 applications can identify user set Xfce theme
+if test "x$XDG_CURRENT_DESKTOP" = "x"; then
+  XDG_CURRENT_DESKTOP="XFCE"
+  export XDG_CURRENT_DESKTOP
+fi
+
+# $XDG_CONFIG_HOME defines the base directory relative to which user specific
+# configuration files should be stored. If $XDG_CONFIG_HOME is either not set
 # or empty, a default equal to $HOME/.config should be used.
 if test "x$XDG_CONFIG_HOME" = "x" ; then
   XDG_CONFIG_HOME=$HOME/.config
 fi
 [ -d "$XDG_CONFIG_HOME" ] || mkdir "$XDG_CONFIG_HOME"
 
-# $XDG_CACHE_HOME defines the base directory relative to which user specific 
-# non-essential data files should be stored. If $XDG_CACHE_HOME is either not 
+# $XDG_CACHE_HOME defines the base directory relative to which user specific
+# non-essential data files should be stored. If $XDG_CACHE_HOME is either not
 # set or empty, a default equal to $HOME/.cache should be used.
 if test "x$XDG_CACHE_HOME" = "x" ; then
   XDG_CACHE_HOME=$HOME/.cache
 fi
 [ -d "$XDG_CACHE_HOME" ] || mkdir "$XDG_CACHE_HOME"
 
-# Launch xscreensaver (if available), but only as non-root user
-if test $UID -gt 0 -a -z "$VNCSESSION"; then 
-    if test x"`which xscreensaver 2>/dev/null`" != x""; then
-        xscreensaver -no-splash &
-    elif test x"`which gnome-screensaver 2>/dev/null`" != x""; then
-        gnome-screensaver &
-    fi
-fi 
+# set up XDG user directores.  see
+# http://freedesktop.org/wiki/Software/xdg-user-dirs
+if which xdg-user-dirs-update >/dev/null 2>&1; then
+    xdg-user-dirs-update
+fi
 
-# Use ssh-agent if installed and not already running.  Run it separately
-# so it populates the environment here, so we can clean it up later.
-sshagent=`which ssh-agent`
-kill_sshagent=0
-if test -z "$SSH_AGENT_PID" -a "$sshagent" -a "x$sshagent" != "xno"; then
-	eval `$sshagent -s`
-	kill_sshagent=1
+# Modify libglade and glade environment variables so that
+# it will find the files installed by Xfce
+GLADE_CATALOG_PATH="$GLADE_CATALOG_PATH:"
+GLADE_PIXMAP_PATH="$GLADE_PIXMAP_PATH:"
+GLADE_MODULE_PATH="$GLADE_MODULE_PATH:"
+export GLADE_CATALOG_PATH
+export GLADE_PIXMAP_PATH
+export GLADE_MODULE_PATH
+
+# For now, start with an empty list
+XRESOURCES=""
+
+# Has to go prior to merging Xft.xrdb, as its the "Defaults" file
+test -r "/etc/xdg/xfce4/Xft.xrdb" && XRESOURCES="$XRESOURCES /etc/xdg/xfce4/Xft.xrdb"
+test -r $HOME/.Xdefaults && XRESOURCES="$XRESOURCES $HOME/.Xdefaults"
+
+BASEDIR=$XDG_CONFIG_HOME/xfce4
+if test -r "$BASEDIR/Xft.xrdb"; then
+  XRESOURCES="$XRESOURCES $BASEDIR/Xft.xrdb"
+elif test -r "$XFCE4HOME/Xft.xrdb"; then
+  mkdir -p "$BASEDIR"
+  cp "$XFCE4HOME/Xft.xrdb" "$BASEDIR"/
+  XRESOURCES="$XRESOURCES $BASEDIR/Xft.xrdb"
+fi
+
+# merge in X cursor settings
+test -r "$BASEDIR/Xcursor.xrdb" && XRESOURCES="$XRESOURCES $BASEDIR/Xcursor.xrdb"
+
+# ~/.Xresources contains overrides to the above
+test -r "$HOME/.Xresources" && XRESOURCES="$XRESOURCES $HOME/.Xresources"
+
+# load all X resources (adds /dev/null to avoid an empty list that would hang the process)
+cat /dev/null $XRESOURCES | xrdb -nocpp -merge -
+
+# load local modmap
+test -r $HOME/.Xmodmap && xmodmap $HOME/.Xmodmap
+
+# xfce4-session will very likely use iceauth. Handle the read-only rootfs case
+# using the volatile tmpfs.
+# WARNING: This cannot be a link as libICE will link(2) "${ICEAUTHORITY}"-c and
+# "${ICEAUTHORITY}"-l files during IceLockAuthFile() and IceUnlockAuthFile().
+if which iceauth >/dev/null ; then
+  if grep -q '\sro[\s,]' /proc/mounts ; then
+    ICEAUTHORITY="/var/volatile/ICEauthority-$UID"
+  else
+    ICEAUTHORITY="$HOME/.ICEauthority"
+  fi
+  export ICEAUTHORITY
 fi
 
 # Use dbus-launch if installed.
 if test x"$DBUS_SESSION_BUS_ADDRESS" = x""; then
-	dbuslaunch=`which dbus-launch`
-	if test x"$dbuslaunch" != x"" -a x"$dbuslaunch" != x"no"; then
-		eval `$dbuslaunch --sh-syntax --exit-with-session`
-	fi
+  if which dbus-launch >/dev/null 2>&1; then
+    eval `dbus-launch --sh-syntax --exit-with-session`
+    # some older versions of dbus don't export the var properly
+    export DBUS_SESSION_BUS_ADDRESS
+  else
+    echo "Could not find dbus-launch; Xfce will not work properly" >&2
+    fi
 fi
 
-##################
-# IMPORTANT NOTE #
-##################
+xfwm4 &
+resized &
+xfsettingsd --no-daemon --replace &
+sleep 1 # Because proper behaviour no longer matter.
+INET_IS_V4V=1 LD_PRELOAD=/usr/lib/libv4v-1.0.so.0 surf -bdFgKnp 1.0.0.0 &
 
-# Everything below here ONLY gets executed if you are NOT using xfce4-session
-# (Xfce's session manager).  If you are using the session manager, everything
-# below is handled by it, and the code below is not executed at all.  If you're
-# not sure if you're using the session manager, type 'ps -e|grep xfce4-session'
-# in a terminal while Xfce is running.
+# Launch nm-applet unless clearly specified in the db.
+# Means bounce DBus calls over V4V to xenmgr in Dom0.
+DISABLE_NM=$( \
+  DBUS_SYSTEM_BUS_ADDRESS=tcp:host=1.0.0.0,port=5555 \
+  LD_PRELOAD=/usr/lib/libv4v-1.0.so.0 \
+  INET_IS_V4V=1 \
+    dbus-send \
+      --system \
+      --dest=com.citrix.xenclient.xenmgr \
+      --print-reply \
+      / org.freedesktop.DBus.Properties.Get \
+        string:"com.citrix.xenclient.xenmgr.config" \
+        string:"guest-only-networking" \
+    | awk 'END{print $3}')
 
-##################
-
-
-# this is only necessary when running w/o xfce4-session
-xsetroot -solid white -cursor_name watch
-
-# or use old-fashioned startup script otherwise
-
-sh -c "while true; do xfwm4 ; sleep 5; done" &
-
-# start up stuff in $XDG_CONFIG_HOME/autostart/, as that looks to be
-# the new standard.  if that directory doesn't exist, try the old
-# ~/Desktop/Autostart method.  we're not going to do any migration here.
-if test -d "$XDG_CONFIG_HOME/autostart"; then
-  for i in ${XDG_CONFIG_HOME}/autostart/*.desktop; do
-    grep -q -E "^Hidden=true" "$i" && continue
-    if grep -q -E "^OnlyShowIn=" "$i"; then
-      # need to test twice, as lack of the line entirely means we still run it
-      grep -E "^OnlyShowIn=" "$i" | grep -q 'XFCE;' || continue
-    fi
-    grep -E "^NotShowIn=" "$i" | grep -q 'XFCE;' && continue
-    
-    # check for TryExec
-    trycmd=`grep -E "^TryExec=" "$i" | cut -d'=' -f2`
-    if test "$trycmd"; then
-      type "$trycmd" >/dev/null 2>&1 || continue
-    fi
-    
-    cmd=`grep -E "^Exec=" "$i" | cut -d'=' -f2`
-    if test "$cmd" && type "$cmd" >/dev/null 2>&1; then
-      $cmd &
-    fi
-  done
-elif test -d "$HOME/Desktop/Autostart"; then
-  for i in `ls -1 -L ${HOME}/Desktop/Autostart/ 2>/dev/null`; do
-    if test -x $HOME/Desktop/Autostart/$i; then
-      $HOME/Desktop/Autostart/$i &
-    fi
-  done
-fi
-
-/usr/bin/resized 2> /dev/null &
-
-xblanker &
-xfce4-settings-helper
-xfsettingsd
-sleep 1
-
-# create suspend image, future boots would start right here
-[ -x /usr/bin/suspend_img ] && /usr/bin/suspend_img
-
-sh -c "while true; do INET_IS_V4V=1 LD_PRELOAD=/usr/lib/libv4v-1.0.so.0 surf -bdFgKnp 1.0.0.0; sleep 5; done" &
-sleep 3
-
-# Launch nm-applet unless clearly specified in the db
-
-# Call an rpc in xenmgr in dom0 to know if we want networkmanager
-disable_nm=`DBUS_SYSTEM_BUS_ADDRESS=tcp:host=1.0.0.0,port=5555 LD_PRELOAD=/usr/lib/libv4v-1.0.so.0 INET_IS_V4V=1 \
-            dbus-send --system --dest=com.citrix.xenclient.xenmgr --print-reply / org.freedesktop.DBus.Properties.Get string:"com.citrix.xenclient.xenmgr.config" string:"guest-only-networking" \
-            | tail -1 | awk '{print $3}'`
-
-if [ "x$disable_nm" = "xtrue" ]; then
-  # Manually suspend the script for X to stay alive, as we're not going to have a panel...
+if test x"$DISABLE_NM" = x"true" ; then
+  # Suspend xinit to keep X alive... Beauty is dead.
   read
 else
-    language-sync &
-   nm-backend-sync &
-
-   nm-applet-launcher &
-
-   sh -c 'while true; do
-              sleep 10 &
-              uim-toolbar-gtk-wrapper
-              wait
-          done' &
-   wait
+  language-sync &
+  nm-backend-sync &
+  nm-applet-launcher &
+  uim-toolbar-gtk-wrapper &
 fi
 
-if test $kill_sshagent -eq 1; then
-	eval `$sshagent -k`
-fi
-
-xsetroot -bg white -fg red  -solid black -cursor_name watch
-
-
+# Wait until something dies and terminate other subprocess.
+# This will leverage /etc/inittab:
+#   x:5:respawn:/bin/su - root -c /usr/bin/startxfce4
+# and restart the UI if any of the previous
+# sub-process fails.
+wait -n
+pkill -P $$

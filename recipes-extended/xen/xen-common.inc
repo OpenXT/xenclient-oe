@@ -15,7 +15,6 @@ require ${@bb.utils.contains('DISTRO_FEATURES', 'blktap2', 'xen-blktap2.inc', 'x
 SRC_URI_append = " \
     file://defconfig \
     file://config.patch \
-    file://do-not-overwrite-cc-and-ld.patch \
     file://disable-xen-root-check.patch \
     file://hvm-pm-hibernate-s-state.patch;patch=1 \
     file://prune-vga-acpi-dev.patch;patch=1 \
@@ -127,14 +126,3 @@ DEPENDS_remove = "iproute2"
 deltask stubs
 deltask deploy
 #--
-
-# meta-virtualization updates for Xen 4.9 -- retire when these land in m-v
-PACKAGES_append = " \
-    ${PN}-libxendevicemodel \
-    ${PN}-libxendevicemodel-dev \
-"
-FILES_${PN}-libxendevicemodel = "${libdir}/libxendevicemodel.so.*"
-FILES_${PN}-libxendevicemodel-dev = "${libdir}/libxendevicemodel.so"
-RDEPENDS_${PN}-libxenctrl_append = " \
-    ${PN}-libxendevicemodel \
-"

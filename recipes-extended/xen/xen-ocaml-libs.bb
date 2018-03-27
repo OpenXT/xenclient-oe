@@ -13,9 +13,8 @@ FILES_xen-xenstored-ocaml = " \
     ${sysconfdir}/init.d/xenstored.xen-xenstored-ocaml \
     ${sysconfdir}/xen/oxenstored.conf \
     "
-
-PROVIDES =+ "xen-xenstored xen-xenstored-ocaml"
-RPROVIDES_xen-xenstored-ocaml = "xen-xenstored xen-xenstored-ocaml"
+PROVIDES =+ "xen-xenstored-ocaml"
+RPROVIDES_${PN}-xenstored-ocaml = "xen-xenstored"
 
 DEPENDS += " \
     util-linux \
@@ -50,11 +49,6 @@ PACKAGES = " \
 PACKAGES_remove = " \
     ${@bb.utils.contains('DISTRO_FEATURES', 'blktap2', '', '${PN}-blktap ${PN}-libblktap ${PN}-libblktapctl ${PN}-libblktapctl-dev ${PN}-libblktap-dev', d)} \
     "
-
-FILES_${PN}-dev = "${ocamllibdir}/*/*.so"
-FILES_${PN}-dbg += "${ocamllibdir}/*/.debug/*"
-FILES_${PN}-staticdev = "${ocamllibdir}/*/*.a"
-FILES_${PN} = "${ocamllibdir}/*"
 
 CFLAGS_prepend += " -I${STAGING_INCDIR}/blktap "
 
@@ -91,10 +85,17 @@ do_compile() {
 		       LDLIBS_libxentoollog='-lxentoollog' \
 		       LDLIBS_libxenevtchn='-lxenevtchn' \
 		       -C tools subdir-all-libxl
+
+    # ocamlopt/ocamlc -cc argument will treat everything following it as the
+    # executable name, so wrap everything.
+    cat - > ocaml-cc.sh <<EOF
+#! /bin/sh
+exec ${CC} "\$@"
+EOF
+    chmod +x ocaml-cc.sh
+
     oe_runmake V=1 \
-       CC="${CC_FOR_OCAML}" \
-       EXTRA_CFLAGS_XEN_TOOLS="${TARGET_CC_ARCH} --sysroot=${STAGING_DIR_TARGET}" \
-       LDFLAGS="${TARGET_CC_ARCH} --sysroot=${STAGING_DIR_TARGET}" \
+       CC="${B}/ocaml-cc.sh" \
        LDLIBS_libxenctrl='-lxenctrl' \
        LDLIBS_libxenstore='-lxenstore' \
        LDLIBS_libblktapctl='-lblktapctl' \

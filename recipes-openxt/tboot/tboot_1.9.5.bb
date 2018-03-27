@@ -19,6 +19,7 @@ SRC_URI = "http://downloads.sourceforge.net/tboot/tboot-${PV}.tar.gz \
            file://tpm2-extpol-sha256.patch \
            file://tpm2-orderly-shutdown.patch \
            file://tboot-export-of-tpm-event-log.patch \
+           file://tboot-64.patch \
            "
 
 SRC_URI[md5sum] = "7946ed861628fab1e6d5e35fbcc5d614"

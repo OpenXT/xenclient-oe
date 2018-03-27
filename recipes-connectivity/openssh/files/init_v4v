@@ -1,135 +1,97 @@
 #! /bin/sh
-#
-# Copyright (c) 2014 Citrix Systems, Inc.
-# 
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-# 
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-# 
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-#
-
 set -e
+
+PIDFILE=/var/run/sshd-v4v.pid
+
+# source function library
+. /etc/init.d/functions
 
 # /etc/init.d/ssh: start and stop the OpenBSD "secure shell" daemon
 
 test -x /usr/sbin/sshd || exit 0
 ( /usr/sbin/sshd -\? 2>&1 | grep -q OpenSSH ) 2>/dev/null || exit 0
 
-if test -f /etc/default/ssh; then
-    . /etc/default/ssh
+# /etc/default/ssh may set SYSCONFDIR and SSHD_OPTS
+if test -f /etc/default/ssh-v4v; then
+    . /etc/default/ssh-v4v
 fi
 
-make_dir() {
-	# create keys if necessary
-    	if [ ! -d /etc/ssh ]; then
-	    	echo "  creating /etc/ssh..."
-		mkdir -p /etc/ssh
-		[ -x /sbin/restorecon ] && /sbin/restorecon /etc/ssh
-		chmod 0700 /etc/ssh
-	fi
-}
+[ -z "$SYSCONFDIR" ] && SYSCONFDIR=/etc/ssh
+mkdir -p $SYSCONFDIR
 
-is_enabled() {
-    # forget it if we're trying to start, and enable-v4v-ssh is not set in xec
-    if [ -e /config/etc/ssh/disable-v4v ]; then 
-        echo "OpenBSD Secure Shell server not in use (internal SSH access disabled)"
-        return 1
+check_for_no_start() {
+    # forget it if we're trying to start, and /etc/ssh/v4v_not_to_be_run exists
+    if [ -e $SYSCONFDIR/v4v_not_to_be_run ]; then
+	echo "OpenBSD Secure Shell server not in use ($SYSCONFDIR/v4v_not_to_be_run)"
+	exit 0
     fi
-
-    return 0
 }
-
 
 check_privsep_dir() {
     # Create the PrivSep empty dir if necessary
     if [ ! -d /var/run/sshd ]; then
-	mkdir -p /var/run/sshd
-	[ -x /sbin/restorecon ] && /sbin/restorecon /var/run/sshd
+	mkdir /var/run/sshd
 	chmod 0755 /var/run/sshd
     fi
 }
 
 check_config() {
-	/usr/sbin/sshd -t -f /etc/ssh/sshd_config_v4v || exit 1
-}
-
-check_keys() {
-	if [ ! -f /etc/ssh/ssh_host_rsa_key_v4v ]; then
-		echo "  generating ssh RSA key..."
-		ssh-keygen -q -f /etc/ssh/ssh_host_rsa_key_v4v -N '' -t rsa
-	fi
-	if [ ! -f /etc/ssh/ssh_host_dsa_key_v4v ]; then
-		echo "  generating ssh DSA key..."
-		ssh-keygen -q -f /etc/ssh/ssh_host_dsa_key_v4v -N '' -t dsa
-	fi
+	/usr/sbin/sshd -t $SSHD_OPTS || exit 1
 }
 
 export PATH="${PATH:+$PATH:}/usr/sbin:/sbin"
 
 case "$1" in
   start)
-	make_dir
-	is_enabled || exit 0
-	echo "Starting OpenBSD Secure Shell server (v4v socket): sshd"
-	check_keys
+	check_for_no_start
+	echo "Starting OpenBSD Secure Shell server: sshd"
+	@LIBEXECDIR@/sshd_check_keys_v4v
 	check_privsep_dir
 	INET_IS_V4V=1 \
-	  LD_PRELOAD=/usr/lib/libv4v-1.0.so.0 \
-	  start-stop-daemon -S -p /var/run/sshd-v4v.pid -x /usr/sbin/sshd -- -f /etc/ssh/sshd_config_v4v -o PidFile=/var/run/sshd-v4v.pid -o Port=2222
-	[ -x /sbin/restorecon ] && restorecon -R /var/run
+	LD_PRELOAD=/usr/lib/libv4v-1.0.so.0 \
+		start-stop-daemon -S -p $PIDFILE -x /usr/sbin/sshd -- $SSHD_OPTS
         echo "done."
 	;;
   stop)
-        echo -n "Stopping OpenBSD Secure Shell server (v4v socket): sshd"
-	start-stop-daemon -K -x /usr/sbin/sshd -p /var/run/sshd-v4v.pid || true
+        echo -n "Stopping OpenBSD Secure Shell server: sshd"
+	start-stop-daemon -K -p $PIDFILE -x /usr/sbin/sshd
         echo "."
 	;;
 
   reload|force-reload)
-	make_dir
-	is_enabled || exit 0
-	check_keys
+	check_for_no_start
+	@LIBEXECDIR@/sshd_check_keys_v4v
 	check_config
         echo -n "Reloading OpenBSD Secure Shell server's configuration"
-	start-stop-daemon -K -s 1 -x /usr/sbin/sshd -p /var/run/sshd-v4v.pid
+	INET_IS_V4V=1 \
+	LD_PRELOAD=/usr/lib/libv4v-1.0.so.0 \
+		start-stop-daemon -K -p $PIDFILE -s 1 -x /usr/sbin/sshd
 	echo "."
 	;;
 
   restart)
-	make_dir
-  	check_keys
+	@LIBEXECDIR@/sshd_check_keys_v4v
 	check_config
         echo -n "Restarting OpenBSD Secure Shell server: sshd"
-	start-stop-daemon -K -x /usr/sbin/sshd -p /var/run/sshd-v4v.pid || true
-	sleep 1
-	is_enabled || exit 0
 	INET_IS_V4V=1 \
-	  LD_PRELOAD=/usr/lib/libv4v-1.0.so.0 \
-	  start-stop-daemon -S -p /var/run/sshd-v4v.pid -x /usr/sbin/sshd -- -f /etc/ssh/sshd_config_v4v -o PidFile=/var/run/sshd-v4v.pid -o Port=2222
+	LD_PRELOAD=/usr/lib/libv4v-1.0.so.0 \
+		start-stop-daemon -K -p $PIDFILE --oknodo -x /usr/sbin/sshd
+	check_for_no_start
 	check_privsep_dir
+	sleep 2
+	INET_IS_V4V=1 \
+	LD_PRELOAD=/usr/lib/libv4v-1.0.so.0 \
+		start-stop-daemon -S -p $PIDFILE -x /usr/sbin/sshd -- $SSHD_OPTS
 	echo "."
 	;;
 
-  enabled)
-	is_enabled || exit 1
-	exit 0
-	;;
+  status)
+	status /usr/sbin/sshd
+	exit $?
+  ;;
 
   *)
-	echo "Usage: /etc/init.d/ssh_v4v {start|stop|reload|force-reload|restart}"
+	echo "Usage: /etc/init.d/ssh-v4v {start|stop|status|reload|force-reload|restart}"
 	exit 1
 esac
 

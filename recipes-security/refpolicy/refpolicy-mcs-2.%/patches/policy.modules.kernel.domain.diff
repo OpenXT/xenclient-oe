@@ -1,0 +1,73 @@
+Index: refpolicy/policy/modules/kernel/domain.if
+===================================================================
+--- refpolicy.orig/policy/modules/kernel/domain.if
++++ refpolicy/policy/modules/kernel/domain.if
+@@ -1530,3 +1530,22 @@ interface(`domain_unconfined',`
+ 	typeattribute $1 set_curr_context;
+ 	typeattribute $1 process_uncond_exempt;
+ ')
++
++########################################
++## <summary>
++##      Unconfined readonly access to domains.
++## </summary>
++## <param name="domain">
++##      <summary>
++##      Domain allowed access.
++##      </summary>
++## </param>
++#
++interface(`domain_unconfined_readonly',`
++        gen_require(`
++                attribute unconfined_domain_readonly_type;
++        ')
++
++        typeattribute $1 unconfined_domain_readonly_type;
++
++')
+Index: refpolicy/policy/modules/kernel/domain.te
+===================================================================
+--- refpolicy.orig/policy/modules/kernel/domain.te
++++ refpolicy/policy/modules/kernel/domain.te
+@@ -22,6 +22,9 @@ neverallow domain ~domain:process { tran
+ # Domains that are unconfined
+ attribute unconfined_domain_type;
+ 
++# Domains that are unconfined readonly
++attribute unconfined_domain_readonly_type;
++
+ # Domains that can mmap low memory.
+ attribute mmap_low_domain_type;
+ neverallow { domain -mmap_low_domain_type } self:memprotect mmap_zero;
+@@ -96,6 +99,10 @@ kernel_read_proc_symlinks(domain)
+ kernel_dontaudit_search_key(domain)
+ kernel_dontaudit_link_key(domain)
+ 
++# libselinux constructor probes to find selinuxfs mount.
++kernel_getattr_proc(domain)
++selinux_get_fs_mount(domain)
++
+ # create child processes in the domain
+ allow domain self:process { fork sigchld };
+ 
+@@ -183,3 +190,20 @@ allow unconfined_domain_type domain:key
+ 
+ # receive from all domains over labeled networking
+ domain_all_recvfrom_all_domains(unconfined_domain_type)
++
++########################################
++#
++# Unconfined readonly access to this module
++#
++
++# Use/sendto/connectto sockets created by any domain.
++allow unconfined_domain_readonly_type domain:{ socket_class_set socket key_socket } *;
++
++# Use descriptors and pipes created by any domain.
++allow unconfined_domain_readonly_type domain:fd use;
++allow unconfined_domain_readonly_type domain:fifo_file read_file_perms;
++
++# For /proc/pid
++allow unconfined_domain_readonly_type domain:dir list_dir_perms;
++allow unconfined_domain_readonly_type domain:file read_file_perms;
++allow unconfined_domain_readonly_type domain:lnk_file { read_lnk_file_perms ioctl lock };
