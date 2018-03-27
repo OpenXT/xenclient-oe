@@ -36,3 +36,8 @@ ROOTFS_POSTPROCESS_COMMAND += '${@bb.utils.contains("IMAGE_FEATURES", "read-only
 start_tty_on_hvc0() {
 	echo 'hvc0:12345:respawn:/bin/start_getty 115200 hvc0 vt102' >> ${IMAGE_ROOTFS}/etc/inittab;
 }
+
+# Remove default login shell on tty1 in inittab.
+remove_getty_on_tty() {
+    sed -i '/^#*.*getty.*tty[0-9]/d' ${IMAGE_ROOTFS}/etc/inittab ;
+}

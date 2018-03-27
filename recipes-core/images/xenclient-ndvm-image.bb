@@ -84,13 +84,13 @@ post_rootfs_shell_commands() {
     # enable ctrlaltdel reboot because PV driver uses ctrl+alt+del to interpret reboot issued via xenstore
     echo 'ca:12345:ctrlaltdel:/sbin/shutdown -t1 -a -r now' >> ${IMAGE_ROOTFS}/etc/inittab;
 
-    # NDVM doesn't have a /dev/tty1, disable the login shell on it
-    sed -i 's/[^#].*getty.*tty1$/#&/' ${IMAGE_ROOTFS}/etc/inittab ;
-
     # Forcibly remove packages in PACKAGE_REMOVE variable.
     opkg -f ${IPKGCONF_TARGET} -o ${IMAGE_ROOTFS} ${OPKG_ARGS} -force-depends remove ${PACKAGE_REMOVE};
 }
 ROOTFS_POSTPROCESS_COMMAND += "post_rootfs_shell_commands; "
+
+# Remove getty on tty consoles, service-vms do not have a need for it.
+ROOTFS_POSTPROCESS_COMMAND += "remove_getty_on_tty; "
 
 # Get a tty on hvc0 when in debug mode.
 ROOTFS_POSTPROCESS_COMMAND += '${@bb.utils.contains("IMAGE_FEATURES", "debug-tweaks", "start_tty_on_hvc0; ", "",d)}'

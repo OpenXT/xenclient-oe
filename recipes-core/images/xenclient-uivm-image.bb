@@ -125,6 +125,9 @@ post_rootfs_shell_commands() {
 }
 ROOTFS_POSTPROCESS_COMMAND += "post_rootfs_shell_commands; "
 
+# Remove getty on tty consoles, service-vms do not have a need for it.
+ROOTFS_POSTPROCESS_COMMAND += "remove_getty_on_tty; "
+
 # Get a tty on hvc0 when in debug mode.
 ROOTFS_POSTPROCESS_COMMAND += '${@bb.utils.contains("IMAGE_FEATURES", "debug-tweaks", "start_tty_on_hvc0; ", "",d)}'
 
