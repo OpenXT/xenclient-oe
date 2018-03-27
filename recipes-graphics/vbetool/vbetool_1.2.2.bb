@@ -4,7 +4,7 @@ attempt to initialize the video card from scratch."
 HOMEPAGE = "https://cgit.freedesktop.org/~airlied/vbetool"
 LICENSE = "GPLv2"
 LIC_FILES_CHKSUM = "file://COPYING;md5=48a5edcd17b7ae645f03eef18cd5e540"
-DEPENDS = "libx86 libpciaccess zlib"
+DEPENDS = "libx86-1 libpciaccess zlib"
 
 SRC_URI = " \
     https://cgit.freedesktop.org/~airlied/${BPN}/snapshot/${BPN}-${PV}.tar.gz \
