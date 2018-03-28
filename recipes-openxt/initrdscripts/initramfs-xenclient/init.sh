@@ -28,7 +28,14 @@ DEFINIT=/sbin/init
 FIRSTBOOT_FLAG=/boot/system/firstboot
 
 is_tpm_2_0 () {
-    [ -e /sys/class/tpm/tpm0/device/description ] && cat /sys/class/tpm/tpm0/device/description | grep "2.0" &>/dev/null
+   files=$(find /sys/ | grep "description$")
+   for file in $files; do
+      tpm=$(cat ${file})
+      if [ "${tpm}" == "TPM 2.0 Device" ]; then
+         return 0
+      fi
+   done
+   return 1
 }
 
 #listpcrs sample output:
