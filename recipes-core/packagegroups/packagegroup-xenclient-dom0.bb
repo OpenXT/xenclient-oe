@@ -43,7 +43,7 @@ RDEPENDS_${PN} = " \
     qemu-dm \
     seabios \
     xcpmd \
-    vbetool-xc \
+    vbetool \
     xenclient-toolstack \
     xenclient-input-daemon \
     xenclient-dom0-tweaks \

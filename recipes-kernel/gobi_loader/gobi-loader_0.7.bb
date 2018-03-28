@@ -22,7 +22,6 @@ do_configure() {
 do_compile() {
 	${CC} -c ${CFLAGS} ${LDFLAGS} gobi_loader.c
 	${CC} ${LDFLAGS} -o gobi_loader gobi_loader.o
-	${STRIP} gobi_loader
 }
 
 do_install () {
@@ -32,5 +31,7 @@ do_install () {
         install -m 644 -c -D ${S}/60-gobi.rules ${D}/etc/udev/rules.d/60-gobi.rules
 }
 
-FILES_${PN} += "/lib/udev/*" 
+FILES_${PN} += " \
+    /lib/udev/* \
+"
 

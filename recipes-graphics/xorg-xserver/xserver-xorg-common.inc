@@ -97,12 +97,7 @@ FILES_${PN}-module-libxf4bpp = "${libdir}/xorg/modules/libxf4bpp.so"
 
 EXTRA_OECONF += "--with-fop=no \
                  --disable-static \
-                 --disable-acfb \
-                 --disable-ccfb \
-                 --disable-mcfb \
                  --disable-xinerama \
-                 --disable-xf86misc \
-                 --disable-xorgcfg \
                  --disable-record \
                  --disable-dmx \
                  --disable-xnest \
@@ -111,7 +106,6 @@ EXTRA_OECONF += "--with-fop=no \
                  --without-dtrace \
                  --sysconfdir=/etc/X11 \
                  --localstatedir=/var \
-                 --with-fontdir=${datadir}/fonts/X11 \
                  --with-xkb-output=/var/lib/xkb \
                  ac_cv_file__usr_share_sgml_X11_defs_ent=no \
 "
