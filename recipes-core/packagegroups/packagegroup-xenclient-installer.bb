@@ -36,6 +36,7 @@ RDEPENDS_${PN} = " \
     openssl \
     openxt-keymanagement \
     openxt-measuredlaunch \
+    parted \
     pciutils-ids \
     read-edid \
     refpolicy-mcs \
