@@ -84,6 +84,7 @@ SRC_URI_append = " \
     file://libxl-vwif-support.patch \
     file://libxl-atapi-pt.patch \
     file://libxl-iso-hotswap.patch \
+    file://libxl-avoid-creating-unusable-cdrom-vbd-xs-nodes.patch \
     file://libxl-disable-json-updates.patch \
     file://libxl-allow-non-qdisk-cdrom.patch \
     file://libxl-fix-flr.patch \

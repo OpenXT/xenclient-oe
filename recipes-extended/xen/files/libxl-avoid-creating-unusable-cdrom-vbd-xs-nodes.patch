@@ -1,0 +1,86 @@
+################################################################################
+SHORT DESCRIPTION:
+################################################################################
+Don't create useless CDROM VBD nodes in xenstore
+
+################################################################################
+LONG DESCRIPTION:
+################################################################################
+blkfront doesn't support CDROMs in HVMs. However, XL creates guest CDROM VBD
+nodes for the virtual CD, when it only makes sense for their stubdoms. XL also
+creates stubdom and guest nodes for atapi-pt drives, which doesn't make sense.
+To summarize, the creation of guest virtual cd nodes and all atapi-pt nodes
+should be removed from XL.
+
+################################################################################
+CHANGELOG
+################################################################################
+Authors:
+Mahantesh Salimath<salimathm@ainfosec.com>
+
+################################################################################
+Index: xen-4.9.1/tools/libxl/libxl_create.c
+===================================================================
+--- xen-4.9.1.orig/tools/libxl/libxl_create.c
++++ xen-4.9.1/tools/libxl/libxl_create.c
+@@ -1265,7 +1265,7 @@ static void domcreate_rebuild_done(libxl
+ 
+     /* convenience aliases */
+     const uint32_t domid = dcs->guest_domid;
+-    libxl_domain_config *const d_config = dcs->guest_config;
++    libxl_domain_config *d_config = dcs->guest_config;
+ 
+     if (ret) {
+         LOGD(ERROR, domid, "cannot (re-)build domain: %d", ret);
+@@ -1275,11 +1275,51 @@ static void domcreate_rebuild_done(libxl
+ 
+     store_libxl_entry(gc, domid, &d_config->b_info);
+ 
++    /* Below quirk is to prevent the creation of useless vbd nodes
++     * in xenstore.
++     */
++    if(d_config->c_info.type == LIBXL_DOMAIN_TYPE_HVM) {
++        libxl_domain_config domain_config;
++        int i = 0;
++        int j = 0;
++        bool has_stub;
++
++        has_stub = libxl_defbool_val(d_config->b_info.device_model_stubdomain);
++        libxl_domain_config_copy(CTX, &domain_config, dcs->guest_config);
++        d_config = &domain_config;
++
++        for( ; i < d_config->num_disks; i++) {
++            if(d_config->disks[i].is_cdrom) {
++
++                /* No atapi-pt vbd nodes */
++                if(!strncmp(d_config->disks[i].vdev, "atapi-pt", 9))
++                    continue;
++
++                /* No emulated cdroms for guests that have stubdom */
++                if(has_stub)
++                    continue;
++
++            }
++            if(j != i)
++                    libxl_device_disk_copy(CTX,
++                                           &d_config->disks[j],
++                                           &d_config->disks[i]);
++            j++;
++        }
++        d_config->num_disks = j;
++        d_config->disks = libxl__realloc(NOGC,
++                                         d_config->disks,
++                                         sizeof(*(d_config->disks)) * j);
++    }
++
+     libxl__multidev_begin(ao, &dcs->multidev);
+     dcs->multidev.callback = domcreate_launch_dm;
+     libxl__add_disks(egc, ao, domid, d_config, &dcs->multidev);
+     libxl__multidev_prepared(egc, &dcs->multidev, 0);
+ 
++    if(d_config != dcs->guest_config)
++        libxl_domain_config_dispose(d_config);
++
+     return;
+ 
+  error_out:
