@@ -71,7 +71,7 @@ INITSCRIPT_PARAMS_${PN}-console = "defaults 20"
 INITSCRIPT_NAME_${PN}-xenstored-c = "xenstored"
 INITSCRIPT_PARAMS_${PN}-xenstored-c = "defaults 05"
 
-EXTRA_OEMAKE += "ETHERBOOT_ROMS=${STAGING_DIR_HOST}/usr/share/firmware/e1000.rom"
+EXTRA_OEMAKE += "ETHERBOOT_ROMS=${STAGING_DIR_HOST}/usr/share/firmware/intel.rom"
 
 pkg_postinst_${PN}-xenstored-c () {
     update-alternatives --install ${sbindir}/xenstored xenstored xenstored.${PN}-xenstored-c 200
@@ -97,7 +97,7 @@ do_compile() {
     # tools/firmware/Rules.mk: override XEN_TARGET_ARCH = x86_32
     # With a 32bit host targeting a 64bit machine, this will break passing -m32
     # -m64 and using the 64bit sysroot.
-    if [ "${XEN_TARGET_ARCH}" = "${XEN_COMPILE_ARCH}"]; then
+    if [ "${XEN_TARGET_ARCH}" = "${XEN_COMPILE_ARCH}" ]; then
         oe_runmake -C tools subdir-all-firmware
     fi
 }
