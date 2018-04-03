@@ -13,7 +13,7 @@ S = "${WORKDIR}/${XORG_PN}-${PV}"
 
 inherit autotools pkgconfig
 
-EXTRA_OECONF = "--enable-malloc0returnsnull --with-fop=no --without-xmlto"
+EXTRA_OECONF = "--enable-malloc0returnsnull"
 
 python () {
         whitelist = [ "pixman" ]
