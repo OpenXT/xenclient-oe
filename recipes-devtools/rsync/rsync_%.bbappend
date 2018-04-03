@@ -1,1 +1,1 @@
-PACKAGECONFIG_append = " xattr"
+PACKAGECONFIG_append += "attr"
