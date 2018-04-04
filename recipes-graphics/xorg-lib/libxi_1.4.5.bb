@@ -18,7 +18,7 @@ PR = "r0"
 
 XORG_PN = "libXi"
 
-EXTRA_OECONF_append = " --enable-specs=no"
+EXTRA_OECONF_append += "--with-fop=no --without-xmlto --enable-specs=no"
 
 SRC_URI[md5sum] = "82dcdc76388116800a2c3ad969f510a4"
 SRC_URI[sha256sum] = "22a99123229d22e6e1567c4cda0224a744475f427625d61b23d965157a86f1b5"
