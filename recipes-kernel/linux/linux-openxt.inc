@@ -1,4 +1,4 @@
-inherit xenclient
+require recipes-kernel/linux/linux-openxt-copy-objtool.inc
 
 DEPENDS += "bc-native"
 
