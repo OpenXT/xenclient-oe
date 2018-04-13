@@ -80,7 +80,7 @@ main (int argc, char **argv)
                 goto exit;
         }
         /*  not really parsing parameters, just going on position  */
-        data.domid = atoi (argv [1]);
+        data.domid = atoi (argv [2]);
         syslog (LOG_INFO, "domain id: %d", data.domid);
 
         data.xsh = xs_daemon_open();
@@ -437,7 +437,7 @@ get_writable_files (xs_handle_t *xsh, int domid)
  *    devices.  This function returns the path to the device that the QEMU
  *    instances is accessing the block device through.
  *  The path parameter is a xenstore path to a VBD:
- *    /local/domain/#/backend/#/vbd/# where 
+ *    /local/domain/#/backend/#/vbd3/# where 
  *    The first # is the domid of the backend hosting the device.
  *    The second # is the domid of the frontend using the device.
  *    The third # is the identifier given to the vbd (vbd number).
