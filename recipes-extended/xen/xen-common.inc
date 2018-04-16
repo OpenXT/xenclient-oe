@@ -90,7 +90,7 @@ SRC_URI_append = " \
     file://libxl-fix-flr.patch \
     file://libxl-disable-vnc-query-when-disabled.patch \
     file://xl-shutdown-wait-for-domain-death.patch \
-    file://xl-uivm-reboot-fix.patch \
+    file://domain-reboot.patch \
     ${BLKTAP_PATCHQUEUE} \
     file://efi-hardcode-openxt-cfg.patch \
     file://efi-load-option-support.patch \
