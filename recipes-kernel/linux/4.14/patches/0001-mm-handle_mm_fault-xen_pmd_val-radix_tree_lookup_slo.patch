@@ -1,0 +1,71 @@
+From f01b273a18af44ebb2fe973d020ff8844e000278 Mon Sep 17 00:00:00 2001
+From: Eric Chanudet <chanudete@ainfosec.com>
+Date: Tue, 17 Apr 2018 18:32:39 -0400
+Subject: [PATCH] mm: handle_mm_fault / xen_pmd_val / radix_tree_lookup_slot
+ Null pointer
+
+Patch from Matthew Wilcox:
+https://bugzilla.kernel.org/show_bug.cgi?id=198497#c12
+
+Signed-off-by: Eric Chanudet <chanudete@ainfosec.com>
+---
+ mm/memory.c     |  4 ++++
+ mm/shmem.c      |  4 ++++
+ mm/swap_state.c | 12 +++++++++++-
+ 3 files changed, 19 insertions(+), 1 deletion(-)
+
+--- a/mm/memory.c
++++ b/mm/memory.c
+@@ -2886,6 +2886,10 @@ int do_swap_page(struct vm_fault *vmf)
+ 	if (!page)
+ 		page = lookup_swap_cache(entry, vma_readahead ? vma : NULL,
+ 					 vmf->address);
++	if (IS_ERR(page)) {
++		pte_ERROR(vmf->orig_pte);
++		page = NULL;
++	}
+ 	if (!page) {
+ 		if (vma_readahead)
+ 			page = do_swap_page_readahead(entry,
+--- a/mm/shmem.c
++++ b/mm/shmem.c
+@@ -1660,6 +1660,10 @@ repeat:
+ 	if (swap.val) {
+ 		/* Look it up and read it in.. */
+ 		page = lookup_swap_cache(swap, NULL, 0);
++		if (IS_ERR(page)) {
++			pte_ERROR(vmf->orig_pte);
++			page = NULL;
++		}
+ 		if (!page) {
+ 			/* Or update major stats only when swapin succeeds?? */
+ 			if (fault_type) {
+--- a/mm/swap_state.c
++++ b/mm/swap_state.c
+@@ -334,8 +334,14 @@ struct page *lookup_swap_cache(swp_entry
+ 	struct page *page;
+ 	unsigned long ra_info;
+ 	int win, hits, readahead;
++	struct address_space *swapper_space = swap_address_space(entry);
++
++	if (!swapper_space) {
++		pr_err("Bad swp_entry: %lx\n", entry.val);
++		return ERR_PTR(-EFAULT);
++	}
+ 
+-	page = find_get_page(swap_address_space(entry), swp_offset(entry));
++	page = find_get_page(swapper_space, swp_offset(entry));
+ 
+ 	INC_CACHE_INFO(find_total);
+ 	if (page) {
+@@ -673,6 +679,10 @@ struct page *swap_readahead_detect(struc
+ 	if ((unlikely(non_swap_entry(entry))))
+ 		return NULL;
+ 	page = lookup_swap_cache(entry, vma, faddr);
++	if (IS_ERR(page)) {
++		pte_ERROR(vmf->orig_pte);
++		page = NULL;
++	}
+ 	if (page)
+ 		return page;
+ 
