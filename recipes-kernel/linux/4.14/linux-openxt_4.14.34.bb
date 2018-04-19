@@ -8,6 +8,8 @@ PV_MAJOR = "${@"${PV}".split('.', 3)[0]}"
 
 FILESEXTRAPATHS_prepend := "${THISDIR}/patches:${THISDIR}/defconfigs:"
 SRC_URI += "${KERNELORG_MIRROR}/linux/kernel/v${PV_MAJOR}.x/linux-${PV}.tar.xz;name=kernel \
+    file://0001-x86-xen-Delay-get_cpu_cap-until-stack-canary-is-esta.patch;patch=1 \
+    file://0002-xen-netfront-Fix-hang-on-device-removal.patch;patch=1 \
     file://bridge-carrier-follow-prio0.patch;patch=1 \
     file://privcmd-mmapnocache-ioctl.patch;patch=1 \
     file://xenkbd-tablet-resolution.patch;patch=1 \
