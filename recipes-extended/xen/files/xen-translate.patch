@@ -33,7 +33,7 @@ PATCHES
 ################################################################################
 --- a/tools/libxc/include/xenctrl.h
 +++ b/tools/libxc/include/xenctrl.h
-@@ -2569,6 +2569,18 @@ int xc_domain_cacheflush(xc_interface *x
+@@ -2610,6 +2610,18 @@ int xc_domain_cacheflush(xc_interface *x
  /* Compat shims */
  #include "xenctrl_compat.h"
  
@@ -54,7 +54,7 @@ PATCHES
  /*
 --- a/tools/libxc/xc_domain.c
 +++ b/tools/libxc/xc_domain.c
-@@ -2143,6 +2143,68 @@ int xc_domain_set_machine_address_size(x
+@@ -2200,6 +2200,68 @@ int xc_domain_set_machine_address_size(x
      return do_domctl(xch, &domctl);
  }
  
@@ -287,7 +287,7 @@ PATCHES
              split = 0;
 --- a/xen/common/memory.c
 +++ b/xen/common/memory.c
-@@ -436,6 +436,162 @@ static bool propagate_node(unsigned int
+@@ -455,6 +455,162 @@ static bool propagate_node(unsigned int
      return true;
  }
  
@@ -450,7 +450,7 @@ PATCHES
  static long memory_exchange(XEN_GUEST_HANDLE_PARAM(xen_memory_exchange_t) arg)
  {
      struct xen_memory_exchange exch;
-@@ -954,6 +1110,7 @@ long do_memory_op(unsigned long cmd, XEN
+@@ -978,6 +1134,7 @@ long do_memory_op(unsigned long cmd, XEN
      struct memop_args args;
      domid_t domid;
      unsigned long start_extent = cmd >> MEMOP_EXTENT_SHIFT;
@@ -458,7 +458,7 @@ PATCHES
      int op = cmd & MEMOP_CMD_MASK;
  
      switch ( op )
-@@ -1387,6 +1544,27 @@ long do_memory_op(unsigned long cmd, XEN
+@@ -1408,6 +1565,27 @@ long do_memory_op(unsigned long cmd, XEN
      }
  #endif
  
@@ -486,26 +486,9 @@ PATCHES
      default:
          rc = arch_memory_op(cmd, arg);
          break;
---- a/xen/include/asm-x86/mm.h
-+++ b/xen/include/asm-x86/mm.h
-@@ -211,9 +211,13 @@ struct page_info
- #define PGT_locked        PG_mask(1, 9)
- 
-  /* Count of uses of this frame as its current type. */
--#define PGT_count_width   PG_shift(9)
-+#define PGT_count_width   PG_shift(10)
- #define PGT_count_mask    ((1UL<<PGT_count_width)-1)
- 
-+ /* Pinned by dom0 tools */
-+#define _PGC_pinned_by_tools	PG_shift(10)
-+#define PGC_pinned_by_tools	PG_mask(1, 10)
-+
- /* Are the 'type mask' bits identical? */
- #define PGT_type_equal(x, y) (!(((x) ^ (y)) & PGT_type_mask))
- 
 --- a/xen/include/public/memory.h
 +++ b/xen/include/public/memory.h
-@@ -310,8 +310,30 @@ struct xen_remove_from_physmap {
+@@ -312,8 +312,30 @@ struct xen_remove_from_physmap {
  typedef struct xen_remove_from_physmap xen_remove_from_physmap_t;
  DEFINE_XEN_GUEST_HANDLE(xen_remove_from_physmap_t);
  
@@ -538,7 +521,7 @@ PATCHES
  
  /*
   * Returns the pseudo-physical memory map as it was when the domain
-@@ -650,6 +672,26 @@ DEFINE_XEN_GUEST_HANDLE(xen_vnuma_topolo
+@@ -652,6 +674,26 @@ DEFINE_XEN_GUEST_HANDLE(xen_vnuma_topolo
  
  /* Next available subop number is 28 */
  
@@ -567,7 +550,7 @@ PATCHES
  /*
 --- a/xen/include/xlat.lst
 +++ b/xen/include/xlat.lst
-@@ -84,6 +84,8 @@
+@@ -85,6 +85,8 @@
  !	memory_reservation		memory.h
  !	mem_access_op			memory.h
  !	pod_target			memory.h
@@ -601,7 +584,7 @@ PATCHES
  
      int (*console_io) (struct domain *d, int cmd);
  
-@@ -382,6 +383,11 @@ static inline int xsm_claim_pages(xsm_de
+@@ -380,6 +381,11 @@ static inline int xsm_claim_pages(xsm_de
      return xsm_ops->claim_pages(d);
  }
  
@@ -615,10 +598,27 @@ PATCHES
      return xsm_ops->console_io(d, cmd);
 --- a/xen/xsm/dummy.c
 +++ b/xen/xsm/dummy.c
-@@ -158,5 +158,6 @@ void __init xsm_fixup_ops (struct xsm_op
+@@ -156,5 +156,6 @@ void __init xsm_fixup_ops (struct xsm_op
      set_to_dummy_if_null(ops, pmu_op);
      set_to_dummy_if_null(ops, dm_op);
  #endif
 +    set_to_dummy_if_null(ops, memory_translate);
      set_to_dummy_if_null(ops, xen_version);
  }
+--- a/xen/include/asm-x86/mm.h
++++ b/xen/include/asm-x86/mm.h
+@@ -229,9 +229,13 @@ struct page_info
+ #define PGT_partial       PG_mask(1, 8)
+ 
+  /* Count of uses of this frame as its current type. */
+-#define PGT_count_width   PG_shift(8)
++#define PGT_count_width   PG_shift(9)
+ #define PGT_count_mask    ((1UL<<PGT_count_width)-1)
+ 
++ /* Pinned by dom0 tools */
++#define _PGC_pinned_by_tools	PG_shift(9)
++#define PGC_pinned_by_tools	PG_mask(1, 9)
++
+ /* Are the 'type mask' bits identical? */
+ #define PGT_type_equal(x, y) (!(((x) ^ (y)) & PGT_type_mask))
+ 
