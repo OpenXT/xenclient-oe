@@ -36,51 +36,78 @@ INTERNAL DEPENDENCIES
 ################################################################################
 PATCHES 
 ################################################################################
---- a/xen/arch/x86/mm.c
-+++ b/xen/arch/x86/mm.c
-@@ -5086,12 +5086,19 @@ int xenmem_add_to_physmap_one(
-     unsigned long prev_mfn, mfn = 0, old_gpfn;
+Index: xen-4.10.0/xen/common/domain.c
+===================================================================
+--- xen-4.10.0.orig/xen/common/domain.c
++++ xen-4.10.0/xen/common/domain.c
+@@ -402,6 +402,9 @@ struct domain *domain_create(domid_t dom
+         spin_unlock(&domlist_update_lock);
+     }
+ 
++    d->prev_mfn_shinfo = mfn_x(INVALID_MFN);
++    d->prev_gpfn_shinfo = mfn_x(INVALID_MFN);
++
+     return d;
+ 
+  fail:
+Index: xen-4.10.0/xen/include/xen/sched.h
+===================================================================
+--- xen-4.10.0.orig/xen/include/xen/sched.h
++++ xen-4.10.0/xen/include/xen/sched.h
+@@ -476,6 +476,10 @@ struct domain
+     unsigned int last_alloc_node;
+     spinlock_t node_affinity_lock;
+ 
++    /* Used for unmapping the shinfo page */
++    unsigned long prev_mfn_shinfo;
++    unsigned long prev_gpfn_shinfo;
++
+     /* vNUMA topology accesses are protected by rwlock. */
+     rwlock_t vnuma_rwlock;
+     struct vnuma_info *vnuma;
+Index: xen-4.10.0/xen/arch/x86/mm.c
+===================================================================
+--- xen-4.10.0.orig/xen/arch/x86/mm.c
++++ xen-4.10.0/xen/arch/x86/mm.c
+@@ -4079,6 +4079,9 @@ int xenmem_add_to_physmap_one(
      int rc = 0;
+     mfn_t mfn = INVALID_MFN;
      p2m_type_t p2mt;
 +    int unmap_shinfo = 0;
 +    xen_pfn_t gpfn_new = gfn_x(gpfn);
++
  
-     switch ( space )
-     {
+     if ( !paging_mode_translate(d) )
+         return -EACCES;
+@@ -4088,7 +4091,12 @@ int xenmem_add_to_physmap_one(
          case XENMAPSPACE_shared_info:
              if ( idx == 0 )
-                 mfn = virt_to_mfn(d->shared_info);
+                 mfn = _mfn(virt_to_mfn(d->shared_info));
+-            break;
 +            /* unmap shared info page if guest passed INVALID_MFN */
 +            if ( gpfn_new == (hvm_guest_x86_mode(current) == 8
 +                              ? mfn_x(INVALID_MFN)
 +                              : mfn_x(INVALID_MFN) >> 32) )
 +                unmap_shinfo = 1;
-             break;
++           break;
          case XENMAPSPACE_grant_table:
-             grant_write_lock(d->grant_table);
-@@ -5147,24 +5154,35 @@ int xenmem_add_to_physmap_one(
-     {
-         if ( page )
-             put_page(page);
-+        if ( unmap_shinfo )
-+        {
-+            if ( d->prev_mfn_shinfo != mfn_x(INVALID_MFN) &&
-+                 d->prev_gpfn_shinfo != mfn_x(INVALID_MFN) )
-+            {
-+                gpfn_new = d->prev_gpfn_shinfo;
-+                mfn = d->prev_mfn_shinfo;
-+            }
-+            else
-+                printk("unmapping of shared info requested while not mapped\n");
-+        }
-         if ( space == XENMAPSPACE_gmfn || space == XENMAPSPACE_gmfn_range )
-             put_gfn(d, gfn);
-         return -EINVAL;
+             rc = gnttab_map_frame(d, idx, gpfn, &mfn);
+             if ( rc )
+@@ -4119,25 +4127,26 @@ int xenmem_add_to_physmap_one(
+             break;
      }
  
-     /* Remove previously mapped page if it was present. */
--    prev_mfn = mfn_x(get_gfn(d, gfn_x(gpfn), &p2mt));
++    /* Remove previously mapped page if it was present. */
 +    prev_mfn = mfn_x(get_gfn(d, gpfn_new, &p2mt));
++
+     if ( mfn_eq(mfn, INVALID_MFN) )
+     {
+         rc = -EINVAL;
+         goto put_both;
+     }
+ 
+-    /* Remove previously mapped page if it was present. */
+-    prev_mfn = mfn_x(get_gfn(d, gfn_x(gpfn), &p2mt));
      if ( mfn_valid(_mfn(prev_mfn)) )
      {
          if ( is_xen_heap_mfn(prev_mfn) )
@@ -99,19 +126,19 @@ PATCHES
  
      if ( rc )
          goto put_both;
-@@ -5179,13 +5197,28 @@ int xenmem_add_to_physmap_one(
+@@ -4156,13 +4165,28 @@ int xenmem_add_to_physmap_one(
  
      /* Map at new location. */
      if ( !rc )
--        rc = guest_physmap_add_page(d, gpfn, _mfn(mfn), PAGE_ORDER_4K);
-+        rc = guest_physmap_add_page(d, _gfn(gpfn_new), _mfn(mfn), PAGE_ORDER_4K);
+-        rc = guest_physmap_add_page(d, gpfn, mfn, PAGE_ORDER_4K);
++        rc = guest_physmap_add_page(d, _gfn(gpfn_new), mfn, PAGE_ORDER_4K);
  
   put_both:
      /* In the XENMAPSPACE_gmfn, we took a ref of the gfn at the top */
      if ( space == XENMAPSPACE_gmfn || space == XENMAPSPACE_gmfn_range )
          put_gfn(d, gfn);
  
-+    if ( space == XENMAPSPACE_shared_info )
++    if ( space == XENMAPSPACE_shared_info || unmap_shinfo )
 +    {
 +        /* save the shared info mapping to restore, if we are not unmapping */
 +        if (!unmap_shinfo)
@@ -129,28 +156,3 @@ PATCHES
      if ( page )
          put_page(page);
  
---- a/xen/common/domain.c
-+++ b/xen/common/domain.c
-@@ -402,6 +402,9 @@ struct domain *domain_create(domid_t dom
-         spin_unlock(&domlist_update_lock);
-     }
- 
-+    d->prev_mfn_shinfo = mfn_x(INVALID_MFN);
-+    d->prev_gpfn_shinfo = mfn_x(INVALID_MFN);
-+
-     return d;
- 
-  fail:
---- a/xen/include/xen/sched.h
-+++ b/xen/include/xen/sched.h
-@@ -476,6 +476,10 @@ struct domain
-     unsigned int last_alloc_node;
-     spinlock_t node_affinity_lock;
- 
-+    /* Used for unmapping the shinfo page */
-+    unsigned long prev_mfn_shinfo;
-+    unsigned long prev_gpfn_shinfo;
-+
-     /* vNUMA topology accesses are protected by rwlock. */
-     rwlock_t vnuma_rwlock;
-     struct vnuma_info *vnuma;

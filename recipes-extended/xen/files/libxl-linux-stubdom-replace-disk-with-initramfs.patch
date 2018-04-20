@@ -1,6 +1,7 @@
 ################################################################################
 SHORT DESCRIPTION:
 ################################################################################
+REWRITE ME! Starting from Xen 4.10, libxl has an option for that!
 Use an initramfs instead of a disk for Linux stubdomains created by LibXL
 
 ################################################################################
@@ -35,11 +36,11 @@ libxl-RFC-*.patch
 ################################################################################
 PATCHES
 ################################################################################
-Index: xen-4.9.0/tools/libxl/libxl_dm.c
+Index: xen-4.10.0/tools/libxl/libxl_dm.c
 ===================================================================
---- xen-4.9.0.orig/tools/libxl/libxl_dm.c
-+++ xen-4.9.0/tools/libxl/libxl_dm.c
-@@ -1590,7 +1590,6 @@ static int libxl__build_device_model_arg
+--- xen-4.10.0.orig/tools/libxl/libxl_dm.c
++++ xen-4.10.0/tools/libxl/libxl_dm.c
+@@ -1620,7 +1620,6 @@ static int libxl__build_device_model_arg
                                                    "/dev/xvdb",
                                                    "/dev/xvdc",
                                                    "/dev/xvdd"} [disk];
@@ -47,7 +48,7 @@ Index: xen-4.9.0/tools/libxl/libxl_dm.c
                      }
                      if (colo_mode == LIBXL__COLO_SECONDARY) {
                          drive = libxl__sprintf
-@@ -1835,7 +1834,6 @@ void libxl__spawn_stub_dm(libxl__egc *eg
+@@ -1899,7 +1898,6 @@ void libxl__spawn_stub_dm(libxl__egc *eg
      char **args;
      struct xs_permissions perm[2];
      xs_transaction_t t;
@@ -55,7 +56,7 @@ Index: xen-4.9.0/tools/libxl/libxl_dm.c
  
      /* convenience aliases */
      libxl_domain_config *const dm_config = &sdss->dm_config;
-@@ -1924,20 +1922,12 @@ void libxl__spawn_stub_dm(libxl__egc *eg
+@@ -1995,20 +1993,12 @@ void libxl__spawn_stub_dm(libxl__egc *eg
          stubdom_state->pv_ramdisk.path = "";
          break;
      case LIBXL_STUBDOMAIN_VERSION_LINUX:
@@ -81,7 +82,7 @@ Index: xen-4.9.0/tools/libxl/libxl_dm.c
          break;
      default:
          abort();
-@@ -2010,10 +2000,7 @@ retry_transaction:
+@@ -2081,10 +2071,7 @@ retry_transaction:
  
      libxl__multidev_begin(ao, &sdss->multidev);
      sdss->multidev.callback = spawn_stub_launch_dm;
@@ -93,20 +94,16 @@ Index: xen-4.9.0/tools/libxl/libxl_dm.c
      libxl__add_disks(egc, ao, dm_domid, dm_config, &sdss->multidev);
      libxl__multidev_prepared(egc, &sdss->multidev, 0);
  
-@@ -2123,6 +2110,12 @@ static void spawn_stub_launch_dm(libxl__
+@@ -2209,7 +2196,7 @@ static void spawn_stub_launch_dm(libxl__
      sdss->pvqemu.build_state = &sdss->dm_state;
      sdss->pvqemu.callback = spawn_stubdom_pvqemu_cb;
  
-+    /* OpenXT: stubdom have no disk backend, so we have to trigger the spawn callback manually */
-+    if (libxl_defbool_val(guest_config->b_info.device_model_stubdomain)) {
-+        spawn_stubdom_pvqemu_cb(egc, &sdss->pvqemu, 0);
-+        return;
-+    }
-+
-     libxl__spawn_local_dm(egc, &sdss->pvqemu);
- 
-     return;
-@@ -2156,42 +2149,6 @@ out:
+-    if (!need_qemu) {
++    if (!need_qemu || libxl_defbool_val(guest_config->b_info.device_model_stubdomain)) {
+         /* If dom0 qemu not needed, do not launch it */
+         spawn_stubdom_pvqemu_cb(egc, &sdss->pvqemu, 0);
+     } else {
+@@ -2247,42 +2234,6 @@ out:
      stubdom_pvqemu_cb(egc, &sdss->multidev, rc);
  }
  
@@ -149,7 +146,7 @@ Index: xen-4.9.0/tools/libxl/libxl_dm.c
  static void stubdom_pvqemu_cb(libxl__egc *egc,
                                libxl__multidev *multidev,
                                int rc)
-@@ -2209,16 +2166,7 @@ static void stubdom_pvqemu_cb(libxl__egc
+@@ -2300,16 +2251,7 @@ static void stubdom_pvqemu_cb(libxl__egc
          goto out;
      }
  
