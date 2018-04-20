@@ -1,7 +1,14 @@
-DEPENDS_${PN} += " \
+# LibSELinux does not extend nativesdk.
+DEPENDS_append_class-native += " \
+    libselinux \
+"
+# DBus will not link with libv4v in the native case.
+# The v4v kernel headers cannot be expected in the native environment since
+# libv4v depends on Xen, and the hypervisor headers are not separated from the
+# main recipe.
+DEPENDS_append_class-target += " \
     libselinux \
     libv4v \
-    xen \
 "
 FILESEXTRAPATHS_prepend := "${THISDIR}/patches:"
 
