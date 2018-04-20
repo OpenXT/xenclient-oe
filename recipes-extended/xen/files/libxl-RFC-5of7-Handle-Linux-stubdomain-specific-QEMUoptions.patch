@@ -37,13 +37,13 @@ INTERNAL DEPENDENCIES
 ################################################################################
 PATCHES
 ################################################################################
-Index: xen-4.9.0/tools/libxl/libxl_dm.c
+Index: xen-4.10.0/tools/libxl/libxl_dm.c
 ===================================================================
---- xen-4.9.0.orig/tools/libxl/libxl_dm.c
-+++ xen-4.9.0/tools/libxl/libxl_dm.c
-@@ -24,9 +24,12 @@
- #include <sys/types.h>
+--- xen-4.10.0.orig/tools/libxl/libxl_dm.c
++++ xen-4.10.0/tools/libxl/libxl_dm.c
+@@ -25,9 +25,12 @@
  #include <pwd.h>
+ #include <grp.h>
  
 -static const char *libxl_tapif_script(libxl__gc *gc)
 +static const char *libxl_tapif_script(libxl__gc *gc,
@@ -55,7 +55,7 @@ Index: xen-4.9.0/tools/libxl/libxl_dm.c
      return libxl__strdup(gc, "no");
  #else
      return GCSPRINTF("%s/qemu-ifup", libxl__xen_script_dir_path());
-@@ -594,8 +597,8 @@ static int libxl__build_device_model_arg
+@@ -595,8 +598,8 @@ static int libxl__build_device_model_arg
                                        "tap,vlan=%d,ifname=%s,bridge=%s,"
                                        "script=%s,downscript=%s",
                                        nics[i].devid, ifname, nics[i].bridge,
@@ -66,7 +66,7 @@ Index: xen-4.9.0/tools/libxl/libxl_dm.c
                                    NULL);
                  ioemu_nics++;
              }
-@@ -657,6 +660,8 @@ static const char *qemu_disk_format_stri
+@@ -665,6 +668,8 @@ static const char *qemu_disk_format_stri
      case LIBXL_DISK_FORMAT_RAW: return "raw";
      case LIBXL_DISK_FORMAT_EMPTY: return NULL;
      case LIBXL_DISK_FORMAT_QED: return "qed";
@@ -75,15 +75,15 @@ Index: xen-4.9.0/tools/libxl/libxl_dm.c
      default: return NULL;
      }
  }
-@@ -911,6 +916,7 @@ static int libxl__build_device_model_arg
-     uint64_t ram_size;
+@@ -937,6 +942,7 @@ static int libxl__build_device_model_arg
      const char *path, *chardev;
      char *user = NULL;
+     struct passwd *user_base, user_pwbuf;
 +    bool is_stubdom = libxl_defbool_val(b_info->device_model_stubdomain);
  
      dm_args = flexarray_make(gc, 16, 1);
      dm_envs = flexarray_make(gc, 16, 1);
-@@ -921,24 +927,18 @@ static int libxl__build_device_model_arg
+@@ -947,24 +953,18 @@ static int libxl__build_device_model_arg
                        "-xen-domid",
                        GCSPRINTF("%d", guest_domid), NULL);
  
@@ -120,7 +120,7 @@ Index: xen-4.9.0/tools/libxl/libxl_dm.c
  
      for (i = 0; i < guest_config->num_channels; i++) {
          connection = guest_config->channels[i].connection;
-@@ -982,7 +982,7 @@ static int libxl__build_device_model_arg
+@@ -1008,7 +1008,7 @@ static int libxl__build_device_model_arg
          flexarray_vappend(dm_args, "-name", c_info->name, NULL);
      }
  
@@ -129,7 +129,7 @@ Index: xen-4.9.0/tools/libxl/libxl_dm.c
          char *vncarg = NULL;
  
          flexarray_append(dm_args, "-vnc");
-@@ -1033,7 +1033,7 @@ static int libxl__build_device_model_arg
+@@ -1059,7 +1059,7 @@ static int libxl__build_device_model_arg
       */
      flexarray_append_pair(dm_args, "-display", "none");
  
@@ -138,7 +138,7 @@ Index: xen-4.9.0/tools/libxl/libxl_dm.c
          flexarray_append(dm_args, "-sdl");
          if (sdl->display)
              flexarray_append_pair(dm_envs, "DISPLAY", sdl->display);
-@@ -1064,10 +1064,19 @@ static int libxl__build_device_model_arg
+@@ -1090,10 +1090,19 @@ static int libxl__build_device_model_arg
                  return ERROR_INVAL;
              }
              if (b_info->u.hvm.serial) {
@@ -160,7 +160,7 @@ Index: xen-4.9.0/tools/libxl/libxl_dm.c
                  for (p = b_info->u.hvm.serial_list;
                       *p;
                       p++) {
-@@ -1082,7 +1091,7 @@ static int libxl__build_device_model_arg
+@@ -1108,7 +1117,7 @@ static int libxl__build_device_model_arg
              flexarray_append(dm_args, "-nographic");
          }
  
@@ -169,7 +169,7 @@ Index: xen-4.9.0/tools/libxl/libxl_dm.c
              const libxl_spice_info *spice = &b_info->u.hvm.spice;
              char *spiceoptions = dm_spice_options(gc, spice);
              if (!spiceoptions)
-@@ -1221,8 +1230,8 @@ static int libxl__build_device_model_arg
+@@ -1247,8 +1256,8 @@ static int libxl__build_device_model_arg
                                   GCSPRINTF("type=tap,id=net%d,ifname=%s,"
                                             "script=%s,downscript=%s",
                                             nics[i].devid, ifname,
@@ -180,7 +180,7 @@ Index: xen-4.9.0/tools/libxl/libxl_dm.c
  
                  /* Userspace COLO Proxy need this */
  #define APPEND_COLO_SOCK_SERVER(sock_id, sock_ip, sock_port) ({             \
-@@ -1475,6 +1484,11 @@ static int libxl__build_device_model_arg
+@@ -1505,6 +1514,11 @@ static int libxl__build_device_model_arg
                           disks[i].vdev);
                      continue;
                  }
@@ -192,7 +192,7 @@ Index: xen-4.9.0/tools/libxl/libxl_dm.c
              } else {
                  if (format == NULL) {
                      LOGD(WARN, guest_domid,
-@@ -1565,6 +1579,10 @@ static int libxl__build_device_model_arg
+@@ -1595,6 +1609,10 @@ static int libxl__build_device_model_arg
                               "qemu-xen doesn't support read-only IDE disk drivers");
                          return ERROR_INVAL;
                      }
@@ -203,7 +203,7 @@ Index: xen-4.9.0/tools/libxl/libxl_dm.c
                      if (colo_mode == LIBXL__COLO_SECONDARY) {
                          drive = libxl__sprintf
                              (gc, "if=none,driver=%s,file=%s,id=%s",
-@@ -1644,7 +1662,7 @@ static int libxl__build_device_model_arg
+@@ -1708,7 +1726,7 @@ static int libxl__build_device_model_arg
                                          char ***args, char ***envs,
                                          const libxl__domain_build_state *state,
                                          int *dm_state_fd)
@@ -212,7 +212,7 @@ Index: xen-4.9.0/tools/libxl/libxl_dm.c
   * and therefore will be passing a filename rather than a fd. */
  {
      switch (guest_config->b_info.device_model_version) {
-@@ -1654,8 +1672,10 @@ static int libxl__build_device_model_arg
+@@ -1718,8 +1736,10 @@ static int libxl__build_device_model_arg
                                                    args, envs,
                                                    state);
      case LIBXL_DEVICE_MODEL_VERSION_QEMU_XEN:
@@ -225,7 +225,7 @@ Index: xen-4.9.0/tools/libxl/libxl_dm.c
          return libxl__build_device_model_args_new(gc, dm,
                                                    guest_domid, guest_config,
                                                    args, envs,
-@@ -1712,7 +1732,7 @@ static int libxl__vfb_and_vkb_from_hvm_g
+@@ -1776,7 +1796,7 @@ static int libxl__vfb_and_vkb_from_hvm_g
  
  static int libxl__write_stub_dmargs(libxl__gc *gc,
                                      int dm_domid, int guest_domid,
@@ -234,7 +234,7 @@ Index: xen-4.9.0/tools/libxl/libxl_dm.c
  {
      libxl_ctx *ctx = libxl__gc_owner(gc);
      int i;
-@@ -1740,7 +1760,9 @@ static int libxl__write_stub_dmargs(libx
+@@ -1804,7 +1824,9 @@ static int libxl__write_stub_dmargs(libx
      i = 1;
      dmargs[0] = '\0';
      while (args[i] != NULL) {
@@ -245,7 +245,7 @@ Index: xen-4.9.0/tools/libxl/libxl_dm.c
              strcat(dmargs, " ");
              strcat(dmargs, args[i]);
          }
-@@ -1878,7 +1900,8 @@ void libxl__spawn_stub_dm(libxl__egc *eg
+@@ -1949,7 +1971,8 @@ void libxl__spawn_stub_dm(libxl__egc *eg
          goto out;
      }
  
@@ -255,11 +255,11 @@ Index: xen-4.9.0/tools/libxl/libxl_dm.c
      libxl__xs_printf(gc, XBT_NULL,
                       GCSPRINTF("%s/image/device-model-domid",
                                 libxl__xs_get_dompath(gc, guest_domid)),
-Index: xen-4.9.0/tools/libxl/libxl_types.idl
+Index: xen-4.10.0/tools/libxl/libxl_types.idl
 ===================================================================
---- xen-4.9.0.orig/tools/libxl/libxl_types.idl
-+++ xen-4.9.0/tools/libxl/libxl_types.idl
-@@ -121,6 +121,8 @@ libxl_disk_format = Enumeration("disk_fo
+--- xen-4.10.0.orig/tools/libxl/libxl_types.idl
++++ xen-4.10.0/tools/libxl/libxl_types.idl
+@@ -122,6 +122,8 @@ libxl_disk_format = Enumeration("disk_fo
      (4, "RAW"),
      (5, "EMPTY"),
      (6, "QED"),

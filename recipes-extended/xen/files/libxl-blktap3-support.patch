@@ -26,10 +26,10 @@ Could be upstreamed
 ################################################################################
 PATCHES
 ################################################################################
-Index: xen-4.9.1/tools/libxl/libxl_blktap3.c
+Index: xen-4.10.0/tools/libxl/libxl_blktap3.c
 ===================================================================
 --- /dev/null
-+++ xen-4.9.1/tools/libxl/libxl_blktap3.c
++++ xen-4.10.0/tools/libxl/libxl_blktap3.c
 @@ -0,0 +1,140 @@
 +/*
 + * Copyright (C) 2012      Advanced Micro Devices
@@ -171,59 +171,11 @@ Index: xen-4.9.1/tools/libxl/libxl_blktap3.c
 + * indent-tabs-mode: nil
 + * End:
 + */
-Index: xen-4.9.1/tools/libxl/Makefile
+Index: xen-4.10.0/tools/libxl/libxl_device.c
 ===================================================================
---- xen-4.9.1.orig/tools/libxl/Makefile
-+++ xen-4.9.1/tools/libxl/Makefile
-@@ -20,17 +20,17 @@ LIBUUID_LIBS += -luuid
- endif
- 
- LIBXL_LIBS =
--LIBXL_LIBS = $(LDLIBS_libxentoollog) $(LDLIBS_libxenevtchn) $(LDLIBS_libxenctrl) $(LDLIBS_libxenguest) $(LDLIBS_libxenstore) $(LDLIBS_libblktapctl) $(PTYFUNCS_LIBS) $(LIBUUID_LIBS)
-+LIBXL_LIBS = $(LDLIBS_libxentoollog) $(LDLIBS_libxenevtchn) $(LDLIBS_libxenctrl) $(LDLIBS_libxenguest) $(LDLIBS_libxenstore) $(PTYFUNCS_LIBS) $(LIBUUID_LIBS)
- ifeq ($(CONFIG_LIBNL),y)
- LIBXL_LIBS += $(LIBNL3_LIBS)
- endif
- 
-+CFLAGS_LIBXL += -I/usr/include/blktap
- CFLAGS_LIBXL += $(CFLAGS_libxentoollog)
- CFLAGS_LIBXL += $(CFLAGS_libxenevtchn)
- CFLAGS_LIBXL += $(CFLAGS_libxenctrl)
- CFLAGS_LIBXL += $(CFLAGS_libxenguest)
- CFLAGS_LIBXL += $(CFLAGS_libxenstore)
--CFLAGS_LIBXL += $(CFLAGS_libblktapctl) 
- ifeq ($(CONFIG_LIBNL),y)
- CFLAGS_LIBXL += $(LIBNL3_CFLAGS)
- endif
-@@ -47,9 +47,9 @@ LIBXLU_LIBS = $(LDLIBS_libxenlight)
- 
- LIBXL_OBJS-y = osdeps.o libxl_paths.o libxl_bootloader.o flexarray.o
- ifeq ($(LIBXL_BLKTAP),y)
--LIBXL_OBJS-y += libxl_blktap2.o
-+LIBXL_OBJS-y += libxl_blktap3.o
- else
--LIBXL_OBJS-y += libxl_noblktap2.o
-+LIBXL_OBJS-y += libxl_noblktap3.o
- endif
- 
- ifeq ($(CONFIG_LIBNL),y)
-Index: xen-4.9.1/tools/libxl/libxl_types_internal.idl
-===================================================================
---- xen-4.9.1.orig/tools/libxl/libxl_types_internal.idl
-+++ xen-4.9.1/tools/libxl/libxl_types_internal.idl
-@@ -27,6 +27,7 @@ libxl__device_kind = Enumeration("device
-     (10, "QUSB"),
-     (11, "9PFS"),
-     (12, "VWIF"),
-+    (13, "VBD3"),
-     ])
- 
- libxl__console_backend = Enumeration("console_backend", [
-Index: xen-4.9.1/tools/libxl/libxl_device.c
-===================================================================
---- xen-4.9.1.orig/tools/libxl/libxl_device.c
-+++ xen-4.9.1/tools/libxl/libxl_device.c
-@@ -920,7 +920,9 @@ void libxl__initiate_device_generic_remo
+--- xen-4.10.0.orig/tools/libxl/libxl_device.c
++++ xen-4.10.0/tools/libxl/libxl_device.c
+@@ -925,7 +925,9 @@ void libxl__initiate_device_generic_remo
      STATE_AO_GC(aodev->ao);
      xs_transaction_t t = 0;
      char *be_path = libxl__device_backend_path(gc, aodev->dev);
@@ -233,7 +185,7 @@ Index: xen-4.9.1/tools/libxl/libxl_device.c
      char *online_path = GCSPRINTF("%s/online", be_path);
      const char *state;
      libxl_dominfo info;
-@@ -990,6 +992,11 @@ void libxl__initiate_device_generic_remo
+@@ -995,6 +997,11 @@ void libxl__initiate_device_generic_remo
                  LOGD(ERROR, domid, "unable to write to xenstore path %s", state_path);
                  goto out;
              }
@@ -245,10 +197,10 @@ Index: xen-4.9.1/tools/libxl/libxl_device.c
          }
  
          rc = libxl__xs_transaction_commit(gc, &t);
-Index: xen-4.9.1/tools/libxl/libxl_disk.c
+Index: xen-4.10.0/tools/libxl/libxl_disk.c
 ===================================================================
---- xen-4.9.1.orig/tools/libxl/libxl_disk.c
-+++ xen-4.9.1/tools/libxl/libxl_disk.c
+--- xen-4.10.0.orig/tools/libxl/libxl_disk.c
++++ xen-4.10.0/tools/libxl/libxl_disk.c
 @@ -56,7 +56,7 @@ static void disk_eject_xswatch_callback(
              "/local/domain/%d/backend/%" TOSTRING(BACKEND_STRING_SIZE)
             "[a-z]/%*d/%*d",
@@ -258,7 +210,7 @@ Index: xen-4.9.1/tools/libxl/libxl_disk.c
          disk->backend = LIBXL_DISK_BACKEND_TAP;
      } else if (!strcmp(backend_type, "qdisk")) {
          disk->backend = LIBXL_DISK_BACKEND_QDISK;
-@@ -189,7 +189,7 @@ int libxl__device_from_disk(libxl__gc *g
+@@ -189,7 +189,7 @@ static int libxl__device_from_disk(libxl
              device->backend_kind = LIBXL__DEVICE_KIND_VBD;
              break;
          case LIBXL_DISK_BACKEND_TAP:
@@ -267,7 +219,7 @@ Index: xen-4.9.1/tools/libxl/libxl_disk.c
              break;
          case LIBXL_DISK_BACKEND_QDISK:
              device->backend_kind = LIBXL__DEVICE_KIND_QDISK;
-@@ -310,7 +310,6 @@ static void device_disk_add(libxl__egc *
+@@ -311,7 +311,6 @@ static void device_disk_add(libxl__egc *
              case LIBXL_DISK_BACKEND_PHY:
                  dev = disk->pdev_path;
  
@@ -275,7 +227,7 @@ Index: xen-4.9.1/tools/libxl/libxl_disk.c
                  flexarray_append(back, "params");
                  flexarray_append(back, dev);
  
-@@ -322,27 +321,29 @@ static void device_disk_add(libxl__egc *
+@@ -323,27 +322,29 @@ static void device_disk_add(libxl__egc *
                  break;
  
              case LIBXL_DISK_BACKEND_TAP:
@@ -319,7 +271,7 @@ Index: xen-4.9.1/tools/libxl/libxl_disk.c
              case LIBXL_DISK_BACKEND_QDISK:
                  flexarray_append(back, "params");
                  flexarray_append(back, GCSPRINTF("%s:%s",
-@@ -547,6 +548,16 @@ static int libxl__device_disk_from_xenst
+@@ -546,6 +547,16 @@ static int libxl__disk_from_xenstore(lib
      }
      libxl_string_to_backend(ctx, tmp, &(disk->backend));
  
@@ -336,7 +288,7 @@ Index: xen-4.9.1/tools/libxl/libxl_disk.c
      disk->vdev = xs_read(ctx->xsh, XBT_NULL,
                           GCSPRINTF("%s/dev", libxl_path), &len);
      if (!disk->vdev) {
-@@ -834,6 +845,7 @@ int libxl_cdrom_change(libxl_ctx *ctx, u
+@@ -774,6 +785,7 @@ int libxl_cdrom_change(libxl_ctx *ctx, u
  
      libxl__ao_complete(egc, ao, 0);
  out:
@@ -344,3 +296,52 @@ Index: xen-4.9.1/tools/libxl/libxl_disk.c
      if (lock) libxl__unlock_domain_userdata(lock);
      if (rc) return AO_CREATE_FAIL(rc);
      return AO_INPROGRESS;
+Index: xen-4.10.0/tools/libxl/Makefile
+===================================================================
+--- xen-4.10.0.orig/tools/libxl/Makefile
++++ xen-4.10.0/tools/libxl/Makefile
+@@ -20,18 +20,18 @@ LIBUUID_LIBS += -luuid
+ endif
+ 
+ LIBXL_LIBS =
+-LIBXL_LIBS = $(LDLIBS_libxentoollog) $(LDLIBS_libxenevtchn) $(LDLIBS_libxenctrl) $(LDLIBS_libxenguest) $(LDLIBS_libxenstore) $(LDLIBS_libblktapctl) $(LDLIBS_libxentoolcore) $(PTYFUNCS_LIBS) $(LIBUUID_LIBS)
++LIBXL_LIBS = $(LDLIBS_libxentoollog) $(LDLIBS_libxenevtchn) $(LDLIBS_libxenctrl) $(LDLIBS_libxenguest) $(LDLIBS_libxenstore) $(LDLIBS_libxentoolcore) $(PTYFUNCS_LIBS) $(LIBUUID_LIBS)
+ ifeq ($(CONFIG_LIBNL),y)
+ LIBXL_LIBS += $(LIBNL3_LIBS)
+ endif
+ 
++CFLAGS_LIBXL += -I/usr/include/blktap
+ CFLAGS_LIBXL += $(CFLAGS_libxentoollog)
+ CFLAGS_LIBXL += $(CFLAGS_libxentoolcore)
+ CFLAGS_LIBXL += $(CFLAGS_libxenevtchn)
+ CFLAGS_LIBXL += $(CFLAGS_libxenctrl)
+ CFLAGS_LIBXL += $(CFLAGS_libxenguest)
+ CFLAGS_LIBXL += $(CFLAGS_libxenstore)
+-CFLAGS_LIBXL += $(CFLAGS_libblktapctl) 
+ ifeq ($(CONFIG_LIBNL),y)
+ CFLAGS_LIBXL += $(LIBNL3_CFLAGS)
+ endif
+@@ -48,9 +48,9 @@ LIBXLU_LIBS = $(LDLIBS_libxenlight)
+ 
+ LIBXL_OBJS-y = osdeps.o libxl_paths.o libxl_bootloader.o flexarray.o
+ ifeq ($(CONFIG_BLKTAP2),y)
+-LIBXL_OBJS-y += libxl_blktap2.o
++LIBXL_OBJS-y += libxl_blktap3.o
+ else
+-LIBXL_OBJS-y += libxl_noblktap2.o
++LIBXL_OBJS-y += libxl_noblktap3.o
+ endif
+ 
+ ifeq ($(CONFIG_LIBNL),y)
+Index: xen-4.10.0/tools/libxl/libxl_types_internal.idl
+===================================================================
+--- xen-4.10.0.orig/tools/libxl/libxl_types_internal.idl
++++ xen-4.10.0/tools/libxl/libxl_types_internal.idl
+@@ -29,6 +29,7 @@ libxl__device_kind = Enumeration("device
+     (12, "VDISPL"),
+     (13, "VUART"),
+     (14, "VWIF"),
++    (15, "VBD3"),
+     ])
+ 
+ libxl__console_backend = Enumeration("console_backend", [
