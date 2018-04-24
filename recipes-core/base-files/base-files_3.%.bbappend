@@ -1,6 +1,5 @@
 FILESEXTRAPATHS_prepend := "${THISDIR}/files:"
 SRC_URI += " \
-    file://inputrc \
     file://fstab.early \
     file://openxt-aliases.sh \
 "
@@ -43,7 +42,6 @@ dirs755_append_xenclient-uivm = " \
 volatiles = ""
 conffiles = " \
     ${sysconfdir}/host.conf \
-    ${sysconfdir}/inputrc \
     ${sysconfdir}/issue \
     ${sysconfdir}/issue.net \
     ${sysconfdir}/profile \
