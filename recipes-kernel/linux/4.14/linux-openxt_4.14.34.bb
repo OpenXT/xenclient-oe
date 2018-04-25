@@ -8,6 +8,8 @@ PV_MAJOR = "${@"${PV}".split('.', 3)[0]}"
 
 FILESEXTRAPATHS_prepend := "${THISDIR}/patches:${THISDIR}/defconfigs:"
 SRC_URI += "${KERNELORG_MIRROR}/linux/kernel/v${PV_MAJOR}.x/linux-${PV}.tar.xz;name=kernel \
+    file://0001-x86-xen-Delay-get_cpu_cap-until-stack-canary-is-esta.patch;patch=1 \
+    file://0002-xen-netfront-Fix-hang-on-device-removal.patch;patch=1 \
     file://bridge-carrier-follow-prio0.patch;patch=1 \
     file://privcmd-mmapnocache-ioctl.patch;patch=1 \
     file://xenkbd-tablet-resolution.patch;patch=1 \
@@ -44,9 +46,10 @@ SRC_URI += "${KERNELORG_MIRROR}/linux/kernel/v${PV_MAJOR}.x/linux-${PV}.tar.xz;n
     file://xsa-155-qsb-023-xen-netfront-add-range-check-for-Tx-response-id.patch;patch=1 \
     file://xsa-155-qsb-023-xen-netfront-copy-response-out-of-shared-buffer-befo.patch;patch=1 \
     file://xsa-155-qsb-023-xen-netfront-do-not-use-data-already-exposed-to-back.patch;patch=1 \
+    file://0001-mm-handle_mm_fault-xen_pmd_val-radix_tree_lookup_slo.patch;patch=1 \
     file://defconfig \
     "
 
-SRC_URI[kernel.md5sum] = "0c033c0420ae28017c2f15e02d0cf90c"
-SRC_URI[kernel.sha256sum] = "4ce2fa81854971c2f50462e14e790885ab13376870c41dd5208ccd7619617fbe"
+SRC_URI[kernel.md5sum] = "815b808ef64375fec3b2843e4d556c87"
+SRC_URI[kernel.sha256sum] = "782b6c4c85275c382c820e1934d3e6003ef468f43cfc5e7c22bc07c331a12bb9"
 LIC_FILES_CHKSUM = "file://COPYING;md5=d7810fab7487fb0aad327b76f1be7cd7"
