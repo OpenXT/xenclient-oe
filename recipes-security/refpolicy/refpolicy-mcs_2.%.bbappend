@@ -135,6 +135,7 @@ SRC_URI += " \
     file://patches/policy.modules.system.getty.diff \
     file://patches/policy.modules.system.init.diff \
     file://patches/policy.modules.system.libraries.diff \
+    file://patches/policy.modules.system.locallogin.diff \
     file://patches/policy.modules.system.logging.diff \
     file://patches/policy.modules.system.lvm.diff \
     file://patches/policy.modules.system.miscfiles.diff \
