@@ -1,0 +1,1107 @@
+From a10a505c36595df30465d82254127b61951ae582 Mon Sep 17 00:00:00 2001
+From: Mahantesh Salimath <mahantesh.openxt@gmail.com>
+Date: Wed, 14 Mar 2018 17:17:39 -0400
+Subject: [PATCH] icbinn support for blktap3
+
+OXT-1282
+
+Signed-off-by: Mahantesh Salimath <mahantesh.openxt@gmail.com>
+---
+ drivers/Makefile.am         |   7 +-
+ include/libvhd.h            |  18 +++
+ vhd/Makefile.am             |   2 +-
+ vhd/lib/Makefile.am         |   2 +-
+ vhd/lib/icbinn.c            | 334 ++++++++++++++++++++++++++++++++++++++++++++
+ vhd/lib/libvhd.c            | 266 ++++++++++++++++++++++++++---------
+ vhd/lib/relative-path.c     |   6 +-
+ vhd/lib/vhd-util-key.c      |  61 +++++++-
+ vhd/lib/vhd-util-scan.c     |   2 +-
+ vhd/lib/vhd-util-snapshot.c |   2 +-
+ 10 files changed, 624 insertions(+), 76 deletions(-)
+ create mode 100644 vhd/lib/icbinn.c
+
+Index: git/drivers/Makefile.am
+===================================================================
+--- git.orig/drivers/Makefile.am
++++ git/drivers/Makefile.am
+@@ -7,21 +7,22 @@ AM_CFLAGS += -DXC_WANT_COMPAT_EVTCHN_API
+ AM_CPPFLAGS  = -D_GNU_SOURCE
+ AM_CPPFLAGS += -I$(top_srcdir)/include
+ CRYPTLIBS = -lcrypto -Lcrypto -lxts-aes
++ICBLIBS = -licbinn -lpthread -ldl
+ 
+ libexec_PROGRAMS = tapdisk
+ 
+ tapdisk_SOURCES = tapdisk2.c
+-tapdisk_LDADD = libtapdisk.la crypto/libxts-aes.la $(CRYPTLIBS)
++tapdisk_LDADD = libtapdisk.la crypto/libxts-aes.la $(CRYPTLIBS) $(ICBLIBS)
+ 
+ noinst_PROGRAMS = tapdisk-stream
+ 
+-tapdisk_stream_LDADD = libtapdisk.la crypto/libxts-aes.la $(CRYPTLIBS)
++tapdisk_stream_LDADD = libtapdisk.la crypto/libxts-aes.la $(CRYPTLIBS) $(ICBLIBS)
+ 
+ sbin_PROGRAMS  = td-util
+ sbin_PROGRAMS += td-rated
+ 
+ td_util_SOURCES = td.c
+-td_util_LDADD = libtapdisk.la
++td_util_LDADD = libtapdisk.la $(ICBLIBS)
+ 
+ noinst_LTLIBRARIES = libtapdisk.la
+ 
+Index: git/include/libvhd.h
+===================================================================
+--- git.orig/include/libvhd.h
++++ git/include/libvhd.h
+@@ -118,9 +118,20 @@ typedef struct vhd_bat             vhd_b
+ typedef struct vhd_batmap          vhd_batmap_t;
+ typedef struct dd_batmap_hdr       vhd_batmap_header_t;
+ typedef struct prt_loc             vhd_parent_locator_t;
++typedef struct vhd_devops          vhd_devops_t;
+ typedef struct vhd_context         vhd_context_t;
+ typedef uint32_t                   vhd_flag_creat_t;
+ 
++struct vhd_devops {
++	off_t (*position)          (vhd_context_t *);
++	int (*seek)                (vhd_context_t *, off64_t, int);
++	int (*read)                (vhd_context_t *, void *, size_t);
++	int (*write)               (vhd_context_t *, void *, size_t);
++	int (*pread)               (vhd_context_t *, void *, size_t, off64_t);
++	int (*pwrite)              (vhd_context_t *, void *, size_t, off64_t);
++	void (*close)              (vhd_context_t *);
++};
++
+ struct vhd_bat {
+ 	uint32_t                   spb;
+ 	uint32_t                   entries;
+@@ -140,6 +151,8 @@ struct vhd_context {
+ 	int                        oflags;
+ 	int                        is_block;
+ 
++	uint64_t 		   offset;
++
+ 	uint32_t                   spb;
+ 	uint32_t                   bm_secs;
+ 
+@@ -147,6 +160,7 @@ struct vhd_context {
+ 	vhd_footer_t               footer;
+ 	vhd_bat_t                  bat;
+ 	vhd_batmap_t               batmap;
++	vhd_devops_t		  *devops;
+ 
+ 	struct crypto_blkcipher   *xts_tfm;
+ 	struct list_head           next;
+@@ -360,4 +374,8 @@ int vhd_io_write(vhd_context_t *, char *
+ int vhd_io_read_bytes(vhd_context_t *, void *, size_t, uint64_t);
+ int vhd_io_write_bytes(vhd_context_t *, void *, size_t, uint64_t);
+ 
++char *vhd_canonpath(const char *path, char *resolved_path);
++struct ICBINN_struct * vhd_icbinn_key(void);
++struct ICBINN_struct * vhd_icbinn_vhd(void);
++
+ #endif
+Index: git/vhd/Makefile.am
+===================================================================
+--- git.orig/vhd/Makefile.am
++++ git/vhd/Makefile.am
+@@ -11,6 +11,6 @@ bin_PROGRAMS  = vhd-util
+ bin_PROGRAMS += vhd-index
+ bin_PROGRAMS += vhd-update
+ 
+-LDADD = lib/libvhd.la -luuid -lcrypto
++LDADD = lib/libvhd.la -luuid -lcrypto -Llib -licbinn -ldl -lpthread
+ 
+ vhd_index_LDADD = lib/libvhd.la -luuid -lcrypto
+Index: git/vhd/lib/Makefile.am
+===================================================================
+--- git.orig/vhd/lib/Makefile.am
++++ git/vhd/lib/Makefile.am
+@@ -41,7 +41,7 @@ libvhd_la_SOURCES += ../../lvm/lvm-util.
+ 
+ libvhd_la_LDFLAGS = -version-info 1:1:1
+ 
+-libvhd_la_LIBADD = -luuid -lcrypto $(LIBICONV)
++libvhd_la_LIBADD = -luuid -lcrypto -lpthread -licbinn -ldl $(LIBICONV)
+ 
+ libvhdio_la_SOURCES  = libvhdio.c
+ libvhdio_la_SOURCES += ../../part/partition.c
+Index: git/vhd/lib/icbinn.c
+===================================================================
+--- /dev/null
++++ git/vhd/lib/icbinn.c
+@@ -0,0 +1,334 @@
++/*
++ * Copyright (c) 2012 Citrix Systems, Inc.
++ */
++
++#include <icbinn.h>
++
++static ICBINN *icb_vhd;
++
++static ICBINN *icb_key;
++
++ICBINN *
++vhd_icbinn_key (void)
++{
++  char proto[1024], *ptr, *host;
++  int port;
++
++  if (icb_key)
++    return icb_key;
++
++  ptr = getenv ("LIBVHD_ICBINN_KEY_SERVER");
++  if (!ptr)
++    return NULL;
++
++  strncpy (proto, ptr, sizeof (proto));
++  proto[sizeof (proto) - 1] = 0;
++
++  host = index (proto, ':');
++  if (!host)
++    return NULL;
++  *(host++) = 0;
++
++  ptr = index (host, ':');
++  if (!ptr)
++    {
++      port = ICBINN_PORT;
++    }
++  else
++    {
++      *ptr = 0;
++      port = atoi (ptr + 1);
++    }
++
++  if (!strcmp (proto, "v4v"))
++    {
++      icb_key = icbinn_clnt_create_v4v (atoi (host), port);
++    }
++  else if (!strcmp (proto, "tcp"))
++    {
++      icb_key = icbinn_clnt_create_tcp (host, port);
++    }
++
++  return icb_key;
++}
++
++ICBINN *
++vhd_icbinn_vhd (void)
++{
++  char proto[1024], *ptr, *host;
++  int port;
++
++  if (icb_vhd)
++    return icb_vhd;
++
++  ptr = getenv ("LIBVHD_ICBINN_VHD_SERVER");
++  if (!ptr)
++    return NULL;
++
++  strncpy (proto, ptr, sizeof (proto));
++  proto[sizeof (proto) - 1] = 0;
++
++  host = index (proto, ':');
++  if (!host)
++    return NULL;
++  *(host++) = 0;
++
++  ptr = index (host, ':');
++  if (!ptr)
++    {
++      port = ICBINN_PORT;
++    }
++  else
++    {
++      *ptr = 0;
++      port = atoi (ptr + 1);
++    }
++
++  if (!strcmp (proto, "v4v"))
++    {
++      icb_vhd = icbinn_clnt_create_v4v (atoi (host), port);
++    }
++  else if (!strcmp (proto, "tcp"))
++    {
++      icb_vhd = icbinn_clnt_create_tcp (host, port);
++    }
++
++  return icb_vhd;
++}
++
++static off_t
++vhd_icbinn_devops_position (vhd_context_t * vhd)
++{
++  return (off_t) vhd->offset;
++}
++
++static int
++vhd_icbinn_devops_seek (vhd_context_t * vhd, off64_t off, int whence)
++{
++  struct icbinn_stat buf;
++
++  switch (whence)
++    {
++      //XXX: both of these ought to check for seeks beyond EOF, but they don't
++    case SEEK_SET:
++      vhd->offset = off;
++      break;
++    case SEEK_CUR:
++      vhd->offset += off;
++      break;
++    case SEEK_END:
++
++      if (icbinn_stat (icb_vhd, vhd->file, &buf))
++        return -1;
++
++      if (buf.type != ICBINN_TYPE_FILE)
++        return -1;
++
++      vhd->offset = buf.size + off;
++      break;
++    default:
++      return -1;
++    }
++
++  return 0;
++}
++
++static int
++vhd_icbinn_devops_read (vhd_context_t * vhd, void *buf, size_t count)
++{
++  size_t ret;
++
++  ret = icbinn_pread (icb_vhd, vhd->fd, buf, count, vhd->offset);
++
++  if (ret > 0)
++    vhd->offset += ret;
++
++  return (ret == count) ? 0 : -EIO;
++}
++
++static int
++vhd_icbinn_devops_pread (vhd_context_t * vhd,
++                         void *buf, size_t size, off64_t off)
++{
++  size_t ret = icbinn_pread (icb_vhd, vhd->fd, buf, size, off);
++
++  return (ret == size) ? 0 : -EIO;
++}
++
++static int
++vhd_icbinn_devops_write (vhd_context_t * vhd, void *buf, size_t count)
++{
++  size_t ret;
++
++  ret = icbinn_pwrite (icb_vhd, vhd->fd, buf, count, vhd->offset);
++
++  if (ret > 0)
++    vhd->offset += ret;
++
++  return (ret == count) ? 0 : -EIO;
++}
++
++static int
++vhd_icbinn_devops_pwrite (vhd_context_t * vhd,
++                          void *buf, size_t size, off64_t off)
++{
++  size_t ret = icbinn_pwrite (icb_vhd, vhd->fd, buf, size, off);
++
++  return (ret == size) ? 0 : -EIO;
++}
++
++static void
++vhd_icbinn_devops_close (vhd_context_t * vhd)
++{
++  char *file = vhd->file;
++  int fd = vhd->fd;
++
++  vhd->fd = -1;
++  __vhd_close (vhd);
++
++  if (file)
++    icbinn_close (icb_vhd, fd);
++}
++
++static vhd_devops_t vhd_icbinn_devops = {
++  .position = vhd_icbinn_devops_position,
++  .seek = vhd_icbinn_devops_seek,
++  .read = vhd_icbinn_devops_read,
++  .write = vhd_icbinn_devops_write,
++  .pread = vhd_icbinn_devops_pread,
++  .pwrite = vhd_icbinn_devops_pwrite,
++  .close = vhd_icbinn_devops_close,
++};
++
++
++
++/* Shamelessly stolen of glibc 2.9 with modifications */
++
++/* Return the canonical absolute name of file NAME.  A canonical name
++   does not contain any `.', `..' components nor any repeated path
++   separators ('/') or symlinks.  All path components must exist.  If
++   RESOLVED is null, the result is malloc'd; otherwise, if the
++   canonical name is PATH_MAX chars or more, returns null with `errno'
++   set to ENAMETOOLONG; if the name fits in fewer than PATH_MAX chars,
++   returns the name in RESOLVED.  If the name cannot be resolved and
++   RESOLVED is non-NULL, it contains the path of the first component
++   that cannot be resolved.  If the path can be resolved, RESOLVED
++   holds the same value as the value returned.  */
++
++char *
++vhd_canonpath(const char *name, char *resolved)
++{
++  char *rpath, *dest;
++  const char *start, *end, *rpath_limit;
++  long int path_max;
++
++  if (!vhd_icbinn_vhd ())
++    return canonpath (name, resolved);
++
++  if ((name == NULL) || (name[0] == '\0'))
++    return canonpath (name, resolved);
++
++#ifdef PATH_MAX
++  path_max = PATH_MAX;
++#else
++  path_max = pathconf (name, _PC_PATH_MAX);
++  if (path_max <= 0)
++    path_max = 1024;
++#endif
++
++  if (resolved == NULL)
++    {
++      rpath = malloc (path_max);
++      if (rpath == NULL)
++        return NULL;
++    }
++  else
++    rpath = resolved;
++  rpath_limit = rpath + path_max;
++
++  rpath[0] = '/';
++  dest = rpath + 1;
++
++  for (start = end = name; *start; start = end)
++    {
++      struct icbinn_stat st;
++
++      /* Skip sequence of multiple path-separators.  */
++      while (*start == '/')
++        ++start;
++
++      /* Find end of path component.  */
++      for (end = start; *end && *end != '/'; ++end)
++        /* Nothing.  */ ;
++
++      if (end - start == 0)
++        break;
++      else if (end - start == 1 && start[0] == '.')
++        /* nothing */ ;
++      else if (end - start == 2 && start[0] == '.' && start[1] == '.')
++        {
++          /* Back up to previous component, ignore if at root already.  */
++          if (dest > rpath + 1)
++            while ((--dest)[-1] != '/');
++        }
++      else
++        {
++          size_t new_size;
++
++          if (dest[-1] != '/')
++            *dest++ = '/';
++
++          if (dest + (end - start) >= rpath_limit)
++            {
++              ptrdiff_t dest_offset = dest - rpath;
++              char *new_rpath;
++
++              if (resolved)
++                {
++                  errno = ENAMETOOLONG;
++                  if (dest > rpath + 1)
++                    dest--;
++                  *dest = '\0';
++                  goto error;
++                }
++              new_size = rpath_limit - rpath;
++              if (end - start + 1 > path_max)
++                new_size += end - start + 1;
++              else
++                new_size += path_max;
++              new_rpath = (char *) realloc (rpath, new_size);
++              if (new_rpath == NULL)
++                goto error;
++              rpath = new_rpath;
++              rpath_limit = rpath + new_size;
++
++              dest = rpath + dest_offset;
++            }
++
++          dest = mempcpy (dest, start, end - start);
++          *dest = '\0';
++
++          if (icbinn_stat (icb_vhd, rpath, &st) < 0)
++            {
++              errno = ENOENT;
++              goto error;
++            }
++
++          if ((st.type != ICBINN_TYPE_DIRECTORY) && (*end != '\0'))
++            {
++              errno = ENOTDIR;
++              goto error;
++            }
++        }
++    }
++  if (dest > rpath + 1 && dest[-1] == '/')
++    --dest;
++  *dest = '\0';
++
++  return rpath;
++
++error:
++  if (resolved == NULL)
++    free (rpath);
++  return NULL;
++}
+Index: git/vhd/lib/libvhd.c
+===================================================================
+--- git.orig/vhd/lib/libvhd.c
++++ git/vhd/lib/libvhd.c
+@@ -47,6 +47,7 @@
+ #include <sys/mman.h>
+ #include <sys/stat.h>
+ #include <sys/types.h>
++#include <stddef.h>
+ 
+ #include "debug.h"
+ #include "xattr.h"
+@@ -99,6 +100,9 @@ static int vhd_cache_enabled(vhd_context
+ static int vhd_cache_load(vhd_context_t *);
+ static int vhd_cache_unload(vhd_context_t *);
+ static vhd_context_t * vhd_cache_get_parent(vhd_context_t *);
++static void __vhd_close(vhd_context_t *ctx);
++
++#include "icbinn.c"
+ 
+ static inline int
+ old_test_bit(volatile char *addr, int nr)
+@@ -1326,7 +1330,7 @@ vhd_find_parent(vhd_context_t *ctx, cons
+ 	}
+ 
+ 	/* check parent path relative to child's directory */
+-	cpath = canonpath(ctx->file, __cpath);
++	cpath = vhd_canonpath(ctx->file, __cpath);
+ 	if (!cpath) {
+ 		err = -errno;
+ 		goto out;
+@@ -1340,7 +1344,7 @@ vhd_find_parent(vhd_context_t *ctx, cons
+ 	}
+ 
+ 	if (!access(location, R_OK)) {
+-		path = canonpath(location, __location);
++		path = vhd_canonpath(location, __location);
+ 		if (path) {
+ 			*_location = strdup(path);
+ 			if (*_location)
+@@ -1723,11 +1727,11 @@ vhd_parent_locator_write_at(vhd_context_
+ 			    const char *parent, off64_t off, uint32_t code,
+ 			    size_t max_bytes, vhd_parent_locator_t *loc)
+ {
+-	struct stat stats;
+ 	int err, len, size;
+ 	char *absolute_path, *relative_path, *encoded;
+ 	char __parent[PATH_MAX];
+ 	void *block;
++	ICBINN *icb = vhd_icbinn_vhd();
+ 
+ 	memset(loc, 0, sizeof(vhd_parent_locator_t));
+ 
+@@ -1750,22 +1754,36 @@ vhd_parent_locator_write_at(vhd_context_
+ 		return -EINVAL;
+ 	}
+ 
+-	absolute_path = canonpath(parent, __parent);
++	absolute_path = vhd_canonpath(parent, __parent);
+ 	if (!absolute_path) {
+ 		err = -errno;
+ 		goto out;
+ 	}
+ 
+-	err = stat(absolute_path, &stats);
+-	if (err) {
+-		err = -errno;
+-		goto out;
+-	}
++	if (icb) {
++		struct icbinn_stat stats;
++		err = icbinn_stat(icb,absolute_path, &stats);
++		if (err) {
++			err = -ENOENT;
++			goto out;
++		}
++		if (stats.type != ICBINN_TYPE_FILE) {
++			err = -EINVAL;
++			goto out;
++		}
++	} else {
++		struct stat stats;
++		err = stat(absolute_path, &stats);
++		if (err) {
++			err = -errno;
++			goto out;
++		}
+ 
+-	if (!S_ISREG(stats.st_mode) && !S_ISBLK(stats.st_mode)) {
+-		err = -EINVAL;
+-		goto out;
+-	}
++		if (!S_ISREG(stats.st_mode) && !S_ISBLK(stats.st_mode)) {
++			err = -EINVAL;
++			goto out;
++		}
++ 	}
+ 
+ 	relative_path = relative_path_to(ctx->file, absolute_path, &err);
+ 	if (!relative_path || err) {
+@@ -2397,8 +2415,8 @@ vhd_atomic_io(ssize_t (*f) (int, void *,
+ 	return res;
+ }
+ 
+-int
+-vhd_seek(vhd_context_t *ctx, off64_t offset, int whence)
++static int
++__vhd_seek(vhd_context_t *ctx, off64_t offset, int whence)
+ {
+ 	off64_t off;
+ 
+@@ -2412,14 +2430,14 @@ vhd_seek(vhd_context_t *ctx, off64_t off
+ 	return 0;
+ }
+ 
+-off64_t
+-vhd_position(vhd_context_t *ctx)
++static off64_t
++__vhd_position(vhd_context_t *ctx)
+ {
+ 	return lseek64(ctx->fd, 0, SEEK_CUR);
+ }
+ 
+-int
+-vhd_read(vhd_context_t *ctx, void *buf, size_t size)
++static int
++__vhd_read(vhd_context_t *ctx, void *buf, size_t size)
+ {
+ 	size_t ret;
+ 
+@@ -2435,8 +2453,8 @@ vhd_read(vhd_context_t *ctx, void *buf,
+ 	return (errno ? -errno : -EIO);
+ }
+ 
+-int
+-vhd_write(vhd_context_t *ctx, void *buf, size_t size)
++static int
++__vhd_write(vhd_context_t *ctx, void *buf, size_t size)
+ {
+ 	size_t ret;
+ 
+@@ -2453,7 +2471,7 @@ vhd_write(vhd_context_t *ctx, void *buf,
+ }
+ 
+ static int
+-vhd_pread(vhd_context_t *ctx, void *buf, size_t size, off64_t offset)
++__vhd_pread(vhd_context_t *ctx, void *buf, size_t size, off64_t offset)
+ {
+ 	ssize_t ret;
+ 
+@@ -2470,7 +2488,7 @@ vhd_pread(vhd_context_t *ctx, void *buf,
+ }
+ 
+ static int
+-vhd_pwrite(vhd_context_t *ctx, void *buf, size_t size, off64_t offset)
++__vhd_pwrite(vhd_context_t *ctx, void *buf, size_t size, off64_t offset)
+ {
+ 	ssize_t ret;
+ 
+@@ -2487,6 +2505,54 @@ vhd_pwrite(vhd_context_t *ctx, void *buf
+ }
+ 
+ int
++vhd_seek(vhd_context_t *ctx, off64_t offset, int whence)
++{
++	if (ctx->devops && ctx->devops->seek)
++		return ctx->devops->seek(ctx, offset, whence);
++	return __vhd_seek(ctx, offset, whence);
++}
++
++off_t
++vhd_position(vhd_context_t *ctx)
++{
++	if (ctx->devops && ctx->devops->position)
++		return ctx->devops->position(ctx);
++	return __vhd_position(ctx);
++}
++
++int
++vhd_read(vhd_context_t *ctx, void *buf, size_t size)
++{
++	if (ctx->devops && ctx->devops->read)
++		return ctx->devops->read(ctx, buf, size);
++	return __vhd_read(ctx, buf, size);
++}
++
++int
++vhd_write(vhd_context_t *ctx, void *buf, size_t size)
++{
++	if (ctx->devops && ctx->devops->write)
++		return ctx->devops->write(ctx, buf, size);
++	return __vhd_write(ctx, buf, size);
++}
++
++int
++vhd_pread(vhd_context_t *ctx, void *buf, size_t size, off64_t offset)
++{
++	if (ctx->devops && ctx->devops->pread)
++		return ctx->devops->pread(ctx, buf, size, offset);
++	return __vhd_pread(ctx, buf, size, offset);
++}
++
++int
++vhd_pwrite(vhd_context_t *ctx, void *buf, size_t size, off64_t offset)
++{
++	if (ctx->devops && ctx->devops->pwrite)
++		return ctx->devops->pwrite(ctx, buf, size, offset);
++	return __vhd_pwrite(ctx, buf, size, offset);
++}
++
++int
+ vhd_offset(vhd_context_t *ctx, uint32_t sector, uint32_t *offset)
+ {
+ 	int err;
+@@ -2562,6 +2628,7 @@ int
+ vhd_open(vhd_context_t *ctx, const char *file, int flags)
+ {
+ 	int i, err, oflags;
++	ICBINN *icb;
+ 
+ 	if (flags & VHD_OPEN_STRICT)
+ 		vhd_flag_clear(flags, VHD_OPEN_FAST);
+@@ -2572,19 +2639,34 @@ vhd_open(vhd_context_t *ctx, const char
+ 	ctx->fd     = -1;
+ 	ctx->oflags = flags;
+ 
++	icb = vhd_icbinn_vhd();
++
+ 	err = namedup(&ctx->file, file);
+ 	if (err)
+ 		return err;
+ 
+-	oflags = O_LARGEFILE;
+-	if (!(flags & VHD_OPEN_CACHED))
+-		oflags |= O_DIRECT;
+-	if (flags & VHD_OPEN_RDONLY)
+-		oflags |= O_RDONLY;
+-	if (flags & VHD_OPEN_RDWR)
+-		oflags |= O_RDWR;
++	if (icb) {
++		oflags = 0;
++		if (flags & VHD_OPEN_RDONLY)
++			oflags |= ICBINN_RDONLY;
++		if (flags & VHD_OPEN_RDWR)
++			oflags |= ICBINN_RDWR;
++
++		ctx->fd = icbinn_open(icb, ctx->file, oflags);
++		ctx->devops = &vhd_icbinn_devops;
++	}
++	else{
++		oflags = O_LARGEFILE;
++		if (!(flags & VHD_OPEN_CACHED))
++			oflags |= O_DIRECT;
++		if (flags & VHD_OPEN_RDONLY)
++			oflags |= O_RDONLY;
++		if (flags & VHD_OPEN_RDWR)
++			oflags |= O_RDWR;
++
++		ctx->fd = open(ctx->file, oflags, 0644);
++	}
+ 
+-	ctx->fd = open(ctx->file, oflags, 0644);
+ 	if (ctx->fd == -1) {
+ 		err = -errno;
+ 		VHDLOG("failed to open %s: %d\n", ctx->file, err);
+@@ -2609,11 +2691,17 @@ vhd_open(vhd_context_t *ctx, const char
+ 		posix_fadvise(ctx->fd, 0, 0, POSIX_FADV_RANDOM);
+ 	}
+ 
+-	err = vhd_test_file_fixed(ctx->file, &ctx->is_block);
+-	if (err)
+-		goto fail;
++	if (icb) {
++		ctx->is_block = 0;
++	}
++	else {
++		err = vhd_test_file_fixed(ctx->file, &ctx->is_block);
++		if (err)
++			goto fail;
++	}
+ 
+ 	if (flags & VHD_OPEN_FAST) {
++		/* TODO handle ICBINN open in this case too */
+ 		err = vhd_open_fast(ctx);
+ 		if (err)
+ 			goto fail;
+@@ -2655,19 +2743,23 @@ vhd_open(vhd_context_t *ctx, const char
+ 	return 0;
+ 
+ fail:
+-	if (ctx->fd != -1)
+-		close(ctx->fd);
++	if (ctx->fd != -1) {
++		if (icb)
++			icbinn_close(icb,ctx->fd);
++		else
++			close(ctx->fd);
++	}
+ 	free(ctx->file);
+ 	memset(ctx, 0, sizeof(vhd_context_t));
+ 	return err;
+ }
+ 
+-void
+-vhd_close(vhd_context_t *ctx)
++static void
++__vhd_close(vhd_context_t *ctx)
+ {
+ 	vhd_cache_unload(ctx);
+ 
+-	if (ctx->fd != -1) {
++	if (ctx->file && ctx->fd != -1) {
+ 		fsync(ctx->fd);
+ 		close(ctx->fd);
+ 	}
+@@ -2679,6 +2771,14 @@ vhd_close(vhd_context_t *ctx)
+ 	memset(ctx, 0, sizeof(vhd_context_t));
+ }
+ 
++void
++vhd_close(vhd_context_t *ctx)
++{
++        if (ctx->devops && ctx->devops->close)
++                return ctx->devops->close(ctx);
++        return __vhd_close(ctx);
++}
++
+ static inline void
+ vhd_initialize_footer(vhd_context_t *ctx, int type, uint64_t size)
+ {
+@@ -2753,20 +2853,35 @@ get_file_size(const char *name)
+ {
+ 	int fd;
+ 	off64_t end;
++	ICBINN *icb=vhd_icbinn_vhd();
+ 
+-	fd = open(name, O_LARGEFILE | O_RDONLY);
+-	if (fd == -1) {
+-		VHDLOG("unable to open '%s': %d\n", name, errno);
+-		return -errno;
++	if (icb) {
++		struct icbinn_stat buf;
++
++		if (icbinn_stat(icb,name,&buf))
++			return -1;
++
++		if (buf.type != ICBINN_TYPE_FILE)
++			return -1;
++
++		end=buf.size;
+ 	}
+-	end = lseek64(fd, 0, SEEK_END);
+-	close(fd); 
++	else{
++		fd = open(name, O_LARGEFILE | O_RDONLY);
++		if (fd == -1) {
++			VHDLOG("unable to open '%s': %d\n", name, errno);
++			return -errno;
++		}
++		end = lseek64(fd, 0, SEEK_END);
++		close(fd);
++	}
++
+ 	return end;
+ }
+ 
+ static int
+-vhd_initialize_header(vhd_context_t *ctx, const char *parent_path, 
+-		uint64_t size, int raw, uint64_t *psize)
++vhd_initialize_header(ICBINN *icb, vhd_context_t *ctx, const char *parent_path,
++		uint64_t size, int raw)
+ {
+ 	int err;
+ 	struct stat stats;
+@@ -2796,15 +2911,21 @@ vhd_initialize_header(vhd_context_t *ctx
+ 	if (ctx->footer.type == HD_TYPE_DYNAMIC)
+ 		return 0;
+ 
+-	err = stat(parent_path, &stats);
++	if (icb) {
++		struct icbinn_stat buf;
++		err = icbinn_stat(icb,parent_path,&buf);
++		time(&stats.st_mtime);
++	}
++	else {
++		err = stat(parent_path, &stats);
++	}
+ 	if (err == -1)
+ 		return -errno;
+ 
+ 	if (raw) {
+ 		ctx->header.prt_ts = vhd_time(stats.st_mtime);
+-		*psize = get_file_size(parent_path);
+ 		if (!size)
+-			size = *psize;
++			size = get_file_size(parent_path);
+ 	}
+ 	else {
+ 		err = vhd_open(&parent, parent_path, VHD_OPEN_RDONLY);
+@@ -2817,16 +2938,10 @@ vhd_initialize_header(vhd_context_t *ctx
+ 			vhd_close(&parent);
+ 			return -EINVAL;
+ 		}
+-		*psize = parent.footer.curr_size;
+ 		if (!size)
+-			size = *psize;
++			size = parent.footer.curr_size;
+ 		vhd_close(&parent);
+ 	}
+-	if (size < *psize) {
+-		VHDLOG("snapshot size (%"PRIu64") < parent size (%"PRIu64")\n",
+-				size, *psize);
+-		return -EINVAL;
+-	}
+ 	ctx->footer.orig_size    = size;
+ 	ctx->footer.curr_size    = size;
+ 	ctx->footer.geometry     = vhd_chs(size);
+@@ -2891,7 +3006,7 @@ vhd_change_parent(vhd_context_t *child,
+ 		return -EINVAL;
+ 	}
+ 
+-	ppath = canonpath(parent_path, __parent_path);
++	ppath = vhd_canonpath(parent_path, __parent_path);
+ 	if (!ppath) {
+ 		VHDLOG("error resolving parent path %s for %s: %d\n",
+ 		       parent_path, child->file, errno);
+@@ -3129,6 +3244,7 @@ __vhd_create(const char *name, const cha
+ 	off64_t off;
+ 	vhd_context_t ctx;
+ 	uint64_t size, psize, blks;
++	ICBINN *icb;
+ 
+ 	switch (type) {
+ 	case HD_TYPE_DIFF:
+@@ -3159,8 +3275,17 @@ __vhd_create(const char *name, const cha
+ 		blks = (mbytes + VHD_BLOCK_SIZE - 1) >> VHD_BLOCK_SHIFT;
+ 	size = blks << VHD_BLOCK_SHIFT;
+ 
+-	ctx.fd = open(name, O_WRONLY | O_CREAT |
+-		      O_TRUNC | O_LARGEFILE | O_DIRECT, 0644);
++	icb = vhd_icbinn_vhd();
++
++	if (icb) {
++		ctx.fd = icbinn_open(icb, (char *) name, ICBINN_WRONLY | ICBINN_CREAT | ICBINN_TRUNC);
++		ctx.devops = &vhd_icbinn_devops;
++	}
++	else {
++		ctx.fd = open(name, O_WRONLY | O_CREAT |
++			      O_TRUNC | O_LARGEFILE | O_DIRECT, 0644);
++	}
++
+ 	if (ctx.fd == -1)
+ 		return -errno;
+ 
+@@ -3170,9 +3295,14 @@ __vhd_create(const char *name, const cha
+ 		goto out;
+ 	}
+ 
+-	err = vhd_test_file_fixed(ctx.file, &ctx.is_block);
+-	if (err)
+-		goto out;
++	if (icb) {
++		ctx.is_block = 0;
++	}
++	else {
++		err = vhd_test_file_fixed(ctx.file, &ctx.is_block);
++		if (err)
++			goto out;
++	}
+ 
+ 	vhd_initialize_footer(&ctx, type, size);
+ 
+@@ -3182,7 +3312,7 @@ __vhd_create(const char *name, const cha
+ 			goto out;
+ 	} else {
+ 		int raw = vhd_flag_test(flags, VHD_FLAG_CREAT_PARENT_RAW);
+-		err = vhd_initialize_header(&ctx, parent, size, raw, &psize);
++		err = vhd_initialize_header(icb, &ctx, parent, size, raw);
+ 		if (err)
+ 			goto out;
+ 
+@@ -3248,8 +3378,12 @@ __vhd_create(const char *name, const cha
+ 
+ out:
+ 	vhd_close(&ctx);
+-	if (err && !ctx.is_block)
+-		unlink(name);
++	if (err && !ctx.is_block) {
++		if (icb)
++			icbinn_unlink(icb, name);
++		else
++			unlink(name);
++	}
+ 	return err;
+ }
+ 
+Index: git/vhd/lib/relative-path.c
+===================================================================
+--- git.orig/vhd/lib/relative-path.c
++++ git/vhd/lib/relative-path.c
+@@ -38,6 +38,8 @@
+ #include <string.h>
+ #include <limits.h>
+ 
++char *vhd_canonpath(const char *path, char *resolved_path);
++
+ #include "relative-path.h"
+ #include "canonpath.h"
+ 
+@@ -240,14 +242,14 @@ relative_path_to(char *from, char *to, i
+ 		return NULL;
+ 	}
+ 
+-	to_absolute = canonpath(to, __to_absolute);
++	to_absolute = vhd_canonpath(to, __to_absolute);
+ 	if (!to_absolute) {
+ 		EPRINTF("failed to get absolute path of %s\n", to);
+ 		*err = -errno;
+ 		goto out;
+ 	}
+ 
+-	from_absolute = canonpath(from, __from_absolute);
++	from_absolute = vhd_canonpath(from, __from_absolute);
+ 	if (!from_absolute) {
+ 		EPRINTF("failed to get absolute path of %s\n", from);
+ 		*err = -errno;
+Index: git/vhd/lib/vhd-util-key.c
+===================================================================
+--- git.orig/vhd/lib/vhd-util-key.c
++++ git/vhd/lib/vhd-util-key.c
+@@ -38,6 +38,7 @@
+ 
+ #include <openssl/evp.h>
+ 
++#include "icbinn.h"
+ #include "libvhd.h"
+ 
+ #define MAX_KEY_SIZE 512
+@@ -92,6 +93,58 @@ out:
+ 	return err;
+ }
+ 
++static int
++vhd_util_read_key_icbinn(ICBINN *icb, const char *keypath, uint8_t *key,
++		  size_t max_size, size_t *out_size)
++{
++	int fd = -1, err;
++	ssize_t size;
++	struct icbinn_stat sb;
++
++
++
++	err = icbinn_stat(icb, keypath, &sb);
++	if (err) {
++		ERR("failed to stat %s\n", keypath);
++		err = -ENOENT;
++		goto out;
++	}
++
++	if (sb.type != ICBINN_TYPE_FILE) {
++		ERR("%s isn't a file\n", keypath);
++		err = -EISDIR;
++		goto out;
++	}
++
++	fd = icbinn_open(icb, keypath, O_RDONLY);
++	if (fd == -1) {
++		ERR("failed to open %s\n", keypath );
++		err = -EINVAL;
++		goto out;
++	}
++
++	size = icbinn_pread(icb, fd, key, max_size, 0);
++	if (size == -1) {
++		ERR("failed to read key\n");
++		err = -EIO;
++		goto out;
++	}
++
++	if (size != sb.size) {
++		ERR("short read of key\n");
++		err = -EIO;
++		goto out;
++	}
++
++	if (out_size)
++		*out_size = size;
++
++out:
++	if (fd != -1)
++		icbinn_close(icb,fd);
++	return err;
++}
++
+ /*
+  * calculates keyhash by taking a SHA256 hash of @keyhash->nonce + key
+  */
+@@ -138,9 +191,15 @@ vhd_util_calculate_keyhash(struct vhd_ke
+ 	int err;
+ 	size_t size;
+ 	uint8_t key[MAX_KEY_SIZE];
++	ICBINN *icb = vhd_icbinn_key();
+ 
+ 	size = 0;
+-	err = vhd_util_read_key(keypath, key, sizeof(key), &size);
++	if (icb) {
++		err = vhd_util_read_key_icbinn(icb, keypath, key, sizeof(key), &size);
++	}
++	else {
++		err = vhd_util_read_key(keypath, key, sizeof(key), &size);
++	}
+ 	if (err) {
+ 		ERR("failed to read key: %d\n", err);
+ 		goto out;
+Index: git/vhd/lib/vhd-util-scan.c
+===================================================================
+--- git.orig/vhd/lib/vhd-util-scan.c
++++ git/vhd/lib/vhd-util-scan.c
+@@ -786,7 +786,7 @@ vhd_util_scan_open(vhd_context_t *vhd, s
+ 	else {
+ 		char __image_name[PATH_MAX];
+ 
+-		image->name = canonpath(target->name, __image_name);
++		image->name = vhd_canonpath(target->name, __image_name);
+ 		if (image->name)
+ 			image->name = strdup(__image_name);
+ 		if (!image->name) {
+Index: git/vhd/lib/vhd-util-snapshot.c
+===================================================================
+--- git.orig/vhd/lib/vhd-util-snapshot.c
++++ git/vhd/lib/vhd-util-snapshot.c
+@@ -173,7 +173,7 @@ vhd_util_snapshot(int argc, char **argv)
+ 		goto usage;
+ 	}
+ 
+-	ppath = canonpath(pname, __ppath);
++	ppath = vhd_canonpath(pname, __ppath);
+ 	if (!ppath)
+ 		return -errno;
+ 
