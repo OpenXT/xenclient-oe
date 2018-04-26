@@ -6,6 +6,9 @@ LICENSE = "BSD"
 LIC_FILES_CHKSUM = "file://${S}/LICENSE;md5=91b7c548d73ea16537799e8060cea819"
 DEPENDS = "tpm2-tss openssl curl autoconf-archive pkgconfig"
 SRC_URI = "git://github.com/01org/tpm2-tools.git;protocol=git;branch=master;name=tpm2-tools;destsuffix=tpm2-tools \
+    file://0001-tpm2_listpcrs-use-TPM2_GetCapability-to-determine-PC.patch \
+    file://0002-listpcrs-remove-one-redundant-call-to-tpm-get-cap.patch \
+    file://0003-listpcrs-fix-for-unsupported-disabled-alg-in-L.patch \
     file://tpm2-tools-lib-support.patch \
     file://tpm2-sealing-support.patch \
     file://tpm2-unsealing-support.patch \
