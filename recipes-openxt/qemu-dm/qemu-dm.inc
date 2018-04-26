@@ -50,6 +50,7 @@ SRC_URI += "file://compile-time-stubdom-flag.patch \
             file://set-blockdev-ro.patch \
             file://block-remove-unused-block-format-support.patch \
             file://net-Remove-unused-network-options.patch \
+            file://round-pci-region-sizes.patch \
             file://xsa-197-qemu-incautious-about-shared-ring-processing.patch \
             file://xsa216-qemuu-4.7.patch \
             file://CVE-2016-8669-char-serial-check-divider-value-against-baud-base.patch \
