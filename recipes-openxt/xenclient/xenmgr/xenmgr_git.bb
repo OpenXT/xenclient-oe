@@ -45,7 +45,7 @@ S = "${WORKDIR}/git/xenmgr"
 inherit haskell update-rc.d xc-rpcgen
 
 INITSCRIPT_NAME = "xenmgr"
-INITSCRIPT_PARAMS = "start 80 5 . stop 01 0 1 6 ."
+INITSCRIPT_PARAMS = "defaults 80"
 
 FILES_${PN} += " \
     ${datadir}/xenmgr-1.0/templates/default/* \
