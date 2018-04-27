@@ -1,8 +1,8 @@
 #!/bin/sh
 ### BEGIN INIT INFO
 # Provides:             volatile
-# Required-Start:       $local_fs
-# Required-Stop:      $local_fs
+# Required-Start:       $local_fs cryptdisks
+# Required-Stop:        cryptdisks $local_fs
 # Default-Start:        S
 # Default-Stop:
 # Short-Description:  Populate the volatile filesystem
