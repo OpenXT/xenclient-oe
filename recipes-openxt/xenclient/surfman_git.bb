@@ -21,7 +21,7 @@ ASNEEDED = ""
 inherit autotools xenclient update-rc.d pkgconfig
 
 INITSCRIPT_NAME = "surfman"
-INITSCRIPT_PARAMS = "defaults 72"
+INITSCRIPT_PARAMS = "start 72 5 . stop 72 0 1 2 3 4 6 ."
 
 pkg_postinst_${PN} () {
     if [ ! -f $D/etc/surfman.conf ]; then

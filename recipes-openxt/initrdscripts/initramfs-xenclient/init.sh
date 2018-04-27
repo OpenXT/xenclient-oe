@@ -112,6 +112,8 @@ read_args() {
                 ;;
             break=*)
                 BREAK=$optarg ;;
+            [0123456Ss])
+                RUNLEVEL=$arg ;;
         esac
     done
 }
@@ -205,7 +207,7 @@ boot_root() {
     mount --move /sys /root/sys
 
     cd /root
-    exec switch_root -c /dev/console /root /sbin/selinux-load.sh ${INIT:-$DEFINIT}
+    exec switch_root -c /dev/console /root /sbin/selinux-load.sh ${INIT:-$DEFINIT} ${RUNLEVEL}
 }
 
 fatal() {
