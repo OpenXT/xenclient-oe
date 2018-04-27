@@ -157,6 +157,7 @@ tboot_install_files() {
     cp -f ${IMAGE_ROOTFS}/boot/5th_gen_i5_i7_SINIT_79.BIN ${DEPLOY_DIR_IMAGE}/bdw.acm
     cp -f ${IMAGE_ROOTFS}/boot/6th_gen_i5_i7_SINIT_71.BIN ${DEPLOY_DIR_IMAGE}/skl.acm
     cp -f ${IMAGE_ROOTFS}/boot/7th_gen_i5_i7-SINIT_74.bin ${DEPLOY_DIR_IMAGE}/kbl.acm
+    cp -f ${IMAGE_ROOTFS}/boot/8th_gen_i5_i7-SINIT_76.bin ${DEPLOY_DIR_IMAGE}/cfl.acm
     cp -f ${IMAGE_ROOTFS}/boot/license-SINIT-ACMs.txt ${DEPLOY_DIR_IMAGE}/license-SINIT-ACMs.txt
 }
 IMAGE_POSTPROCESS_COMMAND += "tboot_install_files; "
