@@ -11,6 +11,8 @@ COMPATIBLE_MACHINE_x86-64 = ".*"
 
 require tboot-arch.inc
 
+INSANE_SKIP_${PN} = "arch"
+
 export TBOOT_TARGET_ARCH = "${@map_tboot_arch(d.getVar('TARGET_ARCH'), d)}"
 
 python () {
@@ -25,6 +27,7 @@ do_compile() {
 
 do_install() {
 	oe_runmake SUBDIRS="tboot lcptools lcptools-v2 tb_polgen utils pcr-calc" DISTDIR="${D}${base_prefix}" install
+	gunzip -k "${D}${base_prefix}/boot/tboot.gz"
 }
 
 PACKAGES += " \
@@ -37,6 +40,7 @@ PACKAGES += " \
 "
 
 FILES_${PN} = " \
+    ${base_prefix}/boot/tboot \
     ${base_prefix}/boot/tboot.gz \
 "
 FILES_${PN}-dbg += " \

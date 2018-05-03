@@ -27,6 +27,8 @@ SRC_URI = " \
     file://0018-tpm2.0-Perform-orderly-shutdown.patch \
     file://0019-tboot-Export-TPM-event-log-to-VMM-Kernel.patch \
     file://0020-tboot-utils-Fix-tools-build-in-64bits-env.patch \
+    file://0021-tboot-find-e820-regions-that-include-the-limit.patch \
+    file://0022-tboot-add-support-for-launching-64-bit-PE-kernels.patch \
 "
 
 SRC_URI[md5sum] = "bf785aa8637846f4c741d436146227fa"
