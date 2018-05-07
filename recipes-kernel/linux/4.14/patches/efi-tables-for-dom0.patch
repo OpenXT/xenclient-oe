@@ -1,0 +1,156 @@
+################################################################################
+SHORT DESCRIPTION: 
+################################################################################
+Force enable the Xen EFI init path for dom0.
+
+################################################################################
+LONG DESCRIPTION: 
+################################################################################
+With our 32-bit dom0, it is difficult to get access to the EFI tables from OEM's
+like HP and Intel natively.  Xen already exposes a hypercall to present the EFI
+tables to a PV linux guest (ie. dom0).  This patch force compiles the support
+normally enabled w/CONFIG_XEN_EFI (requires CONFIG_X86_64) into our 32-bit dom0.
+It then selectively ignores the 32-bit/64-bit distinction during Linux kernel
+EFI subsystem initialization. The data returned from the hypercall is 32-bit
+addressable, the only unknown is whether the EFI tables themselves are 32-bit
+addressable. The EFI initialization code protects against this case by checking 
+to see if each table is below 4GB in memory, and if not, it disables EFI.
+
+This allows the sysfs DMI and ACPI entries to be populated, which dmidecode,
+xcpmd, and get-config-key rely upon.
+
+################################################################################
+CHANGELOG 
+################################################################################
+Original author: Chris Rogers <rogersc@ainfosec.com>
+
+################################################################################
+REMOVAL 
+################################################################################
+Once dom0 is 64-bit this patch can be removed.
+
+################################################################################
+UPSTREAM PLAN
+################################################################################
+None.
+
+################################################################################
+INTERNAL DEPENDENCIES 
+################################################################################
+None.
+
+################################################################################
+PATCHES 
+################################################################################
+
+--- a/arch/x86/xen/Makefile
++++ b/arch/x86/xen/Makefile
+@@ -16,7 +16,7 @@ CFLAGS_mmu_pv.o		:= $(nostackp)
+ 
+ obj-y		:= enlighten.o multicalls.o mmu.o irq.o \
+ 			time.o xen-asm.o xen-asm_$(BITS).o \
+-			grant-table.o suspend.o platform-pci-unplug.o
++			grant-table.o suspend.o platform-pci-unplug.o efi.o
+ 
+ obj-$(CONFIG_XEN_PVHVM)		+= enlighten_hvm.o mmu_hvm.o suspend_hvm.o
+ obj-$(CONFIG_XEN_PV)			+= setup.o apic.o pmu.o suspend_pv.o \
+@@ -32,5 +32,4 @@ obj-$(CONFIG_PARAVIRT_SPINLOCKS)+= spinl
+ obj-$(CONFIG_XEN_DEBUG_FS)	+= debugfs.o
+ obj-$(CONFIG_XEN_DOM0)		+= vga.o
+ obj-$(CONFIG_SWIOTLB_XEN)	+= pci-swiotlb-xen.o
+-obj-$(CONFIG_XEN_EFI)		+= efi.o
+ obj-$(CONFIG_XEN_PVH)	 	+= xen-pvh.o
+--- a/arch/x86/xen/efi.c
++++ b/arch/x86/xen/efi.c
+@@ -127,9 +127,8 @@ void __init xen_efi_init(void)
+ 	strncpy((char *)&boot_params.efi_info.efi_loader_signature, "Xen",
+ 			sizeof(boot_params.efi_info.efi_loader_signature));
+ 	boot_params.efi_info.efi_systab = (__u32)__pa(efi_systab_xen);
+-	boot_params.efi_info.efi_systab_hi = (__u32)(__pa(efi_systab_xen) >> 32);
++	boot_params.efi_info.efi_systab_hi = 0;
+ 
+ 	set_bit(EFI_BOOT, &efi.flags);
+ 	set_bit(EFI_PARAVIRT, &efi.flags);
+-	set_bit(EFI_64BIT, &efi.flags);
+ }
+--- a/arch/x86/xen/xen-ops.h
++++ b/arch/x86/xen/xen-ops.h
+@@ -122,13 +122,7 @@ static inline void __init xen_init_vga(c
+ 
+ void __init xen_init_apic(void);
+ 
+-#ifdef CONFIG_XEN_EFI
+ extern void xen_efi_init(void);
+-#else
+-static inline void __init xen_efi_init(void)
+-{
+-}
+-#endif
+ 
+ __visible void xen_irq_enable_direct(void);
+ __visible void xen_irq_disable_direct(void);
+--- a/drivers/xen/Makefile
++++ b/drivers/xen/Makefile
+@@ -1,7 +1,7 @@
+ # SPDX-License-Identifier: GPL-2.0
+ obj-$(CONFIG_HOTPLUG_CPU)		+= cpu_hotplug.o
+ obj-$(CONFIG_X86)			+= fallback.o
+-obj-y	+= grant-table.o features.o balloon.o manage.o preempt.o time.o
++obj-y	+= grant-table.o features.o balloon.o manage.o preempt.o time.o efi.o
+ obj-y	+= events/
+ obj-y	+= xenbus/
+ 
+@@ -34,7 +34,6 @@ obj-$(CONFIG_XEN_STUB)			+= xen-stub.o
+ obj-$(CONFIG_XEN_ACPI_HOTPLUG_MEMORY)	+= xen-acpi-memhotplug.o
+ obj-$(CONFIG_XEN_ACPI_HOTPLUG_CPU)	+= xen-acpi-cpuhotplug.o
+ obj-$(CONFIG_XEN_ACPI_PROCESSOR)	+= xen-acpi-processor.o
+-obj-$(CONFIG_XEN_EFI)			+= efi.o
+ obj-$(CONFIG_XEN_SCSI_BACKEND)		+= xen-scsiback.o
+ obj-$(CONFIG_XEN_AUTO_XLATE)		+= xlate_mmu.o
+ obj-$(CONFIG_XEN_PVCALLS_BACKEND)	+= pvcalls-back.o
+--- a/drivers/firmware/efi/efi.c
++++ b/drivers/firmware/efi/efi.c
+@@ -498,22 +498,17 @@ int __init efi_config_parse_tables(void
+ 		efi_guid_t guid;
+ 		unsigned long table;
+ 
+-		if (efi_enabled(EFI_64BIT)) {
+-			u64 table64;
+-			guid = ((efi_config_table_64_t *)tablep)->guid;
+-			table64 = ((efi_config_table_64_t *)tablep)->table;
+-			table = table64;
++		u64 table64;
++		guid = ((efi_config_table_64_t *)tablep)->guid;
++		table64 = ((efi_config_table_64_t *)tablep)->table;
++		table = table64;
+ #ifndef CONFIG_64BIT
+-			if (table64 >> 32) {
+-				pr_cont("\n");
+-				pr_err("Table located above 4GB, disabling EFI.\n");
+-				return -EINVAL;
+-			}
+-#endif
+-		} else {
+-			guid = ((efi_config_table_32_t *)tablep)->guid;
+-			table = ((efi_config_table_32_t *)tablep)->table;
++		if (table64 >> 32) {
++			pr_cont("\n");
++			pr_err("Table located above 4GB, disabling EFI.\n");
++			return -EINVAL;
+ 		}
++#endif
+ 
+ 		if (!match_config_table(&guid, table, common_tables))
+ 			match_config_table(&guid, table, arch_tables);
+@@ -575,10 +570,7 @@ int __init efi_config_init(efi_config_ta
+ 	void *config_tables;
+ 	int sz, ret;
+ 
+-	if (efi_enabled(EFI_64BIT))
+-		sz = sizeof(efi_config_table_64_t);
+-	else
+-		sz = sizeof(efi_config_table_32_t);
++	sz = sizeof(efi_config_table_64_t);
+ 
+ 	/*
+ 	 * Let's see what config tables the firmware passed to us.
