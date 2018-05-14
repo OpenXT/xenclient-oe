@@ -3,6 +3,7 @@ FILESEXTRAPATHS_prepend := "${THISDIR}/files:${THISDIR}/patches:"
 
 SRC_URI += " \
     file://CVE-2017-12588.patch \
+    file://0001-core-bugfix-segfault-after-configuration-errors.patch \
 "
 
 # Hack until upstream fix is backported on Pyro upstream:
