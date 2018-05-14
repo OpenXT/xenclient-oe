@@ -1,5 +1,9 @@
 # Fetch our configuration files.
-FILESEXTRAPATHS_prepend := "${THISDIR}/files:"
+FILESEXTRAPATHS_prepend := "${THISDIR}/files:${THISDIR}/patches:"
+
+SRC_URI += " \
+    file://CVE-2017-12588.patch \
+"
 
 # Hack until upstream fix is backported on Pyro upstream:
 # 32a93e0d5 rsyslog: install logrotate configuration file into correct location
