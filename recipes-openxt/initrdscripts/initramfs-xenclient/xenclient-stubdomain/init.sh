@@ -94,13 +94,12 @@ case "$AGENT" in
             exec /usr/bin/dm-agent -q -n -t $DOMID
         else
             echo "No agent specified. Starting qemu directly."
-            KERNEL_CMDLINE=`cat /proc/cmdline`
-            # Remove everything up to the first double quote of the qemu args
-            KERNEL_CMDLINE_STRIPPED="${KERNEL_CMDLINE##*openxt_qemu_args=\"}"
-            # Remove the last quote of the qemu args and everything after
-            QEMU_CMDLINE="${KERNEL_CMDLINE_STRIPPED%%\"*}"
-            echo "Invoking qemu with QEMU_CMDLINE = ${QEMU_CMDLINE}"
-            /usr/bin/qemu-system-i386 ${QEMU_CMDLINE}
+            target="$( xenstore-read target )"
+            vm_uuid="$( xenstore-read /local/domain/${target}/vm )"
+            dmargs="$( xenstore-read ${vm_uuid}/image/dmargs )"
+            echo "target $target vm_uuid $vm_uuid"
+            echo "Invoking qemu with dmargs       = ${dmargs}"
+            /usr/bin/qemu-system-i386 ${dmargs}
             poweroff
         fi
         ;;
