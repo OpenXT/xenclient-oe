@@ -25,7 +25,3 @@ CONVERSION_CMD_vhd() {
 }
 
 CONVERSION_DEPENDS_vhd = "hkg-vhd-native"
-
-IMAGE_TYPES += " \
-    ext3.vhd ext3.vhd.gz \
-"
