@@ -17,7 +17,6 @@ IMAGE_INSTALL = " \
     xen-xenstore \
     qemu-dm-stubdom \
     v4v-module \
-    dm-agent \
     simple-poweroff \
     rsyslog \
 "
