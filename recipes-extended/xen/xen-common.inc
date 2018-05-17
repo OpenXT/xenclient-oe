@@ -66,7 +66,6 @@ SRC_URI_append = " \
     file://libxl-openxt-helpers.patch \
     file://libxl-openxt-qemu-args.patch \
     file://libxl-openxt-xci-cpuid-signature.patch \
-    file://libxl-pass-qemu-options-through-linux-stubdom-cmdline.patch \
     file://libxl-openxt-tweaks.patch \
     file://libxl-domain-state.patch \
     file://libxl-fixup-cmdline-ops.patch \
