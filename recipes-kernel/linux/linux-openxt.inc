@@ -2,8 +2,6 @@ require recipes-kernel/linux/linux-openxt-copy-objtool.inc
 
 DEPENDS += "bc-native"
 
-KERNEL_IMAGETYPE = "bzImage"
-
 S = "${WORKDIR}/linux-${PV}"
 
 # Don't use update-alternatives for kernel at all. 
