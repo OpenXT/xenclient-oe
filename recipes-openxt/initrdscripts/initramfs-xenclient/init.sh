@@ -107,7 +107,6 @@ read_args() {
             debug)
                 set -x ;;
             fbcon)
-                modprobe fbcon
                 FBCON=true
                 ;;
             break=*)
