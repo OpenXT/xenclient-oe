@@ -43,12 +43,40 @@ PATCHES
 ################################################################################
 --- a/tools/libxl/libxl_dm.c
 +++ b/tools/libxl/libxl_dm.c
-@@ -2023,6 +2023,41 @@ void libxl__spawn_stub_dm(libxl__egc *eg
+@@ -25,6 +25,10 @@
+ #include <pwd.h>
+ #include <grp.h>
+ 
++static bool need_qmp_helper = false;
++static bool need_atapi_helper = false;
++static bool need_audio_helper = false;
++
+ static const char *libxl_tapif_script(libxl__gc *gc,
+                                       const libxl_domain_build_info *info)
+ {
+@@ -565,6 +569,7 @@ static int libxl__build_device_model_arg
+         }
+         if (b_info->u.hvm.soundhw) {
+             flexarray_vappend(dm_args, "-soundhw", b_info->u.hvm.soundhw, NULL);
++            need_audio_helper = true;
+         }
+         if (libxl__acpi_defbool_val(b_info)) {
+             flexarray_append(dm_args, "-acpi");
+@@ -1226,6 +1231,7 @@ static int libxl__build_device_model_arg
+         }
+         if (b_info->u.hvm.soundhw) {
+             flexarray_vappend(dm_args, "-soundhw", b_info->u.hvm.soundhw, NULL);
++            need_audio_helper = true;
+         }
+         if (!libxl__acpi_defbool_val(b_info)) {
+             flexarray_append(dm_args, "-no-acpi");
+@@ -2023,6 +2023,47 @@ void libxl__spawn_stub_dm(libxl__egc *eg
          goto out;
      }
  
 +    pid_t pid;
 +
++    if (need_qmp_helper) {
 +    /* OpenXT: Start the QMP helper */
 +    pid = fork();
 +    if (pid == -1)
@@ -59,7 +87,9 @@ PATCHES
 +                   libxl__sprintf(gc, "%s/qmp-helper-pid",
 +                                  libxl__xs_get_dompath(gc, dm_domid)),
 +                   "%d", pid);
++    }
 +
++    if (need_atapi_helper) {
 +    /* OpenXT: Start the ATAPI helper */
 +    pid = fork();
 +    if (pid == -1)
@@ -70,7 +100,9 @@ PATCHES
 +                   libxl__sprintf(gc, "%s/atapi-pt-helper-pid",
 +                                  libxl__xs_get_dompath(gc, dm_domid)),
 +                   "%d", pid);
++    }
 +
++    if (need_audio_helper) {
 +    /* OpenXT: Start the audio helper */
 +    pid = fork();
 +    if (pid == -1)
@@ -81,6 +113,7 @@ PATCHES
 +                   libxl__sprintf(gc, "%s/audio-helper-pid",
 +                                  libxl__xs_get_dompath(gc, dm_domid)),
 +                   "%d", pid);
++    }
 +
      libxl__store_libxl_entry(gc, guest_domid, "dm-version",
          libxl_device_model_version_to_string(dm_config->b_info.device_model_version));
