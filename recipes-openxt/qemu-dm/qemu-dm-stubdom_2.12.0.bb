@@ -13,7 +13,7 @@ EXTRA_OECONF += " --audio-drv-list=openxt --enable-openxt-stubdom "
 
 do_install_append(){
     install -m 0755 -d ${D}${sysconfdir}/qemu
-    install -m 0755 ${WORKDIR}/qemu-ifup-stubdom ${D}${sysconfdir}/qemu/qemu-ifup
+    install -m 0755 ${WORKDIR}/qemu-ifup-stubdom ${D}${sysconfdir}/qemu-ifup
 }
 
 PR = "${INC_PR}.9"
