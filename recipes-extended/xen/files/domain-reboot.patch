@@ -1,0 +1,74 @@
+--- a/tools/xl/xl_vmcontrol.c
++++ b/tools/xl/xl_vmcontrol.c
+@@ -21,6 +21,7 @@
+ #include <sys/utsname.h>
+ #include <time.h>
+ #include <unistd.h>
++#include <signal.h>
+ 
+ #include <libxl.h>
+ #include <libxl_utils.h>
+@@ -32,6 +33,12 @@
+ 
+ static int fd_lock = -1;
+ 
++static volatile sig_atomic_t xenmgr_signal = 0;
++
++static void xenmgr_sig(int sig) {
++    xenmgr_signal = 1;
++}
++
+ static void pause_domain(uint32_t domid)
+ {
+     libxl_domain_pause(ctx, domid);
+@@ -741,6 +748,8 @@ int create_domain(struct domain_create *
+ {
+     uint32_t domid = INVALID_DOMID;
+ 
++    sigset_t mask, oldmask, b_mask;
++
+     libxl_domain_config d_config;
+ 
+     int debug = dom_info->debug;
+@@ -772,6 +781,16 @@ int create_domain(struct domain_create *
+     struct save_file_header hdr;
+     uint32_t domid_soft_reset = INVALID_DOMID;
+     int restoring;
++    struct sigaction xenmgr_action;
++
++    sigfillset (&b_mask);
++    xenmgr_action.sa_handler = xenmgr_sig;
++    xenmgr_action.sa_mask = b_mask;
++    xenmgr_action.sa_flags = 0;
++    sigaction (SIGUSR1, &xenmgr_action, NULL);
++
++    sigemptyset (&mask);
++    sigaddset (&mask, SIGUSR1);
+ 
+ start:
+     restoring = (restore_file || (migrate_fd >= 0));
+@@ -1149,15 +1168,16 @@ start:
+                     d_config.c_info.name = strdup(common_domname);
+                 }
+ 
+-                /*
+-                 * XXX FIXME: If this sleep is not there then domain
+-                 * re-creation fails sometimes.
+-                 */
+                 LOG("Done. Rebooting now");
+-                libxl_update_state_direct(ctx, d_config.c_info.uuid, "shutdown"); //Sleep here because daemons with an xs_watch on this node
+-                sleep(2);                                                         //won't see the "shutdown" event, just the "rebooted" one.
+-                libxl_update_state_direct(ctx, d_config.c_info.uuid, "rebooted"); //Once this is fixed in xenstore libs, sleep can be removed.
+-                sleep(2);
++
++                libxl_update_state_direct(ctx, d_config.c_info.uuid, "rebooted");
++
++                sigprocmask (SIG_BLOCK, &mask, &oldmask);
++                while (!xenmgr_signal)
++                  sigsuspend (&oldmask);
++                sigprocmask (SIG_UNBLOCK, &mask, NULL);
++                xenmgr_signal = 0;
++
+                 goto start;
+ 
+             case DOMAIN_RESTART_NONE:
