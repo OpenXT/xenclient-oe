@@ -23,7 +23,8 @@ set -e
 
 test -x /usr/bin/uid || exit 0
 
-UID_OPTS=""
+UID_OPTS="--no-daemonize"
+PIDFILE="/var/run/uid.pid"
 
 if [ -n "$2" ]; then
     UID_OPTS="$UID_OPTS $2"
@@ -34,17 +35,18 @@ export PATH="${PATH:+$PATH:}/usr/sbin:/sbin"
 case "$1" in
 start)
 	echo "Starting UID server"
-	LD_PRELOAD=/usr/lib/libv4v-1.0.so.0.0.0 INET_IS_V4V=1 start-stop-daemon --start --quiet --oknodo --exec /usr/bin/uid -- $UID_OPTS
+	LD_PRELOAD=/usr/lib/libv4v-1.0.so.0.0.0 INET_IS_V4V=1 start-stop-daemon --start --background --make-pidfile --pidfile="${PIDFILE}" --quiet --oknodo --exec /usr/bin/uid -- $UID_OPTS
 	;;
   stop)
 	echo "Stopping UID server"
-	start-stop-daemon --stop --quiet --oknodo /usr/bin/uid
+	start-stop-daemon --stop --quiet --oknodo --pidfile="${PIDFILE}"
+	rm -f "${PIDFILE}"
 	;;
 
   restart)
 	echo "Restarting UID server"
-	start-stop-daemon --stop --quiet --oknodo --retry 30
-	start-stop-daemon --start --quiet --oknodo --exec /usr/bin/uid -- $UID_OPTS
+	start-stop-daemon --stop --quiet --oknodo --retry 30 --pidfile="${PIDFILE}"
+	start-stop-daemon --start --background --make-pidfile --pidfile="${PIDFILE}" --quiet --oknodo --exec /usr/bin/uid -- $UID_OPTS
 	;;
 
   *)
