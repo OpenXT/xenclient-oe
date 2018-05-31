@@ -8,8 +8,6 @@ PV_MAJOR = "${@"${PV}".split('.', 3)[0]}"
 
 FILESEXTRAPATHS_prepend := "${THISDIR}/patches:${THISDIR}/defconfigs:"
 SRC_URI += "${KERNELORG_MIRROR}/linux/kernel/v${PV_MAJOR}.x/linux-${PV}.tar.xz;name=kernel \
-    file://0001-x86-xen-Delay-get_cpu_cap-until-stack-canary-is-esta.patch;patch=1 \
-    file://0002-xen-netfront-Fix-hang-on-device-removal.patch;patch=1 \
     file://bridge-carrier-follow-prio0.patch;patch=1 \
     file://privcmd-mmapnocache-ioctl.patch;patch=1 \
     file://xenkbd-tablet-resolution.patch;patch=1 \
@@ -50,6 +48,6 @@ SRC_URI += "${KERNELORG_MIRROR}/linux/kernel/v${PV_MAJOR}.x/linux-${PV}.tar.xz;n
     file://defconfig \
     "
 
-SRC_URI[kernel.md5sum] = "815b808ef64375fec3b2843e4d556c87"
-SRC_URI[kernel.sha256sum] = "782b6c4c85275c382c820e1934d3e6003ef468f43cfc5e7c22bc07c331a12bb9"
+SRC_URI[kernel.md5sum] = "c998ebfbabfdc640060b28839a7a9fca"
+SRC_URI[kernel.sha256sum] = "672b3b6a6b3baac184380028d0a6298d12920f0ede049a20aeb868e0129d8819"
 LIC_FILES_CHKSUM = "file://COPYING;md5=d7810fab7487fb0aad327b76f1be7cd7"
