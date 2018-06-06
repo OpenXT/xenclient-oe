@@ -6,9 +6,11 @@ __makeclean() {
     oe_runmake clean
 }
 python do_makeclean() {
+    import functools
+
     workdir = d.getVar('B', True)
     makefiles = [ '/Makefile', '/GNUmakefile', '/makefile' ]
-    if reduce(lambda x, y: x or os.path.exists(workdir + y), makefiles, False):
+    if functools.reduce(lambda x, y: x or os.path.exists(workdir + y), makefiles, False):
         bb.build.exec_func('__makeclean', d)
         bb.build.write_taint('do_compile' , d)
         sstate_clean_cachefiles(d)
