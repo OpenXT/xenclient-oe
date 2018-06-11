@@ -774,7 +774,7 @@ PATCHES
 +
 --- /dev/null
 +++ b/drivers/usb/xen-usbback/common.h
-@@ -0,0 +1,361 @@
+@@ -0,0 +1,362 @@
 +/*
 + * Copyright (c) Citrix Systems Inc.
 + *
@@ -1025,6 +1025,7 @@ PATCHES
 +	struct timer_list        timer;
 +#endif
 +	pending_segment_t        *pending_segment[USBIF_MAX_SEGMENTS_PER_REQUEST];
++	int                      pending_segments;
 +#ifdef INDIRECT_SEGMENTS
 +	pending_segment_t        **pending_indirect_segment;
 +	int                      pending_indirect_segments;
@@ -1305,7 +1306,7 @@ PATCHES
 +}
 --- /dev/null
 +++ b/drivers/usb/xen-usbback/usbback.c
-@@ -0,0 +1,1269 @@
+@@ -0,0 +1,1271 @@
 +/******************************************************************************
 + *
 + * Back-end of the driver for virtual block devices. This portion of the
@@ -1363,7 +1364,7 @@ PATCHES
 +
 +#include "common.h"
 +
-+static int usbif_reqs = 64;
++static int usbif_reqs = 128;
 +module_param_named(reqs, usbif_reqs, int, 0);
 +MODULE_PARM_DESC(reqs, "Number of usbback requests to allocate");
 +
@@ -1409,6 +1410,7 @@ PATCHES
 +	unsigned long flags;
 +	int index;
 +
++	req->pending_segments = 0;
 +#ifdef INDIRECT_SEGMENTS
 +	req->pending_indirect_segments = 0;
 +#endif
@@ -1439,6 +1441,7 @@ PATCHES
 +#endif
 +		req->pending_segment[index] = segment;
 +	}
++	req->pending_segments = req->nr_pages;
 +	spin_unlock_irqrestore(&pending_free_lock, flags);
 +
 +	return 0;
@@ -1539,7 +1542,7 @@ PATCHES
 +		free_indirect_segments(req);
 +#endif
 +
-+        for (index=0; index<req->nr_pages; index++) {
++        for (index=0; index<req->pending_segments; index++) {
 +		pending_segment_t *segment = req->pending_segment[index];
 +
 +		BUG_ON(!segment);
@@ -1554,7 +1557,7 @@ PATCHES
 +			segment->page);
 +#endif
 +        }
-+
++	req->pending_segments = 0;
 +	req->nr_pages = 0;
 +}
 +
