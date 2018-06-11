@@ -511,6 +511,19 @@ mle_success() {
     return $ret
 }
 
+write_config_pcrs() {
+    local root="${1:-/}"
+    local pcrs
+
+    if is_tpm_2_0 ; then
+        pcrs="-r 0 -r 1 -r 2 -r 3 -r 4 -r 5 -r 7 -r 8 -r 15 -r 17 -r 18 -r 19"
+    else
+        pcrs="-p 0 -p 1 -p 2 -p 3 -p 4 -p 5 -p 7 -p 8 -p 15 -p 17 -p 18 -p 19"
+    fi
+
+    echo "$pcrs" > ${root}/config/config.pcrs
+}
+
 # Function to configure measured launch on platform.  The next boot will cause
 #   init-root.ro to perform first sealing operation.
 # parameter 0: mount point for rootfs
@@ -524,19 +537,13 @@ configure_measured_launch()
     local unlock_key="${2}"
     local config_dev="${3}"
     local tpm_dir="${root}/boot/system/tpm"
-    is_tpm_2_0
-    local tpm2=$?
+
     # this will block until there is sufficient entropy
     local key_file=$(gen_config_key $root) || return 1
     set_encrypted_key $unlock_key $key_file $config_dev || return 1
 
+    write_config_pcrs "${root}"
 
-    if [ "${tpm2}" -eq 0 ];
-    then
-        echo "-r 0 -r 1 -r 2 -r 3 -r 4 -r 5 -r 7 -r 8 -r 15 -r 17 -r 18 -r 19" > ${root}/config/config.pcrs
-    else
-        echo "-p 0 -p 1 -p 2 -p 3 -p 4 -p 5 -p 7 -p 8 -p 15 -p 17 -p 18 -p 19" > ${root}/config/config.pcrs
-    fi
     mkdir -p ${tpm_dir}
     touch ${tpm_dir}/setup
     touch ${tpm_dir}/enabled
