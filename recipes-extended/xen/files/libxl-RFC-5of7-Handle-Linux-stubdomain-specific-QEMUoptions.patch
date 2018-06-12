@@ -64,16 +64,7 @@ PATCHES
                                    NULL);
                  ioemu_nics++;
              }
-@@ -657,6 +660,8 @@ static const char *qemu_disk_format_stri
-     case LIBXL_DISK_FORMAT_RAW: return "raw";
-     case LIBXL_DISK_FORMAT_EMPTY: return NULL;
-     case LIBXL_DISK_FORMAT_QED: return "qed";
-+    case LIBXL_DISK_FORMAT_HOST_CDROM: return "host_cdrom";
-+    case LIBXL_DISK_FORMAT_HOST_DEVICE: return "host_device";
-     default: return NULL;
-     }
- }
-@@ -911,6 +916,7 @@ static int libxl__build_device_model_arg
+@@ -898,6 +901,7 @@ static int libxl__build_device_model_arg
      uint64_t ram_size;
      const char *path, *chardev;
      char *user = NULL;
@@ -81,7 +72,7 @@ PATCHES
  
      dm_args = flexarray_make(gc, 16, 1);
      dm_envs = flexarray_make(gc, 16, 1);
-@@ -921,24 +927,18 @@ static int libxl__build_device_model_arg
+@@ -908,24 +912,18 @@ static int libxl__build_device_model_arg
                        "-xen-domid",
                        GCSPRINTF("%d", guest_domid), NULL);
  
@@ -118,7 +109,7 @@ PATCHES
  
      for (i = 0; i < guest_config->num_channels; i++) {
          connection = guest_config->channels[i].connection;
-@@ -982,7 +982,7 @@ static int libxl__build_device_model_arg
+@@ -969,7 +967,7 @@ static int libxl__build_device_model_arg
          flexarray_vappend(dm_args, "-name", c_info->name, NULL);
      }
  
@@ -127,7 +118,7 @@ PATCHES
          char *vncarg = NULL;
  
          flexarray_append(dm_args, "-vnc");
-@@ -1033,7 +1033,7 @@ static int libxl__build_device_model_arg
+@@ -1020,7 +1018,7 @@ static int libxl__build_device_model_arg
       */
      flexarray_append_pair(dm_args, "-display", "none");
  
@@ -136,7 +127,7 @@ PATCHES
          flexarray_append(dm_args, "-sdl");
          if (sdl->display)
              flexarray_append_pair(dm_envs, "DISPLAY", sdl->display);
-@@ -1064,10 +1064,19 @@ static int libxl__build_device_model_arg
+@@ -1051,10 +1049,19 @@ static int libxl__build_device_model_arg
                  return ERROR_INVAL;
              }
              if (b_info->u.hvm.serial) {
@@ -158,7 +149,7 @@ PATCHES
                  for (p = b_info->u.hvm.serial_list;
                       *p;
                       p++) {
-@@ -1082,7 +1091,7 @@ static int libxl__build_device_model_arg
+@@ -1069,7 +1076,7 @@ static int libxl__build_device_model_arg
              flexarray_append(dm_args, "-nographic");
          }
  
@@ -167,7 +158,7 @@ PATCHES
              const libxl_spice_info *spice = &b_info->u.hvm.spice;
              char *spiceoptions = dm_spice_options(gc, spice);
              if (!spiceoptions)
-@@ -1221,8 +1230,8 @@ static int libxl__build_device_model_arg
+@@ -1208,8 +1215,8 @@ static int libxl__build_device_model_arg
                                   GCSPRINTF("type=tap,id=net%d,ifname=%s,"
                                             "script=%s,downscript=%s",
                                             nics[i].devid, ifname,
@@ -178,19 +169,19 @@ PATCHES
  
                  /* Userspace COLO Proxy need this */
  #define APPEND_COLO_SOCK_SERVER(sock_id, sock_ip, sock_port) ({             \
-@@ -1475,6 +1484,11 @@ static int libxl__build_device_model_arg
+@@ -1462,6 +1469,11 @@ static int libxl__build_device_model_arg
                           disks[i].vdev);
                      continue;
                  }
 +            } else if ((disks[i].is_cdrom) && (b_info->stubdomain_version ==
 +                                               LIBXL_STUBDOMAIN_VERSION_LINUX))
 +            {
-+                format = qemu_disk_format_string(LIBXL_DISK_FORMAT_HOST_CDROM);
++                format = libxl__qemu_disk_format_string(LIBXL_DISK_FORMAT_HOST_CDROM);
 +                target_path = "/dev/xvdc";
              } else {
                  if (format == NULL) {
                      LOGD(WARN, guest_domid,
-@@ -1565,6 +1579,10 @@ static int libxl__build_device_model_arg
+@@ -1552,6 +1564,10 @@ static int libxl__build_device_model_arg
                               "qemu-xen doesn't support read-only IDE disk drivers");
                          return ERROR_INVAL;
                      }
@@ -201,7 +192,7 @@ PATCHES
                      if (colo_mode == LIBXL__COLO_SECONDARY) {
                          drive = libxl__sprintf
                              (gc, "if=none,driver=%s,file=%s,id=%s",
-@@ -1644,7 +1662,7 @@ static int libxl__build_device_model_arg
+@@ -1631,7 +1647,7 @@ static int libxl__build_device_model_arg
                                          char ***args, char ***envs,
                                          const libxl__domain_build_state *state,
                                          int *dm_state_fd)
@@ -210,7 +201,7 @@ PATCHES
   * and therefore will be passing a filename rather than a fd. */
  {
      switch (guest_config->b_info.device_model_version) {
-@@ -1654,8 +1672,10 @@ static int libxl__build_device_model_arg
+@@ -1641,8 +1657,10 @@ static int libxl__build_device_model_arg
                                                    args, envs,
                                                    state);
      case LIBXL_DEVICE_MODEL_VERSION_QEMU_XEN:
@@ -223,7 +214,7 @@ PATCHES
          return libxl__build_device_model_args_new(gc, dm,
                                                    guest_domid, guest_config,
                                                    args, envs,
-@@ -1712,7 +1732,7 @@ static int libxl__vfb_and_vkb_from_hvm_g
+@@ -1699,7 +1717,7 @@ static int libxl__vfb_and_vkb_from_hvm_g
  
  static int libxl__write_stub_dmargs(libxl__gc *gc,
                                      int dm_domid, int guest_domid,
@@ -232,7 +223,7 @@ PATCHES
  {
      libxl_ctx *ctx = libxl__gc_owner(gc);
      int i;
-@@ -1740,7 +1760,9 @@ static int libxl__write_stub_dmargs(libx
+@@ -1727,7 +1745,9 @@ static int libxl__write_stub_dmargs(libx
      i = 1;
      dmargs[0] = '\0';
      while (args[i] != NULL) {
@@ -243,7 +234,7 @@ PATCHES
              strcat(dmargs, " ");
              strcat(dmargs, args[i]);
          }
-@@ -1878,7 +1900,8 @@ void libxl__spawn_stub_dm(libxl__egc *eg
+@@ -1865,7 +1885,8 @@ void libxl__spawn_stub_dm(libxl__egc *eg
          goto out;
      }
  
@@ -264,3 +255,14 @@ PATCHES
      ])
  
  libxl_disk_backend = Enumeration("disk_backend", [
+--- a/tools/libxl/libxl_device.c
++++ b/tools/libxl/libxl_device.c
+@@ -435,6 +435,8 @@ const char *libxl__qemu_disk_format_stri
+     case LIBXL_DISK_FORMAT_RAW: return "raw";
+     case LIBXL_DISK_FORMAT_EMPTY: return NULL;
+     case LIBXL_DISK_FORMAT_QED: return "qed";
++    case LIBXL_DISK_FORMAT_HOST_CDROM: return "host_cdrom";
++    case LIBXL_DISK_FORMAT_HOST_DEVICE: return "host_device";
+     default: return NULL;
+     }
+ }
