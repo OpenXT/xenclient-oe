@@ -15,7 +15,7 @@ IMAGE_CMD_ext3_append() {
 # OpenXT vhd.
 # Standard vhd image from an existing filesystem.
 # vhd size must be a multiple of 2 MB.
-CONVERSIONTYPES_append = "vhd"
+CONVERSIONTYPES_append = " vhd"
 
 CONVERSION_CMD_vhd() {
     local ALIGN=`expr 2 \* 1024 \* 1024`
@@ -25,7 +25,3 @@ CONVERSION_CMD_vhd() {
 }
 
 CONVERSION_DEPENDS_vhd = "hkg-vhd-native"
-
-IMAGE_TYPES += " \
-    ext3.vhd ext3.vhd.gz \
-"

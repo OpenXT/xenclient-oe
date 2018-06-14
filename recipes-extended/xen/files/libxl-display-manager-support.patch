@@ -31,7 +31,7 @@ PATCHES
 ################################################################################
 --- a/tools/libxl/libxl_dm.c
 +++ b/tools/libxl/libxl_dm.c
-@@ -75,6 +75,14 @@ const char *libxl__domain_device_model(l
+@@ -79,6 +79,14 @@ const char *libxl__domain_device_model(l
      return dm;
  }
  
@@ -46,7 +46,7 @@ PATCHES
  static int
  libxl__xc_device_get_rdm(libxl__gc *gc,
                           uint32_t flags,
-@@ -929,6 +937,7 @@ static int libxl__build_device_model_arg
+@@ -934,6 +942,7 @@ static int libxl__build_device_model_arg
      const int num_disks = guest_config->num_disks;
      const int num_nics = guest_config->num_nics;
      const libxl_vnc_info *vnc = libxl__dm_vnc(guest_config);
@@ -54,18 +54,32 @@ PATCHES
      const libxl_sdl_info *sdl = dm_sdl(guest_config);
      const char *keymap = dm_keymap(guest_config);
      char *machinearg;
-@@ -1049,7 +1058,10 @@ static int libxl__build_device_model_arg
-     /*
-      * OpenXT: the default display backend is Surfman
-      */
--    flexarray_append_pair(dm_args, "-display", "surfman");
-+    if (display && display->kind)
-+        flexarray_append_pair(dm_args, "-display", display->kind);
-+    else
-+        flexarray_append_pair(dm_args, "-display", "surfman");
+@@ -1048,11 +1057,6 @@ static int libxl__build_device_model_arg
+         flexarray_append(dm_args, vncarg);
+     } /* OpenXT: no else here, we don't support "-vnc none" */
  
+-    /*
+-     * OpenXT: the default display backend is Surfman
+-     */
+-    flexarray_append_pair(dm_args, "-display", "surfman");
+-
      if (sdl && !is_stubdom) {
          flexarray_append(dm_args, "-sdl");
+         if (sdl->display)
+@@ -1110,6 +1114,13 @@ static int libxl__build_device_model_arg
+         if (libxl_defbool_val(b_info->u.hvm.nographic) && (!sdl && !vnc)) {
+             flexarray_append(dm_args, "-nographic");
+         } else {
++            /*
++             * OpenXT: the default display backend is Surfman
++             */
++            if (display && display->kind)
++                flexarray_append_pair(dm_args, "-display", display->kind);
++            else
++                flexarray_append_pair(dm_args, "-display", "surfman");
+             /* OpenXT: only add mouse if graphical */
+             flexarray_append_pair(dm_args, "-device", "xenmou");
+         }
 --- a/tools/libxl/libxl_internal.h
 +++ b/tools/libxl/libxl_internal.h
 @@ -1706,6 +1706,8 @@ _hidden int libxl__wait_for_device_model

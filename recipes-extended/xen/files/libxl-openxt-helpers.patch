@@ -43,48 +43,82 @@ PATCHES
 ################################################################################
 --- a/tools/libxl/libxl_dm.c
 +++ b/tools/libxl/libxl_dm.c
-@@ -2011,6 +2011,41 @@ void libxl__spawn_stub_dm(libxl__egc *eg
-     if (ret)
-         goto out;
-     uint32_t dm_domid = sdss->pvqemu.guest_domid;
+@@ -25,6 +25,10 @@
+ #include <pwd.h>
+ #include <grp.h>
+ 
++static bool need_qmp_helper = false;
++static bool need_atapi_helper = false;
++static bool need_audio_helper = false;
++
+ static const char *libxl_tapif_script(libxl__gc *gc,
+                                       const libxl_domain_build_info *info)
+ {
+@@ -565,6 +569,7 @@ static int libxl__build_device_model_arg
+         }
+         if (b_info->u.hvm.soundhw) {
+             flexarray_vappend(dm_args, "-soundhw", b_info->u.hvm.soundhw, NULL);
++            need_audio_helper = true;
+         }
+         if (libxl__acpi_defbool_val(b_info)) {
+             flexarray_append(dm_args, "-acpi");
+@@ -1226,6 +1231,7 @@ static int libxl__build_device_model_arg
+         }
+         if (b_info->u.hvm.soundhw) {
+             flexarray_vappend(dm_args, "-soundhw", b_info->u.hvm.soundhw, NULL);
++            need_audio_helper = true;
+         }
+         if (!libxl__acpi_defbool_val(b_info)) {
+             flexarray_append(dm_args, "-no-acpi");
+@@ -1888,6 +1894,25 @@ char *libxl__stub_dm_name(libxl__gc *gc,
+     return GCSPRINTF("%s-dm", guest_name);
+ }
+ 
++static void fork_helper(libxl__gc *gc, const char *helper_path,
++                        const char *xs_pid_key, int guest_domid, int dm_domid)
++{
 +    pid_t pid;
 +
-+    /* OpenXT: Start the QMP helper */
 +    pid = fork();
 +    if (pid == -1)
 +        LOG(ERROR, "Failed to fork");
 +    else if (pid == 0)
-+        execl(QMP_HELPER_PATH, QMP_HELPER_PATH, libxl__sprintf(gc, "%d", guest_domid), libxl__sprintf(gc, "%d", dm_domid), NULL);
-+    libxl__xs_printf(gc, XBT_NULL,
-+                   libxl__sprintf(gc, "%s/qmp-helper-pid",
-+                                  libxl__xs_get_dompath(gc, dm_domid)),
-+                   "%d", pid);
++        execl(helper_path, helper_path, GCSPRINTF("%d", guest_domid),
++              GCSPRINTF("%d", dm_domid), NULL);
++    else
++        libxl__xs_printf(gc, XBT_NULL,
++                         GCSPRINTF("%s/%s",
++                                   libxl__xs_get_dompath(gc, dm_domid),
++                                   xs_pid_key),
++                         "%d", pid);
++}
 +
-+    /* OpenXT: Start the ATAPI helper */
-+    pid = fork();
-+    if (pid == -1)
-+        LOG(ERROR, "Failed to fork");
-+    else if (pid == 0)
-+        execl(ATAPI_PT_HELPER_PATH, ATAPI_PT_HELPER_PATH, libxl__sprintf(gc, "%d", guest_domid), libxl__sprintf(gc, "%d", dm_domid), NULL);
-+    libxl__xs_printf(gc, XBT_NULL,
-+                   libxl__sprintf(gc, "%s/atapi-pt-helper-pid",
-+                                  libxl__xs_get_dompath(gc, dm_domid)),
-+                   "%d", pid);
-+
-+    /* OpenXT: Start the audio helper */
-+    pid = fork();
-+    if (pid == -1)
-+        LOG(ERROR, "Failed to fork");
-+    else if (pid == 0)
-+        execl(AUDIO_HELPER_PATH, AUDIO_HELPER_PATH, libxl__sprintf(gc, "%d", guest_domid), libxl__sprintf(gc, "%d", dm_domid), NULL);
-+    libxl__xs_printf(gc, XBT_NULL,
-+                   libxl__sprintf(gc, "%s/audio-helper-pid",
-+                                  libxl__xs_get_dompath(gc, dm_domid)),
-+                   "%d", pid);
-+
-     ret = libxl__domain_build(gc, dm_config, dm_domid, stubdom_state);
-     if (ret)
+ void libxl__spawn_stub_dm(libxl__egc *egc, libxl__stub_dm_spawn_state *sdss)
+ {
+     STATE_AO_GC(sdss->dm.spawn.ao);
+@@ -2023,6 +2048,22 @@ void libxl__spawn_stub_dm(libxl__egc *eg
          goto out;
+     }
+ 
++    if (need_qmp_helper) {
++        /* OpenXT: Start the QMP helper */
++        fork_helper(gc, QMP_HELPER_PATH, XS_QMP_PID, guest_domid, dm_domid);
++    }
++
++    if (need_atapi_helper) {
++        /* OpenXT: Start the ATAPI helper */
++        fork_helper(gc, ATAPI_PT_HELPER_PATH, XS_ATAPI_PT_PID, guest_domid,
++                    dm_domid);
++    }
++
++    if (need_audio_helper) {
++        /* OpenXT: Start the audio helper */
++        fork_helper(gc, AUDIO_HELPER_PATH, XS_AUDIO_PID, guest_domid, dm_domid);
++    }
++
+     libxl__store_libxl_entry(gc, guest_domid, "dm-version",
+         libxl_device_model_version_to_string(dm_config->b_info.device_model_version));
+     libxl__store_libxl_entry(gc, dm_domid, "stubdom-version",
 --- a/tools/libxl/libxl_domain.c
 +++ b/tools/libxl/libxl_domain.c
 @@ -989,6 +989,7 @@ void libxl__destroy_domid(libxl__egc *eg
@@ -104,7 +138,7 @@ PATCHES
 +    if (dm_domid) {
 +        /* OpenXT: Kill qmp-helper */
 +        pid = libxl__xs_read(gc, XBT_NULL,
-+                             GCSPRINTF("/local/domain/%d/qmp-helper-pid", dm_domid));
++                             GCSPRINTF("/local/domain/%d/"XS_QMP_PID, dm_domid));
 +        if (!pid)
 +            LOG(ERROR, "Cannot get qmp_helper pid for domain %d", dm_domid);
 +        else
@@ -112,7 +146,7 @@ PATCHES
 +
 +        /* OpenXT: Kill atapi-pt-helper */
 +        pid = libxl__xs_read(gc, XBT_NULL,
-+                             GCSPRINTF("/local/domain/%d/atapi-pt-helper-pid", dm_domid));
++                             GCSPRINTF("/local/domain/%d/"XS_ATAPI_PT_PID, dm_domid));
 +        if (!pid)
 +            LOG(ERROR, "Cannot get atapi-pt_helper pid for domain %d", dm_domid);
 +        else
@@ -120,7 +154,7 @@ PATCHES
 +
 +        /* OpenXT: Kill audio-helper */
 +        pid = libxl__xs_read(gc, XBT_NULL,
-+                             GCSPRINTF("/local/domain/%d/audio-helper-pid", dm_domid));
++                             GCSPRINTF("/local/domain/%d/"XS_AUDIO_PID, dm_domid));
 +        if (!pid)
 +            LOG(ERROR, "Cannot get audio_helper pid for domain %d", dm_domid);
 +        else
@@ -131,13 +165,16 @@ PATCHES
      dis->drs.callback = devices_destroy_cb;
 --- a/tools/libxl/libxl_internal.h
 +++ b/tools/libxl/libxl_internal.h
-@@ -129,6 +129,10 @@
+@@ -129,6 +129,13 @@
  #define MB(_mb)     (_AC(_mb, ULL) << 20)
  #define GB(_gb)     (_AC(_gb, ULL) << 30)
  
 +#define QMP_HELPER_PATH "/usr/lib/xen/bin/qmp_helper"
 +#define ATAPI_PT_HELPER_PATH "/usr/lib/xen/bin/atapi_pt_helper"
 +#define AUDIO_HELPER_PATH "/usr/lib/xen/bin/audio_helper_start"
++#define XS_QMP_PID "qmp-helper-pid"
++#define XS_ATAPI_PT_PID "atapi-pt-helper-pid"
++#define XS_AUDIO_PID "audio-helper-pid"
 +
  #define ARRAY_SIZE(a) (sizeof(a) / sizeof(a[0]))
  

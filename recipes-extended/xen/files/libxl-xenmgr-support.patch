@@ -170,63 +170,27 @@ PATCHES
  out:
 --- a/tools/libxl/libxl_dm.c
 +++ b/tools/libxl/libxl_dm.c
-@@ -638,7 +638,7 @@ static int libxl__build_device_model_arg
-     }
-     for (i = 0; b_info->extra && b_info->extra[i] != NULL; i++)
-         flexarray_append(dm_args, b_info->extra[i]);
--    flexarray_append(dm_args, "-M");
-+    flexarray_append(dm_args, "-machine");
-     switch (b_info->type) {
-     case LIBXL_DOMAIN_TYPE_PVH:
-     case LIBXL_DOMAIN_TYPE_PV:
-@@ -1839,7 +1839,7 @@ static int libxl__write_stub_dmargs(libx
-     while (args[i] != NULL) {
-         if (linux_stubdom ||
-             (strcmp(args[i], "-sdl") &&
--             strcmp(args[i], "-M") && strcmp(args[i], "xenfv"))) {
-+             strcmp(args[i], "-machine") && strcmp(args[i], "xenfv"))) {
-             strcat(dmargs, " ");
-             strcat(dmargs, args[i]);
-         }
-@@ -2050,9 +2050,26 @@ void libxl__spawn_stub_dm(libxl__egc *eg
-                              &stubdom_state->config);
-     if (ret)
-         goto out;
-+
-     uint32_t dm_domid = sdss->pvqemu.guest_domid;
--    pid_t pid;
+@@ -2114,6 +2114,20 @@ retry_transaction:
+     libxl__xs_printf(gc, XBT_NULL,
+                      DEVICE_MODEL_XS_PATH(gc, dm_domid, guest_domid, "/xen_extended_power_mgmt"), "2");
  
-+    libxl__xs_printf(gc, XBT_NULL,
-+                   GCSPRINTF("%s/image/device-model-domid",
-+                             libxl__xs_get_dompath(gc, guest_domid)),
-+                   "%d", dm_domid);
-+
-+	int32_t timeout = 0;
-+	char * ready = NULL;
++    /* OpenXT: We wait on xenmgr writing v4v-firewall-ready.
++     *         xenmgr waits on us writing image/device-model-domid
++     */
++    int32_t timeout = 0;
++    char * ready = NULL;
 +    /* Block and wait for v4v firewall rules */
 +    while (timeout < 30) {
 +        ready = libxl__xs_read(gc, XBT_NULL, GCSPRINTF("%s/v4v-firewall-ready", libxl__xs_get_dompath(gc, guest_domid)));
 +        if(ready)
 +            break;
 +        sleep(1);
-+  	    timeout++;
++        timeout++;
 +    }
 +
-+    pid_t pid;
-     /* OpenXT: Start the QMP helper */
-     pid = fork();
-     if (pid == -1)
-@@ -2097,10 +2114,6 @@ void libxl__spawn_stub_dm(libxl__egc *eg
-     libxl__write_stub_dmargs(gc, dm_domid, guest_domid, args,
-          guest_config->b_info.stubdomain_version == LIBXL_STUBDOMAIN_VERSION_LINUX);
-     libxl__xs_printf(gc, XBT_NULL,
--                     GCSPRINTF("%s/image/device-model-domid",
--                               libxl__xs_get_dompath(gc, guest_domid)),
--                     "%d", dm_domid);
--    libxl__xs_printf(gc, XBT_NULL,
-                      GCSPRINTF("%s/target",
-                                libxl__xs_get_dompath(gc, dm_domid)),
-                      "%d", guest_domid);
+     libxl__multidev_begin(ao, &sdss->multidev);
+     sdss->multidev.callback = spawn_stub_launch_dm;
+     /* OpenXT: Again, no disk for the stubdom itself */
 --- a/tools/libxl/libxl_domain.c
 +++ b/tools/libxl/libxl_domain.c
 @@ -669,6 +669,13 @@ static int libxl__domain_pvcontrol(libxl
@@ -263,7 +227,7 @@ PATCHES
                  } else {                /* not found in xenstore */
 --- a/tools/libxl/libxl_internal.h
 +++ b/tools/libxl/libxl_internal.h
-@@ -1815,6 +1815,8 @@ _hidden int libxl__qmp_pci_del(libxl__gc
+@@ -1818,6 +1818,8 @@ _hidden int libxl__qmp_pci_del(libxl__gc
                                 libxl_device_pci *pcidev);
  /* Resume hvm domain */
  _hidden int libxl__qmp_system_wakeup(libxl__gc *gc, int domid);

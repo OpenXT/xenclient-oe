@@ -20,10 +20,12 @@
 usage()
 {
     cat <<EOF >&2
-Usage: $(basename $0) NEW_VM_NAME
+Usage: $(basename $0) NEW_VM_NAME <mode>
 
 Creates a new NDVM. Please refer to the XenClient XT documentation for details
 on how to configure which network devices are passed through to this NDVM.
+
+mode is either "pv" or "hvm" - "pv" by default.
 
 EOF
 
@@ -36,18 +38,24 @@ die()
     exit 1
 }
 
-[ $# -eq 1 ] || usage
+[ $# -ge 1 ] && [ $# -le 2 ] || usage
 
 NAME="$1"
+MODE="${2:-pv}"
 
 case "$NAME" in
     */*|.|..) die "name '$NAME' is not valid" ;;
 esac
 
+case "$MODE" in
+    pv|hvm) ;;
+    *)      die "mode '$MODE' invalid.  Must be 'pv' or 'hvm'" ;;
+esac
+
 xec-vm -n "$NAME" > /dev/null 2>&1 &&
     die "VM '$NAME' already exists"
 
-VM=$(xec create-vm-with-template new-vm-ndvm) ||
+VM=$(xec create-vm-with-template new-vm-ndvm-${MODE}) ||
     die "failed to create VM"
 
 xec -o "$VM" -i com.citrix.xenclient.xenmgr.vm.unrestricted \
@@ -75,7 +83,7 @@ tap-ctl destroy -d "$DEV" ||
 DISK=$(xec -o "$VM" add-disk) ||
     die "failed to add disk"
 
-xec -o "$DISK" set virt-path xvda2 ||
+xec -o "$DISK" set virt-path xvdb ||
     die "failed to update disk virt-path"
 
 xec -o "$DISK" attach-vhd "$VHD" ||
