@@ -14,6 +14,8 @@ SRC_URI = "git://xenbits.xen.org/xen.git;branch=${XEN_BRANCH}"
 require ${@bb.utils.contains('DISTRO_FEATURES', 'blktap2', 'xen-blktap2.inc', 'xen-blktap3.inc', d)}
 
 SRC_URI_append = " \
+    file://xsa267-4.9-1.patch \
+    file://xsa267-4.9-2.patch \
     file://defconfig \
     file://config.patch \
     file://disable-xen-root-check.patch \
