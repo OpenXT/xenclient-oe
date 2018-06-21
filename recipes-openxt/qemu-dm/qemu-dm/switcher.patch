@@ -115,7 +115,7 @@ PATCHES
  x_keymap.o-cflags := $(X11_CFLAGS)
 --- /dev/null
 +++ b/ui/xen-input.c
-@@ -0,0 +1,598 @@
+@@ -0,0 +1,427 @@
 +/*
 + * Copyright (c) 2012 Citrix Systems, Inc.
 + *
@@ -184,30 +184,6 @@ PATCHES
 +
 +static XenInput input = { .service = 0, .abs_enabled = 0 };
 +
-+/*
-+ * In 2.x QEMU these 2 functions are gone. Implementing them here to deal with
-+ * the logic for:
-+ *  - key up and down
-+ *  - mouse abs and rel
-+ *  - mouse button and down
-+ * See ui/sdl.c and ui/curses.c for how they mapped their old
-+ * kbd_put_keycode/kbd_mouse_event logic to the new logic.
-+ */
-+static void kbd_put_keycode(int keycode)
-+{
-+#define KEY_RELEASE 0x80
-+#define KEY_MASK    0xff
-+     if (keycode & KEY_RELEASE) {
-+        keycode &= ~KEY_RELEASE;
-+        qemu_input_event_send_key_number(NULL, keycode & KEY_MASK, false);
-+        qemu_input_event_send_key_delay(0);
-+     }
-+     else {
-+        qemu_input_event_send_key_number(NULL, keycode & KEY_MASK, true);
-+        qemu_input_event_send_key_delay(0);
-+     }
-+}
-+
 +static void kbd_mouse_event(bool abs, int x, int y, int button_state)
 +{
 +    static uint32_t bmap[INPUT_BUTTON__MAX] = {
@@ -233,154 +209,6 @@ PATCHES
 +        qemu_input_queue_rel(NULL, INPUT_AXIS_Y, y);
 +    }
 +    qemu_input_event_sync();
-+}
-+
-+static void input_inject_pause_key(void)
-+{
-+    kbd_put_keycode(0xE1);
-+    kbd_put_keycode(0x1D);
-+    kbd_put_keycode(0x45);
-+
-+    kbd_put_keycode(0xE1);
-+    kbd_put_keycode(0x9D);
-+    kbd_put_keycode(0xC5);
-+}
-+
-+static void input_key_inject(int code, uint32_t keycode)
-+{
-+    int first = 0;
-+
-+    if (keycode == KEY_PAUSE) {
-+        if (code != 0) {
-+            input_inject_pause_key();
-+        }
-+        return;
-+    }
-+
-+    switch (keycode) {
-+    /* XCP-367 */
-+    case KEY_MUHENKAN:
-+        keycode = 0x7b;
-+        break;
-+    case KEY_HENKAN:
-+        keycode = 0x79;
-+        break;
-+    case KEY_KATAKANAHIRAGANA:
-+        keycode = 0x70;
-+        break;
-+    case KEY_YEN:
-+        keycode = 0x7d;
-+        break;
-+    case KEY_RO:
-+        keycode = 0x73;
-+        break;
-+    case KEY_F11:
-+        keycode = 0X57;
-+        break;                    /* F11 */
-+    case KEY_F12:
-+        keycode = 0X58;
-+        break;                    /* F12 */
-+    case KEY_INSERT:
-+        keycode = 0X52;
-+        first = 0xe0;
-+        break;
-+    case KEY_HOME:
-+        keycode = 0X47;
-+        first = 0xe0;
-+        break;
-+    case KEY_PAGEUP:
-+        keycode = 0X49;
-+        first = 0xe0;
-+        break;
-+    case KEY_DELETE:
-+        keycode = 0X53;
-+        first = 0xe0;
-+        break;
-+    case KEY_END:
-+        keycode = 0X4F;
-+        first = 0xe0;
-+        break;
-+    case KEY_PAGEDOWN:
-+        keycode = 0x51;
-+        first = 0xe0;
-+        break;
-+    case KEY_UP:
-+        keycode = 0X48;
-+        first = 0xe0;
-+        break;
-+    case KEY_LEFT:
-+        keycode = 0X4B;
-+        first = 0xe0;
-+        break;
-+    case KEY_DOWN:
-+        keycode = 0X50;
-+        first = 0xe0;
-+        break;
-+    case KEY_RIGHT:
-+        keycode = 0X4D;
-+        first = 0xe0;
-+        break;
-+    case KEY_RIGHTALT:
-+        keycode = 0x38;
-+        first = 0xe0;
-+        break;
-+    case KEY_LEFTMETA:
-+        keycode = 0x5B;
-+        first = 0xe0;
-+        break;
-+    case KEY_RIGHTMETA:
-+        keycode = 0x5C;
-+        first = 0xe0;
-+        break;
-+    case KEY_RIGHTCTRL:
-+        keycode = 0x1d;
-+        first = 0xe0;
-+        break;
-+    case KEY_PROG1:
-+        keycode = 0x1;
-+        first = 0xe0;
-+        break;
-+    case KEY_SYSRQ:
-+        keycode = 0x37;
-+        first = 0xe0;
-+        break;
-+    case KEY_MUTE:
-+        keycode = 0x20;
-+        first = 0xe0;
-+        break;
-+    case KEY_VOLUMEDOWN:
-+        keycode = 0x2e;
-+        first = 0xe0;
-+        break;
-+    case KEY_VOLUMEUP:
-+        keycode = 0x30;
-+        first = 0xe0;
-+        break;
-+    case KEY_COMPOSE:
-+        keycode = 0x5D;
-+        first = 0xe0;
-+        break;
-+    case KEY_KPENTER:
-+        keycode = 0x1C;
-+        first = 0xe0;
-+        break;
-+    case KEY_KPSLASH:
-+        keycode = 0x35;
-+        first = 0xe0;
-+        break;
-+    }
-+
-+    if (first) {
-+        kbd_put_keycode(first);
-+    }
-+
-+    if (keycode < 0x80) {
-+        if (code == 0) {
-+            kbd_put_keycode(keycode | 0x80);
-+        } else {
-+            kbd_put_keycode(keycode & 0x7f);
-+        }
-+    }
 +}
 +
 +static int input_demultitouch(uint16_t *type, uint16_t *code, int32_t *value)
@@ -496,7 +324,8 @@ PATCHES
 +            }
 +        } else {
 +            /* Keyboard */
-+            input_key_inject(value, code);
++            int qcode = qemu_input_linux_to_qcode(code);
++            qemu_input_event_send_key_qcode(NULL, qcode, value);
 +        }
 +        break;
 +    /* Mouse relative motion */
