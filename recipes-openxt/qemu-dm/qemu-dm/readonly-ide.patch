@@ -44,15 +44,17 @@ Ross Philipson, philipsonr@ainfosec.com, 10/13/2016
 
 --- a/configure
 +++ b/configure
-@@ -207,6 +207,7 @@ fdt=""
+@@ -322,7 +322,8 @@ docs=""
+ fdt=""
  netmap="no"
- pixman=""
  sdl=""
+-sdlabi=""
++sdlabi="1.2"
 +readonly_ide="no"
- sdlabi="1.2"
  virtfs=""
+ mpath=""
  vnc="yes"
-@@ -829,6 +830,10 @@ for opt do
+@@ -972,6 +973,10 @@ for opt do
    ;;
    --enable-sdl) sdl="yes"
    ;;
@@ -63,17 +65,17 @@ Ross Philipson, philipsonr@ainfosec.com, 10/13/2016
    --with-sdlabi=*) sdlabi="$optarg"
    ;;
    --disable-qom-cast-debug) qom_cast_debug="no"
-@@ -4774,6 +4779,7 @@ if test "$darwin" = "yes" ; then
+@@ -5770,6 +5775,7 @@ if test "$darwin" = "yes" ; then
  fi
- echo "pixman            $pixman"
- echo "SDL support       $sdl"
+ echo "SDL support       $sdl $(echo_version $sdl $sdlversion)"
+ echo "GTK support       $gtk $(echo_version $gtk $gtk_version)"
 +echo "readonly IDE support       $readonly_ide"
- echo "GTK support       $gtk"
  echo "GTK GL support    $gtk_gl"
- echo "GNUTLS support    $gnutls"
-@@ -5048,6 +5054,9 @@ if test "$sdl" = "yes" ; then
-   echo "CONFIG_SDLABI=$sdlabi" >> $config_host_mak
+ echo "VTE support       $vte $(echo_version $vte $vteversion)"
+ echo "TLS priority      $tls_priority"
+@@ -6103,6 +6109,9 @@ if test "$sdl" = "yes" ; then
    echo "SDL_CFLAGS=$sdl_cflags" >> $config_host_mak
+   echo "SDL_LIBS=$sdl_libs" >> $config_host_mak
  fi
 +if test "$readonly_ide" = "yes" ; then
 +  echo "CONFIG_READONLY_IDE=y" >> $config_host_mak
@@ -83,7 +85,7 @@ Ross Philipson, philipsonr@ainfosec.com, 10/13/2016
  fi
 --- a/hw/ide/core.c
 +++ b/hw/ide/core.c
-@@ -1401,6 +1401,13 @@ static bool cmd_write_multiple(IDEState
+@@ -1465,6 +1465,13 @@ static bool cmd_write_multiple(IDEState
          return true;
      }
  
@@ -97,7 +99,7 @@ Ross Philipson, philipsonr@ainfosec.com, 10/13/2016
      ide_cmd_lba48_transform(s, lba48);
  
      s->req_nb_sectors = s->mult_sectors;
-@@ -1445,6 +1452,13 @@ static bool cmd_write_pio(IDEState *s, u
+@@ -1509,6 +1516,13 @@ static bool cmd_write_pio(IDEState *s, u
          return true;
      }
  
@@ -111,7 +113,7 @@ Ross Philipson, philipsonr@ainfosec.com, 10/13/2016
      ide_cmd_lba48_transform(s, lba48);
  
      s->req_nb_sectors = 1;
-@@ -1480,6 +1494,13 @@ static bool cmd_write_dma(IDEState *s, u
+@@ -1544,6 +1558,13 @@ static bool cmd_write_dma(IDEState *s, u
          return true;
      }
  
@@ -125,13 +127,13 @@ Ross Philipson, philipsonr@ainfosec.com, 10/13/2016
      ide_cmd_lba48_transform(s, lba48);
      ide_sector_start_dma(s, IDE_DMA_WRITE);
  
-@@ -2408,10 +2429,12 @@ int ide_init_drive(IDEState *s, BlockBac
-             error_report("Device needs media, but drive is empty");
+@@ -2500,10 +2521,12 @@ int ide_init_drive(IDEState *s, BlockBac
+             error_setg(errp, "Device needs media, but drive is empty");
              return -1;
          }
 +#ifndef CONFIG_READONLY_IDE
          if (blk_is_read_only(blk)) {
-             error_report("Can't use a read-only drive");
+             error_setg(errp, "Can't use a read-only drive");
              return -1;
          }
 +#endif
