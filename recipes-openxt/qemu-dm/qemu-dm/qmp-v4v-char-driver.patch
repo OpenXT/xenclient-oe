@@ -1,29 +1,49 @@
---- a/qapi-schema.json
-+++ b/qapi-schema.json
-@@ -3362,7 +3362,8 @@
-                                        'vc'     : 'ChardevVC',
-                                        'ringbuf': 'ChardevRingbuf',
-                                        # next one is just for compatibility
--                                       'memory' : 'ChardevRingbuf' } }
-+                                       'memory' : 'ChardevRingbuf',
-+                                       'v4v' : 'ChardevCommon' } }
+--- a/chardev/Makefile.objs
++++ b/chardev/Makefile.objs
+@@ -23,3 +23,4 @@ baum.o-cflags := $(SDL_CFLAGS)
+ baum.o-libs := $(BRLAPI_LIBS)
  
- ##
- # @ChardevReturn:
---- a/qemu-char.c
-+++ b/qemu-char.c
-@@ -42,6 +42,7 @@
- #include "sysemu/replay.h"
- 
- #include <zlib.h>
+ common-obj-$(CONFIG_SPICE) += spice.o
++chardev-obj-$(CONFIG_XEN) += char-v4v.o
+--- /dev/null
++++ b/chardev/char-v4v.c
+@@ -0,0 +1,276 @@
++/*
++ * QEMU System Emulator
++ *
++ * Copyright (c) 2003-2008 Fabrice Bellard
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining a copy
++ * of this software and associated documentation files (the "Software"), to deal
++ * in the Software without restriction, including without limitation the rights
++ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
++ * copies of the Software, and to permit persons to whom the Software is
++ * furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included in
++ * all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
++ * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
++ * THE SOFTWARE.
++ */
++#include "qemu/osdep.h"
++#include "chardev/char.h"
++#include "io/channel-file.h"
++#include "io/channel-socket.h"
++#include "qemu/error-report.h"
++#include "qapi/error.h"
++#include "qapi/clone-visitor.h"
++
++#include "chardev/char-io.h"
++#include "sys/ioctl.h"
 +#include <libv4v.h>
- 
- #ifndef _WIN32
- #include <sys/times.h>
-@@ -2488,6 +2489,223 @@ err1:
- 
- 
- /***********************************************************/
++
++/***********************************************************/
 +/* V4V console for QMP */
 +
 +#define V4V_TYPE 'W'
@@ -40,20 +60,26 @@
 +#define V4V_MAGIC_DISCONNECT "dead"
 +
 +typedef struct {
-+    int fd;
++    Chardev parent;
 +    QIOChannel *ioc;
 +    v4v_addr_t remote_addr;
 +    v4v_addr_t local_addr;
-+    uint8_t buf[READ_BUF_LEN];
++    uint8_t buf[CHR_READ_BUF_LEN];
++    int fd;
 +    int bufcnt;
 +    int bufptr;
 +    int max_size;
 +    int connected;
-+} V4vCharDriver;
++} V4vChardev;
 +
-+static int v4v_chr_write(CharDriverState *chr, const uint8_t *buf, int len)
++#define TYPE_CHARDEV_V4V "chardev-v4v"
++#define V4V_CHARDEV(obj)                                     \
++    OBJECT_CHECK(V4vChardev, (obj), TYPE_CHARDEV_V4V)
++
++
++static int v4v_chr_write(Chardev *chr, const uint8_t *buf, int len)
 +{
-+    V4vCharDriver *s = chr->opaque;
++    V4vChardev *s = V4V_CHARDEV(chr);
 +    int ret;
 +
 +    ret = v4v_sendto(s->fd, buf, len, 0, &s->remote_addr);
@@ -68,8 +94,8 @@
 +
 +static int v4v_chr_read_poll(void *opaque)
 +{
-+    CharDriverState *chr = opaque;
-+    V4vCharDriver *s = chr->opaque;
++    Chardev *chr = CHARDEV(opaque);
++    V4vChardev *s = V4V_CHARDEV(chr);
 +
 +    s->max_size = qemu_chr_be_can_write(chr);
 +
@@ -86,22 +112,23 @@
 +
 +static gboolean v4v_chr_read(QIOChannel *chan, GIOCondition cond, void *opaque);
 +
-+static void v4v_chr_update_read_handler(CharDriverState *chr)
++static void v4v_chr_update_read_handler(Chardev *chr)
 +{
-+    V4vCharDriver *s = chr->opaque;
++    V4vChardev *s = V4V_CHARDEV(chr);
 +
 +    remove_fd_in_watch(chr);
 +    if (s->ioc) {
-+        chr->fd_in_tag = io_add_watch_poll(s->ioc,
-+                                           v4v_chr_read_poll,
-+                                           v4v_chr_read, chr);
++        chr->gsource = io_add_watch_poll(chr, s->ioc,
++                                         v4v_chr_read_poll,
++                                         v4v_chr_read, chr,
++                                         chr->gcontext);
 +    }
 +}
 +
 +static gboolean v4v_chr_read(QIOChannel *chan, GIOCondition cond, void *opaque)
 +{
-+    CharDriverState *chr = opaque;
-+    V4vCharDriver *s = chr->opaque;
++    Chardev *chr = CHARDEV(opaque);
++    V4vChardev *s = V4V_CHARDEV(chr);
 +    int ret;
 +
 +    if (s->max_size == 0)
@@ -117,10 +144,10 @@
 +        fprintf(stderr, "v4v_recvfrom() returned V4V_MAGIC_CONNECT, connecting.\n");
 +        v4v_chr_update_read_handler(chr);
 +        qemu_chr_be_event(chr, CHR_EVENT_OPENED);
-+        if (!chr->fd_in_tag) {
-+            chr->fd_in_tag = io_add_watch_poll(s->ioc,
-+                                               v4v_chr_read_poll,
-+                                               v4v_chr_read, chr);
++        if (!chr->gsource) {
++            chr->gsource = io_add_watch_poll(chr, s->ioc,
++                                             v4v_chr_read_poll,
++                                             v4v_chr_read, chr, chr->gcontext);
 +        }
 +        s->connected = 1;
 +        return FALSE;
@@ -128,10 +155,10 @@
 +    if (s->connected == 1 && !strncmp((char*)(s->buf), V4V_MAGIC_DISCONNECT, 4)) {
 +        v4v_chr_update_read_handler(chr);
 +        qemu_chr_be_event(chr, CHR_EVENT_CLOSED);
-+        if (!chr->fd_in_tag) {
-+            chr->fd_in_tag = io_add_watch_poll(s->ioc,
-+                                               v4v_chr_read_poll,
-+                                               v4v_chr_read, chr);
++        if (!chr->gsource) {
++            chr->gsource = io_add_watch_poll(chr, s->ioc,
++                                             v4v_chr_read_poll,
++                                             v4v_chr_read, chr, chr->gcontext);
 +        }
 +        fprintf(stderr, "v4v_recvfrom() returned V4V_MAGIC_DISCONNECT, closing.\n");
 +        s->connected = 0;
@@ -149,40 +176,46 @@
 +    return TRUE;
 +}
 +
-+static GSource *v4v_chr_add_watch(CharDriverState *chr, GIOCondition cond)
++static GSource *v4v_chr_add_watch(Chardev *chr, GIOCondition cond)
 +{
-+    V4vCharDriver *s = chr->opaque;
++    V4vChardev *s = V4V_CHARDEV(chr);
 +    return qio_channel_create_watch(s->ioc, cond);
 +}
 +
-+static void v4v_chr_close(CharDriverState *chr)
++static void char_v4v_finalize(Object *obj)
 +{
-+    V4vCharDriver *s = chr->opaque;
++    Chardev *chr = CHARDEV(obj);
++    V4vChardev *s = V4V_CHARDEV(chr);
 +
-+    /* TODO should call close() internally on v4v fd */
 +    remove_fd_in_watch(chr);
-+
 +    if (s->ioc) {
 +        object_unref(OBJECT(s->ioc));
 +    }
 +
-+    g_free(s);
++    close(s->fd);
++    s->fd = -1;
 +
 +    qemu_chr_be_event(chr, CHR_EVENT_CLOSED);
 +}
 +
-+static CharDriverState *qemu_chr_open_v4v(const char *id,
-+                                          ChardevBackend *backend,
-+                                          ChardevReturn *ret,
-+                                          Error **errp)
++static void qemu_chr_parse_v4v(QemuOpts *opts, ChardevBackend *backend,
++                               Error **errp)
 +{
-+    CharDriverState *chr = NULL;
-+    V4vCharDriver *s = NULL;
-+    ChardevCommon *common = backend->u.v4v.data;
++    ChardevV4v *v4v;
++
++    backend->type = CHARDEV_BACKEND_KIND_V4V;
++    v4v = backend->u.v4v.data = g_new0(ChardevV4v, 1);
++    qemu_chr_parse_common(opts, qapi_ChardevV4v_base(v4v));
++}
++
++static void qmp_chr_open_v4v(Chardev *chr,
++                             ChardevBackend *backend,
++                             bool *be_opened,
++                             Error **errp)
++{
++    V4vChardev *s = V4V_CHARDEV(chr);
 +    uint32_t v4v_ring_size = V4V_CHARDRV_RING_SIZE;
 +    int fd = -1;
-+
-+    s = g_new0(V4vCharDriver, 1);
 +
 +    s->local_addr.port = V4V_CHARDRV_PORT;
 +    s->local_addr.domain = V4V_DOMID_ANY;
@@ -193,7 +226,7 @@
 +    if (fd < 0) {
 +        error_setg(errp, "%s cannot create v4v socket - err: %d",
 +                   V4V_CHARDRV_NAME, fd);
-+        return NULL;
++        return;
 +    }
 +
 +    if (ioctl(fd, V4VIOCSETRINGSIZE, &v4v_ring_size)) {
@@ -201,7 +234,7 @@
 +                   "%s failed to set ring size v4v socket - err: %d",
 +                   V4V_CHARDRV_NAME, errno);
 +        close(fd);
-+        return NULL;
++        return;
 +    }
 +
 +    if (v4v_bind(fd, &s->local_addr, 0)) {
@@ -209,55 +242,96 @@
 +                   "%s failed to bind v4v socket - err: %d",
 +                   V4V_CHARDRV_NAME, errno);
 +        close(fd);
-+        return NULL;
-+    }
-+
-+    chr = qemu_chr_alloc(common, errp);
-+    if (!chr) {
-+        close(fd);
-+        return NULL;
++        return;
 +    }
 +
 +    s->fd = fd;
 +    s->bufcnt = 0;
 +    s->bufptr = 0;
-+    chr->opaque = s;
-+    chr->chr_write = v4v_chr_write;
-+    chr->chr_update_read_handler = v4v_chr_update_read_handler;
-+    chr->chr_close = v4v_chr_close;
-+    chr->chr_add_watch = v4v_chr_add_watch;
 +    /* be isn't opened until we get a connection */
-+    chr->explicit_be_open = true;
++    *be_opened = false;
 +
 +    s->ioc = QIO_CHANNEL(qio_channel_file_new_fd(fd));
 +
 +    /* TODO currently starting up open */
-+    qemu_chr_be_generic_open(chr);
 +    s->connected = 1;
 +
 +    fprintf(stderr, "Opened V4V chardev\n");
-+
-+    return chr;
 +}
 +
-+/***********************************************************/
- /* UDP Net console */
- 
- typedef struct {
-@@ -3430,6 +3648,7 @@ QemuOpts *qemu_chr_parse_compat(const ch
-         strcmp(filename, "pty")     == 0 ||
++static void char_v4v_class_init(ObjectClass *oc, void *data)
++{
++    ChardevClass *cc = CHARDEV_CLASS(oc);
++
++    cc->parse = qemu_chr_parse_v4v;
++    cc->open = qmp_chr_open_v4v;
++    cc->chr_write = v4v_chr_write;
++    cc->chr_add_watch = v4v_chr_add_watch;
++    cc->chr_update_read_handler = v4v_chr_update_read_handler;
++}
++
++static const TypeInfo char_v4v_type_info = {
++    .name = TYPE_CHARDEV_V4V,
++    .parent = TYPE_CHARDEV,
++    .instance_size = sizeof(V4vChardev),
++    .instance_finalize = char_v4v_finalize,
++    .class_init = char_v4v_class_init,
++};
++
++static void register_types(void)
++{
++    type_register_static(&char_v4v_type_info);
++}
++
++type_init(register_types);
+--- a/chardev/char.c
++++ b/chardev/char.c
+@@ -361,6 +361,7 @@ QemuOpts *qemu_chr_parse_compat(const ch
          strcmp(filename, "msmouse") == 0 ||
+         strcmp(filename, "wctablet") == 0 ||
          strcmp(filename, "braille") == 0 ||
 +        strcmp(filename, "v4v")     == 0 ||
          strcmp(filename, "testdev") == 0 ||
          strcmp(filename, "stdio")   == 0) {
          qemu_opt_set(opts, "backend", filename, &error_abort);
-@@ -4605,6 +4824,8 @@ static void register_types(void)
-     /* Bug-compatibility: */
-     register_char_driver("memory", CHARDEV_BACKEND_KIND_MEMORY,
-                          qemu_chr_parse_ringbuf, qemu_chr_open_ringbuf);
-+    register_char_driver("v4v", CHARDEV_BACKEND_KIND_V4V, NULL,
-+                         qemu_chr_open_v4v);
-     /* this must be done after machine init, since we register FEs with muxes
-      * as part of realize functions like serial_isa_realizefn when -nographic
-      * is specified
+--- a/include/chardev/char.h
++++ b/include/chardev/char.h
+@@ -219,6 +219,7 @@ int qemu_chr_wait_connected(Chardev *chr
+ #define TYPE_CHARDEV_SERIAL "chardev-serial"
+ #define TYPE_CHARDEV_SOCKET "chardev-socket"
+ #define TYPE_CHARDEV_UDP "chardev-udp"
++#define TYPE_CHARDEV_V4V "chardev-v4v"
+ 
+ #define CHARDEV_IS_RINGBUF(chr) \
+     object_dynamic_cast(OBJECT(chr), TYPE_CHARDEV_RINGBUF)
+--- a/qapi/char.json
++++ b/qapi/char.json
+@@ -282,6 +282,20 @@
+   'base': 'ChardevCommon' }
+ 
+ ##
++# @ChardevV4v:
++#
++# Configuration info for v4v socket chardevs.
++#
++# @remote: remote address
++# @local: local address
++#
++# Since: 1.5
++##
++{ 'struct': 'ChardevV4v', 'data': { 'remote' : 'SocketAddressLegacy',
++                                  '*local' : 'SocketAddressLegacy' },
++  'base': 'ChardevCommon' }
++
++##
+ # @ChardevMux:
+ #
+ # Configuration info for mux chardevs.
+@@ -387,6 +401,7 @@
+                                        'spicevmc' : 'ChardevSpiceChannel',
+                                        'spiceport' : 'ChardevSpicePort',
+                                        'vc'     : 'ChardevVC',
++                                       'v4v'    : 'ChardevV4v',
+                                        'ringbuf': 'ChardevRingbuf',
+                                        # next one is just for compatibility
+                                        'memory' : 'ChardevRingbuf' } }
