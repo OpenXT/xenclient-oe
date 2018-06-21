@@ -27,6 +27,9 @@ CHANGELOG
 ================================================================================
 Intial Commit: Rian Quinn, quinnr@ainfosec.com, 4/8/2015
 Ported to QEMU 2.6.2: Ross Philipson, philipsonr@ainfosec.com, 10/13/2016
+Port to QEMU 2.12: Jason Andryuk, jandryuk@gmail.com, 6/19/2018
+  CONFIG option must be prefixed CONFIG_AUDIO_
+  name must be openxt to be found in driver search
 
 ================================================================================
 REMOVAL
@@ -47,19 +50,18 @@ None
 ================================================================================
 PATCHES
 ================================================================================
+=======
 --- a/audio/Makefile.objs
 +++ b/audio/Makefile.objs
-@@ -8,6 +8,10 @@ common-obj-$(CONFIG_DSOUND) += dsoundaud
- common-obj-$(CONFIG_PA) += paaudio.o
+@@ -4,6 +4,8 @@ common-obj-$(CONFIG_AUDIO_COREAUDIO) +=
+ common-obj-$(CONFIG_AUDIO_DSOUND) += dsoundaudio.o
  common-obj-$(CONFIG_AUDIO_PT_INT) += audio_pt_int.o
  common-obj-$(CONFIG_AUDIO_WIN_INT) += audio_win_int.o
-+common-obj-$(CONFIG_OPENXT) += alsadef.o
-+common-obj-$(CONFIG_OPENXT) += openxtv4v.o
-+common-obj-$(CONFIG_OPENXT) += openxtdebug.o
-+common-obj-$(CONFIG_OPENXT) += openxtaudio.o
++common-obj-$(CONFIG_AUDIO_OPENXT) += alsadef.o openxtv4v.o
++common-obj-$(CONFIG_AUDIO_OPENXT) += openxtdebug.o openxtaudio.o
  common-obj-y += wavcapture.o
  
- sdlaudio.o-cflags := $(SDL_CFLAGS)
+ coreaudio.o-libs := $(COREAUDIO_LIBS)
 --- /dev/null
 +++ b/audio/alsadef.c
 @@ -0,0 +1,151 @@
@@ -252,19 +254,9 @@ PATCHES
 +int alsa_to_audfmt(snd_pcm_format_t alsafmt, audfmt_e *fmt, int *endianness);
 +
 +#endif // ALSADEF_H
---- a/audio/audio_int.h
-+++ b/audio/audio_int.h
-@@ -211,6 +211,7 @@ extern struct audio_driver coreaudio_aud
- extern struct audio_driver dsound_audio_driver;
- extern struct audio_driver pa_audio_driver;
- extern struct audio_driver spice_audio_driver;
-+extern struct audio_driver openxt_audio_driver;
- extern const struct mixeng_volume nominal_volume;
- 
- void audio_pcm_init_info (struct audio_pcm_info *info, struct audsettings *as);
 --- /dev/null
 +++ b/audio/openxtaudio.c
-@@ -0,0 +1,737 @@
+@@ -0,0 +1,743 @@
 +//
 +// Copyright (c) 2015 Assured Information Security, Inc
 +//
@@ -989,8 +981,8 @@ PATCHES
 +    .ctl_in   = openxt_capture_ctl
 +};
 +
-+struct audio_driver openxt_audio_driver = {
-+    .name           = "openxt audio",
++static struct audio_driver openxt_audio_driver = {
++    .name           = "openxt",
 +    .descr          = "OpenXT Audio Driver",
 +    .options        = NULL,
 +    .init           = openxt_audio_init,
@@ -1002,6 +994,12 @@ PATCHES
 +    .voice_size_out = sizeof(OpenXTOut),
 +    .voice_size_in  = sizeof(OpenXTIn)
 +};
++
++static void register_audio_openxt(void)
++{
++    audio_driver_register(&openxt_audio_driver);
++}
++type_init(register_audio_openxt);
 --- /dev/null
 +++ b/audio/openxtdebug.c
 @@ -0,0 +1,61 @@
@@ -1993,9 +1991,9 @@ PATCHES
 +#endif // OPENXT_V4V_H
 --- a/configure
 +++ b/configure
-@@ -674,7 +674,7 @@ Haiku)
+@@ -816,7 +816,7 @@ Haiku)
  ;;
- *)
+ Linux)
    audio_drv_list="oss"
 -  audio_possible_drivers="oss alsa sdl pa"
 +  audio_possible_drivers="oss alsa sdl pa openxt"
