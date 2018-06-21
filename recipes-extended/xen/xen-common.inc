@@ -14,19 +14,8 @@ SRC_URI = "git://xenbits.xen.org/xen.git;branch=${XEN_BRANCH}"
 require ${@bb.utils.contains('DISTRO_FEATURES', 'blktap2', 'xen-blktap2.inc', 'xen-blktap3.inc', d)}
 
 SRC_URI_append = " \
-    file://xsa263-4.9/0001-x86-spec_ctrl-Read-MSR_ARCH_CAPABILITIES-only-once.patch \
-    file://xsa263-4.9/0002-x86-spec_ctrl-Express-Xen-s-choice-of-MSR_SPEC_CTRL-.patch \
-    file://xsa263-4.9/0003-x86-spec_ctrl-Merge-bti_ist_info-and-use_shadow_spec.patch \
-    file://xsa263-4.9/0004-x86-spec_ctrl-Fold-the-XEN_IBRS_-SET-CLEAR-ALTERNATI.patch \
-    file://xsa263-4.9/0005-x86-spec_ctrl-Rename-bits-of-infrastructure-to-avoid.patch \
-    file://xsa263-4.9/0006-x86-spec_ctrl-Elide-MSR_SPEC_CTRL-handling-in-idle-c.patch \
-    file://xsa263-4.9/0007-x86-spec_ctrl-Split-X86_FEATURE_SC_MSR-into-PV-and-H.patch \
-    file://xsa263-4.9/0008-x86-spec_ctrl-Explicitly-set-Xen-s-default-MSR_SPEC_.patch \
-    file://xsa263-4.9/0009-x86-cpuid-Improvements-to-guest-policies-for-specula.patch \
-    file://xsa263-4.9/0010-x86-spec_ctrl-Introduce-a-new-spec-ctrl-command-line.patch \
-    file://xsa263-4.9/0011-x86-AMD-Mitigations-for-GPZ-SP4-Speculative-Store-By.patch \
-    file://xsa263-4.9/0012-x86-Intel-Mitigations-for-GPZ-SP4-Speculative-Store-.patch \
-    file://xsa263-4.9/0013-x86-msr-Virtualise-MSR_SPEC_CTRL.SSBD-for-guests-to-.patch \
+    file://xsa267-4.9-1.patch \
+    file://xsa267-4.9-2.patch \
     file://defconfig \
     file://config.patch \
     file://disable-xen-root-check.patch \
