@@ -45,15 +45,7 @@ PATCHES
 ################################################################################
 --- a/hw/xen/xen_backend.c
 +++ b/hw/xen/xen_backend.c
-@@ -30,6 +30,7 @@
- #include "sysemu/char.h"
- #include "qemu/log.h"
- #include "hw/xen/xen_backend.h"
-+#include "qmp-commands.h"
- 
- #include <xen/grant_table.h>
- 
-@@ -607,6 +608,214 @@ static int xenstore_scan(const char *typ
+@@ -469,6 +469,168 @@ static int xenstore_scan(const char *typ
      return 0;
  }
  
@@ -98,21 +90,21 @@ PATCHES
 +/*
 + * OpenXT: Fill base with the Xenstore path of the network backend for that NICInfo element.
 + *
-+ * @param ni a valid pointer to a NICInfo, likely an element of nd_table.
++ * @param name vif string (e.g. vif0)
 + * @param base is able to store at least XEN_BUFSIZE bytes.
 + * @return 0 on success, -ERRNO else.
 + */
-+static int xenstore_get_nic_path(const struct NetClientState *ncs, char *base)
++static int xenstore_get_nic_path(const char *name, char *base)
 +{
 +    char *dompath;
 +    char type[XENSTORE_NET_TYPE_LEN];
 +    char id[XENSTORE_NET_ID_LEN];
 +
-+    assert(ncs);
++    assert(name);
 +    assert(base);
 +
-+    if (xenstore_nic_parse_name(ncs->name, type, id)) {
-+        fprintf(stderr, "failed to parse nic backend xenstore name `%s'.\n", ncs->name);
++    if (xenstore_nic_parse_name(name, type, id)) {
++        fprintf(stderr, "failed to parse nic backend xenstore name `%s'.\n", name);
 +        return -EINVAL;
 +    }
 +    dompath = xs_get_domain_path(xenstore, xen_domid);
@@ -127,50 +119,23 @@ PATCHES
 +}
 +
 +/*
-+ * OpenXT: Return the NICInfo entry of the backend peered with the
-+ * given NICConf.
-+ *
-+ * @param conf a valid pointer to a NICConf.
-+ * @return a pointer to the corresponding NICInfo, NULL else.
-+ */
-+static struct NetClientState *qemu_find_netclientstate(const NICConf *conf)
-+{
-+    size_t i;
-+    NetClientState *ncs[MAX_QUEUE_NUM];
-+    NICState *tstate;
-+    NICConf  *tconf;
-+    int count;
-+
-+    assert(conf);
-+
-+    count = qemu_find_net_clients_except(NULL, ncs,
-+                                         NET_CLIENT_OPTIONS_KIND_TAP,
-+                                         MAX_QUEUE_NUM);
-+    for (i = 0; i < count; ++i) {
-+        tstate = qemu_get_nic(ncs[i]);
-+        tconf = tstate->conf;
-+        if (!memcmp(&tconf->macaddr.a, &conf->macaddr.a, 6)) {
-+            return ncs[i];
-+        }
-+    }
-+    return NULL;
-+}
-+
-+/*
 + * OpenXT: Read Xenstore for link-state change to be forwarded to the NetClients of this netdev.
 + *
 + * @param opaque a valid pointer to a NICInfo object.
 + */
 +static void xenstore_update_nic(void *opaque)
 +{
-+    const struct NetClientState *ncs = opaque;
++    NICState *nic = opaque;
++    NetClientState *ncs;
++    char *name = nic->ncs->name;
 +    char base[XEN_BUFSIZE];
 +    int val;
 +
 +    assert(opaque);
++    assert(name);
 +
-+    if (xenstore_get_nic_path(ncs, base)) {
-+        fprintf(stderr, "Could not find xenstore path for dom%d NIC `%s'.\n", xen_domid, ncs->name);
++    if (xenstore_get_nic_path(name, base)) {
++        fprintf(stderr, "Could not find xenstore path for dom%d NIC `%s'.\n", xen_domid, name);
 +        return;
 +    }
 +    if (xenstore_read_int(base, "disconnect", &val)) {
@@ -178,27 +143,15 @@ PATCHES
 +        return;
 +    }
 +
++    ncs = nic->ncs;
 +    if (ncs->link_down != !!val) {
 +        /* notify the emulation through qmp.
 +         * note that qmp_set_link boolean is "link-up?",
 +         * not nc->link_down "link-down?". */
 +        qmp_set_link(ncs->name, !val, NULL);
 +        fprintf(stderr, "%s (%s): link status is now %s.\n",
-+                ncs->name, ncs->name, !!val ? "down" : "up");
++                ncs->name, name, !!val ? "down" : "up");
 +    }
-+}
-+
-+/*
-+ * OpenXT: Print a MAC addr
-+ *
-+ * @param msg a valid message
-+ * @param macaddr a valid pointer to a 6 byte array.
-+ */
-+static void qemu_mac_printf(const char *msg, const uint8_t *macaddr)
-+{
-+    fprintf(stderr, "%s %.2x:%.2x:%.2x:%.2x:%.2x:%.2x", msg,
-+            macaddr[0], macaddr[1], macaddr[2],
-+            macaddr[3], macaddr[4], macaddr[5]);
 +}
 +
 +/*
@@ -207,30 +160,26 @@ PATCHES
 + * @param conf a valid pointer to a NetClientState object.
 + * @return 0 on success, -ERRNO else.
 + */
-+int xenstore_register_nic(NICConf *conf)
++int xenstore_register_nic(NICState *nic)
 +{
 +    char base[XEN_BUFSIZE];
-+    struct NetClientState *ncs;
++    char *name;
 +
-+    assert(conf);
++    assert(nic);
 +
-+    ncs = qemu_find_netclientstate(conf);
-+    if (!ncs) {
-+        fprintf(stderr, "Failed to find backend device for emulated NIC conf %p\n", conf);
-+        return -ENODEV;
-+    }
-+    if (xenstore_get_nic_path(ncs, base)) {
-+        fprintf(stderr, "Could not find xenstore path for dom%d NIC `%s'.\n", xen_domid, ncs->name);
++    name = nic->ncs->name;
++
++    if (xenstore_get_nic_path(name, base)) {
++        fprintf(stderr, "Could not find xenstore path for dom%d NIC `%s'.\n", xen_domid, name);
 +        return -ENOENT;
 +    }
-+    if (xenstore_add_watch(base, "disconnect", xenstore_update_nic, ncs)) {
++    if (xenstore_add_watch(base, "disconnect", xenstore_update_nic, nic)) {
 +        fprintf(stderr, "Could not install xenstore watch on path `%s/disconnect'.\n", base);
 +        return -1;
 +    }
-+    xenstore_update_nic(ncs);
++    xenstore_update_nic(nic);
 +
-+    qemu_mac_printf("Registered xenstore watch for NIC addr:",
-+                    &conf->macaddr.a[0]);
++    fprintf(stderr, "Registered xenstore watch for NIC %s", name);
 +
 +    return 0;
 +}
@@ -242,55 +191,56 @@ PATCHES
 + * @param conf a valid pointer to a NICConf object.
 + * @return 0 on success, -ERRNO else.
 + */
-+int xenstore_unregister_nic(NICConf *conf)
++int xenstore_unregister_nic(NICState *nic)
 +{
 +    char base[XEN_BUFSIZE];
-+    struct NetClientState *ncs;
++    char *name;
 +
-+    assert(conf);
++    assert(nic);
 +
-+    ncs = qemu_find_netclientstate(conf);
-+    if (!ncs) {
-+        fprintf(stderr, "Failed to find backend device for emulated NIC conf %p\n", conf);
-+        return -ENODEV;
-+    }
-+    if (xenstore_get_nic_path(ncs, base)) {
-+        fprintf(stderr, "Could not find xenstore path for dom%d NIC `%s'.\n", xen_domid, ncs->name);
++    name = nic->ncs->name;
++
++    if (xenstore_get_nic_path(name, base)) {
++        fprintf(stderr, "Could not find xenstore path for dom%d NIC `%s'.\n", xen_domid, name);
 +        return -ENOENT;
 +    }
-+    if (xenstore_remove_watch(base, "disconnect", xenstore_update_nic, ncs)) {
-+        fprintf(stderr, "Could not install xenstore watch on path `%s/disconnect'.\n", base);
++    if (xenstore_remove_watch(base, "disconnect", xenstore_update_nic, nic)) {
++        fprintf(stderr, "Could not remove xenstore watch on path `%s/disconnect'.\n", base);
 +        return -1;
 +    }
 +    return 0;
 +}
 +
- static void xenstore_update_be(char *watch, char *type, int dom,
-                                struct XenDevOps *ops)
+ void xenstore_update_be(char *watch, char *type, int dom,
+                         struct XenDevOps *ops)
  {
 --- a/include/hw/xen/xen.h
 +++ b/include/hw/xen/xen.h
-@@ -8,6 +8,7 @@
+@@ -8,9 +8,10 @@
+  *   /usr/include/xen, so it can be included unconditionally.
   */
  
- #include "hw/irq.h"
++#include "hw/irq.h"
 +#include "net/net.h"
  #include "qemu-common.h"
+ #include "exec/cpu-common.h"
+-#include "hw/irq.h"
  
  /* xen-machine.c */
-@@ -33,6 +34,9 @@ void xen_piix_pci_write_config_client(ui
+ enum xen_mode {
+@@ -36,6 +37,9 @@ void xen_piix_pci_write_config_client(ui
  void xen_hvm_inject_msi(uint64_t addr, uint32_t data);
  int xen_is_pirq_msi(uint32_t msi_data);
  
-+int xenstore_register_nic(NICConf *conf);
-+int xenstore_unregister_nic(NICConf *conf);
++int xenstore_register_nic(NICState *nic);
++int xenstore_unregister_nic(NICState *nic);
 +
  qemu_irq *xen_interrupt_controller_init(void);
  
- void xenstore_store_pv_console_info(int i, struct CharDriverState *chr);
+ void xenstore_store_pv_console_info(int i, struct Chardev *chr);
 --- a/net/net.c
 +++ b/net/net.c
-@@ -48,6 +48,9 @@
+@@ -52,6 +52,9 @@
  #include "net/filter.h"
  #include "qapi/string-output-visitor.h"
  
@@ -300,7 +250,7 @@ PATCHES
  /* Net bridge is currently not supported for W32. */
  #if !defined(_WIN32)
  # define CONFIG_NET_BRIDGE
-@@ -305,6 +308,14 @@ NICState *qemu_new_nic(NetClientInfo *in
+@@ -299,6 +302,14 @@ NICState *qemu_new_nic(NetClientInfo *in
          nic->ncs[i].queue_index = i;
      }
  
@@ -309,19 +259,19 @@ PATCHES
 +     * Required for link-state propagation logic.
 +     */
 +    if (xen_enabled()) {
-+        xenstore_register_nic(conf);
++        xenstore_register_nic(nic);
 +    }
 +
      return nic;
  }
  
-@@ -409,6 +420,11 @@ void qemu_del_nic(NICState *nic)
+@@ -403,6 +414,11 @@ void qemu_del_nic(NICState *nic)
  {
      int i, queues = MAX(nic->conf->peers.queues, 1);
  
 +    /* OpenXT: Unregister NICConf/NICInfo from Xenstore. */
 +    if (xen_enabled()) {
-+        xenstore_unregister_nic(nic->conf);
++        xenstore_unregister_nic(nic);
 +    }
 +
      qemu_macaddr_set_free(&nic->conf->macaddr);
