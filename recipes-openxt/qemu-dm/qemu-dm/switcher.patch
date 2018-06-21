@@ -22,6 +22,8 @@ CHANGELOG
 --------------------------------------------------------------------------------
 Initial commit: Eric Chanudet <chanudete@ainfosec.com> 1/15/2015
 Port 2.6.2: Ross Philipson, <philipsonr@ainfosec.com> 10/13/2016
+Port 2.12: Jason Andryuk <jandryuk@gmail.com> 06/19/2018
+ - xen_input_init will be called from surfman init
 
 --------------------------------------------------------------------------------
 DEPENDENCIES
@@ -49,28 +51,6 @@ progress will likely be reconsidered after some elements of the input server
 --------------------------------------------------------------------------------
 PATCHES
 --------------------------------------------------------------------------------
----
- include/sysemu/sysemu.h |   1 +
- include/ui/console.h    |   1 +
- ui/Makefile.objs        |   1 +
- ui/input.c              |  24 +++
- ui/xen-input.c          | 492 ++++++++++++++++++++++++++++++++++++++++++++++++
- ui/xen-input.h          |  30 +++
- vl.c                    |   6 +-
- 7 files changed, 554 insertions(+), 1 deletion(-)
- create mode 100644 ui/xen-input.c
- create mode 100644 ui/xen-input.h
-
---- a/include/sysemu/sysemu.h
-+++ b/include/sysemu/sysemu.h
-@@ -139,6 +139,7 @@ typedef enum DisplayType
-     DT_GTK,
-     DT_NOGRAPHIC,
-     DT_NONE,
-+    DT_XEN /* OpenXT Display */
- } DisplayType;
- 
- extern int autostart;
 --- /dev/null
 +++ b/include/ui/xen-input.h
 @@ -0,0 +1,49 @@
@@ -125,14 +105,14 @@ PATCHES
 +#endif /* !UI_XEN_INPUT_H_ */
 --- a/ui/Makefile.objs
 +++ b/ui/Makefile.objs
-@@ -16,6 +16,7 @@ common-obj-$(CONFIG_COCOA) += cocoa.o
- common-obj-$(CONFIG_CURSES) += curses.o
+@@ -14,6 +14,7 @@ common-obj-$(CONFIG_SPICE) += spice-core
+ common-obj-$(CONFIG_COCOA) += cocoa.o
  common-obj-$(CONFIG_VNC) += $(vnc-obj-y)
- common-obj-$(CONFIG_GTK) += gtk.o x_keymap.o
+ common-obj-$(call lnot,$(CONFIG_VNC)) += vnc-stubs.o
 +common-obj-$(CONFIG_XEN) += xen-input.o
  
- ifeq ($(CONFIG_SDLABI),1.2)
- sdl.mo-objs := sdl.o sdl_zoom.o
+ common-obj-$(CONFIG_X11) += x_keymap.o
+ x_keymap.o-cflags := $(X11_CFLAGS)
 --- /dev/null
 +++ b/ui/xen-input.c
 @@ -0,0 +1,598 @@
@@ -245,8 +225,8 @@ PATCHES
 +    }
 +
 +    if (abs) {
-+        qemu_input_queue_abs(NULL, INPUT_AXIS_X, x, INPUT_EVENT_ABS_SIZE);
-+        qemu_input_queue_abs(NULL, INPUT_AXIS_Y, y, INPUT_EVENT_ABS_SIZE);
++        qemu_input_queue_abs(NULL, INPUT_AXIS_X, x, 0, INPUT_EVENT_ABS_MAX);
++        qemu_input_queue_abs(NULL, INPUT_AXIS_Y, y, 0, INPUT_EVENT_ABS_MAX);
 +    }
 +    else {
 +        qemu_input_queue_rel(NULL, INPUT_AXIS_X, x);
@@ -736,7 +716,7 @@ PATCHES
 +}
 --- a/vl.c
 +++ b/vl.c
-@@ -111,6 +111,7 @@ int main(int argc, char **argv)
+@@ -118,6 +118,7 @@ int main(int argc, char **argv)
  #include "sysemu/arch_init.h"
  
  #include "ui/qemu-spice.h"
@@ -744,30 +724,3 @@ PATCHES
  #include "qapi/string-input-visitor.h"
  #include "qapi/opts-visitor.h"
  #include "qom/object_interfaces.h"
-@@ -128,7 +129,7 @@ static const char *data_dir[16];
- static int data_dir_idx;
- const char *bios_name = NULL;
- enum vga_retrace_method vga_retrace_method = VGA_RETRACE_DUMB;
--DisplayType display_type = DT_DEFAULT;
-+DisplayType display_type = DT_XEN;
- int request_opengl = -1;
- int display_opengl;
- static int display_remote;
-@@ -4589,6 +4590,9 @@ int main(int argc, char **argv, char **e
-         gtk_display_init(ds, full_screen, grab_on_hover);
-         break;
- #endif
-+    case DT_XEN:
-+        xen_input_init();
-+        break;
-     default:
-         break;
-     }
-@@ -4665,6 +4669,7 @@ int main(int argc, char **argv, char **e
-     main_loop();
-     replay_disable_events();
-     iothread_stop_all();
-+    xen_input_deinit();
- 
-     bdrv_close_all();
-     pause_all_vcpus();
