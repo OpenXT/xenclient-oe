@@ -94,6 +94,7 @@ EXTRA_OECONF += " \
     --disable-vhdx \
     --disable-qom-cast-debug \
     --disable-tcg-interpreter \
+    --disable-tcg \
     --disable-vhost-net \
     --disable-vhost-scsi \
     --disable-bzip2 \
