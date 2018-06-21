@@ -1,10 +1,6 @@
 DESCRIPTION = "QEMU hosted virtual machine monitor for stub-domain."
 
-PV_MAJOR = "${@"${PV}".split('.', 3)[0]}"
-PV_MINOR = "${@"${PV}".split('.', 3)[1]}"
-PV_MICRO = "${@"${PV}".split('.', 3)[2]}"
-
-FILESEXTRAPATHS_prepend := "${THISDIR}/qemu-dm-${PV_MAJOR}.${PV_MINOR}.${PV_MICRO}:"
+FILESEXTRAPATHS_prepend := "${THISDIR}/qemu-dm:"
 
 require qemu-dm.inc
 
