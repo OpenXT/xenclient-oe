@@ -42,6 +42,10 @@ Chris Patterson, <pattersonc@ainfosec.com>, 04/21/2015
 Ross Philipson, philipsonr@ainfosec.com, 10/13/2016
 - Ported to 2.6.2
 
+Jason Andryuk, jandryuk@gmail.com, 06/19/2018
+- Port to 2.12.  Set readonly approriately in ide_dev_initfn to avoid
+  error in bdrv_check_perm.
+
 --- a/configure
 +++ b/configure
 @@ -322,7 +322,8 @@ docs=""
@@ -140,3 +144,19 @@ Ross Philipson, philipsonr@ainfosec.com, 10/13/2016
          blk_set_dev_ops(blk, &ide_hd_block_ops, s);
      }
      if (serial) {
+--- a/hw/ide/qdev.c
++++ b/hw/ide/qdev.c
+@@ -195,7 +195,12 @@ static void ide_dev_initfn(IDEDevice *de
+             return;
+         }
+     }
+-    if (!blkconf_apply_backend_options(&dev->conf, kind == IDE_CD,
++    /* OpenXT: We also support read-only disks */
++    bool readonly = kind == IDE_CD;
++#ifdef CONFIG_READONLY_IDE
++    readonly |= blk_is_read_only(dev->conf.blk);
++#endif
++    if (!blkconf_apply_backend_options(&dev->conf, readonly,
+                                        kind != IDE_CD, errp)) {
+         return;
+     }
