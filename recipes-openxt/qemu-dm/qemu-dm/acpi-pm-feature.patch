@@ -39,7 +39,7 @@ PATCHES
 ################################################################################
 --- a/hw/acpi/core.c
 +++ b/hw/acpi/core.c
-@@ -730,15 +730,24 @@ void acpi_send_gpe_event(ACPIREGS *ar, q
+@@ -738,15 +738,24 @@ void acpi_send_gpe_event(ACPIREGS *ar, q
  
  void acpi_update_sci(ACPIREGS *regs, qemu_irq irq)
  {
@@ -71,15 +71,15 @@ PATCHES
      acpi_pm_tmr_update(regs,
 --- a/hw/acpi/piix4.c
 +++ b/hw/acpi/piix4.c
-@@ -39,6 +39,7 @@
+@@ -40,6 +40,7 @@
  #include "hw/acpi/memory_hotplug.h"
  #include "hw/acpi/acpi_dev_interface.h"
  #include "hw/xen/xen.h"
 +#include "hw/xen/xen_acpi_pm.h"
+ #include "qom/cpu.h"
  
  //#define DEBUG
- 
-@@ -463,6 +464,11 @@ static void piix4_pm_realize(PCIDevice *
+@@ -510,6 +511,11 @@ static void piix4_pm_realize(PCIDevice *
      /* APM */
      apm_init(dev, &s->apm, apm_ctrl_changed, s);
  
@@ -91,7 +91,7 @@ PATCHES
      /* OpenXT: Enable ACPI, QEMU doesn't enable it by default */
      apm_ctrl_changed(ACPI_ENABLE, s);
  
-@@ -556,6 +562,7 @@ static void gpe_writeb(void *opaque, hwa
+@@ -604,6 +610,7 @@ static void gpe_writeb(void *opaque, hwa
      PIIX4PMState *s = opaque;
  
      acpi_gpe_ioport_writeb(&s->ar, addr, val);
@@ -99,9 +99,9 @@ PATCHES
      acpi_update_sci(&s->ar, s->irq);
  
      PIIX4_DPRINTF("gpe write %" HWADDR_PRIx " <== %" PRIu64 "\n", addr, val);
-@@ -571,6 +578,32 @@ static const MemoryRegionOps piix4_gpe_o
-     .endianness = DEVICE_LITTLE_ENDIAN,
- };
+@@ -639,6 +646,32 @@ static void piix4_set_cpu_hotplug_legacy
+     s->cpu_hotplug_legacy = value;
+ }
  
 +void piix4_pm_set_gpe_sts_raise_sci(void *opaque, uint8_t bit)
 +{
@@ -134,9 +134,9 @@ PATCHES
  {
 --- a/hw/xen/Makefile.objs
 +++ b/hw/xen/Makefile.objs
-@@ -4,3 +4,4 @@ common-obj-$(CONFIG_XEN_BACKEND) += xen_
- obj-$(CONFIG_XEN_PCI_PASSTHROUGH) += xen-host-pci-device.o
+@@ -5,3 +5,4 @@ obj-$(CONFIG_XEN_PCI_PASSTHROUGH) += xen
  obj-$(CONFIG_XEN_PCI_PASSTHROUGH) += xen_pt.o xen_pt_config_init.o xen_pt_graphics.o xen_pt_msi.o
+ obj-$(CONFIG_XEN_PCI_PASSTHROUGH) += xen_pt_load_rom.o
  obj-$(CONFIG_XEN) += xenmou.o
 +obj-$(CONFIG_XEN) += xen_acpi_pm.o
 --- /dev/null
@@ -1271,10 +1271,10 @@ PATCHES
 +type_init(xen_acpi_pm_register_types)
 --- a/include/hw/i386/pc.h
 +++ b/include/hw/i386/pc.h
-@@ -277,6 +277,7 @@ I2CBus *piix4_pm_init(PCIBus *bus, int d
+@@ -251,6 +251,7 @@ int cmos_get_fd_drive_type(FloppyDriveTy
+ I2CBus *piix4_pm_init(PCIBus *bus, int devfn, uint32_t smb_io_base,
                        qemu_irq sci_irq, qemu_irq smi_irq,
                        int smm_enabled, DeviceState **piix4_pm);
- void piix4_smbus_register_device(SMBusDevice *dev, uint8_t addr);
 +void piix4_pm_set_gpe_sts_raise_sci(void *opaque, uint8_t bit);
  
  /* hpet.c */
@@ -1327,9 +1327,9 @@ PATCHES
 +#endif /* !XEN_ACPI_PM_H_ */
 --- a/qemu-options.hx
 +++ b/qemu-options.hx
-@@ -3236,6 +3236,9 @@ DEF("xen-attach", 0, QEMU_OPTION_xen_att
-     "-xen-attach     attach to existing xen domain\n"
-     "                xend will use this when starting QEMU\n",
+@@ -3448,6 +3448,9 @@ DEF("xen-domid-restrict", 0, QEMU_OPTION
+     "                        to specified domain id. (Does not affect\n"
+     "                        xenpv machine type).\n",
      QEMU_ARCH_ALL)
 +DEF("xen-acpi-pm", 0, QEMU_OPTION_xen_acpi_pm,
 +    "-xen-acpi-pm     use the Xen ACPI PM emulated battery/AC/lid feature\n",
@@ -1337,10 +1337,10 @@ PATCHES
  STEXI
  @item -xen-domid @var{id}
  @findex -xen-domid
-@@ -3248,6 +3251,9 @@ Warning: should not be used when xend is
- @findex -xen-attach
- Attach to existing xen domain.
+@@ -3462,6 +3465,9 @@ Attach to existing xen domain.
  xend will use this when starting QEMU (XEN only).
+ @findex -xen-domid-restrict
+ Restrict set of available xen operations to specified domain id (XEN only).
 +@item -xen-acpi-pm
 +@findex -xen-acpi-pm
 +Use the Xen ACPI PM emulated battery/AC/lid feature.
@@ -1349,17 +1349,17 @@ PATCHES
  DEF("no-reboot", 0, QEMU_OPTION_no_reboot, \
 --- a/vl.c
 +++ b/vl.c
-@@ -121,6 +121,7 @@ int main(int argc, char **argv)
- #include "sysemu/replay.h"
+@@ -132,6 +132,7 @@ int main(int argc, char **argv)
+ #include "qapi/qapi-commands-run-state.h"
  #include "qapi/qmp/qerror.h"
  #include "sysemu/iothread.h"
 +#include "hw/xen/xen_acpi_pm.h"
  
  #define MAX_VIRTIO_CONSOLES 1
  #define MAX_SCLP_CONSOLES 1
-@@ -3922,6 +3923,15 @@ int main(int argc, char **argv, char **e
+@@ -3965,6 +3966,15 @@ int main(int argc, char **argv, char **e
                  }
-                 xen_mode = XEN_ATTACH;
+                 xen_domid_restrict = true;
                  break;
 +            case QEMU_OPTION_xen_acpi_pm:
 +                /* Use the OpenXT emulated battery/AC/lid devices */
@@ -1371,5 +1371,5 @@ PATCHES
 +                xen_acpi_pm_set_enabled(true);
 +                break;
              case QEMU_OPTION_trace:
-             {
-                 opts = qemu_opts_parse_noisily(qemu_find_opts("trace"),
+                 g_free(trace_file);
+                 trace_file = trace_opt_parse(optarg);
