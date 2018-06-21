@@ -151,16 +151,32 @@ PATCHES
      }
  }
  
---- a/include/hw/xen/xen.h
-+++ b/include/hw/xen/xen.h
-@@ -55,5 +55,7 @@ enum xenstore_pm_type {
- };
+--- a/hw/display/vga_int.h
++++ b/hw/display/vga_int.h
+@@ -47,6 +47,15 @@
+ #define VBE_DISPI_INDEX_NB              0xa /* size of vbe_regs[] */
+ #define VBE_DISPI_INDEX_VIDEO_MEMORY_64K 0xa /* read-only, not in vbe_regs */
  
- int xenstore_update_power(enum xenstore_pm_type const type);
-+bool xenstore_is_32bpp_only(void);
-+bool xenstore_is_legacy_res_only(void);
- 
- #endif /* QEMU_HW_XEN_H */
++#define VBE_DISPI_EXT_INDEX_START           0xd
++#define VBE_DISPI_EXT_INDEX_STRIDE          (VBE_DISPI_EXT_INDEX_START + 0x0) /* 0xd */
++#define VBE_DISPI_EXT_INDEX_NB              0x1 /* size of vbe_ext_regs[] */
++#define VBE_DISPI_EXT_INDEX_EDID_XRES       (VBE_DISPI_EXT_INDEX_START + 0x1) /* 0xe -- read-only, not in vbe_regs */
++#define VBE_DISPI_EXT_INDEX_EDID_YRES       (VBE_DISPI_EXT_INDEX_START + 0x2) /* 0xf -- read-only, not in vbe_regs */
++#define VBE_DISPI_EXT_INDEX_STRIDE_ALIGN    (VBE_DISPI_EXT_INDEX_START + 0x3) /* 0x10 -- read-only, not in vbe_regs */
++#define VBE_DISPI_EXT_INDEX_32BPP_ONLY      (VBE_DISPI_EXT_INDEX_START + 0x4) /* 0x11 -- read-only, not in vbe_regs */
++#define VBE_DISPI_EXT_INDEX_LEGACY_RES_ONLY (VBE_DISPI_EXT_INDEX_START + 0x5) /* 0x12 -- read-only, not in vbe_regs */
++
+ #define VBE_DISPI_ID0                   0xB0C0
+ #define VBE_DISPI_ID1                   0xB0C1
+ #define VBE_DISPI_ID2                   0xB0C2
+@@ -131,6 +140,7 @@ typedef struct VGACommonState {
+     /* bochs vbe state */
+     uint16_t vbe_index;
+     uint16_t vbe_regs[VBE_DISPI_INDEX_NB];
++    uint16_t vbe_ext_regs[VBE_DISPI_EXT_INDEX_NB];
+     uint32_t vbe_start_addr;
+     uint32_t vbe_line_offset;
+     uint32_t vbe_bank_mask;
 --- a/hw/xen/xen_backend.c
 +++ b/hw/xen/xen_backend.c
 @@ -935,3 +935,35 @@ int xenstore_update_power(enum xenstore_
@@ -199,6 +215,16 @@ PATCHES
 +    }
 +    return !!val;
 +}
+--- a/include/hw/xen/xen.h
++++ b/include/hw/xen/xen.h
+@@ -55,5 +55,7 @@ enum xenstore_pm_type {
+ };
+ 
+ int xenstore_update_power(enum xenstore_pm_type const type);
++bool xenstore_is_32bpp_only(void);
++bool xenstore_is_legacy_res_only(void);
+ 
+ #endif /* QEMU_HW_XEN_H */
 --- a/include/ui/console.h
 +++ b/include/ui/console.h
 @@ -202,6 +202,9 @@ typedef struct DisplayChangeListenerOps
@@ -253,29 +279,3 @@ PATCHES
  void dpy_cursor_define(QemuConsole *con, QEMUCursor *cursor)
  {
      DisplayState *s = con->ds;
---- a/hw/display/vga_int.h
-+++ b/hw/display/vga_int.h
-@@ -47,6 +47,15 @@
- #define VBE_DISPI_INDEX_NB              0xa /* size of vbe_regs[] */
- #define VBE_DISPI_INDEX_VIDEO_MEMORY_64K 0xa /* read-only, not in vbe_regs */
- 
-+#define VBE_DISPI_EXT_INDEX_START           0xd
-+#define VBE_DISPI_EXT_INDEX_STRIDE          (VBE_DISPI_EXT_INDEX_START + 0x0) /* 0xd */
-+#define VBE_DISPI_EXT_INDEX_NB              0x1 /* size of vbe_ext_regs[] */
-+#define VBE_DISPI_EXT_INDEX_EDID_XRES       (VBE_DISPI_EXT_INDEX_START + 0x1) /* 0xe -- read-only, not in vbe_regs */
-+#define VBE_DISPI_EXT_INDEX_EDID_YRES       (VBE_DISPI_EXT_INDEX_START + 0x2) /* 0xf -- read-only, not in vbe_regs */
-+#define VBE_DISPI_EXT_INDEX_STRIDE_ALIGN    (VBE_DISPI_EXT_INDEX_START + 0x3) /* 0x10 -- read-only, not in vbe_regs */
-+#define VBE_DISPI_EXT_INDEX_32BPP_ONLY      (VBE_DISPI_EXT_INDEX_START + 0x4) /* 0x11 -- read-only, not in vbe_regs */
-+#define VBE_DISPI_EXT_INDEX_LEGACY_RES_ONLY (VBE_DISPI_EXT_INDEX_START + 0x5) /* 0x12 -- read-only, not in vbe_regs */
-+
- #define VBE_DISPI_ID0                   0xB0C0
- #define VBE_DISPI_ID1                   0xB0C1
- #define VBE_DISPI_ID2                   0xB0C2
-@@ -131,6 +140,7 @@ typedef struct VGACommonState {
-     /* bochs vbe state */
-     uint16_t vbe_index;
-     uint16_t vbe_regs[VBE_DISPI_INDEX_NB];
-+    uint16_t vbe_ext_regs[VBE_DISPI_EXT_INDEX_NB];
-     uint32_t vbe_start_addr;
-     uint32_t vbe_line_offset;
-     uint32_t vbe_bank_mask;
