@@ -51,6 +51,7 @@ SRC_URI += "file://compile-time-stubdom-flag.patch \
             file://block-remove-unused-block-format-support.patch \
             file://net-Remove-unused-network-options.patch \
             file://round-pci-region-sizes.patch \
+            file://vhost-stubs.patch \
             "
 
 SRC_URI[md5sum] = "122fd7cdf241ff7eb1e42c0b503b5d1b"
