@@ -32,14 +32,14 @@ PATCHES
 ################################################################################
 --- a/hw/xen/Makefile.objs
 +++ b/hw/xen/Makefile.objs
-@@ -3,3 +3,4 @@ common-obj-$(CONFIG_XEN_BACKEND) += xen_
- 
+@@ -4,3 +4,4 @@ common-obj-$(CONFIG_XEN) += xen_backend.
  obj-$(CONFIG_XEN_PCI_PASSTHROUGH) += xen-host-pci-device.o
  obj-$(CONFIG_XEN_PCI_PASSTHROUGH) += xen_pt.o xen_pt_config_init.o xen_pt_graphics.o xen_pt_msi.o
+ obj-$(CONFIG_XEN_PCI_PASSTHROUGH) += xen_pt_load_rom.o
 +obj-$(CONFIG_XEN) += xenmou.o
 --- /dev/null
 +++ b/hw/xen/xenmou.c
-@@ -0,0 +1,827 @@
+@@ -0,0 +1,830 @@
 +/*
 + * Xen mouse PCI card emulator
 + *
@@ -61,6 +61,7 @@ PATCHES
 + */
 +
 +#include "qemu/osdep.h"
++#include "cpu.h"
 +#include "hw/hw.h"
 +#include "exec/memory.h"
 +#include "qapi/error.h"
@@ -796,7 +797,7 @@ PATCHES
 +    *(xenmou_get_wptr_guest(m)) = 0;
 +}
 +
-+static int xenmou_initfn(PCIDevice *dev)
++static void xenmou_realize(PCIDevice *dev, Error **errp)
 +{
 +    PCIXenMouState *d = DO_UPCAST(PCIXenMouState, pci_dev, dev);
 +    uint8_t *pci_conf;
@@ -833,8 +834,6 @@ PATCHES
 +                           xenmou_config_reset, d);
 +
 +    DEBUG_MSG("init completed\n");
-+
-+    return 0;
 +}
 +
 +static void xenmou_class_init(ObjectClass *klass, void *data)
@@ -842,7 +841,7 @@ PATCHES
 +    DeviceClass *dc = DEVICE_CLASS(klass);
 +    PCIDeviceClass *k = PCI_DEVICE_CLASS(klass);
 +
-+    k->init = xenmou_initfn;
++    k->realize = xenmou_realize;
 +    k->vendor_id = PCI_VENDOR_ID_XEN;
 +    k->device_id = PCI_DEVICE_ID_XENMOU;
 +    k->class_id = PCI_CLASS_INPUT_OTHER;
@@ -859,6 +858,10 @@ PATCHES
 +    .parent         = TYPE_PCI_DEVICE,
 +    .instance_size  = sizeof(PCIXenMouState),
 +    .class_init     = xenmou_class_init,
++    .interfaces     = (InterfaceInfo[]) {
++        { INTERFACE_CONVENTIONAL_PCI_DEVICE },
++        { }
++    },
 +};
 +
 +static void xenmou_register_types(void)
@@ -869,12 +872,10 @@ PATCHES
 +type_init(xenmou_register_types)
 --- a/include/hw/pci/pci_ids.h
 +++ b/include/hw/pci/pci_ids.h
-@@ -160,6 +160,10 @@
+@@ -260,6 +260,8 @@
  #define PCI_VENDOR_ID_XEN                0x5853
  #define PCI_DEVICE_ID_XEN_PLATFORM       0x0001
  
-+#define PCI_DEVICE_ID_XENMOU             0xc110
-+
 +#define PCI_DEVICE_ID_XENMOU             0xc110
 +
  #define PCI_VENDOR_ID_NEC                0x1033
