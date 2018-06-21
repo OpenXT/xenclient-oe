@@ -57,6 +57,8 @@ Chris Patterson, <pattersonc@ainfosec.com>, 03/31/2015
 Ross Philipson, philipsonr@ainfosec.com, 10/13/2016
 - Ported to 2.6.2
 
+Jason Andryuk, jandryuk@gmail.com, 06/19/2018
+- Port to 2.12
 ---
  hw/xen_backend.c |   18 ++++++++++++++++++
  hw/xen_backend.h |    4 ++++
@@ -64,23 +66,25 @@ Ross Philipson, philipsonr@ainfosec.com, 10/13/2016
 
 --- a/hw/xen/xen_backend.c
 +++ b/hw/xen/xen_backend.c
-@@ -674,6 +674,12 @@ static void xenstore_update(void *unused
-     if (sscanf(vec[XS_WATCH_TOKEN], "fe:%" PRIxPTR, &ptr) == 1) {
-         xenstore_update_fe(vec[XS_WATCH_PATH], (void*)ptr);
-     }
-+    if (sscanf(vec[XS_WATCH_TOKEN], "cb:%" PRIxPTR ":%" PRIxPTR,
-+               &ptr, &ops) == 2) {
-+        if (ptr) {
-+            ((xenstore_watch_cb_t)ptr)((void *)ops);
-+        }
-+    }
+@@ -33,6 +33,7 @@
+ #include "hw/xen/xen_backend.h"
+ #include "hw/xen/xen_pvdev.h"
+ #include "monitor/qdev.h"
++#include "qapi/qapi-commands.h"
  
- cleanup:
-     free(vec);
-@@ -702,7 +708,11 @@ static void xen_be_evtchn_event(void *op
+ #include <xen/grant_table.h>
+ 
+@@ -516,13 +517,18 @@ void xenstore_update_fe(char *watch, str
+     xen_be_frontend_changed(xendev, node);
+     xen_be_check_state(xendev);
+ }
++
+ /* -------------------------------------------------------------------- */
  
  int xen_be_init(void)
  {
+     xengnttab_handle *gnttabdev;
+ 
 -    xenstore = xs_daemon_open();
 +    /* xenstore_generic_init() may have already opened xenstore */
 +    if (!xenstore) {
@@ -88,12 +92,12 @@ Ross Philipson, philipsonr@ainfosec.com, 10/13/2016
 +    }
 +
      if (!xenstore) {
-         xen_be_printf(NULL, 0, "can't connect to xenstored\n");
+         xen_pv_printf(NULL, 0, "can't connect to xenstored\n");
          return -1;
-@@ -800,3 +810,109 @@ void xen_be_printf(struct XenDevice *xen
-     }
-     qemu_log_flush();
+@@ -691,3 +697,109 @@ static void xenbe_register_types(void)
  }
+ 
+ type_init(xenbe_register_types)
 +
 +/**
 + * Retrieve /vm/<uuid> path from /local/domain/<domid>/vm
@@ -142,14 +146,14 @@ Ross Philipson, philipsonr@ainfosec.com, 10/13/2016
 +    char token[XEN_BUFSIZE];
 +
 +    snprintf(abspath, sizeof(abspath), "%s/%s", base, node);
-+    xen_be_printf(NULL, 1, "xenstore_add_watch: %s\n", abspath);
++    xen_pv_printf(NULL, 1, "xenstore_add_watch: %s\n", abspath);
 +
 +    /* xs_watch copies this token and xenstore_update() parses it on event */
 +    snprintf(token, sizeof(token), "cb:%p:%p", cb, opaque);
-+    xen_be_printf(NULL, 1, "xenstore_add_watch: %s - %s\n", abspath, token);
++    xen_pv_printf(NULL, 1, "xenstore_add_watch: %s - %s\n", abspath, token);
 +
 +    if (!xs_watch(xenstore, abspath, token)) {
-+         xen_be_printf(NULL, 1, "xenstore_add_watch: failed watch for %s\n",
++         xen_pv_printf(NULL, 1, "xenstore_add_watch: failed watch for %s\n",
 +                       abspath);
 +        return -1;
 +    }
@@ -168,14 +172,14 @@ Ross Philipson, philipsonr@ainfosec.com, 10/13/2016
 +    char token[XEN_BUFSIZE];
 +
 +    snprintf(abspath, sizeof (abspath), "%s/%s", base, node);
-+    xen_be_printf(NULL, 1, "xenstore_remove_watch: %s\n", abspath);
++    xen_pv_printf(NULL, 1, "xenstore_remove_watch: %s\n", abspath);
 +
 +    /* For some reason, xs_unwatch will check the token... */
 +    snprintf(token, sizeof(token), "cb:%p:%p", cb, opaque);
-+    xen_be_printf(NULL, 1, "xenstore_remove_watch: %s - %s\n", abspath, token);
++    xen_pv_printf(NULL, 1, "xenstore_remove_watch: %s - %s\n", abspath, token);
 +
 +    if (!xs_unwatch(xenstore, abspath, token)) {
-+         xen_be_printf(NULL, 1, "xenstore_remove_watch: failed to remove watch for %s\n",
++         xen_pv_printf(NULL, 1, "xenstore_remove_watch: failed to remove watch for %s\n",
 +                       abspath);
 +        return -1;
 +    }
@@ -190,19 +194,34 @@ Ross Philipson, philipsonr@ainfosec.com, 10/13/2016
 +int xenstore_generic_init(void)
 +{
 +    if (!xenstore) {
-+        xen_be_printf(NULL, 1, "xenstore_basic_init: opening xenstore\n");
++        xen_pv_printf(NULL, 1, "xenstore_basic_init: opening xenstore\n");
 +        xenstore = xs_daemon_open();
 +        if (!xenstore) {
-+            xen_be_printf(NULL, 0, "xenstore_basic_init: failed to open xs\n");
++            xen_pv_printf(NULL, 0, "xenstore_basic_init: failed to open xs\n");
 +            return -1;
 +        }
 +    }
 +
 +    return 0;
 +}
+--- a/hw/xen/xen_pvdev.c
++++ b/hw/xen/xen_pvdev.c
+@@ -169,6 +169,12 @@ void xenstore_update(void *unused)
+     if (sscanf(vec[XS_WATCH_TOKEN], "fe:%" PRIxPTR, &ptr) == 1) {
+         xenstore_update_fe(vec[XS_WATCH_PATH], (void *)ptr);
+     }
++    if (sscanf(vec[XS_WATCH_TOKEN], "cb:%" PRIxPTR ":%" PRIxPTR,
++               &ptr, &ops) == 2) {
++        if (ptr) {
++            ((xenstore_watch_cb_t)ptr)((void *)ops);
++        }
++    }
+ 
+ cleanup:
+     free(vec);
 --- a/include/hw/xen/xen_backend.h
 +++ b/include/hw/xen/xen_backend.h
-@@ -109,4 +109,14 @@ int xen_config_dev_vfb(int vdev, const c
+@@ -64,4 +64,14 @@ int xen_config_dev_vfb(int vdev, const c
  int xen_config_dev_vkbd(int vdev);
  int xen_config_dev_console(int vdev);
  
