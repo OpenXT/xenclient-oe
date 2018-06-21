@@ -35,9 +35,9 @@ PATCHES
 ################################################################################
 --- a/hw/acpi/core.c
 +++ b/hw/acpi/core.c
-@@ -19,6 +19,11 @@
-  * GNU GPL, version 2 or (at your option) any later version.
+@@ -20,6 +20,11 @@
   */
+ 
  #include "qemu/osdep.h"
 +#ifdef CONFIG_SYSLOG_LOGGING
 +# include "logging.h"
@@ -46,16 +46,16 @@ PATCHES
 +#endif
  #include "sysemu/sysemu.h"
  #include "hw/hw.h"
- #include "hw/i386/pc.h"
-@@ -28,6 +33,7 @@
- #include "qapi/opts-visitor.h"
- #include "qapi-visit.h"
- #include "qapi-event.h"
+ #include "hw/acpi/acpi.h"
+@@ -31,6 +36,7 @@
+ #include "qapi/qapi-visit-misc.h"
+ #include "qemu/error-report.h"
+ #include "qemu/option.h"
 +#include "hw/xen/xen.h" /* needed for 'xenstore_update_power' */
  
  struct acpi_table_header {
      uint16_t _length;         /* our length, not actual part of the hdr */
-@@ -46,6 +52,17 @@ struct acpi_table_header {
+@@ -49,6 +55,17 @@ struct acpi_table_header {
  #define ACPI_TABLE_HDR_SIZE sizeof(struct acpi_table_header)
  #define ACPI_TABLE_PFX_SIZE sizeof(uint16_t)  /* size of the extra prefix */
  
@@ -73,7 +73,7 @@ PATCHES
  static const char unsigned dfl_hdr[ACPI_TABLE_HDR_SIZE - ACPI_TABLE_PFX_SIZE] =
      "QEMU\0\0\0\0\1\0"       /* sig (4), len(4), revno (1), csum (1) */
      "QEMUQEQEMUQEMU\1\0\0\0" /* OEM id (6), table (8), revno (4) */
-@@ -554,16 +571,29 @@ static void acpi_pm1_cnt_write(ACPIREGS
+@@ -562,16 +579,29 @@ static void acpi_pm1_cnt_write(ACPIREGS
          /* change suspend type */
          uint16_t sus_typ = (val >> 10) & 7;
          switch(sus_typ) {
@@ -87,7 +87,7 @@ PATCHES
 +        case SLP_TYP_S4_V0: /* S4: Suspend to disk: Hibernation */
 +            /* PRIOR: monitor_protocol_event(QEVENT_SUSPEND_DISK, NULL); */
 +            qapi_event_send_suspend_disk(&error_abort);
-             qemu_system_shutdown_request();
+             qemu_system_shutdown_request(SHUTDOWN_CAUSE_GUEST_SHUTDOWN);
 +            xenstore_update_power(XENSTORE_PM_TYPE_HIBERNATE);
              break;
 -        case 1:
@@ -95,20 +95,20 @@ PATCHES
 +        case SLP_TYP_S5_V0: /* S5: Shutdown */
 +            /* Same code for V0 and V1 */
 +        case SLP_TYP_S5_V1:
-+            qemu_system_shutdown_request();
++            qemu_system_shutdown_request(SHUTDOWN_CAUSE_GUEST_SHUTDOWN);
 +            xenstore_update_power(XENSTORE_PM_TYPE_SHUTDOWN);
              break;
          default:
              if (sus_typ == ar->pm1.cnt.s4_val) { /* S4 request */
                  qapi_event_send_suspend_disk(&error_abort);
-                 qemu_system_shutdown_request();
+                 qemu_system_shutdown_request(SHUTDOWN_CAUSE_GUEST_SHUTDOWN);
 +                xenstore_update_power(XENSTORE_PM_TYPE_HIBERNATE);
              }
              break;
          }
 --- a/hw/acpi/piix4.c
 +++ b/hw/acpi/piix4.c
-@@ -328,7 +328,15 @@ static void piix4_reset(void *opaque)
+@@ -359,7 +359,15 @@ static void piix4_reset(void *opaque)
          /* Mark SMM as already inited (until KVM supports SMM). */
          pci_conf[0x5B] = 0x02;
      }
@@ -125,7 +125,7 @@ PATCHES
      acpi_pcihp_reset(&s->acpi_pci_hotplug);
  }
  
-@@ -455,6 +463,9 @@ static void piix4_pm_realize(PCIDevice *
+@@ -502,6 +510,9 @@ static void piix4_pm_realize(PCIDevice *
      /* APM */
      apm_init(dev, &s->apm, apm_ctrl_changed, s);
  
@@ -135,19 +135,31 @@ PATCHES
      if (!s->smm_enabled) {
          /* Mark SMM as already inited to prevent SMM from running.  KVM does not
           * support SMM mode. */
+--- a/hw/i386/xen/xen-hvm.c
++++ b/hw/i386/xen/xen-hvm.c
+@@ -1420,6 +1420,9 @@ void destroy_hvm_domain(bool reboot)
+         } else {
+             fprintf(stderr, "Issued domain %d %s\n", xen_domid,
+                     reboot ? "reboot" : "poweroff");
++            if (reboot) {
++                xenstore_update_power(XENSTORE_PM_TYPE_REBOOT);
++            }
+         }
+         xc_interface_close(xc_handle);
+     }
 --- a/hw/xen/xen_backend.c
 +++ b/hw/xen/xen_backend.c
-@@ -33,6 +33,9 @@
+@@ -37,6 +37,9 @@
  
  #include <xen/grant_table.h>
  
 +#include "ui/xen-input.h"
 +#include "xen-dmbus.h"
 +
- /* ------------------------------------------------------------- */
+ DeviceState *xen_sysdev;
+ BusState *xen_sysbus;
  
- /* public */
-@@ -916,3 +919,19 @@ int xenstore_generic_init(void)
+@@ -803,3 +806,19 @@ int xenstore_generic_init(void)
  
      return 0;
  }
@@ -169,7 +181,7 @@ PATCHES
 +}
 --- a/include/hw/xen/xen.h
 +++ b/include/hw/xen/xen.h
-@@ -46,4 +46,14 @@ void xen_modified_memory(ram_addr_t star
+@@ -48,4 +48,14 @@ void xen_hvm_modified_memory(ram_addr_t
  
  void xen_register_framebuffer(struct MemoryRegion *mr);
  
@@ -184,15 +196,3 @@ PATCHES
 +int xenstore_update_power(enum xenstore_pm_type const type);
 +
  #endif /* QEMU_HW_XEN_H */
---- a/xen-hvm.c
-+++ b/xen-hvm.c
-@@ -1346,6 +1346,9 @@ void destroy_hvm_domain(bool reboot)
-         } else {
-             fprintf(stderr, "Issued domain %d %s\n", xen_domid,
-                     reboot ? "reboot" : "poweroff");
-+            if (reboot) {
-+                xenstore_update_power(XENSTORE_PM_TYPE_REBOOT);
-+            }
-         }
-         xc_interface_close(xc_handle);
-     }
