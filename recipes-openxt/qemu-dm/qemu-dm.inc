@@ -53,8 +53,8 @@ SRC_URI += "file://compile-time-stubdom-flag.patch \
             file://round-pci-region-sizes.patch \
             "
 
-SRC_URI[md5sum] = "bdf1f3d0c177ebeb35a079a4bc3fc74e"
-SRC_URI[sha256sum] = "9a7ec64f147b9e1e570c410e00ebe271869b5d4c85392ba047db7617c297faa3"
+SRC_URI[md5sum] = "122fd7cdf241ff7eb1e42c0b503b5d1b"
+SRC_URI[sha256sum] = "c9f4a147bc915d24df9784affc611a115f42d24720a89210b479f1ba7a3f679c"
 
 S = "${WORKDIR}/qemu-${PV}"
 
@@ -76,7 +76,6 @@ PACKAGES += "${PN}-extra-keymaps ${PN}-extra-roms ${PN}-utils"
 EXTRA_OECONF += " \
     --enable-xen \
     --target-list=i386-softmmu \
-    --with-system-pixman \
     --disable-sdl \
     --disable-vnc \
     --disable-docs \
@@ -147,7 +146,8 @@ do_compile_prepend() {
 	dev_disable CONFIG_IPMI_EXTERN
 	dev_disable CONFIG_ISA_IPMI_KCS
 	dev_disable CONFIG_ISA_IPMI_BT
-	dev_disable CONFIG_PARALLEL
+	# SuperIO needs this
+	#dev_disable CONFIG_PARALLEL
 	dev_disable CONFIG_NE2000_ISA
 	dev_disable CONFIG_APPLESMC
 	#dev_disable CONFIG_PFLASH_CFI01
@@ -166,7 +166,8 @@ do_compile_prepend() {
 	dev_disable CONFIG_VIRTIO_PCI
 	dev_disable CONFIG_VIRTIO
 	dev_disable CONFIG_USB_OHCI
-	dev_disable CONFIG_USB_XHCI
+	# Things blow up without xhci
+	#dev_disable CONFIG_USB_XHCI
 	dev_disable CONFIG_NE2000_PCI
 	dev_disable CONFIG_EEPRO100_PCI
 	dev_disable CONFIG_PCNET_PCI
