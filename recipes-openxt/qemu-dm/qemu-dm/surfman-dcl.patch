@@ -53,6 +53,7 @@ Documentation:           Kyle J. Temkin <temkink@ainfosec.com>   3/16/2015
 Coherency & Color Fixes: Kyle J. Temkin <temkink@ainfosec.com>   1/26/2015
 QEMU 1.4.0 Port:         Eric Chanudet  <chanudete@ainfosec.com> 1/16/2015
 QEMU 2.6.2 Port:         Ross Philipson, philipsonr@ainfosec.com, 10/13/2016
+QEMU 2.12 Port:          Jason Andryuk  <jandryuk@gmail.com>     6/19/2018
 
 --------------------------------------------------------------------------------
 REMOVAL
@@ -72,32 +73,17 @@ to our stack, is is unlikely to be upstreamed.
 --------------------------------------------------------------------------------
 PATCHES
 --------------------------------------------------------------------------------
----
- configure               |  12 ++
- hw/xen.h                |   2 +
- include/sysemu/sysemu.h |   3 +-
- include/ui/console.h    |   5 +
- ui/Makefile.objs        |   1 +
- ui/console.c            |  10 +-
- ui/surfman.c            | 363 ++++++++++++++++++++++++++++++++++++++++++++++++
- ui/surfman.h            | 118 ++++++++++++++++
- vl.c                    |  14 +-
- xen-all.c               |  97 ++++++++++++-
- 10 files changed, 617 insertions(+), 8 deletions(-)
- create mode 100644 ui/surfman.c
- create mode 100644 ui/surfman.h
-
 --- a/configure
 +++ b/configure
-@@ -300,6 +300,7 @@ coroutine=""
- coroutine_pool=""
+@@ -427,6 +427,7 @@ debug_stack_usage="no"
+ crypto_afalg="no"
  seccomp=""
  glusterfs=""
 +surfman="no"
  stubdom="no"
  atapipt="no"
  atapiptv4v="no"
-@@ -1118,6 +1119,10 @@ for opt do
+@@ -1309,6 +1310,10 @@ for opt do
    ;;
    --disable-openxt-stubdom) stubdom="no"
    ;;
@@ -108,7 +94,7 @@ PATCHES
    --disable-gtk) gtk="no"
    ;;
    --enable-gtk) gtk="yes"
-@@ -4916,6 +4921,7 @@ echo "gcov enabled      $gcov"
+@@ -5916,6 +5921,7 @@ echo "gcov enabled      $gcov"
  echo "OpenXT stubdomain support $stubdom"
  echo "ATAPI PT support  $atapipt"
  echo "ATAPI PT V4V support  $atapiptv4v"
@@ -116,7 +102,7 @@ PATCHES
  echo "TPM support       $tpm"
  echo "libssh2 support   $libssh2"
  echo "TPM passthrough   $tpm_passthrough"
-@@ -5474,6 +5480,10 @@ if test "$atapiptv4v" = "yes" ; then
+@@ -6589,6 +6595,10 @@ if test "$atapiptv4v" = "yes" ; then
    echo "CONFIG_ATAPI_PT_V4V=y" >> $config_host_mak
  fi
  
@@ -124,13 +110,142 @@ PATCHES
 +  echo "CONFIG_SURFMAN=y" >> $config_host_mak
 +fi
 +
- # USB host support
- if test "$libusb" = "yes"; then
-   echo "HOST_USB=libusb legacy" >> $config_host_mak
+ if test "$tpm" = "yes"; then
+   echo 'CONFIG_TPM=$(CONFIG_SOFTMMU)' >> $config_host_mak
+   # TPM passthrough support?
+--- a/hw/i386/xen/xen-hvm.c
++++ b/hw/i386/xen/xen-hvm.c
+@@ -39,7 +39,21 @@
+ #endif
+ 
+ static MemoryRegion ram_memory, ram_640k, ram_lo, ram_hi;
++
++/**
++ * The next two variables are references to the HVM domain's VGA framebuffer.
++ * We hold on to these so we can pass them to Surfman, the XenClient multiplexed
++ * display handler.
++ *
++ * Note that we effectively have two different references: one to the framebuffer from the
++ * HVM guest's perspective ("framebuffer"), and one to the region from the "host" QEMU's
++ * perspective ("framebuffer_mapped"). It's important that QEMU only read and modify the
++ * memory region using the second reference; as this is the only "window" into that memory
++ * mapped with the correct caching attributes.
++ **/
+ static MemoryRegion *framebuffer;
++static void * framebuffer_mapped;
++
+ static bool xen_in_migration;
+ 
+ /* Compatibility with older version */
+@@ -408,10 +422,17 @@ go_physmap:
+         }
+     }
+ 
++    /*
++     * "Pin" the guest's video memory in place with the correct cache
++     * attribute.  Since we're sharing this video memory directly with the
++     * integrated graphics card, it's important that we set a proper caching
++     * policy on this memory - otherwise screen segments will only update as
++     * they're evicted from cache.
++     */
+     xc_domain_pin_memory_cacheattr(xen_xc, xen_domid,
+                                    start_addr >> TARGET_PAGE_BITS,
+                                    (start_addr + size - 1) >> TARGET_PAGE_BITS,
+-                                   XEN_DOMCTL_MEM_CACHEATTR_WB);
++                                   XEN_DOMCTL_MEM_CACHEATTR_WC);
+     return xen_save_physmap(state, physmap);
+ }
+ 
+@@ -1428,9 +1449,85 @@ void destroy_hvm_domain(bool reboot)
+     }
+ }
+ 
++/**
++ * Creates the internal framebuffer mapping used when QEMU internal
++ * components (e.g. the Surfman UI). This mapping is then used to get
++ * internal framebfufer pointers (in lieu of memory_region_get_ram_ptr),
++ * ensuring that our memory is mapped in a way that assures cache coherency.
++ */
++static void __xen_create_framebuffer_mapping(void)
++{
++    size_t number_of_pfns_to_map;
++    xen_pfn_t * pfns_to_map;
++    hwaddr vram_gmfn;
++    int i;
++
++    //Get the GMFN (guest machine frame) that contains the  framebuffer.
++    vram_gmfn = memory_region_get_ram_addr(framebuffer) >> TARGET_PAGE_BITS;
++
++    //Determine the total number of page frames used to store the framebuffer.
++    number_of_pfns_to_map = int128_get64(framebuffer->size) >> TARGET_PAGE_BITS;
++
++    //Build a list of guest page frames that will contain the framebuffer--
++    //we'll use this list to map the framebuffer into our memory space.
++    pfns_to_map = malloc(sizeof(*pfns_to_map) * number_of_pfns_to_map);
++    for(i = 0; i < number_of_pfns_to_map; ++i) {
++      pfns_to_map[i] =  vram_gmfn + i;
++    }
++
++    //Ask the hypervisor to perform the actual mapping, ensuring that we map
++    //the memory with write-combine caching. This ensures that any changes we
++    //make to the framebuffer are "immediately" applied to the VRAM (and thus
++    //to the display), rather than sitting in a CPU cache until eviction.
++    framebuffer_mapped = xc_map_foreign_batch_cacheattr(xen_xc, xen_domid,
++                                                        PROT_READ | PROT_WRITE,
++                                                        pfns_to_map,
++                                                        number_of_pfns_to_map,
++                                                        XC_MAP_CACHEATTR_WC);
++    free(pfns_to_map);
++}
++
++/**
++ * Register a given guest memory region as a VRAM LFB (linear framebuffer).
++ * This allows us to "pass" this memory directly to Surfman, the XenClient
++ * display multiplexer, which can map the region for zero-copy multiplexing.
++ */
+ void xen_register_framebuffer(MemoryRegion *mr)
+ {
++    //Store the fram
+     framebuffer = mr;
++    __xen_create_framebuffer_mapping();
++}
++
++/**
++ * Returns a MemoryRegion object descrbing the guest's video memory.
++ *
++ * WARNING:
++ *  Consider this a "read-only" reference to the guest's memory; it should
++ *  not be used to generate references used to write into the guest's VRAM,
++ *  as references generated accordingly will not have the correct cache
++ *  attributes. For a reference that can be used to write to guest memory,
++ *  use xen_get_framebuffer_ptr().
++ */
++MemoryRegion *xen_get_framebuffer(void)
++{
++    return framebuffer;
++}
++
++/**
++ * Return a pointer to the Xen VRAM framebuffer that can be used for writing.
++ * The reference returned by this function will have the correct cache attributes
++ * to ensure cache coherency, even when using XenClient's multiplexed display.
++ *
++ * This function should be used when the guest framebuffer needs to be modified by QEMU
++ * (e.g. when rendering glyphs in text-mode), rather than memory_region_get_ram_ptr, as
++ * we need to ensure that the VRAM memory has been mapped with the correct cache attributes.
++ *
++ * @return A QEMU-accessible pointer to the Xen guest's framebuffer.
++ */
++void * xen_get_framebuffer_ptr(void)
++{
++    return framebuffer_mapped;
+ }
+ 
+ void xen_shutdown_fatal_error(const char *fmt, ...)
 --- a/include/hw/xen/xen.h
 +++ b/include/hw/xen/xen.h
-@@ -45,6 +45,8 @@ void xen_modified_memory(ram_addr_t star
- #endif
+@@ -47,6 +47,8 @@ void xen_ram_alloc(ram_addr_t ram_addr,
+ void xen_hvm_modified_memory(ram_addr_t start, ram_addr_t length);
  
  void xen_register_framebuffer(struct MemoryRegion *mr);
 +struct MemoryRegion *xen_get_framebuffer(void);
@@ -140,17 +255,7 @@ PATCHES
  enum xenstore_pm_type {
 --- a/include/sysemu/sysemu.h
 +++ b/include/sysemu/sysemu.h
-@@ -138,8 +138,8 @@ typedef enum DisplayType
-     DT_SDL,
-     DT_GTK,
-     DT_NOGRAPHIC,
-+    DT_SURFMAN,
-     DT_NONE,
--    DT_XEN /* OpenXT Display */
- } DisplayType;
- 
- extern int autostart;
-@@ -151,6 +151,7 @@ typedef enum {
+@@ -105,6 +105,7 @@ typedef enum {
  
  extern int vga_interface_type;
  #define xenfb_enabled (vga_interface_type == VGA_XENFB)
@@ -158,24 +263,9 @@ PATCHES
  
  extern int graphic_width;
  extern int graphic_height;
---- a/include/ui/console.h
-+++ b/include/ui/console.h
-@@ -453,6 +453,12 @@ static inline int vnc_display_pw_expire(
- };
- #endif
- 
-+#ifdef CONFIG_SURFMAN
-+/* surfman.c */
-+void surfman_display_init(void);
-+void surfman_display_deinit(DisplayState *ds);
-+#endif
-+
- /* curses.c */
- void curses_display_init(DisplayState *ds, int full_screen);
- 
 --- /dev/null
 +++ b/include/ui/surfman.h
-@@ -0,0 +1,139 @@
+@@ -0,0 +1,141 @@
 +/*
 + * QEMU graphical console
 + *
@@ -313,21 +403,40 @@ PATCHES
 +    }
 +}
 +
-+#endif /* !_SURFMAN_H_ */
++void surfman_display_init(DisplayState *ds, DisplayOptions *opts);
++void surfman_display_deinit(DisplayState *ds);
 +
++#endif /* !_SURFMAN_H_ */
+--- a/qapi/ui.json
++++ b/qapi/ui.json
+@@ -1029,7 +1029,7 @@
+ ##
+ { 'enum'    : 'DisplayType',
+   'data'    : [ 'default', 'none', 'gtk', 'sdl',
+-                'egl-headless', 'curses', 'cocoa' ] }
++                'egl-headless', 'curses', 'cocoa', 'surfman' ] }
+ 
+ ##
+ # @DisplayOptions:
+@@ -1056,4 +1056,5 @@
+                 'sdl'            : 'DisplayNoOpts',
+                 'egl-headless'   : 'DisplayNoOpts',
+                 'curses'         : 'DisplayNoOpts',
++                'surfman'        : 'DisplayNoOpts',
+                 'cocoa'          : 'DisplayNoOpts' } }
 --- a/ui/Makefile.objs
 +++ b/ui/Makefile.objs
-@@ -17,6 +17,7 @@ common-obj-$(CONFIG_CURSES) += curses.o
+@@ -15,6 +15,7 @@ common-obj-$(CONFIG_COCOA) += cocoa.o
  common-obj-$(CONFIG_VNC) += $(vnc-obj-y)
- common-obj-$(CONFIG_GTK) += gtk.o x_keymap.o
+ common-obj-$(call lnot,$(CONFIG_VNC)) += vnc-stubs.o
  common-obj-$(CONFIG_XEN) += xen-input.o
 +common-obj-$(CONFIG_SURFMAN) += surfman.o
  
- ifeq ($(CONFIG_SDLABI),1.2)
- sdl.mo-objs := sdl.o sdl_zoom.o
+ common-obj-$(CONFIG_X11) += x_keymap.o
+ x_keymap.o-cflags := $(X11_CFLAGS)
 --- a/ui/qemu-pixman.c
 +++ b/ui/qemu-pixman.c
-@@ -70,7 +70,17 @@ pixman_format_code_t qemu_default_pixman
+@@ -71,7 +71,17 @@ pixman_format_code_t qemu_default_pixman
          case 15:
              return PIXMAN_x1r5g5b5;
          case 16:
@@ -347,7 +456,7 @@ PATCHES
          case 32:
 --- /dev/null
 +++ b/ui/surfman.c
-@@ -0,0 +1,368 @@
+@@ -0,0 +1,383 @@
 +/*
 + * QEMU graphical console
 + *
@@ -379,6 +488,7 @@ PATCHES
 +#include "xen-dmbus.h"
 +#include "exec/memory.h"
 +#include "ui/surfman.h"
++#include "ui/xen-input.h"
 +
 +/**
 + * HACK:
@@ -665,10 +775,11 @@ PATCHES
 + * Initializes a Surfman multiplexed display, creating the DisplayChangeListener object
 + * that tracks display events.
 + */
-+void surfman_display_init(void)
++void surfman_display_init(DisplayState *ds, DisplayOptions *opts)
 +{
 +    DisplayChangeListener *dcl;
 +
++    xen_input_init();
 +    surfman_info("Initialize Surfman display.");
 +
 +    //Create the SurfmanState "ss" object, which compartmentalizes the state of the Surfman
@@ -712,185 +823,31 @@ PATCHES
 +
 +void surfman_display_deinit(DisplayState *ds)
 +{
++    xen_input_deinit();
 +    if (ss) {
 +        dmbus_service_disconnect(ss->dmbus_service);
 +    }
 +}
++
++static QemuDisplay qemu_display_surfman = {
++    .type = DISPLAY_TYPE_SURFMAN,
++    .init = surfman_display_init,
++};
++
++static void register_surfman(void)
++{
++    qemu_display_register(&qemu_display_surfman);
++}
++
++type_init(register_surfman);
 --- a/vl.c
 +++ b/vl.c
-@@ -129,7 +129,7 @@ static const char *data_dir[16];
- static int data_dir_idx;
- const char *bios_name = NULL;
- enum vga_retrace_method vga_retrace_method = VGA_RETRACE_DUMB;
--DisplayType display_type = DT_XEN;
-+DisplayType display_type;
- int request_opengl = -1;
- int display_opengl;
- static int display_remote;
-@@ -2222,6 +2222,13 @@ static DisplayType select_display(const
-         error_report("GTK support is disabled");
-         exit(1);
- #endif
+@@ -2199,6 +2199,8 @@ static void parse_display(const char *p)
+             }
+             opts = nextopt;
+         }
 +    } else if (strstart(p, "surfman", &opts)) {
-+#ifdef CONFIG_SURFMAN
-+        display = DT_SURFMAN;
-+#else
-+        fprintf(stderr, "Surfman support is disabled\n");
-+        exit(1);
-+#endif
++        dpy.type = DISPLAY_TYPE_SURFMAN;
      } else if (strstart(p, "none", &opts)) {
-         display = DT_NONE;
+         dpy.type = DISPLAY_TYPE_NONE;
      } else {
-@@ -4590,9 +4597,12 @@ int main(int argc, char **argv, char **e
-         gtk_display_init(ds, full_screen, grab_on_hover);
-         break;
- #endif
--    case DT_XEN:
-+#if defined(CONFIG_SURFMAN)
-+    case DT_SURFMAN:
-         xen_input_init();
-+        surfman_display_init();
-         break;
-+#endif
-     default:
-         break;
-     }
-@@ -4669,7 +4679,10 @@ int main(int argc, char **argv, char **e
-     main_loop();
-     replay_disable_events();
-     iothread_stop_all();
-+#if defined(CONFIG_SURFMAN)
-     xen_input_deinit();
-+    surfman_display_deinit(ds);
-+#endif
- 
-     bdrv_close_all();
-     pause_all_vcpus();
---- a/xen-hvm.c
-+++ b/xen-hvm.c
-@@ -40,7 +40,21 @@
- #endif
- 
- static MemoryRegion ram_memory, ram_640k, ram_lo, ram_hi;
-+
-+/**
-+ * The next two variables are references to the HVM domain's VGA framebuffer.
-+ * We hold on to these so we can pass them to Surfman, the XenClient multiplexed
-+ * display handler.
-+ *
-+ * Note that we effectively have two different references: one to the framebuffer from the
-+ * HVM guest's perspective ("framebuffer"), and one to the region from the "host" QEMU's
-+ * perspective ("framebuffer_mapped"). It's important that QEMU only read and modify the
-+ * memory region using the second reference; as this is the only "window" into that memory
-+ * mapped with the correct caching attributes.
-+ **/
- static MemoryRegion *framebuffer;
-+static void * framebuffer_mapped;
-+
- static bool xen_in_migration;
- 
- /* Compatibility with older version */
-@@ -362,10 +376,16 @@ go_physmap:
- 
-     QLIST_INSERT_HEAD(&state->physmap, physmap, list);
- 
-+    /*
-+     * "Pin" the guest's video memory in place with the correct cache attribute.
-+     * Since we're sharing this video memory directly with the integrated graphics
-+     * card, it's important that we set a proper caching policy on this memory--
-+     * otherwise screen segments will only update as they're evicted from cache.
-+     */
-     xc_domain_pin_memory_cacheattr(xen_xc, xen_domid,
-                                    start_addr >> TARGET_PAGE_BITS,
-                                    (start_addr + size - 1) >> TARGET_PAGE_BITS,
--                                   XEN_DOMCTL_MEM_CACHEATTR_WB);
-+                                   XEN_DOMCTL_MEM_CACHEATTR_WC);
- 
-     snprintf(path, sizeof(path),
-             "/local/domain/0/device-model/%d/physmap/%"PRIx64"/start_addr",
-@@ -1354,9 +1374,85 @@ void destroy_hvm_domain(bool reboot)
-     }
- }
- 
-+/**
-+ * Creates the internal framebuffer mapping used when QEMU internal
-+ * components (e.g. the Surfman UI). This mapping is then used to get
-+ * internal framebfufer pointers (in lieu of memory_region_get_ram_ptr),
-+ * ensuring that our memory is mapped in a way that assures cache coherency.
-+ */
-+static void __xen_create_framebuffer_mapping(void)
-+{
-+    size_t number_of_pfns_to_map;
-+    xen_pfn_t * pfns_to_map;
-+    hwaddr vram_gmfn;
-+    int i;
-+
-+    //Get the GMFN (guest machine frame) that contains the  framebuffer.
-+    vram_gmfn = memory_region_get_ram_addr(framebuffer) >> TARGET_PAGE_BITS;
-+
-+    //Determine the total number of page frames used to store the framebuffer.
-+    number_of_pfns_to_map = int128_get64(framebuffer->size) >> TARGET_PAGE_BITS;
-+
-+    //Build a list of guest page frames that will contain the framebuffer--
-+    //we'll use this list to map the framebuffer into our memory space.
-+    pfns_to_map = malloc(sizeof(*pfns_to_map) * number_of_pfns_to_map);
-+    for(i = 0; i < number_of_pfns_to_map; ++i) {
-+      pfns_to_map[i] =  vram_gmfn + i;
-+    }
-+
-+    //Ask the hypervisor to perform the actual mapping, ensuring that we map
-+    //the memory with write-combine caching. This ensures that any changes we
-+    //make to the framebuffer are "immediately" applied to the VRAM (and thus
-+    //to the display), rather than sitting in a CPU cache until eviction.
-+    framebuffer_mapped = xc_map_foreign_batch_cacheattr(xen_xc, xen_domid,
-+                                                        PROT_READ | PROT_WRITE,
-+                                                        pfns_to_map,
-+                                                        number_of_pfns_to_map,
-+                                                        XC_MAP_CACHEATTR_WC);
-+    free(pfns_to_map);
-+}
-+
-+/**
-+ * Register a given guest memory region as a VRAM LFB (linear framebuffer).
-+ * This allows us to "pass" this memory directly to Surfman, the XenClient
-+ * display multiplexer, which can map the region for zero-copy multiplexing.
-+ */
- void xen_register_framebuffer(MemoryRegion *mr)
- {
-+    //Store the fram
-     framebuffer = mr;
-+    __xen_create_framebuffer_mapping();
-+}
-+
-+/**
-+ * Returns a MemoryRegion object descrbing the guest's video memory.
-+ *
-+ * WARNING:
-+ *  Consider this a "read-only" reference to the guest's memory; it should
-+ *  not be used to generate references used to write into the guest's VRAM,
-+ *  as references generated accordingly will not have the correct cache
-+ *  attributes. For a reference that can be used to write to guest memory,
-+ *  use xen_get_framebuffer_ptr().
-+ */
-+MemoryRegion *xen_get_framebuffer(void)
-+{
-+    return framebuffer;
-+}
-+
-+/**
-+ * Return a pointer to the Xen VRAM framebuffer that can be used for writing.
-+ * The reference returned by this function will have the correct cache attributes
-+ * to ensure cache coherency, even when using XenClient's multiplexed display.
-+ *
-+ * This function should be used when the guest framebuffer needs to be modified by QEMU
-+ * (e.g. when rendering glyphs in text-mode), rather than memory_region_get_ram_ptr, as
-+ * we need to ensure that the VRAM memory has been mapped with the correct cache attributes.
-+ *
-+ * @return A QEMU-accessible pointer to the Xen guest's framebuffer.
-+ */
-+void * xen_get_framebuffer_ptr(void)
-+{
-+    return framebuffer_mapped;
- }
- 
- void xen_shutdown_fatal_error(const char *fmt, ...)
