@@ -185,9 +185,9 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
 
 --- a/block.c
 +++ b/block.c
-@@ -3981,3 +3981,21 @@ void bdrv_refresh_filename(BlockDriverSt
-         QDECREF(json);
-     }
+@@ -5320,3 +5320,21 @@ bool bdrv_can_store_new_dirty_bitmap(Blo
+ 
+     return drv->bdrv_can_store_new_dirty_bitmap(bs, name, granularity, errp);
  }
 +
 +/* OpenXT: direct IOCTL delivery for ATAPI PT.
@@ -210,16 +210,16 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
 --- a/block/Makefile.objs
 +++ b/block/Makefile.objs
 @@ -9,6 +9,7 @@ block-obj-y += block-backend.o snapshot.
- block-obj-$(CONFIG_WIN32) += raw-win32.o win32-aio.o
- block-obj-$(CONFIG_POSIX) += raw-posix.o
+ block-obj-$(CONFIG_WIN32) += file-win32.o win32-aio.o
+ block-obj-$(CONFIG_POSIX) += file-posix.o
  block-obj-$(CONFIG_LINUX_AIO) += linux-aio.o
 +block-obj-$(CONFIG_ATAPI_PT) += atapi-pt-protocol.o
- block-obj-y += null.o mirror.o io.o
+ block-obj-y += null.o mirror.o commit.o io.o create.o
  block-obj-y += throttle-groups.o
- 
+ block-obj-$(CONFIG_LINUX) += nvme.o
 --- /dev/null
 +++ b/block/atapi-pt-protocol.c
-@@ -0,0 +1,1498 @@
+@@ -0,0 +1,1500 @@
 +/*
 + * ATAPI guest commands translation.
 + *
@@ -244,8 +244,10 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
 +#include "qemu/osdep.h"
 +#include "qemu-common.h"
 +#include "qapi/error.h"
++#include "qapi/qmp/qdict.h"
 +#include "qapi/qmp/qstring.h"
 +#include "qemu/module.h"
++#include "qemu/option.h"
 +#include "block/block_int.h"
 +
 +#include <sys/types.h>
@@ -1720,7 +1722,7 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
 +block_init(bdrv_pt_init);
 --- a/blockdev.c
 +++ b/blockdev.c
-@@ -66,6 +66,9 @@ static const char *const if_name[IF_COUN
+@@ -81,6 +81,9 @@ static const char *const if_name[IF_COUN
      [IF_SD] = "sd",
      [IF_VIRTIO] = "virtio",
      [IF_XEN] = "xen",
@@ -1730,7 +1732,7 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
  };
  
  static int if_max_devs[IF_COUNT] = {
-@@ -849,6 +852,9 @@ DriveInfo *drive_new(QemuOpts *all_opts,
+@@ -791,6 +794,9 @@ DriveInfo *drive_new(QemuOpts *all_opts,
      QemuOpts *legacy_opts;
      DriveMediaType media = MEDIA_DISK;
      BlockInterfaceType type;
@@ -1740,7 +1742,7 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
      int cyls, heads, secs, translation;
      int max_devs, bus_id, unit_id, index;
      const char *devaddr;
-@@ -949,7 +955,9 @@ DriveInfo *drive_new(QemuOpts *all_opts,
+@@ -897,7 +903,9 @@ DriveInfo *drive_new(QemuOpts *all_opts,
              media = MEDIA_DISK;
          } else if (!strcmp(value, "cdrom")) {
              media = MEDIA_CDROM;
@@ -1750,7 +1752,7 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
          } else {
              error_report("'%s' invalid media", value);
              goto fail;
-@@ -985,6 +993,13 @@ DriveInfo *drive_new(QemuOpts *all_opts,
+@@ -931,6 +939,13 @@ DriveInfo *drive_new(QemuOpts *all_opts,
          type = block_default_type;
      }
  
@@ -1764,7 +1766,7 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
      /* Geometry */
      cyls  = qemu_opt_get_number(legacy_opts, "cyls", 0);
      heads = qemu_opt_get_number(legacy_opts, "heads", 0);
-@@ -1172,11 +1187,19 @@ DriveInfo *drive_new(QemuOpts *all_opts,
+@@ -1118,11 +1133,19 @@ DriveInfo *drive_new(QemuOpts *all_opts,
      blk_set_legacy_dinfo(blk, dinfo);
  
      switch(type) {
@@ -1786,7 +1788,7 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
          break;
 --- a/configure
 +++ b/configure
-@@ -301,6 +301,8 @@ coroutine_pool=""
+@@ -428,6 +428,8 @@ crypto_afalg="no"
  seccomp=""
  glusterfs=""
  stubdom="no"
@@ -1794,8 +1796,8 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
 +atapiptv4v="no"
  glusterfs_xlator_opt="no"
  glusterfs_discard="no"
- glusterfs_zerofill="no"
-@@ -1097,6 +1099,14 @@ for opt do
+ glusterfs_fallocate="no"
+@@ -1286,6 +1288,14 @@ for opt do
    ;;
    --enable-glusterfs) glusterfs="yes"
    ;;
@@ -1807,10 +1809,10 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
 +  ;;
 +  --disable-atapi-pt-v4v) atapiptv4v="no"
 +  ;;
-   --disable-archipelago) archipelago="no"
+   --disable-virtio-blk-data-plane|--enable-virtio-blk-data-plane)
+       echo "$0: $opt is obsolete, virtio-blk data-plane is always on" >&2
    ;;
-   --enable-archipelago) archipelago="yes"
-@@ -4904,6 +4914,8 @@ echo "Archipelago support $archipelago"
+@@ -5904,6 +5914,8 @@ echo "GlusterFS support $glusterfs"
  echo "gcov              $gcov_tool"
  echo "gcov enabled      $gcov"
  echo "OpenXT stubdomain support $stubdom"
@@ -1819,7 +1821,7 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
  echo "TPM support       $tpm"
  echo "libssh2 support   $libssh2"
  echo "TPM passthrough   $tpm_passthrough"
-@@ -5454,6 +5466,14 @@ if test "$stubdom" = "yes" ; then
+@@ -6569,6 +6581,14 @@ if test "$stubdom" = "yes" ; then
    echo "CONFIG_STUBDOM=y" >> $config_host_mak
  fi
  
@@ -1831,19 +1833,19 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
 +  echo "CONFIG_ATAPI_PT_V4V=y" >> $config_host_mak
 +fi
 +
- # USB host support
- if test "$libusb" = "yes"; then
-   echo "HOST_USB=libusb legacy" >> $config_host_mak
+ if test "$tpm" = "yes"; then
+   echo 'CONFIG_TPM=$(CONFIG_SOFTMMU)' >> $config_host_mak
+   # TPM passthrough support?
 --- a/hw/ide/Makefile.objs
 +++ b/hw/ide/Makefile.objs
-@@ -10,3 +10,4 @@ common-obj-$(CONFIG_IDE_VIA) += via.o
- common-obj-$(CONFIG_MICRODRIVE) += microdrive.o
- common-obj-$(CONFIG_AHCI) += ahci.o
+@@ -12,3 +12,4 @@ common-obj-$(CONFIG_AHCI) += ahci.o
  common-obj-$(CONFIG_AHCI) += ich.o
+ common-obj-$(CONFIG_ALLWINNER_A10) += ahci-allwinner.o
+ common-obj-$(CONFIG_IDE_SII3112) += sii3112.o
 +common-obj-$(CONFIG_ATAPI_PT) += atapi_pt.o
 --- a/hw/ide/atapi.c
 +++ b/hw/ide/atapi.c
-@@ -329,7 +329,10 @@ void ide_atapi_cmd_reply_end(IDEState *s
+@@ -316,7 +316,10 @@ void ide_atapi_cmd_reply_end(IDEState *s
  }
  
  /* send a reply of 'size' bytes in s->io_buffer to an ATAPI command */
@@ -1883,7 +1885,7 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
 +#include <scsi/sg.h>
 +
 +#include "qemu/osdep.h"
-+#include "block/scsi.h"
++#include "scsi/constants.h"
 +#include "hw/ide/internal.h"
 +#include "hw/atapi_pt.h"
 +#include "block/block.h"
@@ -3250,7 +3252,7 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
 +     * The two ends of the event handling are all internal to this module
 +     * so passing false for is_external.
 +     */
-+    event_notifier_set_handler(&as->e_ret, false, atapi_pt_event_read);
++    event_notifier_set_handler(&as->e_ret, atapi_pt_event_read);
 +
 +    PT_LOG("initialization complete\n");
 +    return 0;
@@ -3904,7 +3906,7 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
 +}
 --- a/hw/ide/core.c
 +++ b/hw/ide/core.c
-@@ -1665,7 +1665,11 @@ static bool cmd_packet(IDEState *s, uint
+@@ -1729,7 +1729,11 @@ static bool cmd_packet(IDEState *s, uint
      }
      s->nsector = 1;
      ide_transfer_start(s, s->io_buffer, ATAPI_PACKET_SIZE,
@@ -3916,7 +3918,7 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
      return false;
  }
  
-@@ -2201,7 +2205,12 @@ void ide_cmd_write(void *opaque, uint32_
+@@ -2285,7 +2289,12 @@ void ide_cmd_write(void *opaque, uint32_
  static bool ide_is_pio_out(IDEState *s)
  {
      if (s->end_transfer_func == ide_sector_write ||
@@ -3930,7 +3932,7 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
          return false;
      } else if (s->end_transfer_func == ide_sector_read ||
                 s->end_transfer_func == ide_transfer_stop ||
-@@ -2406,6 +2415,12 @@ int ide_init_drive(IDEState *s, BlockBac
+@@ -2498,6 +2507,12 @@ int ide_init_drive(IDEState *s, BlockBac
      uint64_t nb_sectors;
  
      s->blk = blk;
@@ -3943,7 +3945,7 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
      s->drive_kind = kind;
  
      blk_get_geometry(blk, &nb_sectors);
-@@ -2448,7 +2463,19 @@ int ide_init_drive(IDEState *s, BlockBac
+@@ -2540,7 +2555,19 @@ int ide_init_drive(IDEState *s, BlockBac
      } else {
          switch (kind) {
          case IDE_CD:
@@ -3964,7 +3966,7 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
              break;
          case IDE_CFATA:
              strcpy(s->drive_model_str, "QEMU MICRODRIVE");
-@@ -2480,8 +2507,15 @@ static void ide_init1(IDEBus *bus, int u
+@@ -2572,8 +2599,15 @@ static void ide_init1(IDEBus *bus, int u
      s->drive_serial = drive_serial++;
      /* we need at least 2k alignment for accessing CDROMs using O_DIRECT */
      s->io_buffer_total_len = IDE_DMA_BUF_SECTORS*512 + 4;
@@ -3980,7 +3982,7 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
  
      s->smart_selftest_data = blk_blockalign(s->blk, 512);
      memset(s->smart_selftest_data, 0, 512);
-@@ -2645,6 +2679,10 @@ static EndTransferFunc* transfer_end_tab
+@@ -2747,6 +2781,10 @@ static EndTransferFunc* transfer_end_tab
          ide_atapi_cmd_reply_end,
          ide_atapi_cmd,
          ide_dummy_transfer_stop,
@@ -3991,59 +3993,9 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
  };
  
  static int transfer_end_table_idx(EndTransferFunc *fn)
---- a/hw/ide/internal.h
-+++ b/hw/ide/internal.h
-@@ -317,7 +317,14 @@ typedef struct IDEDMAOps IDEDMAOps;
- #define SMART_DISABLE         0xd9
- #define SMART_STATUS          0xda
- 
--typedef enum { IDE_HD, IDE_CD, IDE_CFATA } IDEDriveKind;
-+typedef enum {
-+    IDE_HD,
-+    IDE_CD,
-+    IDE_CFATA,
-+#ifdef CONFIG_ATAPI_PT
-+    IDE_CD_PT,
-+#endif
-+} IDEDriveKind;
- 
- typedef void EndTransferFunc(IDEState *);
- 
-@@ -344,6 +351,10 @@ enum ide_dma_cmd {
- #define ide_cmd_is_read(s) \
- 	((s)->dma_cmd == IDE_DMA_READ)
- 
-+#ifdef CONFIG_ATAPI_PT
-+#include "hw/atapi_pt.h"
-+#endif
-+
- typedef struct IDEBufferedRequest {
-     QLIST_ENTRY(IDEBufferedRequest) list;
-     struct iovec iov;
-@@ -397,6 +408,10 @@ struct IDEState {
-     bool tray_open;
-     bool tray_locked;
-     uint8_t cdrom_changed;
-+#ifdef CONFIG_ATAPI_PT
-+    bool atapi_pt;
-+    ATAPIPassThroughState *atapipts;
-+#endif
-     int packet_transfer_size;
-     int elementary_transfer_size;
-     int32_t io_buffer_index;
-@@ -588,6 +603,9 @@ void ide_atapi_cmd_ok(IDEState *s);
- void ide_atapi_cmd_error(IDEState *s, int sense_key, int asc);
- void ide_atapi_dma_restart(IDEState *s);
- void ide_atapi_io_error(IDEState *s, int ret);
-+#ifdef CONFIG_ATAPI_PT
-+void ide_atapi_cmd_reply(IDEState *s, int size, int max_size);
-+#endif
- 
- void ide_ioport_write(void *opaque, uint32_t addr, uint32_t val);
- uint32_t ide_ioport_read(void *opaque, uint32_t addr1);
 --- a/hw/ide/pci.c
 +++ b/hw/ide/pci.c
-@@ -234,6 +234,16 @@ void bmdma_cmd_writeb(BMDMAState *bm, ui
+@@ -230,6 +230,16 @@ void bmdma_cmd_writeb(BMDMAState *bm, ui
      /* Ignore writes to SSBM if it keeps the old value */
      if ((val & BM_CMD_START) != (bm->cmd & BM_CMD_START)) {
          if (!(val & BM_CMD_START)) {
@@ -4062,7 +4014,7 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
          } else {
 --- a/hw/ide/qdev.c
 +++ b/hw/ide/qdev.c
-@@ -118,7 +118,19 @@ IDEDevice *ide_create_drive(IDEBus *bus,
+@@ -122,7 +122,19 @@ IDEDevice *ide_create_drive(IDEBus *bus,
  {
      DeviceState *dev;
  
@@ -4083,14 +4035,14 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
      qdev_prop_set_uint32(dev, "unit", unit);
      qdev_prop_set_drive(dev, "drive", blk_by_legacy_dinfo(drive),
                          &error_fatal);
-@@ -317,6 +329,35 @@ static const TypeInfo ide_cd_info = {
+@@ -340,6 +352,35 @@ static const TypeInfo ide_cd_info = {
      .class_init    = ide_cd_class_init,
  };
  
 +#ifdef CONFIG_ATAPI_PT
-+static int ide_cd_pt_initfn(IDEDevice *dev)
++static void ide_cd_pt_realize(IDEDevice *dev, Error **errp)
 +{
-+    return ide_dev_initfn(dev, IDE_CD_PT);
++    ide_dev_initfn(dev, IDE_CD_PT, errp);
 +}
 +
 +static Property ide_cd_pt_properties[] = {
@@ -4102,7 +4054,7 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
 +{
 +    DeviceClass *dc = DEVICE_CLASS(klass);
 +    IDEDeviceClass *k = IDE_DEVICE_CLASS(klass);
-+    k->init = ide_cd_pt_initfn;
++    k->realize = ide_cd_pt_realize;
 +    dc->fw_name = "drive";
 +    dc->desc = "virtual IDE CD-ROM";
 +    dc->props = ide_cd_pt_properties;
@@ -4119,7 +4071,7 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
  static Property ide_drive_properties[] = {
      DEFINE_IDE_DEV_PROPERTIES(),
      DEFINE_PROP_END_OF_LIST(),
-@@ -365,6 +406,9 @@ static void ide_register_types(void)
+@@ -389,6 +430,9 @@ static void ide_register_types(void)
      type_register_static(&ide_cd_info);
      type_register_static(&ide_drive_info);
      type_register_static(&ide_device_type_info);
@@ -4267,9 +4219,9 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
 +#endif /* !_ATAPI_PT_V4V_H_ */
 --- a/include/block/block.h
 +++ b/include/block/block.h
-@@ -362,6 +362,9 @@ BlockAIOCB *bdrv_aio_ioctl(BlockDriverSt
-         unsigned long int req, void *buf,
-         BlockCompletionFunc *cb, void *opaque);
+@@ -354,6 +354,9 @@ void bdrv_aio_cancel_async(BlockAIOCB *a
+ /* sg packet commands */
+ int bdrv_co_ioctl(BlockDriverState *bs, int req, void *buf);
  
 +/* OpenXT: direct IOCTL delivery */
 +int bdrv_direct_ioctl(BlockDriverState *bs, unsigned long int req, void *buf);
@@ -4279,9 +4231,9 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
  void bdrv_invalidate_cache_all(Error **errp);
 --- a/include/block/block_int.h
 +++ b/include/block/block_int.h
-@@ -246,6 +246,10 @@ struct BlockDriver {
-         unsigned long int req, void *buf,
-         BlockCompletionFunc *cb, void *opaque);
+@@ -311,6 +311,10 @@ struct BlockDriver {
+     int coroutine_fn (*bdrv_co_ioctl)(BlockDriverState *bs,
+                                       unsigned long int req, void *buf);
  
 +    /* OpenXT: direct IOCTL delivery */
 +    int (*bdrv_direct_ioctl)(BlockDriverState *bs, unsigned long int req,
@@ -4446,6 +4398,56 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
 +void atapi_pt_dout_fetch_pio_done(IDEState *s);
 +
 +#endif /* !ATAPI_PT_H_ */
+--- a/include/hw/ide/internal.h
++++ b/include/hw/ide/internal.h
+@@ -314,7 +314,14 @@ typedef struct IDEDMAOps IDEDMAOps;
+ #define SMART_DISABLE         0xd9
+ #define SMART_STATUS          0xda
+ 
+-typedef enum { IDE_HD, IDE_CD, IDE_CFATA } IDEDriveKind;
++typedef enum {
++    IDE_HD,
++    IDE_CD,
++    IDE_CFATA,
++#ifdef CONFIG_ATAPI_PT
++    IDE_CD_PT,
++#endif
++} IDEDriveKind;
+ 
+ typedef void EndTransferFunc(IDEState *);
+ 
+@@ -344,6 +351,10 @@ extern const char *IDE_DMA_CMD_lookup[ID
+ #define ide_cmd_is_read(s) \
+ 	((s)->dma_cmd == IDE_DMA_READ)
+ 
++#ifdef CONFIG_ATAPI_PT
++#include "hw/atapi_pt.h"
++#endif
++
+ typedef struct IDEBufferedRequest {
+     QLIST_ENTRY(IDEBufferedRequest) list;
+     struct iovec iov;
+@@ -397,6 +408,10 @@ struct IDEState {
+     bool tray_open;
+     bool tray_locked;
+     uint8_t cdrom_changed;
++#ifdef CONFIG_ATAPI_PT
++    bool atapi_pt;
++    ATAPIPassThroughState *atapipts;
++#endif
+     int packet_transfer_size;
+     int elementary_transfer_size;
+     int32_t io_buffer_index;
+@@ -599,6 +614,9 @@ void ide_atapi_cmd_ok(IDEState *s);
+ void ide_atapi_cmd_error(IDEState *s, int sense_key, int asc);
+ void ide_atapi_dma_restart(IDEState *s);
+ void ide_atapi_io_error(IDEState *s, int ret);
++#ifdef CONFIG_ATAPI_PT
++void ide_atapi_cmd_reply(IDEState *s, int size, int max_size);
++#endif
+ 
+ void ide_ioport_write(void *opaque, uint32_t addr, uint32_t val);
+ uint32_t ide_ioport_read(void *opaque, uint32_t addr1);
 --- a/include/qemu/event_notifier.h
 +++ b/include/qemu/event_notifier.h
 @@ -26,6 +26,10 @@ struct EventNotifier {
@@ -4459,7 +4461,7 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
  };
  
  typedef void EventNotifierHandler(EventNotifier *);
-@@ -41,6 +45,9 @@ int event_notifier_set_handler(EventNoti
+@@ -38,6 +42,9 @@ int event_notifier_test_and_clear(EventN
  #ifdef CONFIG_POSIX
  void event_notifier_init_fd(EventNotifier *, int fd);
  int event_notifier_get_fd(const EventNotifier *);
@@ -4471,17 +4473,17 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
  #endif
 --- a/include/sysemu/blockdev.h
 +++ b/include/sysemu/blockdev.h
-@@ -25,6 +25,9 @@ typedef enum {
-     IF_IDE = 0,
-     IF_NONE,
-     IF_SCSI, IF_FLOPPY, IF_PFLASH, IF_MTD, IF_SD, IF_VIRTIO, IF_XEN,
+@@ -24,6 +24,9 @@ typedef enum {
+      */
+     IF_NONE = 0,
+     IF_IDE, IF_SCSI, IF_FLOPPY, IF_PFLASH, IF_MTD, IF_SD, IF_VIRTIO, IF_XEN,
 +#ifdef CONFIG_ATAPI_PT
 +    IF_ATAPI_PT,
 +#endif
      IF_COUNT
  } BlockInterfaceType;
  
-@@ -40,6 +43,9 @@ struct DriveInfo {
+@@ -39,6 +42,9 @@ struct DriveInfo {
      QemuOpts *opts;
      char *serial;
      QTAILQ_ENTRY(DriveInfo) next;
@@ -4493,7 +4495,7 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
  DriveInfo *blk_legacy_dinfo(BlockBackend *blk);
 --- a/util/event_notifier-posix.c
 +++ b/util/event_notifier-posix.c
-@@ -130,3 +130,41 @@ int event_notifier_test_and_clear(EventN
+@@ -122,3 +122,41 @@ int event_notifier_test_and_clear(EventN
  
      return value;
  }
