@@ -1,0 +1,68 @@
+From 4b3b4f6b74ec72aa149469d2b81e75060d04f572 Mon Sep 17 00:00:00 2001
+From: Samuel Thibault <samuel.thibault@ens-lyon.org>
+Date: Fri, 25 Aug 2017 01:35:53 +0200
+Subject: [PATCH 32/39] slirp: fix clearing ifq_so from pending packets
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The if_fastq and if_batchq contain not only packets, but queues of packets
+for the same socket. When sofree frees a socket, it thus has to clear ifq_so
+from all the packets from the queues, not only the first.
+
+Signed-off-by: Samuel Thibault <samuel.thibault@ens-lyon.org>
+Reviewed-by: Philippe Mathieu-Daudé <f4bug@amsat.org>
+Cc: qemu-stable@nongnu.org
+Signed-off-by: Peter Maydell <peter.maydell@linaro.org>
+(cherry picked from commit 1201d308519f1e915866d7583d5136d03cc1d384)
+
+CVE-2017-13711
+---
+ slirp/socket.c | 24 ++++++++++++++++++++++++
+ 1 file changed, 24 insertions(+)
+
+diff --git a/slirp/socket.c b/slirp/socket.c
+index b336586c7b..6e01c889b8 100644
+--- a/slirp/socket.c
++++ b/slirp/socket.c
+@@ -59,6 +59,27 @@ socreate(Slirp *slirp)
+   return(so);
+ }
+ 
++/*
++ * Remove references to so from the given message queue.
++ */
++static void
++soqfree(struct socket *so, struct quehead *qh)
++{
++    struct mbuf *ifq;
++
++    for (ifq = (struct mbuf *) qh->qh_link;
++             (struct quehead *) ifq != qh;
++             ifq = ifq->ifq_next) {
++        if (ifq->ifq_so == so) {
++            struct mbuf *ifm;
++            ifq->ifq_so = NULL;
++            for (ifm = ifq->ifs_next; ifm != ifq; ifm = ifm->ifs_next) {
++                ifm->ifq_so = NULL;
++            }
++        }
++    }
++}
++
+ /*
+  * remque and free a socket, clobber cache
+  */
+@@ -67,6 +88,9 @@ sofree(struct socket *so)
+ {
+   Slirp *slirp = so->slirp;
+ 
++  soqfree(so, &slirp->if_fastq);
++  soqfree(so, &slirp->if_batchq);
++
+   if (so->so_emu==EMU_RSH && so->extra) {
+ 	sofree(so->extra);
+ 	so->extra=NULL;
+-- 
+2.17.0
+

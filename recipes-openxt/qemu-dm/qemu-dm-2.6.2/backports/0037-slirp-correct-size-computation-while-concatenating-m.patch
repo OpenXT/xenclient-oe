@@ -1,0 +1,100 @@
+From aa55959d8c2efb34dbf2dace70c0d76419bfb233 Mon Sep 17 00:00:00 2001
+From: Prasad J Pandit <pjp@fedoraproject.org>
+Date: Tue, 5 Jun 2018 23:38:35 +0530
+Subject: [PATCH 37/39] slirp: correct size computation while concatenating
+ mbuf
+
+While reassembling incoming fragmented datagrams, 'm_cat' routine
+extends the 'mbuf' buffer, if it has insufficient room. It computes
+a wrong buffer size, which leads to overwriting adjacent heap buffer
+area. Correct this size computation in m_cat.
+
+Reported-by: ZDI Disclosures <zdi-disclosures@trendmicro.com>
+Signed-off-by: Prasad J Pandit <pjp@fedoraproject.org>
+Signed-off-by: Samuel Thibault <samuel.thibault@ens-lyon.org>
+(cherry picked from commit 864036e251f54c99d31df124aad7f34f01f5344c)
+
+CVE-2018-11806
+---
+ slirp/mbuf.c | 11 +++++------
+ slirp/mbuf.h |  8 +++-----
+ 2 files changed, 8 insertions(+), 11 deletions(-)
+
+diff --git a/slirp/mbuf.c b/slirp/mbuf.c
+index d136988397..cbc3481920 100644
+--- a/slirp/mbuf.c
++++ b/slirp/mbuf.c
+@@ -140,7 +140,7 @@ m_cat(struct mbuf *m, struct mbuf *n)
+ 	 * If there's no room, realloc
+ 	 */
+ 	if (M_FREEROOM(m) < n->m_len)
+-		m_inc(m,m->m_size+MINCSIZE);
++		m_inc(m, m->m_len + n->m_len);
+ 
+ 	memcpy(m->m_data+m->m_len, n->m_data, n->m_len);
+ 	m->m_len += n->m_len;
+@@ -149,7 +149,7 @@ m_cat(struct mbuf *m, struct mbuf *n)
+ }
+ 
+ 
+-/* make m size bytes large */
++/* make m 'size' bytes large from m_data */
+ void
+ m_inc(struct mbuf *m, int size)
+ {
+@@ -160,12 +160,12 @@ m_inc(struct mbuf *m, int size)
+ 
+         if (m->m_flags & M_EXT) {
+ 	  datasize = m->m_data - m->m_ext;
+-	  m->m_ext = (char *)realloc(m->m_ext,size);
++	  m->m_ext = g_realloc(m->m_ext, size + datasize);
+ 	  m->m_data = m->m_ext + datasize;
+         } else {
+ 	  char *dat;
+ 	  datasize = m->m_data - m->m_dat;
+-	  dat = (char *)malloc(size);
++	  dat = g_malloc(size + datasize);
+ 	  memcpy(dat, m->m_dat, m->m_size);
+ 
+ 	  m->m_ext = dat;
+@@ -173,8 +173,7 @@ m_inc(struct mbuf *m, int size)
+ 	  m->m_flags |= M_EXT;
+         }
+ 
+-        m->m_size = size;
+-
++        m->m_size = size + datasize;
+ }
+ 
+ 
+diff --git a/slirp/mbuf.h b/slirp/mbuf.h
+index 36fb814097..00a473b9d2 100644
+--- a/slirp/mbuf.h
++++ b/slirp/mbuf.h
+@@ -33,8 +33,6 @@
+ #ifndef _MBUF_H_
+ #define _MBUF_H_
+ 
+-#define MINCSIZE 4096	/* Amount to increase mbuf if too small */
+-
+ /*
+  * Macros for type conversion
+  * mtod(m,t) -	convert mbuf pointer to data pointer of correct type
+@@ -72,11 +70,11 @@ struct mbuf {
+ 	struct	mbuf *m_prevpkt;	/* Flags aren't used in the output queue */
+ 	int	m_flags;		/* Misc flags */
+ 
+-	int	m_size;			/* Size of data */
++	int	m_size;			/* Size of mbuf, from m_dat or m_ext */
+ 	struct	socket *m_so;
+ 
+-	caddr_t	m_data;			/* Location of data */
+-	int	m_len;			/* Amount of data in this mbuf */
++	caddr_t	m_data;			/* Current location of data */
++	int	m_len;			/* Amount of data in this mbuf, from m_data */
+ 
+ 	Slirp *slirp;
+ 	bool	resolution_requested;
+-- 
+2.17.0
+

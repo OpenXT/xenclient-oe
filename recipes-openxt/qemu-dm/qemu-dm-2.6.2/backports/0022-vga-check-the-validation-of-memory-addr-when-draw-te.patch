@@ -1,0 +1,57 @@
+From 3af7b3c882629ea973fde3c4aae55c4ff0f039e5 Mon Sep 17 00:00:00 2001
+From: linzhecheng <linzhecheng@huawei.com>
+Date: Thu, 11 Jan 2018 21:27:24 +0800
+Subject: [PATCH 22/39] vga: check the validation of memory addr when draw text
+
+Start a vm with qemu-kvm -enable-kvm -vnc :66 -smp 1 -m 1024 -hda
+redhat_5.11.qcow2  -device pcnet -vga cirrus,
+then use VNC client to connect to VM, and excute the code below in guest
+OS will lead to qemu crash:
+
+int main()
+ {
+    iopl(3);
+    srand(time(NULL));
+    int a,b;
+    while(1){
+	a = rand()%0x100;
+	b = 0x3c0 + (rand()%0x20);
+        outb(a,b);
+    }
+    return 0;
+}
+
+The above code is writing the registers of VGA randomly.
+We can write VGA CRT controller registers index 0x0C or 0x0D
+(which is the start address register) to modify the
+the display memory address of the upper left pixel
+or character of the screen. The address may be out of the
+range of vga ram. So we should check the validation of memory address
+when reading or writing it to avoid segfault.
+
+Signed-off-by: linzhecheng <linzhecheng@huawei.com>
+Message-id: 20180111132724.13744-1-linzhecheng@huawei.com
+Fixes: CVE-2018-5683
+Signed-off-by: Gerd Hoffmann <kraxel@redhat.com>
+(cherry picked from commit 191f59dc17396bb5a8da50f8c59b6e0a430711a4)
+---
+ hw/display/vga.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/hw/display/vga.c b/hw/display/vga.c
+index 4c76d3a67b..069ef24ce1 100644
+--- a/hw/display/vga.c
++++ b/hw/display/vga.c
+@@ -1293,6 +1293,9 @@ static void vga_draw_text(VGACommonState *s, int full_update)
+         cx_min = width;
+         cx_max = -1;
+         for(cx = 0; cx < width; cx++) {
++            if (src + sizeof(uint16_t) > s->vram_ptr + s->vram_size) {
++                break;
++            }
+             ch_attr = *(uint16_t *)src;
+             if (full_update || ch_attr != *ch_attr_ptr || src == cursor_ptr) {
+                 if (cx < cx_min)
+-- 
+2.17.0
+

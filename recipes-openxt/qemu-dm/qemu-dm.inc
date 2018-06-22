@@ -19,49 +19,82 @@ DEPENDS = " \
 # other patches, it doesn't seem to work
 SRC_URI = "http://wiki.qemu-project.org/download/qemu-${PV}.tar.bz2"
 
+# QEMU backports
+SRC_URI += " \
+    file://backports/0001-char-serial-check-divider-value-against-baud-base.patch \
+    file://backports/0002-audio-intel-hda-check-stream-entry-count-during-tran.patch \
+    file://backports/0003-net-rtl8139-limit-processing-of-ring-descriptors.patch \
+    file://backports/0004-char-Fix-Possible-use-after-free-CVE-2016-9923.patch \
+    file://backports/0005-audio-ac97-add-exit-function.patch \
+    file://backports/0006-serial-fix-memory-leak-in-serial-exit.patch \
+    file://backports/0007-tcg-i386-Check-the-size-of-instruction-being-transla.patch \
+    file://backports/0008-xen-fix-ioreq-handling.patch \
+    file://backports/0009-input-limit-kbd-queue-depth.patch \
+    file://backports/0010-audio-release-capture-buffers.patch \
+    file://backports/0011-slirp-check-len-against-dhcp-options-array-end.patch \
+    file://backports/0012-bitmap-add-bitmap_copy_and_clear_atomic.patch \
+    file://backports/0013-memory-add-support-getting-and-using-a-dirty-bitmap-.patch \
+    file://backports/0014-vga-add-vga_scanline_invalidated-helper.patch \
+    file://backports/0015-vga-make-display-updates-thread-safe.patch \
+    file://backports/0016-vga-fix-display-update-region-calculation.patch \
+    file://backports/0017-vga-fix-display-update-region-calculation-split-scre.patch \
+    file://backports/0018-vga-stop-passing-pointers-to-vga_draw_line-functions.patch \
+    file://backports/0019-multiboot-validate-multiboot-header-address-values.patch \
+    file://backports/0020-vga-drop-line_offset-variable.patch \
+    file://backports/0021-vga-handle-cirrus-vbe-mode-wraparounds.patch \
+    file://backports/0022-vga-check-the-validation-of-memory-addr-when-draw-te.patch \
+    file://backports/0023-vga-add-ram_addr_t-cast.patch \
+    file://backports/0024-vga-fix-region-calculation.patch \
+    file://backports/0025-memory-remove-unnecessary-masking-of-MemoryRegion-ra.patch \
+    file://backports/0026-exec-hide-mr-ram_addr-from-qemu_get_ram_ptr-users.patch \
+    file://backports/0027-exec-introduce-address_space_extend_translation.patch \
+    file://backports/0028-xen-mapcache-store-dma-information-in-revmapcache-en.patch \
+    file://backports/0029-exec-use-qemu_ram_ptr_length-to-access-guest-ram.patch \
+    file://backports/0030-exec-Add-lock-parameter-to-qemu_ram_ptr_length.patch \
+    file://backports/0031-IDE-Do-not-flush-empty-CDROM-drives.patch \
+    file://backports/0032-slirp-fix-clearing-ifq_so-from-pending-packets.patch \
+    file://backports/0033-ps2-check-PS2Queue-pointers-in-post_load-routine.patch \
+    file://backports/0034-osdep-Fix-ROUND_UP-64-bit-32-bit.patch \
+    file://backports/0035-ide-core-add-cleanup-function.patch \
+    file://backports/0036-ide-ahci-call-cleanup-function-in-ahci-unit.patch \
+    file://backports/0037-slirp-correct-size-computation-while-concatenating-m.patch \
+    file://backports/0038-multiboot-Check-validity-of-mh_header_addr.patch \
+    file://backports/0039-xen-disk-don-t-leak-stack-data-via-response-ring.patch \
+"
+
 # QEMU Patch Queue
-SRC_URI += "file://compile-time-stubdom-flag.patch \
-            file://generic-xenstore-extensions.patch \
-            file://readonly-ide.patch \
-            file://hvm-param-dm-domain.patch \
-            file://logging-syslog.patch \
-            file://dmbus.patch \
-            file://switcher.patch \
-            file://acpi.patch \
-            file://xenmou.patch \
-            file://atapi-pass-through.patch \
-            file://vbe-xt-extensions.patch \
-            file://vga-spinlock.patch \
-            file://vga-shadow-bda.patch \
-            file://surfman-dcl.patch \
-            file://audio-policy.patch \
-            file://msix-cap-disable.patch \
-            file://openxtaudio.patch \
-            file://nic-link-state-propagation.patch \
-            file://stubdom-read-gsi-from-device-config-space.patch \
-            file://acpi-pm-feature.patch \
-            file://maintain-time-offset.patch \
-            file://acpi-wakeup.patch \
-            file://openxt-misc-fixes.patch \
-            file://qmp-v4v-char-driver.patch \
-            file://use-relative-xenstore-nodes.patch \
-            file://exit-mainloop-on-reset.patch \
-            file://write-acpi-state-to-xenstore.patch \
-            file://set-blockdev-ro.patch \
-            file://block-remove-unused-block-format-support.patch \
-            file://net-Remove-unused-network-options.patch \
-            file://xsa-197-qemu-incautious-about-shared-ring-processing.patch \
-            file://xsa216-qemuu-4.7.patch \
-            file://CVE-2016-8669-char-serial-check-divider-value-against-baud-base.patch \
-            file://CVE-2016-8909-audio-intel-hda-check-stream-entry-count-during-tran.patch \
-            file://CVE-2016-8910-net-rtl8139-limit-processing-of-ring-descriptors.patch \
-            file://CVE-2016-9923-char-Fix-Possible-use-after-free.patch \
-            file://CVE-2017-5525-audio-ac97-add-exit-function.patch \
-            file://CVE-2017-5579-serial-fix-memory-leak-in-serial-exit.patch \
-            file://CVE-2017-8284-tcg-i386-Check-the-size-of-instruction-being-transla.patch \
-            file://CVE-2017-8309-audio-release-capture-buffers.patch \
-            file://CVE-2017-8379-input-limit-kbd-queue-depth.patch \
-            "
+SRC_URI += " \
+    file://compile-time-stubdom-flag.patch \
+    file://generic-xenstore-extensions.patch \
+    file://readonly-ide.patch \
+    file://hvm-param-dm-domain.patch \
+    file://logging-syslog.patch \
+    file://dmbus.patch \
+    file://switcher.patch \
+    file://acpi.patch \
+    file://xenmou.patch \
+    file://atapi-pass-through.patch \
+    file://vbe-xt-extensions.patch \
+    file://vga-spinlock.patch \
+    file://vga-shadow-bda.patch \
+    file://surfman-dcl.patch \
+    file://audio-policy.patch \
+    file://msix-cap-disable.patch \
+    file://openxtaudio.patch \
+    file://nic-link-state-propagation.patch \
+    file://stubdom-read-gsi-from-device-config-space.patch \
+    file://acpi-pm-feature.patch \
+    file://maintain-time-offset.patch \
+    file://acpi-wakeup.patch \
+    file://openxt-misc-fixes.patch \
+    file://qmp-v4v-char-driver.patch \
+    file://use-relative-xenstore-nodes.patch \
+    file://exit-mainloop-on-reset.patch \
+    file://write-acpi-state-to-xenstore.patch \
+    file://set-blockdev-ro.patch \
+    file://block-remove-unused-block-format-support.patch \
+    file://net-Remove-unused-network-options.patch \
+"
 
 SRC_URI[md5sum] = "bdf1f3d0c177ebeb35a079a4bc3fc74e"
 SRC_URI[sha256sum] = "9a7ec64f147b9e1e570c410e00ebe271869b5d4c85392ba047db7617c297faa3"

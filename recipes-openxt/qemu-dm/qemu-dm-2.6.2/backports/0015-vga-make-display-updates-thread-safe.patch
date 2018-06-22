@@ -1,0 +1,115 @@
+From 537a68ea80b578bb076c07ddc7b5870cae43f1b5 Mon Sep 17 00:00:00 2001
+From: Gerd Hoffmann <kraxel@redhat.com>
+Date: Fri, 21 Apr 2017 11:16:27 +0200
+Subject: [PATCH 15/39] vga: make display updates thread safe.
+
+The vga code clears the dirty bits *after* reading the framebuffer
+memory.  So if the guest framebuffer updates hits the race window
+between vga reading the framebuffer and vga clearing the dirty bits
+vga will miss that update
+
+Fix it by using the new memory_region_copy_and_clear_dirty()
+memory_region_copy_get_dirty() functions.  That way we clear the
+dirty bitmap before reading the framebuffer.  Any guest display
+updates happening in parallel will be properly tracked in the
+dirty bitmap then and the next display refresh will pick them up.
+
+Problem triggers with mttcg only.  Before mttcg was merged tcg
+never ran in parallel to vga emulation.  Using kvm will hide the
+problem too, due to qemu operating on a userspace copy of the
+kernel's dirty bitmap.
+
+Signed-off-by: Gerd Hoffmann <kraxel@redhat.com>
+Message-id: 20170421091632.30900-5-kraxel@redhat.com
+Signed-off-by: Gerd Hoffmann <kraxel@redhat.com>
+(cherry picked from commit fec5e8c92becad223df9d972770522f64aafdb72)
+---
+ hw/display/vga.c | 36 +++++++++++++++++-------------------
+ 1 file changed, 17 insertions(+), 19 deletions(-)
+
+diff --git a/hw/display/vga.c b/hw/display/vga.c
+index 378d23eff2..0d2ac4580b 100644
+--- a/hw/display/vga.c
++++ b/hw/display/vga.c
+@@ -1478,7 +1478,8 @@ static void vga_draw_graphic(VGACommonState *s, int full_update)
+     DisplaySurface *surface = qemu_console_surface(s->con);
+     int y1, y, update, linesize, y_start, double_scan, mask, depth;
+     int width, height, shift_control, line_offset, bwidth, bits;
+-    ram_addr_t page0, page1, page_min, page_max;
++    ram_addr_t page0, page1;
++    DirtyBitmapSnapshot *snap = NULL;
+     int disp_width, multi_scan, multi_run;
+     uint8_t *d;
+     uint32_t v, addr1, addr;
+@@ -1493,9 +1494,6 @@ static void vga_draw_graphic(VGACommonState *s, int full_update)
+ 
+     full_update |= update_basic_params(s);
+ 
+-    if (!full_update)
+-        vga_sync_dirty_bitmap(s);
+-
+     s->get_resolution(s, &width, &height);
+     disp_width = width;
+ 
+@@ -1646,11 +1644,17 @@ static void vga_draw_graphic(VGACommonState *s, int full_update)
+     addr1 = (s->start_addr * 4);
+     bwidth = (width * bits + 7) / 8;
+     y_start = -1;
+-    page_min = -1;
+-    page_max = 0;
+     d = surface_data(surface);
+     linesize = surface_stride(surface);
+     y1 = 0;
++
++    if (!full_update) {
++        vga_sync_dirty_bitmap(s);
++        snap = memory_region_snapshot_and_clear_dirty(&s->vram, addr1,
++                                                      bwidth * height,
++                                                      DIRTY_MEMORY_VGA);
++    }
++
+     for(y = 0; y < height; y++) {
+         addr = addr1;
+         if (!(s->cr[VGA_CRTC_MODE] & 1)) {
+@@ -1665,17 +1669,17 @@ static void vga_draw_graphic(VGACommonState *s, int full_update)
+         update = full_update;
+         page0 = addr;
+         page1 = addr + bwidth - 1;
+-        update |= memory_region_get_dirty(&s->vram, page0, page1 - page0,
+-                                          DIRTY_MEMORY_VGA);
++        if (full_update) {
++            update = 1;
++        } else {
++            update = memory_region_snapshot_get_dirty(&s->vram, snap,
++                                                      page0, page1 - page0);
++        }
+         /* explicit invalidation for the hardware cursor (cirrus only) */
+         update |= vga_scanline_invalidated(s, y);
+         if (update) {
+             if (y_start < 0)
+                 y_start = y;
+-            if (page0 < page_min)
+-                page_min = page0;
+-            if (page1 > page_max)
+-                page_max = page1;
+             if (!(is_buffer_shared(surface))) {
+                 vga_draw_line(s, d, s->vram_ptr + addr, width);
+                 if (s->cursor_draw_line)
+@@ -1708,13 +1712,7 @@ static void vga_draw_graphic(VGACommonState *s, int full_update)
+         dpy_gfx_update(s->con, 0, y_start,
+                        disp_width, y - y_start);
+     }
+-    /* reset modified pages */
+-    if (page_max >= page_min) {
+-        memory_region_reset_dirty(&s->vram,
+-                                  page_min,
+-                                  page_max - page_min,
+-                                  DIRTY_MEMORY_VGA);
+-    }
++    g_free(snap);
+     memset(s->invalidated_y_table, 0, sizeof(s->invalidated_y_table));
+ }
+ 
+-- 
+2.17.0
+

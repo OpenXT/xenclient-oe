@@ -1,0 +1,243 @@
+From 1629b3264debba140f00b56bb22acd3e3dcdfc2a Mon Sep 17 00:00:00 2001
+From: Gerd Hoffmann <kraxel@redhat.com>
+Date: Fri, 21 Apr 2017 11:16:25 +0200
+Subject: [PATCH 13/39] memory: add support getting and using a dirty bitmap
+ copy.
+
+This patch adds support for getting and using a local copy of the dirty
+bitmap.
+
+memory_region_snapshot_and_clear_dirty() will create a snapshot of the
+dirty bitmap for the specified range, clear the dirty bitmap and return
+the copy.  The returned bitmap can be a bit larger than requested, the
+range is expanded so the code can copy unsigned longs from the bitmap
+and avoid atomic bit update operations.
+
+memory_region_snapshot_get_dirty() will return the dirty status of
+pages, pretty much like memory_region_get_dirty(), but using the copy
+returned by memory_region_copy_and_clear_dirty().
+
+Signed-off-by: Gerd Hoffmann <kraxel@redhat.com>
+Message-id: 20170421091632.30900-3-kraxel@redhat.com
+Signed-off-by: Gerd Hoffmann <kraxel@redhat.com>
+(cherry picked from commit 8deaf12ca1a7c89867df739dc9056080509628bd)
+---
+ exec.c                  | 75 +++++++++++++++++++++++++++++++++++++++++
+ include/exec/memory.h   | 47 ++++++++++++++++++++++++++
+ include/exec/ram_addr.h |  7 ++++
+ include/qemu/typedefs.h |  1 +
+ memory.c                | 17 ++++++++++
+ 5 files changed, 147 insertions(+)
+
+diff --git a/exec.c b/exec.c
+index fc7526666f..e7372d8470 100644
+--- a/exec.c
++++ b/exec.c
+@@ -178,6 +178,12 @@ struct CPUAddressSpace {
+     MemoryListener tcg_as_listener;
+ };
+ 
++struct DirtyBitmapSnapshot {
++    ram_addr_t start;
++    ram_addr_t end;
++    unsigned long dirty[];
++};
++
+ #endif
+ 
+ #if !defined(CONFIG_USER_ONLY)
+@@ -1030,6 +1036,75 @@ bool cpu_physical_memory_test_and_clear_dirty(ram_addr_t start,
+     return dirty;
+ }
+ 
++DirtyBitmapSnapshot *cpu_physical_memory_snapshot_and_clear_dirty
++     (ram_addr_t start, ram_addr_t length, unsigned client)
++{
++    DirtyMemoryBlocks *blocks;
++    unsigned long align = 1UL << (TARGET_PAGE_BITS + BITS_PER_LEVEL);
++    ram_addr_t first = QEMU_ALIGN_DOWN(start, align);
++    ram_addr_t last  = QEMU_ALIGN_UP(start + length, align);
++    DirtyBitmapSnapshot *snap;
++    unsigned long page, end, dest;
++
++    snap = g_malloc0(sizeof(*snap) +
++                     ((last - first) >> (TARGET_PAGE_BITS + 3)));
++    snap->start = first;
++    snap->end   = last;
++
++    page = first >> TARGET_PAGE_BITS;
++    end  = last  >> TARGET_PAGE_BITS;
++    dest = 0;
++
++    rcu_read_lock();
++
++    blocks = atomic_rcu_read(&ram_list.dirty_memory[client]);
++
++    while (page < end) {
++        unsigned long idx = page / DIRTY_MEMORY_BLOCK_SIZE;
++        unsigned long offset = page % DIRTY_MEMORY_BLOCK_SIZE;
++        unsigned long num = MIN(end - page, DIRTY_MEMORY_BLOCK_SIZE - offset);
++
++        assert((offset % (1 << BITS_PER_LEVEL)) == 0);
++        assert((num % (1 << BITS_PER_LEVEL)) == 0);
++        offset >>= BITS_PER_LEVEL;
++
++        bitmap_copy_and_clear_atomic(snap->dirty + dest,
++                                     blocks->blocks[idx] + offset,
++                                     num);
++        page += num;
++        dest += num >> BITS_PER_LEVEL;
++    }
++
++    rcu_read_unlock();
++
++    if (tcg_enabled()) {
++        tlb_reset_dirty_range_all(start, length);
++    }
++
++    return snap;
++}
++
++bool cpu_physical_memory_snapshot_get_dirty(DirtyBitmapSnapshot *snap,
++                                            ram_addr_t start,
++                                            ram_addr_t length)
++{
++    unsigned long page, end;
++
++    assert(start >= snap->start);
++    assert(start + length <= snap->end);
++
++    end = TARGET_PAGE_ALIGN(start + length - snap->start) >> TARGET_PAGE_BITS;
++    page = (start - snap->start) >> TARGET_PAGE_BITS;
++
++    while (page < end) {
++        if (test_bit(page, snap->dirty)) {
++            return true;
++        }
++        page++;
++    }
++    return false;
++}
++
+ /* Called from RCU critical section */
+ hwaddr memory_region_section_get_iotlb(CPUState *cpu,
+                                        MemoryRegionSection *section,
+diff --git a/include/exec/memory.h b/include/exec/memory.h
+index e2a3e9953c..d689ca43d1 100644
+--- a/include/exec/memory.h
++++ b/include/exec/memory.h
+@@ -753,6 +753,53 @@ void memory_region_set_dirty(MemoryRegion *mr, hwaddr addr,
+  */
+ bool memory_region_test_and_clear_dirty(MemoryRegion *mr, hwaddr addr,
+                                         hwaddr size, unsigned client);
++
++/**
++ * memory_region_snapshot_and_clear_dirty: Get a snapshot of the dirty
++ *                                         bitmap and clear it.
++ *
++ * Creates a snapshot of the dirty bitmap, clears the dirty bitmap and
++ * returns the snapshot.  The snapshot can then be used to query dirty
++ * status, using memory_region_snapshot_get_dirty.  Unlike
++ * memory_region_test_and_clear_dirty this allows to query the same
++ * page multiple times, which is especially useful for display updates
++ * where the scanlines often are not page aligned.
++ *
++ * The dirty bitmap region which gets copyed into the snapshot (and
++ * cleared afterwards) can be larger than requested.  The boundaries
++ * are rounded up/down so complete bitmap longs (covering 64 pages on
++ * 64bit hosts) can be copied over into the bitmap snapshot.  Which
++ * isn't a problem for display updates as the extra pages are outside
++ * the visible area, and in case the visible area changes a full
++ * display redraw is due anyway.  Should other use cases for this
++ * function emerge we might have to revisit this implementation
++ * detail.
++ *
++ * Use g_free to release DirtyBitmapSnapshot.
++ *
++ * @mr: the memory region being queried.
++ * @addr: the address (relative to the start of the region) being queried.
++ * @size: the size of the range being queried.
++ * @client: the user of the logging information; typically %DIRTY_MEMORY_VGA.
++ */
++DirtyBitmapSnapshot *memory_region_snapshot_and_clear_dirty(MemoryRegion *mr,
++                                                            hwaddr addr,
++                                                            hwaddr size,
++                                                            unsigned client);
++
++/**
++ * memory_region_snapshot_get_dirty: Check whether a range of bytes is dirty
++ *                                   in the specified dirty bitmap snapshot.
++ *
++ * @mr: the memory region being queried.
++ * @snap: the dirty bitmap snapshot
++ * @addr: the address (relative to the start of the region) being queried.
++ * @size: the size of the range being queried.
++ */
++bool memory_region_snapshot_get_dirty(MemoryRegion *mr,
++                                      DirtyBitmapSnapshot *snap,
++                                      hwaddr addr, hwaddr size);
++
+ /**
+  * memory_region_sync_dirty_bitmap: Synchronize a region's dirty bitmap with
+  *                                  any external TLBs (e.g. kvm)
+diff --git a/include/exec/ram_addr.h b/include/exec/ram_addr.h
+index 5adf7a4fcd..46391b3d85 100644
+--- a/include/exec/ram_addr.h
++++ b/include/exec/ram_addr.h
+@@ -386,6 +386,13 @@ bool cpu_physical_memory_test_and_clear_dirty(ram_addr_t start,
+                                               ram_addr_t length,
+                                               unsigned client);
+ 
++DirtyBitmapSnapshot *cpu_physical_memory_snapshot_and_clear_dirty
++    (ram_addr_t start, ram_addr_t length, unsigned client);
++
++bool cpu_physical_memory_snapshot_get_dirty(DirtyBitmapSnapshot *snap,
++                                            ram_addr_t start,
++                                            ram_addr_t length);
++
+ static inline void cpu_physical_memory_clear_dirty_range(ram_addr_t start,
+                                                          ram_addr_t length)
+ {
+diff --git a/include/qemu/typedefs.h b/include/qemu/typedefs.h
+index 1dcf6f5d53..506be625de 100644
+--- a/include/qemu/typedefs.h
++++ b/include/qemu/typedefs.h
+@@ -22,6 +22,7 @@ typedef struct CPUAddressSpace CPUAddressSpace;
+ typedef struct CPUState CPUState;
+ typedef struct DeviceListener DeviceListener;
+ typedef struct DeviceState DeviceState;
++typedef struct DirtyBitmapSnapshot DirtyBitmapSnapshot;
+ typedef struct DisplayChangeListener DisplayChangeListener;
+ typedef struct DisplayState DisplayState;
+ typedef struct DisplaySurface DisplaySurface;
+diff --git a/memory.c b/memory.c
+index f76f85df95..2108c691fd 100644
+--- a/memory.c
++++ b/memory.c
+@@ -1588,6 +1588,23 @@ bool memory_region_test_and_clear_dirty(MemoryRegion *mr, hwaddr addr,
+                 memory_region_get_ram_addr(mr) + addr, size, client);
+ }
+ 
++DirtyBitmapSnapshot *memory_region_snapshot_and_clear_dirty(MemoryRegion *mr,
++                                                            hwaddr addr,
++                                                            hwaddr size,
++                                                            unsigned client)
++{
++    assert(mr->ram_block);
++    return cpu_physical_memory_snapshot_and_clear_dirty(
++                memory_region_get_ram_addr(mr) + addr, size, client);
++}
++
++bool memory_region_snapshot_get_dirty(MemoryRegion *mr, DirtyBitmapSnapshot *snap,
++                                      hwaddr addr, hwaddr size)
++{
++    assert(mr->ram_block);
++    return cpu_physical_memory_snapshot_get_dirty(snap,
++                memory_region_get_ram_addr(mr) + addr, size);
++}
+ 
+ void memory_region_sync_dirty_bitmap(MemoryRegion *mr)
+ {
+-- 
+2.17.0
+

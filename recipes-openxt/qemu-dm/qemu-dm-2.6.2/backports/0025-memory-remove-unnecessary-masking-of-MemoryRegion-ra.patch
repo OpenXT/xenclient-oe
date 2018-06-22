@@ -1,0 +1,133 @@
+From 413b8edfd2188c1d8173bdf57bf302edcc085efa Mon Sep 17 00:00:00 2001
+From: Paolo Bonzini <pbonzini@redhat.com>
+Date: Tue, 1 Mar 2016 10:44:50 +0100
+Subject: [PATCH 25/39] memory: remove unnecessary masking of MemoryRegion
+ ram_addr
+
+mr->ram_block->offset is already aligned to both host and target size
+(see qemu_ram_alloc_internal).  Remove further masking as it is
+unnecessary.
+
+Reviewed-by: Fam Zheng <famz@redhat.com>
+Signed-off-by: Paolo Bonzini <pbonzini@redhat.com>
+(cherry picked from commit e4e697940dff612b789b0858270c20a8b680f78d)
+---
+ exec.c          | 21 +++++++--------------
+ memory.c        |  5 ++---
+ translate-all.c |  3 +--
+ 3 files changed, 10 insertions(+), 19 deletions(-)
+
+diff --git a/exec.c b/exec.c
+index e7372d8470..11f0199b57 100644
+--- a/exec.c
++++ b/exec.c
+@@ -1118,8 +1118,7 @@ hwaddr memory_region_section_get_iotlb(CPUState *cpu,
+ 
+     if (memory_region_is_ram(section->mr)) {
+         /* Normal RAM.  */
+-        iotlb = (memory_region_get_ram_addr(section->mr) & TARGET_PAGE_MASK)
+-            + xlat;
++        iotlb = memory_region_get_ram_addr(section->mr) + xlat;
+         if (!section->readonly) {
+             iotlb |= PHYS_SECTION_NOTDIRTY;
+         } else {
+@@ -3175,9 +3174,7 @@ static inline uint32_t address_space_ldl_internal(AddressSpace *as, hwaddr addr,
+     } else {
+         /* RAM case */
+         ptr = qemu_get_ram_ptr(mr->ram_block,
+-                               (memory_region_get_ram_addr(mr)
+-                                & TARGET_PAGE_MASK)
+-                               + addr1);
++                               memory_region_get_ram_addr(mr) + addr1);
+         switch (endian) {
+         case DEVICE_LITTLE_ENDIAN:
+             val = ldl_le_p(ptr);
+@@ -3271,9 +3268,7 @@ static inline uint64_t address_space_ldq_internal(AddressSpace *as, hwaddr addr,
+     } else {
+         /* RAM case */
+         ptr = qemu_get_ram_ptr(mr->ram_block,
+-                               (memory_region_get_ram_addr(mr)
+-                                & TARGET_PAGE_MASK)
+-                               + addr1);
++                               memory_region_get_ram_addr(mr) + addr1);
+         switch (endian) {
+         case DEVICE_LITTLE_ENDIAN:
+             val = ldq_le_p(ptr);
+@@ -3387,9 +3382,7 @@ static inline uint32_t address_space_lduw_internal(AddressSpace *as,
+     } else {
+         /* RAM case */
+         ptr = qemu_get_ram_ptr(mr->ram_block,
+-                               (memory_region_get_ram_addr(mr)
+-                                & TARGET_PAGE_MASK)
+-                               + addr1);
++                               memory_region_get_ram_addr(mr) + addr1);
+         switch (endian) {
+         case DEVICE_LITTLE_ENDIAN:
+             val = lduw_le_p(ptr);
+@@ -3471,7 +3464,7 @@ void address_space_stl_notdirty(AddressSpace *as, hwaddr addr, uint32_t val,
+ 
+         r = memory_region_dispatch_write(mr, addr1, val, 4, attrs);
+     } else {
+-        addr1 += memory_region_get_ram_addr(mr) & TARGET_PAGE_MASK;
++        addr1 += memory_region_get_ram_addr(mr);
+         ptr = qemu_get_ram_ptr(mr->ram_block, addr1);
+         stl_p(ptr, val);
+ 
+@@ -3526,7 +3519,7 @@ static inline void address_space_stl_internal(AddressSpace *as,
+         r = memory_region_dispatch_write(mr, addr1, val, 4, attrs);
+     } else {
+         /* RAM case */
+-        addr1 += memory_region_get_ram_addr(mr) & TARGET_PAGE_MASK;
++        addr1 += memory_region_get_ram_addr(mr);
+         ptr = qemu_get_ram_ptr(mr->ram_block, addr1);
+         switch (endian) {
+         case DEVICE_LITTLE_ENDIAN:
+@@ -3636,7 +3629,7 @@ static inline void address_space_stw_internal(AddressSpace *as,
+         r = memory_region_dispatch_write(mr, addr1, val, 2, attrs);
+     } else {
+         /* RAM case */
+-        addr1 += memory_region_get_ram_addr(mr) & TARGET_PAGE_MASK;
++        addr1 += memory_region_get_ram_addr(mr);
+         ptr = qemu_get_ram_ptr(mr->ram_block, addr1);
+         switch (endian) {
+         case DEVICE_LITTLE_ENDIAN:
+diff --git a/memory.c b/memory.c
+index 2108c691fd..5af2da1227 100644
+--- a/memory.c
++++ b/memory.c
+@@ -1658,7 +1658,7 @@ int memory_region_get_fd(MemoryRegion *mr)
+ 
+     assert(mr->ram_block);
+ 
+-    return qemu_get_ram_fd(memory_region_get_ram_addr(mr) & TARGET_PAGE_MASK);
++    return qemu_get_ram_fd(memory_region_get_ram_addr(mr));
+ }
+ 
+ void *memory_region_get_ram_ptr(MemoryRegion *mr)
+@@ -1672,8 +1672,7 @@ void *memory_region_get_ram_ptr(MemoryRegion *mr)
+         mr = mr->alias;
+     }
+     assert(mr->ram_block);
+-    ptr = qemu_get_ram_ptr(mr->ram_block,
+-                           memory_region_get_ram_addr(mr) & TARGET_PAGE_MASK);
++    ptr = qemu_get_ram_ptr(mr->ram_block, memory_region_get_ram_addr(mr));
+     rcu_read_unlock();
+ 
+     return ptr + offset;
+diff --git a/translate-all.c b/translate-all.c
+index 8329ea60ee..952e5555d8 100644
+--- a/translate-all.c
++++ b/translate-all.c
+@@ -1552,8 +1552,7 @@ void tb_invalidate_phys_addr(AddressSpace *as, hwaddr addr)
+         rcu_read_unlock();
+         return;
+     }
+-    ram_addr = (memory_region_get_ram_addr(mr) & TARGET_PAGE_MASK)
+-        + addr;
++    ram_addr = memory_region_get_ram_addr(mr) + addr;
+     tb_invalidate_phys_page_range(ram_addr, ram_addr + 1, 0);
+     rcu_read_unlock();
+ }
+-- 
+2.17.0
+

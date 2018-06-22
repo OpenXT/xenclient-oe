@@ -1,0 +1,59 @@
+From b90c4e8d95aae65e9e5ef5d41973e4b2e5441592 Mon Sep 17 00:00:00 2001
+From: Eric Blake <eblake@redhat.com>
+Date: Thu, 14 Sep 2017 08:49:23 -0500
+Subject: [PATCH 34/39] osdep: Fix ROUND_UP(64-bit, 32-bit)
+
+When using bit-wise operations that exploit the power-of-two
+nature of the second argument of ROUND_UP(), we still need to
+ensure that the mask is as wide as the first argument (done
+by using a ternary to force proper arithmetic promotion).
+Unpatched, ROUND_UP(2ULL*1024*1024*1024*1024, 512U) produces 0,
+instead of the intended 2TiB, because negation of an unsigned
+32-bit quantity followed by widening to 64-bits does not
+sign-extend the mask.
+
+Broken since its introduction in commit 292c8e50 (v1.5.0).
+Callers that passed the same width type to both macro parameters,
+or that had other code to ensure the first parameter's maximum
+runtime value did not exceed the second parameter's width, are
+unaffected, but I did not audit to see which (if any) existing
+clients of the macro could trigger incorrect behavior (I found
+the bug while adding a new use of the macro).
+
+While preparing the patch, checkpatch complained about poor
+spacing, so I also fixed that here and in the nearby DIV_ROUND_UP.
+
+CC: qemu-trivial@nongnu.org
+CC: qemu-stable@nongnu.org
+Signed-off-by: Eric Blake <eblake@redhat.com>
+Reviewed-by: Laszlo Ersek <lersek@redhat.com>
+Reviewed-by: Richard Henderson <richard.henderson@linaro.org>
+Signed-off-by: Michael Tokarev <mjt@tls.msk.ru>
+(cherry picked from commit 2098b073f398cd628c09c5a78537a6854e85830d)
+
+CVE-2017-18043
+---
+ include/qemu/osdep.h | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/include/qemu/osdep.h b/include/qemu/osdep.h
+index af83b1a5a8..f2e97b4774 100644
+--- a/include/qemu/osdep.h
++++ b/include/qemu/osdep.h
+@@ -160,11 +160,11 @@ extern int daemon(int, int);
+ #define QEMU_ALIGN_UP(n, m) QEMU_ALIGN_DOWN((n) + (m) - 1, (m))
+ 
+ #ifndef ROUND_UP
+-#define ROUND_UP(n,d) (((n) + (d) - 1) & -(d))
++#define ROUND_UP(n, d) (((n) + (d) - 1) & -(0 ? (n) : (d)))
+ #endif
+ 
+ #ifndef DIV_ROUND_UP
+-#define DIV_ROUND_UP(n,d) (((n) + (d) - 1) / (d))
++#define DIV_ROUND_UP(n, d) (((n) + (d) - 1) / (d))
+ #endif
+ 
+ #ifndef ARRAY_SIZE
+-- 
+2.17.0
+
