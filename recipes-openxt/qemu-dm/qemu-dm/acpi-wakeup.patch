@@ -1,0 +1,181 @@
+################################################################################
+SHORT DESCRIPTION: 
+################################################################################
+
+Allow QEMU to be notified when guests awake from S3.
+
+################################################################################
+LONG DESCRIPTION: 
+################################################################################
+
+Prior to this patch, QEMU requires a wake signal to be communicated
+from the input server via the DMbus, but:
+  - This is nonideal, as it requires the input server to be running, and
+    requires the input server to circumvent the toolstack for waking guests.
+  - This means that guests are not woken properly when using toolstack calls,
+    such as "xec-vm -n <domain-name> resume".
+
+This commit modifies QEMU to also respond to wake requests via a XenStore node.
+Ideally, this information would be communicated via a protocol like QMP; this is
+to be considered a stand-in until QMP support is integrated.
+
+################################################################################
+REMOVAL 
+################################################################################
+
+Ideally, when QMP (or a similar solution) is implemented, this patch
+will be removed wholesale, as it superseeded by QMP wakeup requests.
+
+################################################################################
+UPSTREAM PLAN
+################################################################################
+
+None
+
+################################################################################
+INTERNAL DEPENDENCIES 
+################################################################################
+
+Applied before this patch:
+- 0009-acpi.patch, which provides the OpenXT ACPI extensions
+
+Applied in any order:
+- 0001-generic-xenstore-extensions.patch, which provides XenStore
+  functionality
+
+--- a/hw/acpi/Makefile.objs
++++ b/hw/acpi/Makefile.objs
+@@ -11,6 +11,7 @@ common-obj-$(call lnot,$(CONFIG_ACPI_X86
+ common-obj-y += acpi_interface.o
+ common-obj-y += bios-linker-loader.o
+ common-obj-y += aml-build.o
++common-obj-$(CONFIG_XEN) += openxt_ext.o
+ 
+ common-obj-$(CONFIG_IPMI) += ipmi.o
+ common-obj-$(call lnot,$(CONFIG_IPMI)) += ipmi-stub.o
+--- a/hw/acpi/core.c
++++ b/hw/acpi/core.c
+@@ -614,6 +614,7 @@ void acpi_pm1_cnt_update(ACPIREGS *ar,
+     /* ACPI specs 3.0, 4.7.2.5 */
+     if (sci_enable) {
+         ar->pm1.cnt.cnt |= ACPI_BITMASK_SCI_ENABLE;
++        acpi_openxt_register_wakeup_listener();
+     } else if (sci_disable) {
+         ar->pm1.cnt.cnt &= ~ACPI_BITMASK_SCI_ENABLE;
+     }
+--- /dev/null
++++ b/hw/acpi/openxt_ext.c
+@@ -0,0 +1,104 @@
++/*
++ * Copyright (C) 2015 Assured Information Security, Inc.
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
++ */
++
++#include "qemu/osdep.h"
++#ifdef CONFIG_SYSLOG_LOGGING
++# include "logging.h"
++#else
++# include "stdio.h"
++#endif
++
++#include "sysemu/sysemu.h"
++#include "hw/hw.h"
++#include "hw/i386/pc.h"
++#include "hw/acpi/acpi.h"
++#include "qemu/config-file.h"
++#include "qapi/qmp-event.h"
++#include "hw/xen/xen.h"
++#include "hw/xen/xen_backend.h"
++
++/**
++ * ACPI_LOG: information to always log (errors & important low-volume events)
++ * @param fmt,... printf style arguments
++ */
++#define ACPI_LOG(fmt, ...)                                                   \
++    do {                                                                   \
++            fprintf(stdout, "[%s:%s:%d] " fmt,                             \
++                    __FILE__, __FUNCTION__, __LINE__, ##__VA_ARGS__);      \
++    } while (0)
++
++/**
++ * Event handler for OpenXT wakeup requests.
++ */
++static void openxt_wakeup_requested(void * unused)
++{
++    char domain_path[256];
++    int requested;
++
++    (void)unused;
++
++    // Determine the path that we'll be listening for wakeup events on.
++    snprintf(domain_path, sizeof(domain_path),
++             "/local/domain/%d", xen_domid);
++
++    // Check to see if a wakeup has been r
++    if(xenstore_read_int(domain_path, "wakeup-req", &requested) != 0)
++    {
++        ACPI_LOG("error: could not read the wakeup request node");
++        return;
++    }
++
++    //... if it has, wake up the guest.
++    if(requested)
++    {
++
++        // Clear the pending request...
++        xenstore_write_int(domain_path, "wakeup-req", 0);
++
++        // ... and issue our wakeup request!
++        if(runstate_check(RUN_STATE_SUSPENDED)) {
++            ACPI_LOG("QEMU: Waking device models from emulated S3.\n");
++            qemu_system_wakeup_request(QEMU_WAKEUP_REASON_OTHER);
++        }
++    }
++}
++
++/**
++ * Register a watcher to handle OpenXT wakeup requests.
++ */
++void acpi_openxt_register_wakeup_listener(void)
++{
++    char domain_path[256];
++
++    // Ensure that our connection to the XenStore has been set up.
++    xenstore_generic_init();
++
++    // Determine the path that we'll be listening for wakeup events on.
++    snprintf(domain_path, sizeof(domain_path),
++             "/local/domain/%d", xen_domid);
++
++    // Create an emtpy wakeup-request node, as a hint that we're listening
++    // for wakeup requests.
++    xenstore_write_int(domain_path, "wakeup-req", 0);
++
++    //... and register an watch for the given node.
++    if (xenstore_add_watch(domain_path, "wakeup-req",
++          openxt_wakeup_requested, (void *) -1 )) {
++        ACPI_LOG("error: failed to register watch for domain wakeup\n");
++    }
++}
+--- a/include/hw/acpi/acpi.h
++++ b/include/hw/acpi/acpi.h
+@@ -199,4 +199,6 @@ struct AcpiSlicOem {
+ };
+ int acpi_get_slic_oem(AcpiSlicOem *oem);
+ 
++void acpi_openxt_register_wakeup_listener(void);
++
+ #endif /* QEMU_HW_ACPI_H */

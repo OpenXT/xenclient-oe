@@ -1,0 +1,74 @@
+################################################################################
+SHORT DESCRIPTION: 
+################################################################################
+Stubdoms read the GSI for pass-through devices from the device config space.
+
+################################################################################
+LONG DESCRIPTION: 
+################################################################################
+It starts with the error that comes out of QEMU:
+
+xen_pt_initfn: Error: Mapping machine irq 25 to pirq -1 failed, (rc: -1)
+
+This is happening because Xen and the stubdom kernel have already mapped
+the GSI to a PIRQ for the stubdom while the PCI bus was being initialized
+at boot time. This is normal behavior but having the GSI->PIRQ mapping in
+the stubdom doesn't do the real domU any good. Worse, when this mapping
+is done, the pci_dev instance is updated with the mapped device PIRQ.
+This is where QEMU gets the updated value and erroneously passes to Xen
+to map for the real domU. This causes the error above because the PIRQ
+is not the host GSI.
+
+################################################################################
+CHANGELOG 
+################################################################################
+Created: Ross Philipson, philipsonr@ainfosec.com, 05/05/2015
+Ported to QEMU 2.6.2: Ross Philipson, philipsonr@ainfosec.com, 10/13/2016
+
+################################################################################
+REMOVAL 
+################################################################################
+This patch is required for PCI pass-through to work in stubdoms.
+
+################################################################################
+UPSTREAM PLAN
+This patch should be upstreamed.
+
+################################################################################
+INTERNAL DEPENDENCIES 
+################################################################################
+Depended on: compile-time-stubdom-flag.patch
+
+################################################################################
+PATCHES 
+################################################################################
+--- a/hw/xen/xen_pt.c
++++ b/hw/xen/xen_pt.c
+@@ -846,7 +846,27 @@ static void xen_pt_realize(PCIDevice *d,
+         goto out;
+     }
+ 
++#ifdef CONFIG_STUBDOM
++    /*
++     * In stubdoms, the kernel and Xen have already setup a GSI->PIRQ mapping
++     * for PCI devices when the PCI bus is initialized. A side effect of this
++     * is that the irq field in the pci_dev instance is updated with the PIRQ
++     * value (see xen_pcifront_enable_irq). This is not a correct value to
++     * call xc_physdev_map_pirq with. The config space of the pcifront device
++     * still contains the valid GSI value so it can be gotten from there.
++     */
++    rc = xen_host_pci_get_byte(&s->real_device, PCI_INTERRUPT_LINE, &machine_irq);
++    if (rc) {
++        XEN_PT_ERR(d, "Read PCI_INTERRUPT_LINE value failed.\n");
++        return;
++    }
++
++    xen_pt_log(d, "PCI stubdom - read GSI from config: %d\n", machine_irq);
++#else
+     machine_irq = s->real_device.irq;
++    xen_pt_log(d, "PCI - use GSI from pci_dev: %d\n", machine_irq);
++#endif
++
+     rc = xc_physdev_map_pirq(xen_xc, xen_domid, machine_irq, &pirq);
+     if (rc < 0) {
+         error_setg_errno(errp, errno, "Mapping machine irq %u to"

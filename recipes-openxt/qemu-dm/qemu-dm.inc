@@ -51,21 +51,11 @@ SRC_URI += "file://compile-time-stubdom-flag.patch \
             file://block-remove-unused-block-format-support.patch \
             file://net-Remove-unused-network-options.patch \
             file://round-pci-region-sizes.patch \
-            file://xsa-197-qemu-incautious-about-shared-ring-processing.patch \
-            file://xsa216-qemuu-4.7.patch \
-            file://CVE-2016-8669-char-serial-check-divider-value-against-baud-base.patch \
-            file://CVE-2016-8909-audio-intel-hda-check-stream-entry-count-during-tran.patch \
-            file://CVE-2016-8910-net-rtl8139-limit-processing-of-ring-descriptors.patch \
-            file://CVE-2016-9923-char-Fix-Possible-use-after-free.patch \
-            file://CVE-2017-5525-audio-ac97-add-exit-function.patch \
-            file://CVE-2017-5579-serial-fix-memory-leak-in-serial-exit.patch \
-            file://CVE-2017-8284-tcg-i386-Check-the-size-of-instruction-being-transla.patch \
-            file://CVE-2017-8309-audio-release-capture-buffers.patch \
-            file://CVE-2017-8379-input-limit-kbd-queue-depth.patch \
+            file://vhost-stubs.patch \
             "
 
-SRC_URI[md5sum] = "bdf1f3d0c177ebeb35a079a4bc3fc74e"
-SRC_URI[sha256sum] = "9a7ec64f147b9e1e570c410e00ebe271869b5d4c85392ba047db7617c297faa3"
+SRC_URI[md5sum] = "122fd7cdf241ff7eb1e42c0b503b5d1b"
+SRC_URI[sha256sum] = "c9f4a147bc915d24df9784affc611a115f42d24720a89210b479f1ba7a3f679c"
 
 S = "${WORKDIR}/qemu-${PV}"
 
@@ -87,7 +77,6 @@ PACKAGES += "${PN}-extra-keymaps ${PN}-extra-roms ${PN}-utils"
 EXTRA_OECONF += " \
     --enable-xen \
     --target-list=i386-softmmu \
-    --with-system-pixman \
     --disable-sdl \
     --disable-vnc \
     --disable-docs \
@@ -105,6 +94,7 @@ EXTRA_OECONF += " \
     --disable-vhdx \
     --disable-qom-cast-debug \
     --disable-tcg-interpreter \
+    --disable-tcg \
     --disable-vhost-net \
     --disable-vhost-scsi \
     --disable-bzip2 \
@@ -158,7 +148,8 @@ do_compile_prepend() {
 	dev_disable CONFIG_IPMI_EXTERN
 	dev_disable CONFIG_ISA_IPMI_KCS
 	dev_disable CONFIG_ISA_IPMI_BT
-	dev_disable CONFIG_PARALLEL
+	# SuperIO needs this
+	#dev_disable CONFIG_PARALLEL
 	dev_disable CONFIG_NE2000_ISA
 	dev_disable CONFIG_APPLESMC
 	#dev_disable CONFIG_PFLASH_CFI01
@@ -177,7 +168,8 @@ do_compile_prepend() {
 	dev_disable CONFIG_VIRTIO_PCI
 	dev_disable CONFIG_VIRTIO
 	dev_disable CONFIG_USB_OHCI
-	dev_disable CONFIG_USB_XHCI
+	# Things blow up without xhci
+	#dev_disable CONFIG_USB_XHCI
 	dev_disable CONFIG_NE2000_PCI
 	dev_disable CONFIG_EEPRO100_PCI
 	dev_disable CONFIG_PCNET_PCI

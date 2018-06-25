@@ -1,0 +1,555 @@
+From cb0dac56f122197016ea9524fee643562043a760 Mon Sep 17 00:00:00 2001
+From: Eric Chanudet <chanudete@ainfosec.com>
+Date: Mon, 16 Mar 2015 11:21:45 -0400
+Subject: [PATCH 1/2] Enable support for XenClient multiplexed input.
+
+--------------------------------------------------------------------------------
+SHORT DESCRIPTION:
+--------------------------------------------------------------------------------
+This patch enables support for using the XenClient multiplexed input server to
+provide emulated mouse and keyboard input for QEMU.
+
+--------------------------------------------------------------------------------
+LONG DESCRIPTION:
+--------------------------------------------------------------------------------
+The XenClient Input daemon allows the user to use a single physical keyboard/
+mouse to control more than one domain, one domain at a time. This patch allows
+the multiplexed input driver to control a QEMU HVM domain by "piping" input
+events to an emulated keyboard and mouse.
+
+--------------------------------------------------------------------------------
+CHANGELOG
+--------------------------------------------------------------------------------
+Initial commit: Eric Chanudet <chanudete@ainfosec.com> 1/15/2015
+Port 2.6.2: Ross Philipson, <philipsonr@ainfosec.com> 10/13/2016
+Port 2.12: Jason Andryuk <jandryuk@gmail.com> 06/19/2018
+ - xen_input_init will be called from surfman init
+
+--------------------------------------------------------------------------------
+DEPENDENCIES
+--------------------------------------------------------------------------------
+External Dependencies:
+  -openxt-input-daemon, the OpenXT multiplexed input daemon
+  -DMBus, the Device Management Bus
+
+Internal/Patch Dependencies:
+  -DMBus Support (dmbus.patch) -- may be applied after
+
+--------------------------------------------------------------------------------
+REMOVAL
+--------------------------------------------------------------------------------
+This patch enables multiplexed input for HVM domains. This should be
+removed and/or reworked if the OpenXT input server is replaced.
+
+--------------------------------------------------------------------------------
+UPSTREAM PLAN
+--------------------------------------------------------------------------------
+This code is OpenXT specific, and not currently planned for upstream. Upstream
+progress will likely be reconsidered after some elements of the input server
+(SuperHID) mature.
+
+--------------------------------------------------------------------------------
+PATCHES
+--------------------------------------------------------------------------------
+--- /dev/null
++++ b/include/ui/xen-input.h
+@@ -0,0 +1,49 @@
++/*
++ * Copyright (c) 2012 Citrix Systems, Inc.
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
++ */
++
++#ifndef UI_XEN_INPUT_H_
++# define UI_XEN_INPUT_H_
++
++# include "hw/xen/xen-dmbus.h"
++
++void xen_input_init(void);
++void xen_input_deinit(void);
++void xen_input_abs_enabled(int enabled);
++
++typedef void (*xen_input_direct_event_cb_t)(void *opaque,
++                                            uint16_t type,
++                                            uint16_t code,
++                                            int32_t value);
++typedef void (*xen_input_set_slot_cb_t)(void *opaque, uint8_t slot);
++typedef void (*xen_input_config_cb_t)(void *opaque, InputConfig *c);
++typedef void (*xen_input_config_reset_cb_t)(void *opaque, uint8_t slot);
++
++
++void xen_input_set_direct_event_handler(xen_input_direct_event_cb_t handler,
++                                        void *opaque);
++
++/* This function is ugly but I have no idea to avoid some xenmou code in input
++ * file */
++void xen_input_set_handlers(xen_input_set_slot_cb_t slot_handler,
++                            xen_input_config_cb_t config_handler,
++                            xen_input_config_reset_cb_t config_reset_handler,
++                            void *opaque);
++
++int32_t xen_input_send_shutdown(int32_t reason);
++
++#endif /* !UI_XEN_INPUT_H_ */
+--- a/ui/Makefile.objs
++++ b/ui/Makefile.objs
+@@ -14,6 +14,7 @@ common-obj-$(CONFIG_SPICE) += spice-core
+ common-obj-$(CONFIG_COCOA) += cocoa.o
+ common-obj-$(CONFIG_VNC) += $(vnc-obj-y)
+ common-obj-$(call lnot,$(CONFIG_VNC)) += vnc-stubs.o
++common-obj-$(CONFIG_XEN) += xen-input.o
+ 
+ common-obj-$(CONFIG_X11) += x_keymap.o
+ x_keymap.o-cflags := $(X11_CFLAGS)
+--- /dev/null
++++ b/ui/xen-input.c
+@@ -0,0 +1,427 @@
++/*
++ * Copyright (c) 2012 Citrix Systems, Inc.
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
++ */
++
++#include "qemu/osdep.h"
++#include <linux/input.h>
++#include <stdlib.h>
++#include "qemu-common.h"
++#include "ui/console.h"
++#include "ui/input.h"
++#include "ui/xen-input.h"
++#include "sysemu/sysemu.h"
++
++//#define DEBUG_INPUT
++
++#ifdef DEBUG_INPUT
++# define DEBUG_MSG(...) printf("XenInput:" __VA_ARGS__)
++#else
++# define DEBUG_MSG(...)
++#endif
++
++/* Following defines are only temporary measure
++ * They should come from input.h
++ */
++
++#define ABS_MT_SLOT     0x2f /* MT slot being modified */
++#define ABS_MT_PRESSURE 0x3a /* Pressure on contact area */
++#define ABS_MT_DISTANCE 0x3b /* Contact hover distance */
++
++/* These are used to set a slot with xenmou */
++#define EV_DEV          0x6
++#define DEV_SET         0x1
++
++struct xen_state {
++    int x;
++    int y;
++    int z;
++    int count;
++};
++
++typedef struct XenInput {
++    dmbus_service_t service;
++    int abs_enabled;
++    xen_input_direct_event_cb_t direct_event_handler;
++    void *direct_event_opaque;
++    xen_input_set_slot_cb_t set_slot_handler;
++    xen_input_config_cb_t config_handler;
++    xen_input_config_reset_cb_t config_reset_handler;
++    void *opaque;
++    QEMUPutLEDEntry *leds;
++} XenInput;
++
++static XenInput input = { .service = 0, .abs_enabled = 0 };
++
++static void kbd_mouse_event(bool abs, int x, int y, int button_state)
++{
++    static uint32_t bmap[INPUT_BUTTON__MAX] = {
++        [INPUT_BUTTON_LEFT]       = MOUSE_EVENT_LBUTTON,
++        [INPUT_BUTTON_MIDDLE]     = MOUSE_EVENT_MBUTTON,
++        [INPUT_BUTTON_RIGHT]      = MOUSE_EVENT_RBUTTON,
++        [INPUT_BUTTON_WHEEL_UP]   = MOUSE_EVENT_WHEELUP,
++        [INPUT_BUTTON_WHEEL_DOWN] = MOUSE_EVENT_WHEELDN
++    };
++    static uint32_t prev_state;
++
++    if (prev_state != button_state) {
++        qemu_input_update_buttons(NULL, bmap, prev_state, button_state);
++        prev_state = button_state;
++    }
++
++    if (abs) {
++        qemu_input_queue_abs(NULL, INPUT_AXIS_X, x, 0, INPUT_EVENT_ABS_MAX);
++        qemu_input_queue_abs(NULL, INPUT_AXIS_Y, y, 0, INPUT_EVENT_ABS_MAX);
++    }
++    else {
++        qemu_input_queue_rel(NULL, INPUT_AXIS_X, x);
++        qemu_input_queue_rel(NULL, INPUT_AXIS_Y, y);
++    }
++    qemu_input_event_sync();
++}
++
++static int input_demultitouch(uint16_t *type, uint16_t *code, int32_t *value)
++{
++    /* TODO: WORST THING EVER
++     * Do not iniatialize static var */
++    static int slot = 0;
++    static int pressed = 0;
++
++    if ((*type == EV_SYN) && (*code == SYN_REPORT)) {
++        slot = 0;
++    }
++
++    if (*type == EV_ABS) {
++        switch (*code) {
++        case ABS_MT_POSITION_X:
++            *code = ABS_X;
++            break;
++        case ABS_MT_POSITION_Y:
++            *code = ABS_Y;
++            break;
++        case ABS_MT_TRACKING_ID:
++            if (slot == 0) {
++                int nowpressed = (*value != 0xffffffff);
++
++                if (pressed != nowpressed) {
++                    pressed = nowpressed;
++                    *type = EV_KEY;
++                    *code = BTN_LEFT;
++                    *value = pressed << 1;
++                    return true;
++                }
++            }
++            return false;
++        case ABS_MT_SLOT:
++            slot = *value;
++            /* Fall through */
++        case ABS_MT_TOUCH_MAJOR:
++        case ABS_MT_TOUCH_MINOR:
++        case ABS_MT_WIDTH_MAJOR:
++        case ABS_MT_WIDTH_MINOR:
++        case ABS_MT_ORIENTATION:
++        case ABS_MT_TOOL_TYPE:
++        case ABS_MT_BLOB_ID:
++        case ABS_MT_PRESSURE:
++        case ABS_MT_DISTANCE:
++            return false;
++        }
++
++        return (slot == 0);
++    }
++
++    return true;
++}
++
++static void input_set_slot(XenInput *x, uint8_t slot)
++{
++    if (x->set_slot_handler) {
++        x->set_slot_handler(x->opaque, slot);
++    } else {
++        DEBUG_MSG("no set slot handler\n");
++    }
++}
++
++static void input_event(void *opaque, uint16_t type,
++                        uint16_t code, int32_t value)
++{
++    XenInput *x = opaque;
++    static int mouse_button_state = 0;
++    static int mouse_key = 0;
++    static struct xen_state absolute = { 0, 0, 0, 0 };
++    static struct xen_state relative = { 0, 0, 0, 0 };
++    static int use_abs = 0;
++    static int deferbutton = 0;
++    static int slot = 0;
++
++    if (type == EV_DEV && code == DEV_SET) {
++        slot = value;
++        input_set_slot(x, slot);
++    }
++
++    if (slot >= 0 && x->direct_event_handler) {
++        DEBUG_MSG("direct event handler\n");
++        x->direct_event_handler(x->direct_event_opaque, type, code, value);
++        return;
++    }
++
++    if (!input_demultitouch(&type, &code, &value)) {
++        return;
++    }
++
++    switch (type) {
++    case EV_KEY:
++        if (code >= BTN_MOUSE) {
++            switch (code) {
++            case BTN_LEFT:
++                mouse_key = MOUSE_EVENT_LBUTTON;
++                break;
++            case BTN_RIGHT:
++                mouse_key = MOUSE_EVENT_RBUTTON;
++                break;
++            case BTN_MIDDLE:
++                mouse_key = MOUSE_EVENT_MBUTTON;
++                break;
++            }
++
++            if (value == 2) { /* The button will be send later */
++                deferbutton = 1;
++            } else if (!value) { /* The button was released */
++                mouse_button_state &= ~mouse_key;
++            } else {
++                mouse_button_state |= mouse_key;
++            }
++        } else {
++            /* Keyboard */
++            int qcode = qemu_input_linux_to_qcode(code);
++            qemu_input_event_send_key_qcode(NULL, qcode, value);
++        }
++        break;
++    /* Mouse relative motion */
++    case EV_REL:
++        use_abs = 0;
++        switch (code) {
++        case REL_X:
++            relative.x = value;
++            break;
++        case REL_Y:
++            relative.y = value;
++            break;
++        case REL_WHEEL:
++            if (value > 0)
++                mouse_key = MOUSE_EVENT_WHEELUP;
++            if (value < 0)
++                mouse_key = MOUSE_EVENT_WHEELDN;
++            mouse_button_state |= mouse_key;
++            relative.z = -value;
++            break;
++        }
++        relative.count++;
++        break;
++    /* Mouse absolute motion */
++    case EV_ABS:
++        use_abs = 1;
++        switch (code) {
++        case ABS_X:
++            absolute.x = value;
++            break;
++        case ABS_Y:
++            absolute.y = value;
++            break;
++        case ABS_WHEEL:
++            if (value > 0)
++                mouse_key = MOUSE_EVENT_WHEELUP;
++            if (value < 0)
++                mouse_key = MOUSE_EVENT_WHEELDN;
++            mouse_button_state |= mouse_key;
++            absolute.z = -value;
++            break;
++        }
++        absolute.count++;
++        break;
++    case EV_SYN:
++        if (code != SYN_REPORT) { /* Do anything if it's not a sync report */
++            break;
++        }
++
++        if (relative.count || (!absolute.count && !use_abs && mouse_key)) {
++            kbd_mouse_event(false, relative.x, relative.y,
++                            mouse_button_state);
++            relative.count = 0;
++            relative.x = relative.y = relative.z = 0;
++            /* Send a scroll "release" event after each scroll... */
++            if ((mouse_button_state & MOUSE_EVENT_WHEELUP) ||
++                (mouse_button_state & MOUSE_EVENT_WHEELDN)) {
++                mouse_button_state &= ~MOUSE_EVENT_WHEELUP;
++                mouse_button_state &= ~MOUSE_EVENT_WHEELDN;
++                kbd_mouse_event(false, 0, 0,
++                                mouse_button_state);
++            }
++        }
++        if (absolute.count || (!relative.count && use_abs && mouse_key)) {
++            if (deferbutton) {
++                if (absolute.count) {
++                    kbd_mouse_event(true, absolute.x, absolute.y,
++                                    mouse_button_state);
++                    absolute.count = 0;
++                }
++                mouse_button_state |= mouse_key;
++            }
++            kbd_mouse_event(true, absolute.x, absolute.y,
++                            mouse_button_state);
++            absolute.count = 0;
++            /* Send a scroll "release" event after each scroll... */
++            if ((mouse_button_state & MOUSE_EVENT_WHEELUP) ||
++                (mouse_button_state & MOUSE_EVENT_WHEELDN)) {
++                mouse_button_state &= ~MOUSE_EVENT_WHEELUP;
++                mouse_button_state &= ~MOUSE_EVENT_WHEELDN;
++                kbd_mouse_event(true, absolute.x, absolute.y,
++                                mouse_button_state);
++            }
++            absolute.z = 0;
++        }
++        mouse_key = 0;
++        deferbutton = 0;
++
++        break;
++    }
++}
++
++static void input_reconnect(void *opaque)
++{
++    XenInput *x = opaque;
++
++    xen_input_abs_enabled(x->abs_enabled);
++}
++
++static void xen_input_config(void *opaque, InputConfig *c)
++{
++    XenInput *x = opaque;
++
++    if (x->config_handler) {
++        x->config_handler(x->opaque, c);
++    } else {
++        DEBUG_MSG("no config handler\n");
++    }
++}
++
++static void xen_input_send_ledcode(void *opaque, int ledstate)
++{
++    XenInput *x = opaque;
++    struct msg_switcher_leds msg;
++
++    DEBUG_MSG("send led keycode 0x%x\n", ledstate);
++    msg.led_code = ledstate;
++
++    dmbus_send(x->service, DMBUS_MSG_SWITCHER_LEDS, &msg, sizeof(msg));
++}
++
++static void xen_input_config_reset(void *opaque, uint8_t slot)
++{
++    XenInput *x = opaque;
++
++    if (x->config_reset_handler) {
++        x->config_reset_handler(x->opaque, slot);
++    } else {
++        DEBUG_MSG("no config reset handler\n");
++    }
++}
++
++static void xen_input_wakeup(void)
++{
++    if (runstate_check(RUN_STATE_SUSPENDED)) {
++        qemu_system_wakeup_request(QEMU_WAKEUP_REASON_OTHER);
++    } else {
++        DEBUG_MSG("wakeup requested but state != suspended\n");
++    }
++}
++
++const struct dmbus_ops input_ops = {
++    .dom0_input_event = input_event,
++    .reconnect = input_reconnect,
++    .input_config = xen_input_config,
++    .input_config_reset = xen_input_config_reset,
++    .input_wakeup = xen_input_wakeup,
++};
++
++void xen_input_init(void)
++{
++    printf("initialize input\n");
++
++    input.service = dmbus_service_connect(DMBUS_SERVICE_INPUT,
++                                          DEVICE_TYPE_INPUT,
++                                          &input_ops, &input);
++    if (!input.service) {
++        fprintf(stderr, "unable to connect to input server\n");
++        exit(1);
++    }
++
++    input.leds = qemu_add_led_event_handler(xen_input_send_ledcode, &input);
++}
++
++void xen_input_deinit(void)
++{
++    if (input.service) {
++        dmbus_service_disconnect(input.service);
++    }
++}
++
++void xen_input_abs_enabled(int enabled)
++{
++    struct msg_switcher_abs msg;
++
++    input.abs_enabled = enabled;
++    msg.enabled = enabled;
++    /* FIXME: check dmbus_send return */
++    dmbus_send(input.service, DMBUS_MSG_SWITCHER_ABS, &msg, sizeof(msg));
++}
++
++void xen_input_set_direct_event_handler(xen_input_direct_event_cb_t handler,
++                                        void *opaque)
++{
++    /* If handler is NULL, it means removing */
++    if (!handler) {
++        input.direct_event_handler = NULL;
++        input.direct_event_opaque = NULL;
++    } else {
++        input.direct_event_handler = handler;
++        input.direct_event_opaque = opaque;
++    }
++}
++
++void xen_input_set_handlers(xen_input_set_slot_cb_t slot_handler,
++                            xen_input_config_cb_t config_handler,
++                            xen_input_config_reset_cb_t config_reset_handler,
++                            void *opaque)
++{
++    input.set_slot_handler = slot_handler;
++    input.config_handler = config_handler;
++    input.config_reset_handler = config_reset_handler;
++    input.opaque = opaque;
++}
++
++int32_t xen_input_send_shutdown(int32_t reason)
++{
++    int32_t rc;
++    struct msg_switcher_shutdown msg;
++
++    msg.reason = reason;
++
++    rc = dmbus_send(input.service, DMBUS_MSG_SWITCHER_SHUTDOWN, &msg,
++                    sizeof(struct msg_switcher_shutdown));
++
++    return rc;
++}
+--- a/vl.c
++++ b/vl.c
+@@ -118,6 +118,7 @@ int main(int argc, char **argv)
+ #include "sysemu/arch_init.h"
+ 
+ #include "ui/qemu-spice.h"
++#include "ui/xen-input.h"
+ #include "qapi/string-input-visitor.h"
+ #include "qapi/opts-visitor.h"
+ #include "qom/object_interfaces.h"

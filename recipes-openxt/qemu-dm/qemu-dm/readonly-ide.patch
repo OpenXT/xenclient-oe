@@ -1,0 +1,162 @@
+--------------------------------------------------------------------------------
+SHORT DESCRIPTION:
+--------------------------------------------------------------------------------
+
+Provide readonly capability for IDE disk drives.
+
+--------------------------------------------------------------------------------
+LONG DESCRIPTION:
+--------------------------------------------------------------------------------
+
+Abort on IDE write commands (in a manner similarly done in legacy-ioemu),
+effectively providing a read-only IDE disk device for OpenXT.
+
+Upstream Qemu does not support this, but IDE disk devices must be used
+as Xen/Qemu will only unplug IDE disk devices in favor of PV (blkfront)
+usage within the guest.  Other options such as SCSI do not allow for this unplug
+without more intrusive changes.
+
+Can be toggled in ./configure stage (disabled by default):
+* To disable: --disable-readonly-ide
+* To enable: --enable-readonly-ide
+
+--------------------------------------------------------------------------------
+UPSTREAM PLAN
+--------------------------------------------------------------------------------
+
+Unlikely to upstream, qemu purposely does not support read-only IDE disk drives.
+
+--------------------------------------------------------------------------------
+DEPENDENCIES
+--------------------------------------------------------------------------------
+
+None.
+
+--------------------------------------------------------------------------------
+CHANGELOG
+--------------------------------------------------------------------------------
+
+Chris Patterson, <pattersonc@ainfosec.com>, 04/21/2015
+- Initial commit.
+
+Ross Philipson, philipsonr@ainfosec.com, 10/13/2016
+- Ported to 2.6.2
+
+Jason Andryuk, jandryuk@gmail.com, 06/19/2018
+- Port to 2.12.  Set readonly approriately in ide_dev_initfn to avoid
+  error in bdrv_check_perm.
+
+--- a/configure
++++ b/configure
+@@ -322,7 +322,8 @@ docs=""
+ fdt=""
+ netmap="no"
+ sdl=""
+-sdlabi=""
++sdlabi="1.2"
++readonly_ide="no"
+ virtfs=""
+ mpath=""
+ vnc="yes"
+@@ -972,6 +973,10 @@ for opt do
+   ;;
+   --enable-sdl) sdl="yes"
+   ;;
++  --disable-readonly-ide) readonly_ide="no"
++  ;;
++  --enable-readonly-ide) readonly_ide="yes"
++  ;;
+   --with-sdlabi=*) sdlabi="$optarg"
+   ;;
+   --disable-qom-cast-debug) qom_cast_debug="no"
+@@ -5770,6 +5775,7 @@ if test "$darwin" = "yes" ; then
+ fi
+ echo "SDL support       $sdl $(echo_version $sdl $sdlversion)"
+ echo "GTK support       $gtk $(echo_version $gtk $gtk_version)"
++echo "readonly IDE support       $readonly_ide"
+ echo "GTK GL support    $gtk_gl"
+ echo "VTE support       $vte $(echo_version $vte $vteversion)"
+ echo "TLS priority      $tls_priority"
+@@ -6103,6 +6109,9 @@ if test "$sdl" = "yes" ; then
+   echo "SDL_CFLAGS=$sdl_cflags" >> $config_host_mak
+   echo "SDL_LIBS=$sdl_libs" >> $config_host_mak
+ fi
++if test "$readonly_ide" = "yes" ; then
++  echo "CONFIG_READONLY_IDE=y" >> $config_host_mak
++fi
+ if test "$cocoa" = "yes" ; then
+   echo "CONFIG_COCOA=y" >> $config_host_mak
+ fi
+--- a/hw/ide/core.c
++++ b/hw/ide/core.c
+@@ -1465,6 +1465,13 @@ static bool cmd_write_multiple(IDEState
+         return true;
+     }
+ 
++#ifdef CONFIG_READONLY_IDE
++    if (blk_is_read_only(s->blk)) {
++        ide_abort_command(s);
++        return true;
++    }
++#endif
++
+     ide_cmd_lba48_transform(s, lba48);
+ 
+     s->req_nb_sectors = s->mult_sectors;
+@@ -1509,6 +1516,13 @@ static bool cmd_write_pio(IDEState *s, u
+         return true;
+     }
+ 
++#ifdef CONFIG_READONLY_IDE
++    if (blk_is_read_only(s->blk)) {
++        ide_abort_command(s);
++        return true;
++    }
++#endif
++
+     ide_cmd_lba48_transform(s, lba48);
+ 
+     s->req_nb_sectors = 1;
+@@ -1544,6 +1558,13 @@ static bool cmd_write_dma(IDEState *s, u
+         return true;
+     }
+ 
++#ifdef CONFIG_READONLY_IDE
++    if (blk_is_read_only(s->blk)) {
++        ide_abort_command(s);
++        return true;
++    }
++#endif
++
+     ide_cmd_lba48_transform(s, lba48);
+     ide_sector_start_dma(s, IDE_DMA_WRITE);
+ 
+@@ -2500,10 +2521,12 @@ int ide_init_drive(IDEState *s, BlockBac
+             error_setg(errp, "Device needs media, but drive is empty");
+             return -1;
+         }
++#ifndef CONFIG_READONLY_IDE
+         if (blk_is_read_only(blk)) {
+             error_setg(errp, "Can't use a read-only drive");
+             return -1;
+         }
++#endif
+         blk_set_dev_ops(blk, &ide_hd_block_ops, s);
+     }
+     if (serial) {
+--- a/hw/ide/qdev.c
++++ b/hw/ide/qdev.c
+@@ -195,7 +195,12 @@ static void ide_dev_initfn(IDEDevice *de
+             return;
+         }
+     }
+-    if (!blkconf_apply_backend_options(&dev->conf, kind == IDE_CD,
++    /* OpenXT: We also support read-only disks */
++    bool readonly = kind == IDE_CD;
++#ifdef CONFIG_READONLY_IDE
++    readonly |= blk_is_read_only(dev->conf.blk);
++#endif
++    if (!blkconf_apply_backend_options(&dev->conf, readonly,
+                                        kind != IDE_CD, errp)) {
+         return;
+     }
