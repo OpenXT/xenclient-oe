@@ -30,6 +30,7 @@ SRC_URI = "file://enter-s3.sh \
 	   file://selinux-state \
 	   file://99-kvm.rules \
 	   file://no-kvm-autosuspend.sh \
+	   file://inputrc \
 "
 
 RDEPENDS_${PN} += "bash"
@@ -87,9 +88,10 @@ do_install () {
 	mkdir -p ${D}/opt/xensource
 	ln -sf /usr/bin ${D}/opt/xensource/libexec
 
-        install -d ${D}/root/.ssh
+	install -d ${D}/root/.ssh
+	install -m 0644 ${WORKDIR}/inputrc ${D}/root/.inputrc
 
-    install -m 0755 -d ${D}${localstatedir}/lib/ovf
+	install -m 0755 -d ${D}${localstatedir}/lib/ovf
 
 	install -d ${D}/config${sysconfdir}
 	install -m 0644 ${WORKDIR}/USB_fakenames.conf \
