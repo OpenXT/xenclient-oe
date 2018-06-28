@@ -23,6 +23,14 @@ err() {
     exit 1
 }
 
+contains_only() {
+    local s="$1"
+    local c="$2"
+
+    # Remove all instances of c from s and check if the result is empty
+    [[ -z "${s//$c}" ]]
+}
+
 # Globals
 TPM_DEV="$(find /sys/class -name tpm0)/device"
 
@@ -134,7 +142,7 @@ forward)
         pcr8=$(grep PCR-08 ${TPM_DEV}/pcrs | cut -f2 -d: | tr -d ' ')
     fi
 
-    if [[ "${pcr8}" = *[!0]* ]]; then
+    if ! contains_only "${pcr8}" 0; then
         ESP=$(sfdisk -l 2>/dev/null | grep "EFI System" | awk '{print $1}')
         mkdir -p /tmp/esp
         mount -o ro $ESP /tmp/esp || err "Failed to mount ESP ${ESP}"
@@ -188,7 +196,7 @@ forward)
     pcr_params="${pcr_params} -p 15:${pcr15}"
 
     # Calculate DRTM PCRs only when booting legacy (ie. PCR8 is all 0)
-    if [[ "${pcr8}" = *[0]* ]]; then
+    if contains_only "${pcr8}" 0; then
         if [ -e /config/.txt-quirk ]; then
             quirk=1
         else
