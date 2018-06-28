@@ -47,7 +47,7 @@ mount -t sysfs sysfs /sys
 KERNEL_CMDLINE=`cat /proc/cmdline`
 for arg in $KERNEL_CMDLINE; do
     case "$arg" in
-        debug) LOGLVL="1";;
+        debug) LOGLVL="debug";;
         *) continue ;;
     esac
 done
