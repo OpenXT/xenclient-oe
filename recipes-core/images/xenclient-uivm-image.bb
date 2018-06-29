@@ -81,7 +81,6 @@ IMAGE_INSTALL = "\
     xenclient-uivm-xsessionconfig \
     setxkbmap \
     resized \
-    xenclient-keymap-sync \
     libx11-locale \
     rsyslog \
     glibc-gconv-libjis \
