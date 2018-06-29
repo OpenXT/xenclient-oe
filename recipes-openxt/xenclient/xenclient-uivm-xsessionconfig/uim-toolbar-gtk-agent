@@ -1,0 +1,89 @@
+#!/bin/bash
+
+if [ -f /usr/lib/openxt/ui-functions ]; then
+    . /usr/lib/openxt/ui-functions
+fi
+
+UIM_PIDFILE="${UIM_PIDFILE:-/run/uim-toolbar-gtk.pid}"
+
+# Usage: start_uim_toolbar
+#   Start uim-toolbar-gtk, in configured environment, and reccord a pidfile
+#   for process management.
+start_uim_toolbar() {
+    local pidfile="${UIM_PIDFILE}"
+    local locale="$(xenmgr_get_locale)" 
+    local show_toolbar="0"
+    local enable_anthy="0"
+    local enable_py="0"
+
+    if [ -e "${pidfile}" ]; then
+        if pgrep -F "${pidfile}" >/dev/null; then
+            echo "uim-toolbar-gtk is already running." >&2
+            return 1
+        else
+            echo "Spurious pidfile found for uim-toolbar-gtk" >&2
+            rm -f ${pidfile}
+        fi
+    fi
+
+    local login_state="$(xenstore-read login/state 2>/dev/null)"
+    local layout="$(xenstore-read /xenclient/keyboard/layout)"
+    case "${login_state}" in
+        "0"|"3"|"")
+            case "${layout}" in
+                "jp")   enable_anthy="1"
+                        enable_toolbar="1"
+                    ;;
+                "cn")   enable_py="1"
+                        enable_toolbar="1"
+                    ;;
+            esac
+            ;;
+    esac
+
+    # XXX: Position should be configuration, currently display at the
+    #      bottom-left corner.
+    UIM_SHOW_TOOLBAR="${show_toolbar}" \
+    UIM_ENABLE_ANTHY="${enable_anthy}" \
+    UIM_ENABLE_PY="${enable_py}" \
+    LANG="${locale}" \
+        uim-toolbar-gtk +0-0 & 
+    echo $! > "${pidfile}"
+}
+
+# Usage: stop_uim_toolbar
+stop_uim_toolbar() {
+    local pidfile="${UIM_PIDFILE}"
+
+    pkill -F "${pidfile}"
+    rm -f "${pidfile}"
+}
+
+# Usage: monitor_uim_toolbar
+#   Listen to XenMgr UI related signals.
+monitor_uim_toolbar() {
+    # Locale.
+    local xgr_intf="com.citrix.xenclient.xenmgr"
+    local xgr_lang_member="language_changed"
+    local xgr_watch="$(dbus_watch_expression signal ${xgr_intf} ${xgr_lang_member})"
+
+    # Monitor dbus watches, use "interface.member"
+    while read type _ _ _ _ path intf member ; do
+        case "${intf}.${member}" in
+            "${xgr_intf}.${xgr_lang_member}")
+                stop_uim_toolbar
+                start_uim_toolbar
+                ;;
+            *) continue ;;
+        esac
+    done < <( dbus_watch "${xgr_watch}" )
+}
+
+## Start uim-toolbar.
+start_uim_toolbar
+
+## Monitor uim-toolbar.
+monitor_uim_toolbar
+
+## This should only happen when X stops, or something went terribly...
+stop_uim_toolbar
