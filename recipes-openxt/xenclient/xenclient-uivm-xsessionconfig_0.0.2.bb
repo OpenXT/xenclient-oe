@@ -17,6 +17,7 @@ SRC_URI = " \
     file://ui-functions \
     file://nm-applets-agent \
     file://uim-toolbar-gtk-agent \
+    file://keymap-agent \
     file://v4v.modutils \
     file://xenfb2.modutils \
     file://xenkbd.modutils \
@@ -88,6 +89,7 @@ do_install () {
     install -d ${D}${bindir}
     install -m 755 ${WORKDIR}/nm-applets-agent ${D}${bindir}/
     install -m 755 ${WORKDIR}/uim-toolbar-gtk-agent ${D}${bindir}/
+    install -m 755 ${WORKDIR}/keymap-agent ${D}${bindir}/
     install -m 755 ${WORKDIR}/xdg-open ${D}${bindir}/
     install -m 755 ${WORKDIR}/keyboard ${D}${bindir}/
 }
