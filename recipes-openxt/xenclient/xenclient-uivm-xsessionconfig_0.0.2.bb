@@ -14,6 +14,7 @@ SRC_URI = " \
     file://Xdefaults \
     file://default \
     file://default.keyring \
+    file://ui-functions \
     file://nm-applets-agent \
     file://v4v.modutils \
     file://xenfb2.modutils \
@@ -84,6 +85,9 @@ do_install () {
     install -m 644 ${WORKDIR}/custom-global.scm ${D}/root/.uim.d/customs/
     install -m 644 ${WORKDIR}/custom-toolbar.scm ${D}/root/.uim.d/customs/
 
+    install -d ${D}${libdir}/openxt
+    install -m 644 ${WORKDIR}/ui-functions ${D}${libdir}/openxt/ui-functions
+
     install -d ${D}${bindir}
     install -m 755 ${WORKDIR}/nm-applets-agent ${D}${bindir}/
     install -m 755 ${WORKDIR}/xdg-open ${D}${bindir}/
@@ -97,6 +101,7 @@ do_install () {
 FILES_${PN} = " \
     ${sysconfdir} \
     ${bindir} \
+    ${libdir} \
     /root/.xfce4/* \
     /root/.config/* \
     /root/.Xdefaults \
