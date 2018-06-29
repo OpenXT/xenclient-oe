@@ -1,5 +1,10 @@
 #!/bin/bash
 
+# Load common helpers.
+if [ -e /usr/lib/openxt/ui-functions ]; then
+    . /usr/lib/openxt/ui-functions
+fi
+
 # Usage: nwd_list_backends
 #   List dbus-path for NetworkManager backends avaiable on stdout.
 #   Format seems consistently: /ndvm/<uuid>
@@ -49,20 +54,6 @@ networkdomain_config_get_uint32() {
         | sed -ne 's|.*uint32 \([0-9]\+\).*|\1|p'
 }
 
-# Usage: networkdomain_monitor interface member
-#   Watch for changes signaled by network-daemon for the given (interface, member).
-#   Since connection to the remote DBus is direct, sender is not filtered,
-#   which leaves some noise on the output.
-networkdomain_monitor_signal() {
-    local intf="com.citrix.xenclient.networkdomain.notify"
-    local member="backend_state_changed"
-
-    DBUS_SYSTEM_BUS_ADDRESS=tcp:host=1.0.0.0,port=5555 \
-    LD_PRELOAD=/usr/lib/libv4v-1.0.so.0 \
-    INET_IS_V4V=1 \
-        dbus-monitor --system --profile "type='signal',interface='${intf}',member='${member}'"
-}
-
 # Usage nm_applet_pidfile dbus-path
 #   Write pidfile path to track nm-applet running for backend with dbus-path on
 #   stdout.
@@ -80,6 +71,7 @@ start_nm_applet() {
     local domid="$(networkdomain_config_get_uint32 ${dbus_path} domid)"
     local name="$(networkdomain_config_get_string ${dbus_path} name)"
     local pidfile="$(nm_applet_pidfile ${dbus_path})"
+    local locale="$(xenmgr_get_locale)"
 
     if [ -z "${uuid}" ]; then
         echo "Invalid UUID:${uuid} for nm-applet." >&2
@@ -107,6 +99,7 @@ start_nm_applet() {
     DBUS_SYSTEM_BUS_ADDRESS="tcp:host=1.0.0.${domid},port=5555" \
     LD_PRELOAD="/usr/lib/libv4v-1.0.so.0" \
     DEFAULT_CERTS_DIR="/var/lib/NetworkManager/${name}" \
+    LANG="${locale}" \
         nm-applet "${uuid}" &
     echo $! > "${pidfile}"
 }
@@ -144,41 +137,58 @@ stop_all_nm_applets() {
     done
 }
 
+# Usage: nm_applet_event path.
+#   Handle signal event for nm-applet running for path.
+nm_applet_event() {
+    local path="$1"
+    local state="off"
+
+    for p in $(nwd_list_backends); do
+        if [ "${p}" = "${path}" ]; then
+            state="on"
+            break
+        fi
+    done
+    case "${state}" in
+        "on")   start_nm_applet "${path}" ;;
+        "off")  stop_nm_applet "${path}" ;;
+    esac
+}
+
+# Usage: language_event
+#   Restart all nm-applets using new locale.
+language_event() {
+    stop_all_nm_applets
+    start_all_nm_applets
+}
+
 # Usage: monitor_nm_applets
 #   Listen to Network daemon on DBus for NetworkManager changes in backend
 #   domains.
 monitor_nm_applets() {
-    # Launcher event loop.
+    # NetworkDomain change.
     local nwd_notify_intf="com.citrix.xenclient.networkdomain.notify"
     local nwd_state_member="backend_state_changed"
+    local nwd_watch="$(dbus_watch_expression signal ${nwd_notify_intf} ${nwd_state_member})"
+    # Locale.
+    local xgr_intf="com.citrix.xenclient.xenmgr"
+    local xgr_lang_member="language_changed"
+    local xgr_watch="$(dbus_watch_expression signal ${xgr_intf} ${xgr_lang_member})"
 
+    # Monitor dbus watches, use "interface.member"
     while read type _ _ _ _ path intf member ; do
-        # Ignore spurious signals.
-        if [ "${type}" != "sig" -o \
-             "${intf}" != "${nwd_notify_intf}" -o \
-             "${member}" != "${nwd_state_member}" ]; then
-            continue
-        fi
-
-        local state="off"
-        for p in $(nwd_list_backends); do
-            if [ "${p}" = "${path}" ]; then
-                state="on"
-                break
-            fi
-        done
-        case "${state}" in
-            "on")   start_nm_applet "${path}" ;;
-            "off")  stop_nm_applet "${path}" ;;
+        case "${intf}.${member}" in
+            "${nwd_notify_intf}.${nwd_state_member}") nm_applet_event "${path}" ;;
+            "${xgr_intf}.${xgr_lang_member}") language_event ;;
+            *) continue ;;
         esac
-
-    done < <( networkdomain_monitor_signal "${nwd_notify_intf}" "${nwd_state_member}" )
+    done < <( dbus_watch "${nwd_watch}" "${xgr_watch}" )
 }
 
 ## Start an nm-applet for every backend.
 start_all_nm_applets
 
-## Monitor nm-applets
+## Monitor nm-applets.
 monitor_nm_applets
 
 ## This should only happen when X stops, or something went terribly...
