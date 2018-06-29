@@ -16,6 +16,7 @@ SRC_URI = " \
     file://default.keyring \
     file://ui-functions \
     file://nm-applets-agent \
+    file://uim-toolbar-gtk-agent \
     file://v4v.modutils \
     file://xenfb2.modutils \
     file://xenkbd.modutils \
@@ -29,10 +30,6 @@ SRC_URI = " \
     file://custom-MailReader.desktop \
     file://custom-global.scm \
     file://custom-toolbar.scm \
-    file://get-language \
-    file://uim-toolbar-gtk-wrapper \
-    file://language-sync \
-    file://nm-backend-sync \
     file://keyboard \
 "
 
@@ -90,11 +87,8 @@ do_install () {
 
     install -d ${D}${bindir}
     install -m 755 ${WORKDIR}/nm-applets-agent ${D}${bindir}/
+    install -m 755 ${WORKDIR}/uim-toolbar-gtk-agent ${D}${bindir}/
     install -m 755 ${WORKDIR}/xdg-open ${D}${bindir}/
-    install -m 755 ${WORKDIR}/get-language ${D}${bindir}/
-    install -m 755 ${WORKDIR}/uim-toolbar-gtk-wrapper ${D}${bindir}/
-    install -m 755 ${WORKDIR}/language-sync ${D}${bindir}/
-    install -m 755 ${WORKDIR}/nm-backend-sync ${D}${bindir}/
     install -m 755 ${WORKDIR}/keyboard ${D}${bindir}/
 }
 
