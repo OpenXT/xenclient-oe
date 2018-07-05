@@ -1,33 +1,27 @@
-################################################################################
-SHORT DESCRIPTION:
-################################################################################
-XSA-197 http://xenbits.xen.org/xsa/advisory-197.html
-x86 software interrupt injection mis-handled
-
-################################################################################
-LONG DESCRIPTION:
-################################################################################
-Source: http://xenbits.xen.org/xsa/advisory-197.html
-Patch: xsa197-4.6-qemuu.patch
-
-xen: fix ioreq handling
+From 3361e81d4ee1dbede0b9e1041bf04b5862755ebd Mon Sep 17 00:00:00 2001
+From: Jan Beulich <JBeulich@suse.com>
+Date: Tue, 22 Nov 2016 05:56:51 -0700
+Subject: [PATCH 08/39] xen: fix ioreq handling
 
 Avoid double fetches and bounds check size to avoid overflowing
 internal variables.
 
-This is XSA-197.
+This is CVE-2016-9381 / XSA-197.
 
+Reported-by: yanghongke <yanghongke@huawei.com>
 Signed-off-by: Jan Beulich <jbeulich@suse.com>
 Reviewed-by: Stefano Stabellini <sstabellini@kernel.org>
+Signed-off-by: Stefano Stabellini <sstabellini@kernel.org>
+(cherry picked from commit b85f9dfdb156ae2a2a52f39a36e9f1f270614cd2)
+---
+ xen-hvm.c | 16 +++++++++++++++-
+ 1 file changed, 15 insertions(+), 1 deletion(-)
 
-################################################################################
-PATCHES
-################################################################################
-Index: qemu-2.6.2/xen-hvm.c
-===================================================================
---- qemu-2.6.2.orig/xen-hvm.c
-+++ qemu-2.6.2/xen-hvm.c
-@@ -837,6 +837,10 @@ static void cpu_ioreq_pio(ioreq_t *req)
+diff --git a/xen-hvm.c b/xen-hvm.c
+index 039680a6d9..ba823c39a3 100644
+--- a/xen-hvm.c
++++ b/xen-hvm.c
+@@ -797,6 +797,10 @@ static void cpu_ioreq_pio(ioreq_t *req)
      trace_cpu_ioreq_pio(req, req->dir, req->df, req->data_is_ptr, req->addr,
                           req->data, req->count, req->size);
  
@@ -38,7 +32,7 @@ Index: qemu-2.6.2/xen-hvm.c
      if (req->dir == IOREQ_READ) {
          if (!req->data_is_ptr) {
              req->data = do_inp(req->addr, req->size);
-@@ -873,6 +877,10 @@ static void cpu_ioreq_move(ioreq_t *req)
+@@ -833,6 +837,10 @@ static void cpu_ioreq_move(ioreq_t *req)
      trace_cpu_ioreq_move(req, req->dir, req->df, req->data_is_ptr, req->addr,
                           req->data, req->count, req->size);
  
@@ -49,7 +43,7 @@ Index: qemu-2.6.2/xen-hvm.c
      if (!req->data_is_ptr) {
          if (req->dir == IOREQ_READ) {
              for (i = 0; i < req->count; i++) {
-@@ -1079,11 +1087,13 @@ static int handle_buffered_iopage(XenIOS
+@@ -997,11 +1005,13 @@ static int handle_buffered_iopage(XenIOState *state)
          req.df = 1;
          req.type = buf_req->type;
          req.data_is_ptr = 0;
@@ -63,7 +57,7 @@ Index: qemu-2.6.2/xen-hvm.c
          }
  
          handle_ioreq(state, &req);
-@@ -1114,7 +1124,11 @@ static void cpu_handle_ioreq(void *opaqu
+@@ -1032,7 +1042,11 @@ static void cpu_handle_ioreq(void *opaque)
  
      handle_buffered_iopage(state);
      if (req) {
@@ -76,3 +70,6 @@ Index: qemu-2.6.2/xen-hvm.c
  
          if (req->state != STATE_IOREQ_INPROCESS) {
              fprintf(stderr, "Badness in I/O request ... not in service?!: "
+-- 
+2.17.0
+

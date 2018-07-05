@@ -1,0 +1,52 @@
+From 8f2157d488096b41c1a46b9d4767fd06c01d088d Mon Sep 17 00:00:00 2001
+From: Li Qiang <liq3ea@gmail.com>
+Date: Wed, 15 Mar 2017 20:50:14 -0400
+Subject: [PATCH 35/39] ide: core: add cleanup function
+
+As the pci ahci can be hotplug and unplug, in the ahci unrealize
+function it should free all the resource once allocated in the
+realized function. This patch add ide_exit to free the resource.
+
+Signed-off-by: Li Qiang <liqiang6-s@360.cn>
+Message-id: 1488449293-80280-3-git-send-email-liqiang6-s@360.cn
+Signed-off-by: John Snow <jsnow@redhat.com>
+(cherry picked from commit c9f086418a255f386e1c4d2c1418c032eb349537)
+---
+ hw/ide/core.c     | 8 ++++++++
+ hw/ide/internal.h | 1 +
+ 2 files changed, 9 insertions(+)
+
+diff --git a/hw/ide/core.c b/hw/ide/core.c
+index d5a2e12002..72761e6511 100644
+--- a/hw/ide/core.c
++++ b/hw/ide/core.c
+@@ -2593,6 +2593,14 @@ void ide_init2(IDEBus *bus, qemu_irq irq)
+     bus->dma = &ide_dma_nop;
+ }
+ 
++void ide_exit(IDEState *s)
++{
++    timer_del(s->sector_write_timer);
++    timer_free(s->sector_write_timer);
++    qemu_vfree(s->smart_selftest_data);
++    qemu_vfree(s->io_buffer);
++}
++
+ static const MemoryRegionPortio ide_portio_list[] = {
+     { 0, 8, 1, .read = ide_ioport_read, .write = ide_ioport_write },
+     { 0, 1, 2, .read = ide_data_readw, .write = ide_data_writew },
+diff --git a/hw/ide/internal.h b/hw/ide/internal.h
+index d2c458f579..c8d60b8e9f 100644
+--- a/hw/ide/internal.h
++++ b/hw/ide/internal.h
+@@ -604,6 +604,7 @@ int ide_init_drive(IDEState *s, BlockBackend *blk, IDEDriveKind kind,
+                    uint32_t cylinders, uint32_t heads, uint32_t secs,
+                    int chs_trans);
+ void ide_init2(IDEBus *bus, qemu_irq irq);
++void ide_exit(IDEState *s);
+ void ide_init_ioport(IDEBus *bus, ISADevice *isa, int iobase, int iobase2);
+ void ide_register_restart_cb(IDEBus *bus);
+ 
+-- 
+2.17.0
+

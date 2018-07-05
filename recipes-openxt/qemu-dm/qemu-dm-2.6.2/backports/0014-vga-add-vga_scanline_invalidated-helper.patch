@@ -1,0 +1,64 @@
+From ab80f8472f0f68f0b45113c1584a168104f3d159 Mon Sep 17 00:00:00 2001
+From: Gerd Hoffmann <kraxel@redhat.com>
+Date: Fri, 21 Apr 2017 11:16:26 +0200
+Subject: [PATCH 14/39] vga: add vga_scanline_invalidated helper
+
+Add vga_scanline_invalidated helper to check whenever a scanline was
+invalidated.  Add a sanity check to fix OOB read access for display
+heights larger than 2048.
+
+Only cirrus uses this, for hardware cursor rendering, so having this
+work properly for the first 2048 scanlines only shouldn't be a problem
+as the cirrus can't handle large resolutions anyway.  Also changing the
+invalidated_y_table size would break live migration.
+
+Signed-off-by: Gerd Hoffmann <kraxel@redhat.com>
+Message-id: 20170421091632.30900-4-kraxel@redhat.com
+Signed-off-by: Gerd Hoffmann <kraxel@redhat.com>
+(cherry picked from commit f3289f6f0f9781d1fe77b4cfc3f18a6336eaed72)
+---
+ hw/display/vga.c | 14 +++++++++++---
+ 1 file changed, 11 insertions(+), 3 deletions(-)
+
+diff --git a/hw/display/vga.c b/hw/display/vga.c
+index 9ebc54f22b..378d23eff2 100644
+--- a/hw/display/vga.c
++++ b/hw/display/vga.c
+@@ -1447,6 +1447,14 @@ void vga_invalidate_scanlines(VGACommonState *s, int y1, int y2)
+     }
+ }
+ 
++static bool vga_scanline_invalidated(VGACommonState *s, int y)
++{
++    if (y >= VGA_MAX_HEIGHT) {
++        return false;
++    }
++    return s->invalidated_y_table[y >> 5] & (1 << (y & 0x1f));
++}
++
+ void vga_sync_dirty_bitmap(VGACommonState *s)
+ {
+     memory_region_sync_dirty_bitmap(&s->vram);
+@@ -1659,8 +1667,8 @@ static void vga_draw_graphic(VGACommonState *s, int full_update)
+         page1 = addr + bwidth - 1;
+         update |= memory_region_get_dirty(&s->vram, page0, page1 - page0,
+                                           DIRTY_MEMORY_VGA);
+-        /* explicit invalidation for the hardware cursor */
+-        update |= (s->invalidated_y_table[y >> 5] >> (y & 0x1f)) & 1;
++        /* explicit invalidation for the hardware cursor (cirrus only) */
++        update |= vga_scanline_invalidated(s, y);
+         if (update) {
+             if (y_start < 0)
+                 y_start = y;
+@@ -1707,7 +1715,7 @@ static void vga_draw_graphic(VGACommonState *s, int full_update)
+                                   page_max - page_min,
+                                   DIRTY_MEMORY_VGA);
+     }
+-    memset(s->invalidated_y_table, 0, ((height + 31) >> 5) * 4);
++    memset(s->invalidated_y_table, 0, sizeof(s->invalidated_y_table));
+ }
+ 
+ static void vga_draw_blank(VGACommonState *s, int full_update)
+-- 
+2.17.0
+
