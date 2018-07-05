@@ -180,6 +180,7 @@ SRC_URI += " \
     file://patches/busybox-mmap-read-execute-checks-from-new-domain.patch \
     file://patches/dev-xen-privcmd.patch \
     file://patches/policy.modules.admin.su.patch \
+    file://patches/storage-Add-fcontexts-for-NVMe-disks.patch \
 "
 #file://patches/upstream-add-binder-security-class.patch
 #file://patches/upstream-update-netlink-classes.patch
