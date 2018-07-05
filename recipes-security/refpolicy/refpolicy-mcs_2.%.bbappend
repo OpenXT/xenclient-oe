@@ -138,6 +138,7 @@ SRC_URI += " \
     file://patches/policy.modules.system.logging.diff \
     file://patches/policy.modules.system.lvm.diff \
     file://patches/policy.modules.system.miscfiles.diff \
+    file://patches/policy.modules.system.iptables.diff \
     file://patches/policy.modules.system.modutils.diff \
     file://patches/policy.modules.system.mount.diff \
     file://patches/policy.modules.system.selinuxutil.diff \
