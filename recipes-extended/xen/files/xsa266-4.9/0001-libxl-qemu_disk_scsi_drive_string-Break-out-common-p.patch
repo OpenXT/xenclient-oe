@@ -1,0 +1,78 @@
+From 3abf0feed50bd0c3450b6b168424693baf0f7039 Mon Sep 17 00:00:00 2001
+From: Ian Jackson <ian.jackson@eu.citrix.com>
+Date: Wed, 13 Jun 2018 15:51:36 +0100
+Subject: [PATCH 1/2] libxl: qemu_disk_scsi_drive_string: Break out common
+ parts of disk config
+
+The generated configurations are identical apart from, in some cases,
+reordering of the id=%s element.  So, overall, no functional change.
+
+This is part of XSA-266.
+
+Reported-by: Andrew Reimers <andrew.reimers@orionvm.com>
+Signed-off-by: Jan Beulich <jbeulich@suse.com>
+Signed-off-by: Ian Jackson <Ian.Jackson@eu.citrix.com>
+---
+ tools/libxl/libxl_dm.c | 13 +++++++------
+ 1 file changed, 7 insertions(+), 6 deletions(-)
+
+diff --git a/tools/libxl/libxl_dm.c b/tools/libxl/libxl_dm.c
+index 40f9dc7..96d5702 100644
+--- a/tools/libxl/libxl_dm.c
++++ b/tools/libxl/libxl_dm.c
+@@ -773,6 +773,7 @@ static char *qemu_disk_scsi_drive_string(libxl__gc *gc, const char *target_path,
+                                          int colo_mode)
+ {
+     char *drive = NULL;
++    char *common = GCSPRINTF("cache=writeback");
+     const char *exportname = disk->colo_export;
+     const char *active_disk = disk->active_disk;
+     const char *hidden_disk = disk->hidden_disk;
+@@ -780,8 +781,8 @@ static char *qemu_disk_scsi_drive_string(libxl__gc *gc, const char *target_path,
+     switch (colo_mode) {
+     case LIBXL__COLO_NONE:
+         drive = libxl__sprintf
+-            (gc, "file=%s,if=scsi,bus=0,unit=%d,format=%s,cache=writeback",
+-             target_path, unit, format);
++            (gc, "%s,file=%s,if=scsi,bus=0,unit=%d,format=%s",
++             common, target_path, unit, format);
+         break;
+     case LIBXL__COLO_PRIMARY:
+         /*
+@@ -794,13 +795,13 @@ static char *qemu_disk_scsi_drive_string(libxl__gc *gc, const char *target_path,
+          *  vote-threshold=1
+          */
+         drive = GCSPRINTF(
+-            "if=scsi,bus=0,unit=%d,cache=writeback,driver=quorum,"
++            "%s,if=scsi,bus=0,unit=%d,,driver=quorum,"
+             "id=%s,"
+             "children.0.file.filename=%s,"
+             "children.0.driver=%s,"
+             "read-pattern=fifo,"
+             "vote-threshold=1",
+-            unit, exportname, target_path, format);
++            common, unit, exportname, target_path, format);
+         break;
+     case LIBXL__COLO_SECONDARY:
+         /*
+@@ -814,7 +815,7 @@ static char *qemu_disk_scsi_drive_string(libxl__gc *gc, const char *target_path,
+          *  file.backing.backing=exportname,
+          */
+         drive = GCSPRINTF(
+-            "if=scsi,id=top-colo,bus=0,unit=%d,cache=writeback,"
++            "%s,if=scsi,id=top-colo,bus=0,unit=%d,"
+             "driver=replication,"
+             "mode=secondary,"
+             "top-id=top-colo,"
+@@ -823,7 +824,7 @@ static char *qemu_disk_scsi_drive_string(libxl__gc *gc, const char *target_path,
+             "file.backing.driver=qcow2,"
+             "file.backing.file.filename=%s,"
+             "file.backing.backing=%s",
+-            unit, active_disk, hidden_disk, exportname);
++            common, unit, active_disk, hidden_disk, exportname);
+         break;
+     default:
+         abort();
+-- 
+2.1.4
+
