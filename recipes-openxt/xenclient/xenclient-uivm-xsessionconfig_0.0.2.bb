@@ -14,9 +14,10 @@ SRC_URI = " \
     file://Xdefaults \
     file://default \
     file://default.keyring \
-    file://nm-applet-wrapper \
-    file://nm-applet-launcher \
-    file://start-nm-applet \
+    file://ui-functions \
+    file://nm-applets-agent \
+    file://uim-toolbar-gtk-agent \
+    file://keymap-agent \
     file://v4v.modutils \
     file://xenfb2.modutils \
     file://xenkbd.modutils \
@@ -30,10 +31,6 @@ SRC_URI = " \
     file://custom-MailReader.desktop \
     file://custom-global.scm \
     file://custom-toolbar.scm \
-    file://get-language \
-    file://uim-toolbar-gtk-wrapper \
-    file://language-sync \
-    file://nm-backend-sync \
     file://keyboard \
 "
 
@@ -86,21 +83,21 @@ do_install () {
     install -m 644 ${WORKDIR}/custom-global.scm ${D}/root/.uim.d/customs/
     install -m 644 ${WORKDIR}/custom-toolbar.scm ${D}/root/.uim.d/customs/
 
+    install -d ${D}${libdir}/openxt
+    install -m 644 ${WORKDIR}/ui-functions ${D}${libdir}/openxt/ui-functions
+
     install -d ${D}${bindir}
-    install -m 755 ${WORKDIR}/nm-applet-wrapper ${D}${bindir}/
-    install -m 755 ${WORKDIR}/nm-applet-launcher ${D}${bindir}/
-    install -m 755 ${WORKDIR}/start-nm-applet ${D}${bindir}/
+    install -m 755 ${WORKDIR}/nm-applets-agent ${D}${bindir}/
+    install -m 755 ${WORKDIR}/uim-toolbar-gtk-agent ${D}${bindir}/
+    install -m 755 ${WORKDIR}/keymap-agent ${D}${bindir}/
     install -m 755 ${WORKDIR}/xdg-open ${D}${bindir}/
-    install -m 755 ${WORKDIR}/get-language ${D}${bindir}/
-    install -m 755 ${WORKDIR}/uim-toolbar-gtk-wrapper ${D}${bindir}/
-    install -m 755 ${WORKDIR}/language-sync ${D}${bindir}/
-    install -m 755 ${WORKDIR}/nm-backend-sync ${D}${bindir}/
     install -m 755 ${WORKDIR}/keyboard ${D}${bindir}/
 }
 
 FILES_${PN} = " \
     ${sysconfdir} \
     ${bindir} \
+    ${libdir} \
     /root/.xfce4/* \
     /root/.config/* \
     /root/.Xdefaults \

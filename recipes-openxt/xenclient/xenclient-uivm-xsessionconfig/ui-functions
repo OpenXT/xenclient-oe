@@ -1,0 +1,63 @@
+#! /bin/bash
+
+# Usage: xenmgr_get_string arg
+#   Print the requested Xenmgr UI configuration (arg) on stdout.
+xenmgr_config_ui_get_string() {
+    local arg="$1"
+    local path="/"
+    local dest="com.citrix.xenclient.xenmgr"
+    local intf="org.freedesktop.DBus.Properties.Get"
+
+    DBUS_SYSTEM_BUS_ADDRESS=tcp:host=1.0.0.0,port=5555 \
+    LD_PRELOAD=/usr/lib/libv4v-1.0.so.0 \
+    INET_IS_V4V=1 \
+        dbus-send --system --print-reply --dest="${dest}" "${path}" "${intf}" \
+            "string:com.citrix.xenclient.xenmgr.config.ui" \
+            "string:${arg}" \
+        | sed -ne 's|.*string "\(.\+\)".*|\1|p'
+}
+
+# Usage: xenmgr_get_locale
+#   Print the locale configured for Xenmgr on stdout.
+xenmgr_get_locale() {
+    local xenmgr_lang="$(xenmgr_config_ui_get_string language)"
+    local lang="${xenmgr_lang%%-*}"
+    local territory="${xenmgr_lang##*-}"
+    local charset="UTF-8"
+
+    # Fallback on en_US if something went wrong.
+    if [ -z "${lang}" -o -z "${territory}" ]; then
+        lang="en"
+        territory="US"
+    fi
+    echo "${lang}_${territory^^*}.${charset}"
+}
+
+# Usage: dbus_watch_expression type interface [member]
+#   Print the dbus-monitor watch formatted string on stdout.
+dbus_watch_expression() {
+    local type="$1"
+    local intf="$2"
+    local member="$3"
+    local watch=""
+
+    if [ -z "${type}" -o -z "${intf}" ]; then
+        return
+    fi
+    watch="type='${type}',interface='${intf}'"
+    if [ -n "${member}" ]; then
+        watch="${watch},member='${member}'"
+    fi
+    echo "${watch}"
+}
+
+# Usage dbus_watch watch-expressions
+#   Simple wrapper to run dbus-monitor using the given watch-expressions on
+#   dom0 remote bus.
+#   See dbus_watch_expression to get the watch strings.
+dbus_watch() {
+    DBUS_SYSTEM_BUS_ADDRESS=tcp:host=1.0.0.0,port=5555 \
+    LD_PRELOAD=/usr/lib/libv4v-1.0.so.0 \
+    INET_IS_V4V=1 \
+        dbus-monitor --system --profile "$@"
+}

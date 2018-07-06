@@ -1,0 +1,38 @@
+#! /bin/bash
+
+if [ -f /usr/lib/openxt/ui-functions ]; then
+    . /usr/lib/openxt/ui-functions
+fi
+
+# Usage: set_keymap
+#   Read the keyboard layout from xenstore and run setxkbmap.
+set_keymap() {
+    local layout=$(xenstore-read /xenclient/keyboard/layout)
+
+    setxkbmap "${layout}"
+}
+
+# Usage: monitor_keymap_layout
+#   Listen to XenMgr UI keyboard layout related signal.
+monitor_keymap_layout() {
+    # Locale.
+    local xgr_intf="com.citrix.xenclient.xenmgr"
+    local xgr_lang_member="language_changed"
+    local xgr_watch="$(dbus_watch_expression signal ${xgr_intf} ${xgr_lang_member})"
+
+    # Monitor dbus watches, use "interface.member"
+    while read type _ _ _ _ path intf member ; do
+        case "${intf}.${member}" in
+            "${xgr_intf}.${xgr_lang_member}")
+                set_keymap
+                ;;
+            *) continue ;;
+        esac
+    done < <( dbus_watch "${xgr_watch}" )
+}
+
+## Set initial keymap.
+set_keymap
+
+## Monitor changes.
+monitor_keymap_layout
