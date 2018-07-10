@@ -126,12 +126,6 @@ seal)
 forward)
     [ "${tpm2}" -eq 0 ] && hashalg="sha256"
 
-    for p in ${static_pcrs}; do
-        if [ "${p}" -ne 4 -a "${p}" -ne 8 ]; then
-            pcr_params="${pcr_params} -p ${p}"
-        fi
-    done
-
     # PCR4 holds the hashes of OpenXT's EFI applications: shim, xen and dom0 kernel.
     # PCR8 holds the hashes of the other critical components of OpenXT's boot:
     #  openxt.cfg, the initrd and the XSM policy.
@@ -142,6 +136,7 @@ forward)
         pcr8=$(grep PCR-08 ${TPM_DEV}/pcrs | cut -f2 -d: | tr -d ' ')
     fi
 
+    pcr_forward=()
     if ! contains_only "${pcr8}" 0; then
         ESP=$(sfdisk -l 2>/dev/null | grep "EFI System" | awk '{print $1}')
         mkdir -p /tmp/esp
@@ -180,10 +175,13 @@ forward)
 
         umount /tmp/esp
 
-        pcr_params="${pcr_params} -p 4:${pcr4} -p 8:${pcr8}"
-    else
-        pcr_params="${pcr_params} -p 4 -p 8"
+        pcr_forward[4]=":${pcr4}"
+        pcr_forward[8]=":${pcr8}"
     fi
+
+    for p in ${static_pcrs}; do
+        pcr_params="${pcr_params} -p ${p}${pcr_forward[${p}]}"
+    done
 
     # During early init, rootfs is hashed and is given to
     # tpm_extend which for tpm1.2 hashes the rootfs hash again and
