@@ -1,0 +1,60 @@
+################################################################################
+SHORT DESCRIPTION:
+################################################################################
+Allow vNUMA-enabled guests to be saved-restored
+
+################################################################################
+LONG DESCRIPTION:
+################################################################################
+save-restore doesn't work in openxt becasue the guests has vNUMA configured.
+AFAICT,XEN doesn't allow this because vNUMA quests cann't be migrated which 
+is something not typically needed or done in OpenXT.
+
+This patch changes the vNUMA error to a warning to allow the guest to be saved.
+
+################################################################################
+CHANGELOG
+################################################################################
+
+################################################################################
+REMOVAL
+################################################################################
+
+################################################################################
+UPSTREAM PLAN
+################################################################################
+
+################################################################################
+INTERNAL DEPENDENCIES
+################################################################################
+
+################################################################################
+PATCHES
+################################################################################
+--- a/tools/libxl/libxl_dom_save.c
++++ b/tools/libxl/libxl_dom_save.c
+@@ -388,13 +388,21 @@ void libxl__domain_save(libxl__egc *egc, libxl__domain_save_state *dss)
+      * Reject any domain which has vnuma enabled, even if the
+      * configuration is empty. Only domains which have no vnuma
+      * configuration at all are supported.
++     *
++     * Update: May-28-2018
++     * Jafar Al-Gharaibeh, ATCorp
++     *   We don't care (yet) about migration in openxt.
++     *   We can continue saving the guest
++     *   Ignore the error and just warn the user
+      */
+     ret = xc_domain_getvnuma(CTX->xch, domid, &nr_vnodes, &nr_vmemranges,
+                              &nr_vcpus, NULL, NULL, NULL);
+     if (ret != -1 || errno != EOPNOTSUPP) {
+-        LOGD(ERROR, domid, "Cannot save a guest with vNUMA configured");
+-        rc = ERROR_FAIL;
+-        goto out;
++        LOGD(WARN, domid, "Trying to save a guest with vNUMA configured. This guest cannot be live-migrated");
++        /*
++         * rc = ERROR_FAIL;
++         * goto out;
++         */
+     }
+ 
+     if (dss->checkpointed_stream == LIBXL_CHECKPOINTED_STREAM_REMUS) {
