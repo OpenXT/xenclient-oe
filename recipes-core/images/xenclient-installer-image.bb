@@ -99,6 +99,7 @@ ROOTFS_POSTPROCESS_COMMAND += "post_rootfs_shell_commands; "
 # Remove initscripts pulled-in by dependencies or not required for operation.
 remove_nonessential_initscripts() {
     remove_initscript "blktap"
+    remove_initscript "tapback-daemon"
     remove_initscript "sshd-v4v"
 }
 ROOTFS_POSTPROCESS_COMMAND += "remove_nonessential_initscripts; "
