@@ -117,22 +117,25 @@ PATCHES
  
      acpi_info = (struct acpi_info *)config->infop;
      memset(acpi_info, 0, sizeof(*acpi_info));
-@@ -640,6 +702,24 @@ int acpi_build_tables(struct acpi_ctxt *
+@@ -640,6 +702,27 @@ int acpi_build_tables(struct acpi_ctxt *
      if ( nr_secondaries < 0 )
          goto oom;
  
-+    /* Check to see if one of the secondary tables is a SLIC. */
-+    for (i = 0; i < (sizeof(secondary_tables) /  sizeof(unsigned long)) && secondary_tables[i]; i++) {
-+        if (secondary_tables[i] && is_slic((struct acpi_header *)secondary_tables[i])) {
-+            slic_header = (struct acpi_header *)secondary_tables[i];
-+            needs_id_fixup = 1;
-+            break;
++    /* We can only have a SLIC if it was passed through. */
++    if ( config->pt.addr ) {
++        /* Check to see if one of the secondary tables is a SLIC. */
++        for (i = 0; i < nr_secondaries; i++) {
++            if (is_slic((struct acpi_header *)secondary_tables[i])) {
++                slic_header = (struct acpi_header *)secondary_tables[i];
++                needs_id_fixup = 1;
++                break;
++            }
 +        }
 +    }
 +
 +    /* If we have a SLIC, patch up the other tables to match it. */
 +    if (needs_id_fixup) {
-+        for (i = 0; i < sizeof(secondary_tables) && secondary_tables[i]; i++) {
++        for (i = 0; i < nr_secondaries; i++) {
 +            fixup_headers((struct acpi_header *)secondary_tables[i], slic_header);
 +        }
 +        fixup_headers(&fadt_10->header, slic_header);
@@ -142,7 +145,7 @@ PATCHES
      xsdt = ctxt->mem_ops.alloc(ctxt, sizeof(struct acpi_20_xsdt) + 
                                 sizeof(uint64_t) * nr_secondaries,
                                 16);
-@@ -649,9 +729,13 @@ int acpi_build_tables(struct acpi_ctxt *
+@@ -649,9 +732,13 @@ int acpi_build_tables(struct acpi_ctxt *
      for ( i = 0; secondary_tables[i]; i++ )
          xsdt->entry[i+1] = secondary_tables[i];
      xsdt->header.length = sizeof(struct acpi_header) + (i+1)*sizeof(uint64_t);
@@ -159,7 +162,7 @@ PATCHES
  
      rsdt = ctxt->mem_ops.alloc(ctxt, sizeof(struct acpi_20_rsdt) +
                                 sizeof(uint32_t) * nr_secondaries,
-@@ -662,9 +746,13 @@ int acpi_build_tables(struct acpi_ctxt *
+@@ -662,9 +749,13 @@ int acpi_build_tables(struct acpi_ctxt *
      for ( i = 0; secondary_tables[i]; i++ )
          rsdt->entry[i+1] = secondary_tables[i];
      rsdt->header.length = sizeof(struct acpi_header) + (i+1)*sizeof(uint32_t);
@@ -176,7 +179,7 @@ PATCHES
  
      /*
       * Fill in low-memory data structures: acpi_info and RSDP.
-@@ -674,6 +762,9 @@ int acpi_build_tables(struct acpi_ctxt *
+@@ -674,6 +765,9 @@ int acpi_build_tables(struct acpi_ctxt *
      memcpy(rsdp, &Rsdp, sizeof(struct acpi_20_rsdp));
      rsdp->rsdt_address = ctxt->mem_ops.v2p(ctxt, rsdt);
      rsdp->xsdt_address = ctxt->mem_ops.v2p(ctxt, xsdt);
