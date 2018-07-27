@@ -144,10 +144,19 @@ forward)
 
         # PCR4 is first extended with the digest of EV_SEPARATOR
         # See TCG EFI Protocol Specification 5.2 Crypto Agile Log Entry Format
-        ev_separator="9069ca78e7450a285173431b3e52c5c25299e473"
-        [ "${tpm2}" -eq 0 ] && ev_separator="df3f619804a92fdb4057192dc43dd748ea778adc52bc498ce80524c014b81119"
+        ev_separator=""
+        if [ "${tpm2}" -ne 0 ]; then
+            # Read the currently used separator from tpm0 sysfs.
+            if [ -e "/sys/kernel/security/tpm0/ascii_bios_measurements" ]; then
+                ev_separator="$(awk '$1 == 4 && $3 == 04 { print $2 }' /sys/kernel/security/tpm0/ascii_bios_measurements)"
+            fi
+            # Pick `printf "\xff\xff\xff\xff" | sha1sum` as it looks popular.
+            ev_separator=${ev_separator:-"d9be6524a5f5047db5866813acf3277892a7a30a"}
+        else
+            ev_separator="df3f619804a92fdb4057192dc43dd748ea778adc52bc498ce80524c014b81119"
+        fi
 
-        pcr4=$(hash_extend 0 $ev_separator $hashalg)
+        pcr4=$(hash_extend 0 "${ev_separator}" "${hashalg}")
 
         hash=$(pesign -h -d ${hashalg} -i /tmp/esp/EFI/OpenXT/shimx64.efi | awk '{ print $2 }')
         pcr4=$(hash_extend $pcr4 $hash $hashalg) ||
