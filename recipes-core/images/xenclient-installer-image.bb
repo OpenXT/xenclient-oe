@@ -73,6 +73,7 @@ post_rootfs_shell_commands() {
         echo '6:2345:respawn:/sbin/getty 38400 tty6';
         echo '7:2345:respawn:/install/part1/autostart-status < /dev/tty7 > /dev/tty7';
         echo 'ca::ctrlaltdel:/sbin/reboot';
+        echo 'S0:12345:respawn:/sbin/getty 115200 ttyS0';
     } >> ${IMAGE_ROOTFS}/etc/inittab;
 
     # Update /etc/network/interfaces
