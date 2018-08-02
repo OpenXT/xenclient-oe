@@ -1,4 +1,5 @@
 inherit module
+inherit module-signing
 
 export KERNEL_PATH="${STAGING_KERNEL_DIR}"
 export KERNEL_SRC="${STAGING_KERNEL_DIR}"
