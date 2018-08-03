@@ -75,7 +75,7 @@ PATCHES
 --------------------------------------------------------------------------------
 --- a/configure
 +++ b/configure
-@@ -427,6 +427,7 @@ debug_stack_usage="no"
+@@ -449,6 +449,7 @@ debug_stack_usage="no"
  crypto_afalg="no"
  seccomp=""
  glusterfs=""
@@ -83,7 +83,7 @@ PATCHES
  stubdom="no"
  atapipt="no"
  atapiptv4v="no"
-@@ -1309,6 +1310,10 @@ for opt do
+@@ -1366,6 +1367,10 @@ for opt do
    ;;
    --disable-openxt-stubdom) stubdom="no"
    ;;
@@ -94,7 +94,7 @@ PATCHES
    --disable-gtk) gtk="no"
    ;;
    --enable-gtk) gtk="yes"
-@@ -5916,6 +5921,7 @@ echo "gcov enabled      $gcov"
+@@ -6051,6 +6056,7 @@ echo "gcov enabled      $gcov"
  echo "OpenXT stubdomain support $stubdom"
  echo "ATAPI PT support  $atapipt"
  echo "ATAPI PT V4V support  $atapiptv4v"
@@ -102,7 +102,7 @@ PATCHES
  echo "TPM support       $tpm"
  echo "libssh2 support   $libssh2"
  echo "TPM passthrough   $tpm_passthrough"
-@@ -6589,6 +6595,10 @@ if test "$atapiptv4v" = "yes" ; then
+@@ -6731,6 +6737,10 @@ if test "$atapiptv4v" = "yes" ; then
    echo "CONFIG_ATAPI_PT_V4V=y" >> $config_host_mak
  fi
  
@@ -115,7 +115,7 @@ PATCHES
    # TPM passthrough support?
 --- a/hw/i386/xen/xen-hvm.c
 +++ b/hw/i386/xen/xen-hvm.c
-@@ -39,7 +39,21 @@
+@@ -40,7 +40,21 @@
  #endif
  
  static MemoryRegion ram_memory, ram_640k, ram_lo, ram_hi;
@@ -137,8 +137,8 @@ PATCHES
  static bool xen_in_migration;
  
  /* Compatibility with older version */
-@@ -408,10 +422,17 @@ go_physmap:
-         }
+@@ -416,10 +430,17 @@ go_physmap:
+         return -1;
      }
  
 +    /*
@@ -148,15 +148,15 @@ PATCHES
 +     * policy on this memory - otherwise screen segments will only update as
 +     * they're evicted from cache.
 +     */
-     xc_domain_pin_memory_cacheattr(xen_xc, xen_domid,
+     rc = xendevicemodel_pin_memory_cacheattr(xen_dmod, xen_domid,
                                     start_addr >> TARGET_PAGE_BITS,
                                     (start_addr + size - 1) >> TARGET_PAGE_BITS,
 -                                   XEN_DOMCTL_MEM_CACHEATTR_WB);
 +                                   XEN_DOMCTL_MEM_CACHEATTR_WC);
-     return xen_save_physmap(state, physmap);
- }
- 
-@@ -1428,9 +1449,85 @@ void destroy_hvm_domain(bool reboot)
+     if (rc) {
+         error_report("pin_memory_cacheattr failed: %s", strerror(errno));
+     }
+@@ -1549,9 +1570,85 @@ void destroy_hvm_domain(bool reboot)
      }
  }
  
@@ -255,7 +255,7 @@ PATCHES
  enum xenstore_pm_type {
 --- a/include/sysemu/sysemu.h
 +++ b/include/sysemu/sysemu.h
-@@ -105,6 +105,7 @@ typedef enum {
+@@ -110,6 +110,7 @@ typedef enum {
  
  extern int vga_interface_type;
  #define xenfb_enabled (vga_interface_type == VGA_XENFB)
@@ -409,7 +409,7 @@ PATCHES
 +#endif /* !_SURFMAN_H_ */
 --- a/qapi/ui.json
 +++ b/qapi/ui.json
-@@ -1029,7 +1029,7 @@
+@@ -1057,7 +1057,7 @@
  ##
  { 'enum'    : 'DisplayType',
    'data'    : [ 'default', 'none', 'gtk', 'sdl',
@@ -418,12 +418,6 @@ PATCHES
  
  ##
  # @DisplayOptions:
-@@ -1056,4 +1056,5 @@
-                 'sdl'            : 'DisplayNoOpts',
-                 'egl-headless'   : 'DisplayNoOpts',
-                 'curses'         : 'DisplayNoOpts',
-+                'surfman'        : 'DisplayNoOpts',
-                 'cocoa'          : 'DisplayNoOpts' } }
 --- a/ui/Makefile.objs
 +++ b/ui/Makefile.objs
 @@ -15,6 +15,7 @@ common-obj-$(CONFIG_COCOA) += cocoa.o
@@ -432,8 +426,8 @@ PATCHES
  common-obj-$(CONFIG_XEN) += xen-input.o
 +common-obj-$(CONFIG_SURFMAN) += surfman.o
  
- common-obj-$(CONFIG_X11) += x_keymap.o
- x_keymap.o-cflags := $(X11_CFLAGS)
+ # ui-sdl module
+ common-obj-$(CONFIG_SDL) += sdl.mo
 --- a/ui/qemu-pixman.c
 +++ b/ui/qemu-pixman.c
 @@ -71,7 +71,17 @@ pixman_format_code_t qemu_default_pixman
@@ -840,14 +834,3 @@ PATCHES
 +}
 +
 +type_init(register_surfman);
---- a/vl.c
-+++ b/vl.c
-@@ -2199,6 +2199,8 @@ static void parse_display(const char *p)
-             }
-             opts = nextopt;
-         }
-+    } else if (strstart(p, "surfman", &opts)) {
-+        dpy.type = DISPLAY_TYPE_SURFMAN;
-     } else if (strstart(p, "none", &opts)) {
-         dpy.type = DISPLAY_TYPE_NONE;
-     } else {
