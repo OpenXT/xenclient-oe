@@ -18,6 +18,9 @@ CHANGELOG
 ################################################################################
 Ported to QEMU 2.6.2: Ross Philipson, philipsonr@ainfosec.com, 10/13/2016
 
+For HDA, we could look to only create hda-output to avoid even having an
+input device.
+
 ################################################################################
 REMOVAL 
 ################################################################################
@@ -60,7 +63,7 @@ PATCHES
      if (!temp) {
 --- a/hw/audio/hda-codec.c
 +++ b/hw/audio/hda-codec.c
-@@ -26,6 +26,8 @@
+@@ -27,6 +27,8 @@
  
  /* -------------------------------------------------------------------------- */
  
@@ -69,23 +72,41 @@ PATCHES
  typedef struct desc_param {
      uint32_t id;
      uint32_t val;
-@@ -193,10 +195,13 @@ static void hda_audio_input_cb(void *opa
+@@ -237,10 +239,13 @@ static void hda_audio_input_timer(void *
+     while (to_transfer) {
+         uint32_t start = (rpos & B_MASK);
+         uint32_t chunk = audio_MIN(B_SIZE - start, to_transfer);
+-        int rc = hda_codec_xfer(
+-                &st->state->hda, st->stream, false, st->buf + start, chunk);
+-        if (!rc) {
+-            break;
++        /* Only transfer input if allowed by the policy */
++        if (!disable_audio_recording) {
++            int rc = hda_codec_xfer(
++                    &st->state->hda, st->stream, false, st->buf + start, chunk);
++            if (!rc) {
++                break;
++            }
+         }
+         rpos += chunk;
+         to_transfer -= chunk;
+@@ -368,10 +373,13 @@ static void hda_audio_compat_input_cb(vo
                  break;
              }
          }
 -        rc = hda_codec_xfer(&st->state->hda, st->stream, false,
--                            st->buf, sizeof(st->buf));
+-                            st->compat_buf, sizeof(st->compat_buf));
 -        if (!rc) {
 -            break;
 +        /* Only transfer input if allowed by the policy */
 +        if (!disable_audio_recording) {
 +            rc = hda_codec_xfer(&st->state->hda, st->stream, false,
-+                                st->buf, sizeof(st->buf));
++                                st->compat_buf, sizeof(st->compat_buf));
 +            if (!rc) {
 +                break;
 +            }
          }
-         st->bpos = 0;
+         st->compat_bpos = 0;
      }
 --- a/qemu-options.hx
 +++ b/qemu-options.hx
@@ -106,7 +127,7 @@ PATCHES
      "                enable virtio balloon device (deprecated)\n", QEMU_ARCH_ALL)
 --- a/vl.c
 +++ b/vl.c
-@@ -186,6 +186,7 @@ bool boot_strict;
+@@ -185,6 +185,7 @@ bool boot_strict;
  uint8_t *boot_splash_filedata;
  size_t boot_splash_filedata_size;
  uint8_t qemu_extra_params_fw[2];
@@ -114,7 +135,7 @@ PATCHES
  
  int icount_align_option;
  
-@@ -3355,6 +3356,9 @@ int main(int argc, char **argv, char **e
+@@ -3238,6 +3239,9 @@ int main(int argc, char **argv, char **e
              case QEMU_OPTION_soundhw:
                  select_soundhw (optarg);
                  break;
