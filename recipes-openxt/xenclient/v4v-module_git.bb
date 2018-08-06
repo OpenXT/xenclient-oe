@@ -15,3 +15,4 @@ SRCREV = "${AUTOREV}"
 S = "${WORKDIR}/git/v4v"
 
 inherit module
+inherit module-signing
