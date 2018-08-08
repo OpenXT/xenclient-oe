@@ -23,10 +23,10 @@ do_sign_modules() {
         SIG_HASH=$( grep CONFIG_MODULE_SIG_HASH= \
                         ${STAGING_KERNEL_BUILDDIR}/.config | \
                       cut -d '"' -f 2 )
-        [ -z "$SIGHASH" ] || bbfatal CONFIG_MODULE_SIG_HASH is not set in .config
+        [ -z "$SIG_HASH" ] && bbfatal CONFIG_MODULE_SIG_HASH is not set in .config
         find ${D} -name "*.ko" -print0 | \
           xargs -0 -n 1 ${STAGING_KERNEL_BUILDDIR}/scripts/sign-file \
-            ${SIG_HASH} ${KERNEL_MODULE_SIG_KEY} ${KERNEL_MODULE_SIG_CERT}
+            $SIG_HASH ${KERNEL_MODULE_SIG_KEY} ${KERNEL_MODULE_SIG_CERT}
     fi
 }
 
