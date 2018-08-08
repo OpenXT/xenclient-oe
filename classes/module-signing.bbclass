@@ -24,9 +24,17 @@ do_sign_modules() {
                         ${STAGING_KERNEL_BUILDDIR}/.config | \
                       cut -d '"' -f 2 )
         [ -z "$SIG_HASH" ] && bbfatal CONFIG_MODULE_SIG_HASH is not set in .config
+
+        # ${B} for kernel, ${STAGING_KERNEL_BUILDDIR} for modules
+        for SIGN_FILE in ${STAGING_KERNEL_BUILDDIR}/scripts/sign-file \
+                         ${B}/scripts/sign-file ; do
+            [ -x "$SIGN_FILE" ] && break
+        done
+        [ -z "$SIGN_FILE" ] && bbfatal "Cannot find scripts/sign-file"
+
         find ${D} -name "*.ko" -print0 | \
-          xargs -0 -n 1 ${STAGING_KERNEL_BUILDDIR}/scripts/sign-file \
-            $SIG_HASH ${KERNEL_MODULE_SIG_KEY} ${KERNEL_MODULE_SIG_CERT}
+          xargs -0 -n 1 $SIGN_FILE $SIG_HASH ${KERNEL_MODULE_SIG_KEY} \
+              ${KERNEL_MODULE_SIG_CERT}
     fi
 }
 
