@@ -111,7 +111,6 @@ RDEPENDS_${PN} = " \
     uid \
     surfman \
     linuxfb-surfman-plugin \
-    dm-agent \
     xenmgr \
     xen-xenstore \
     libtss2 \

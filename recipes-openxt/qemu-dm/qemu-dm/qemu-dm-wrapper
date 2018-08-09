@@ -1,0 +1,44 @@
+#!/bin/sh
+
+# Interposer for qemu upstream
+
+DOMID=$2
+
+# configure and use per-vm alsa pcm device with softvol control
+ALSA_VMID=$DOMID
+
+# config files
+ASOUND_CONF=/etc/asound/asound.conf
+ASOUND_CONF_VMID=/var/run/alsa-vm-${ALSA_VMID}.conf
+
+# sound card
+DB_PCM=`db-read /audio/playback-pcm`
+if [ "$DB_PCM" != "" ]; then
+    CARD=`echo $DB_PCM | cut -d '-' -f 1`
+    CARD=$(( 10#$CARD ))
+else
+    CARD=0
+fi
+
+cat >${ASOUND_CONF_VMID} <<END
+pcm.vm-${ALSA_VMID} {
+  type softvol
+  slave {
+    pcm "asym0"
+  }
+  control {
+    name "vm-${ALSA_VMID}"
+    card ${CARD}
+  }
+}
+END
+cat ${ASOUND_CONF} >> ${ASOUND_CONF_VMID}
+
+export ALSA_CONFIG_PATH=/usr/share/alsa/alsa.conf:${ASOUND_CONF_VMID}
+export QEMU_ALSA_DAC_DEV=plug:vm-${ALSA_VMID}
+export QEMU_ALSA_ADC_DEV=plug:dsnoop0
+export QEMU_ALSA_VOL_CTRL=vm-${ALSA_VMID}
+
+ARGS="$*"
+
+exec /usr/bin/qemu-system-i386 $ARGS

@@ -25,8 +25,8 @@ export PATH="/sbin:$PATH"
 
 mount -t devtmpfs none /dev
 
-exec 0<&-                      
-exec 1<&-              
+exec 0<&-
+exec 1<&-
 exec 2<&-
 
 exec 0< /dev/hvc0
@@ -47,9 +47,7 @@ mount -t sysfs sysfs /sys
 KERNEL_CMDLINE=`cat /proc/cmdline`
 for arg in $KERNEL_CMDLINE; do
     case "$arg" in
-        guest_agent=*) AGENT=${arg##*=} ;;
-        guest_domid=*)  DOMID=${arg##*=} ;;
-        debug) LOGLVL="1";;
+        debug) LOGLVL="debug";;
         *) continue ;;
     esac
 done
@@ -79,29 +77,11 @@ export INTEL_DBUS=1
 
 rsyslogd -f /etc/rsyslog.conf
 
-# Start requested agent.
-case "$AGENT" in
-    dmagent)
-        echo "Start dmagent..."
-        exec /usr/bin/dm-agent -q -n -t ${DOMID}
-        ;;
-
-    *)
-        if [ "${KERNEL_CMDLINE/dmagent/}" != "${KERNEL_CMDLINE}" ]; then
-            # Assumes we are stubbing for the domid passed at the end of the cmdline.
-            DOMID=${KERNEL_CMDLINE##* }
-            echo "Start dmagent..."
-            exec /usr/bin/dm-agent -q -n -t $DOMID
-        else
-            echo "No agent specified. Starting qemu directly."
-            target="$( xenstore-read target )"
-            vm_uuid="$( xenstore-read /local/domain/${target}/vm )"
-            dmargs="$( xenstore-read ${vm_uuid}/image/dmargs )"
-            echo "target $target vm_uuid $vm_uuid"
-            echo "Invoking qemu with dmargs       = ${dmargs}"
-            /usr/bin/qemu-system-i386 ${dmargs}
-            poweroff
-        fi
-        ;;
-esac
-
+echo "Starting qemu directly."
+target="$( xenstore-read target )"
+vm_uuid="$( xenstore-read /local/domain/${target}/vm )"
+dmargs="$( xenstore-read ${vm_uuid}/image/dmargs )"
+echo "target $target vm_uuid $vm_uuid"
+echo "Invoking qemu with dmargs       = ${dmargs}"
+/usr/bin/qemu-system-i386 ${dmargs}
+poweroff

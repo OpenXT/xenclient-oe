@@ -49,9 +49,6 @@ SRC_URI += " \
     file://policy/modules/services/dbusbouncer.fc \
     file://policy/modules/services/dbusbouncer.if \
     file://policy/modules/services/dbusbouncer.te \
-    file://policy/modules/services/dm-agent.fc \
-    file://policy/modules/services/dm-agent.if \
-    file://policy/modules/services/dm-agent.te \
     file://policy/modules/services/icbinn.fc \
     file://policy/modules/services/icbinn.if \
     file://policy/modules/services/icbinn.te \
