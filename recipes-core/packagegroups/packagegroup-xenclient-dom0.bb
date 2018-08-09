@@ -42,6 +42,7 @@ RDEPENDS_${PN} = " \
     iproute2 \
     qemu-dm \
     seabios \
+    ovmf \
     xcpmd \
     vbetool \
     xenclient-toolstack \
