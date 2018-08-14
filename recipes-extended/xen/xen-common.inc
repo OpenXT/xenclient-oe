@@ -1,10 +1,11 @@
 LIC_FILES_CHKSUM := "file://COPYING;md5=bbb4b1bdc2c3b6743da3c39d03249095"
 
-PV = "${XEN_VERSION}"
+require xen-version.inc
 
-SRC_URI := "${XEN_SRC_URI}"
-SRC_URI[md5sum] := "${XEN_SRC_MD5SUM}"
-SRC_URI[sha256sum] := "${XEN_SRC_SHA256SUM}"
+PV = "${XEN_PV}"
+
+SRCREV = "${XEN_SRCREV}"
+SRC_URI = "git://xenbits.xen.org/xen.git;branch=${XEN_BRANCH}"
 
 # XSA patches take precedence and belong at the head of the queue.
 # This ensures that any collisions with other patches get addressed
@@ -99,7 +100,7 @@ COMPATIBLE_HOST = 'i686-oe-linux|(x86_64.*).*-linux|aarch64.*-linux'
 PACKAGECONFIG =+ "xsm"
 PACKAGECONFIG =+ "hvm"
 
-S = "${WORKDIR}/xen-${PV}"
+S = "${WORKDIR}/git"
 
 #--
 # Override meta-virtualization's path to seabios:

@@ -6,7 +6,9 @@ PROVIDES = "xen-xsm-policy"
 
 S = "${WORKDIR}/git"
 
-PV = "${XEN_VERSION}+git${SRCPV}"
+require xen-version.inc
+
+PV = "${XEN_PV}+git${SRCPV}"
 
 SRCREV = "${AUTOREV}"
 SRC_URI = "git://${OPENXT_GIT_MIRROR}/xsm-policy.git;protocol=${OPENXT_GIT_PROTOCOL};branch=${OPENXT_BRANCH}"
