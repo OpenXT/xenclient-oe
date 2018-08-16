@@ -50,6 +50,6 @@ SRC_URI += "${KERNELORG_MIRROR}/linux/kernel/v${PV_MAJOR}.x/linux-${PV}.tar.xz;n
 SRC_URI_append_xenclient-dom0 = "file://efi-tables-for-dom0.patch;patch=1 \ 
 	"
 
-SRC_URI[kernel.md5sum] = "7badf9d4911a2c26601f862199243fca"
-SRC_URI[kernel.sha256sum] = "4a9540f256b8ee91d49c3d55def90be3af8c0ddb1ff274d20bc56a42dcdbd810"
+SRC_URI[kernel.md5sum] = "bd17095c0db7c53cc08172f6ad4f23ca"
+SRC_URI[kernel.sha256sum] = "cd2e52f0e7ba861afa91cf487b2f45e5174115870f256a1d65996647b7bcc6d3"
 LIC_FILES_CHKSUM = "file://COPYING;md5=d7810fab7487fb0aad327b76f1be7cd7"
