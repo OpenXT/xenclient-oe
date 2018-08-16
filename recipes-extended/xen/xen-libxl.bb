@@ -29,6 +29,8 @@ python () {
     d.appendVar("FILES_xen-xl", " /etc/init.d/xen-init-dom0")
 }
 
+FLASK_POLICY_FILE = "xenpolicy-${XEN_PV}"
+
 DEPENDS += " \
     util-linux \
     xen \
@@ -80,6 +82,9 @@ FILES_${PN}-dbg += " \
     ${libdir}/.debug \
     /usr/src/debug \
 "
+FILES_${PN}-misc += "\
+    ${sbindir}/xen-diag \
+"
 
 CFLAGS_prepend += "${@bb.utils.contains('DISTRO_FEATURES', 'blktap2', '', '-I${STAGING_INCDIR}/blktap',d)}"
 
@@ -107,8 +112,8 @@ INITSCRIPT_PARAMS_xen-xl = "defaults 21"
 
 do_configure_prepend() {
 	#remove optimizations in the config files
-	sed -i 's/-O2//g' ${WORKDIR}/xen-${XEN_VERSION}/Config.mk
-	sed -i 's/-O2//g' ${WORKDIR}/xen-${XEN_VERSION}/config/StdGNU.mk
+	sed -i 's/-O2//g' ${S}/Config.mk
+	sed -i 's/-O2//g' ${S}/config/StdGNU.mk
 
 	cp "${WORKDIR}/defconfig" "${B}/xen/.config"
 }
