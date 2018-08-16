@@ -7,7 +7,7 @@
 +chardev-obj-$(CONFIG_XEN) += char-v4v.o
 --- /dev/null
 +++ b/chardev/char-v4v.c
-@@ -0,0 +1,302 @@
+@@ -0,0 +1,326 @@
 +/*
 + * QEMU System Emulator
 + *
@@ -69,6 +69,7 @@
 +    int bufptr;
 +    int max_size;
 +    int connected;
++    bool stream;
 +} V4vChardev;
 +
 +#define TYPE_CHARDEV_V4V "chardev-v4v"
@@ -81,7 +82,11 @@
 +    V4vChardev *s = V4V_CHARDEV(chr);
 +    int ret;
 +
-+    ret = v4v_sendto(s->fd, buf, len, 0, &s->remote_addr);
++    if (s->stream) {
++        ret = v4v_send(s->fd, buf, len, 0);
++    } else {
++        ret = v4v_sendto(s->fd, buf, len, 0, &s->remote_addr);
++    }
 +    if (ret != len) {
 +        fprintf(stderr, "%s error: v4v_sendto() failed (%s) - %d %d.\n",
 +                V4V_CHARDRV_NAME, strerror(errno), ret, len);
@@ -139,29 +144,32 @@
 +                V4V_CHARDRV_NAME, strerror(errno), ret);
 +        return FALSE;
 +    }
-+    if (s->connected == 0 && !strncmp((char*)(s->buf), V4V_MAGIC_CONNECT, 4)) {
-+        fprintf(stderr, "v4v_recvfrom() returned V4V_MAGIC_CONNECT, connecting.\n");
-+        v4v_chr_update_read_handler(chr);
-+        qemu_chr_be_event(chr, CHR_EVENT_OPENED);
-+        if (!chr->gsource) {
-+            chr->gsource = io_add_watch_poll(chr, s->ioc,
-+                                             v4v_chr_read_poll,
-+                                             v4v_chr_read, chr, chr->gcontext);
++
++    if (!s->stream) {
++        if (s->connected == 0 && !strncmp((char*)(s->buf), V4V_MAGIC_CONNECT, 4)) {
++            fprintf(stderr, "v4v_recvfrom() returned V4V_MAGIC_CONNECT, connecting.\n");
++            v4v_chr_update_read_handler(chr);
++            qemu_chr_be_event(chr, CHR_EVENT_OPENED);
++            if (!chr->gsource) {
++                chr->gsource = io_add_watch_poll(chr, s->ioc,
++                                                 v4v_chr_read_poll,
++                                                 v4v_chr_read, chr, chr->gcontext);
++            }
++            s->connected = 1;
++            return FALSE;
 +        }
-+        s->connected = 1;
-+        return FALSE;
-+    }
-+    if (s->connected == 1 && !strncmp((char*)(s->buf), V4V_MAGIC_DISCONNECT, 4)) {
-+        v4v_chr_update_read_handler(chr);
-+        qemu_chr_be_event(chr, CHR_EVENT_CLOSED);
-+        if (!chr->gsource) {
-+            chr->gsource = io_add_watch_poll(chr, s->ioc,
-+                                             v4v_chr_read_poll,
-+                                             v4v_chr_read, chr, chr->gcontext);
++        if (s->connected == 1 && !strncmp((char*)(s->buf), V4V_MAGIC_DISCONNECT, 4)) {
++            v4v_chr_update_read_handler(chr);
++            qemu_chr_be_event(chr, CHR_EVENT_CLOSED);
++            if (!chr->gsource) {
++                chr->gsource = io_add_watch_poll(chr, s->ioc,
++                                                 v4v_chr_read_poll,
++                                                 v4v_chr_read, chr, chr->gcontext);
++            }
++            fprintf(stderr, "v4v_recvfrom() returned V4V_MAGIC_DISCONNECT, closing.\n");
++            s->connected = 0;
++            return FALSE;
 +        }
-+        fprintf(stderr, "v4v_recvfrom() returned V4V_MAGIC_DISCONNECT, closing.\n");
-+        s->connected = 0;
-+        return FALSE;
 +    }
 +
 +    s->bufcnt = ret;
@@ -191,7 +199,6 @@
 +        object_unref(OBJECT(s->ioc));
 +    }
 +
-+    close(s->fd);
 +    s->fd = -1;
 +
 +    qemu_chr_be_event(chr, CHR_EVENT_CLOSED);
@@ -201,10 +208,15 @@
 +                               Error **errp)
 +{
 +    uint64_t domid = qemu_opt_get_number(opts, "domid", 0);
-+    uint64_t port = qemu_opt_get_number(opts, "port", V4V_QH_PORT);
-+    uint64_t localport = qemu_opt_get_number(opts, "localport", 0);
++    /* Sigh, port is defined as a string */
++    const char *port_str = qemu_opt_get(opts, "port");
++    const char *localport_str = qemu_opt_get(opts, "localport");
 +    bool stream = qemu_opt_get_bool(opts, "stream", false);
++    uint32_t port, localport;
 +    ChardevV4v *v4v;
++
++    port = port_str ? strtoul(port_str, NULL, 0) : V4V_QH_PORT;
++    localport = localport_str ? strtoul(localport_str, NULL, 0) : 0;
 +
 +    backend->type = CHARDEV_BACKEND_KIND_V4V;
 +    if (domid > 0x7fff) {
@@ -212,7 +224,7 @@
 +        return;
 +    }
 +    if (port > 0xffff) {
-+        error_setg(errp, "chardev: v4v: port %lld out of range", port);
++        error_setg(errp, "chardev: v4v: port %u out of range", port);
 +        return;
 +    }
 +    if (localport == 0) {
@@ -220,7 +232,7 @@
 +    }
 +    if (localport > 0xffff) {
 +        error_setg(errp,
-+                   "chardev: v4v: localport %lld out of range", localport);
++                   "chardev: v4v: localport %u out of range", localport);
 +        return;
 +    }
 +
@@ -247,8 +259,9 @@
 +    s->local_addr.domain = V4V_DOMID_ANY;
 +    s->remote_addr.port = v4v->port;
 +    s->remote_addr.domain = v4v->domid;
++    s->stream = v4v->stream;
 +
-+    fd = v4v_socket(SOCK_DGRAM);
++    fd = v4v_socket(s->stream ? SOCK_STREAM : SOCK_DGRAM);
 +    if (fd < 0) {
 +        error_setg(errp, "%s cannot create v4v socket - err: %d",
 +                   V4V_CHARDRV_NAME, fd);
@@ -270,6 +283,17 @@
 +        close(fd);
 +        return;
 +    }
++
++    if (s->stream) {
++        if (v4v_connect(fd, &s->remote_addr)) {
++            error_setg(errp,
++                       "%s failed to connect v4v socket - err: %d",
++                       V4V_CHARDRV_NAME, errno);
++            close(fd);
++            return;
++        }
++    }
++
 +
 +    s->fd = fd;
 +    s->bufcnt = 0;
@@ -320,6 +344,16 @@
          strcmp(filename, "testdev") == 0 ||
          strcmp(filename, "stdio")   == 0) {
          qemu_opt_set(opts, "backend", filename, &error_abort);
+@@ -829,6 +830,9 @@ QemuOptsList qemu_chardev_opts = {
+             .name = "reconnect",
+             .type = QEMU_OPT_NUMBER,
+         },{
++            .name = "stream",
++            .type = QEMU_OPT_BOOL,
++        },{
+             .name = "telnet",
+             .type = QEMU_OPT_BOOL,
+         },{
 --- a/include/chardev/char.h
 +++ b/include/chardev/char.h
 @@ -219,6 +219,7 @@ int qemu_chr_wait_connected(Chardev *chr
@@ -365,3 +399,16 @@
                                         'ringbuf': 'ChardevRingbuf',
                                         # next one is just for compatibility
                                         'memory' : 'ChardevRingbuf' } }
+--- a/qemu-options.hx
++++ b/qemu-options.hx
+@@ -2540,6 +2540,10 @@ DEF("chardev", HAS_ARG, QEMU_OPTION_char
+     "-chardev parallel,id=id,path=path[,mux=on|off][,logfile=PATH][,logappend=on|off]\n"
+     "-chardev parport,id=id,path=path[,mux=on|off][,logfile=PATH][,logappend=on|off]\n"
+ #endif
++#if defined(CONFIG_XEN)
++    "-chardev v4v,id=id[,port=5100][,domid=0][,localport=15100][,stream=on|off]\n"
++    "         [,logfile=PATH][,logappend=on|off]\n"
++#endif
+ #if defined(CONFIG_SPICE)
+     "-chardev spicevmc,id=id,name=name[,debug=debug][,logfile=PATH][,logappend=on|off]\n"
+     "-chardev spiceport,id=id,name=name[,debug=debug][,logfile=PATH][,logappend=on|off]\n"
