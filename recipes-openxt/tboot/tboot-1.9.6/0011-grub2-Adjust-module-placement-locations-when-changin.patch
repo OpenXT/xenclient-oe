@@ -1,11 +1,9 @@
-################################################################################
-SHORT DESCRIPTION: 
-################################################################################
-Adjust GRUB2 module placement locations when TBOOT changes e820 mem types.
+From 95279901b7b3cbb08b8a745d045cb57bd38d7f88 Mon Sep 17 00:00:00 2001
+From: Eric Chanudet <chanudete@ainfosec.com>
+Date: Thu, 9 Aug 2018 16:35:10 -0400
+Subject: [PATCH 11/22] grub2: Adjust module placement locations when changing
+ e820 mem types.
 
-################################################################################
-LONG DESCRIPTION: 
-################################################################################
 It has been found that GRUB2 will build its heap from all the RAM
 regions < 4G found in the memory map. This means that sometimes GRUB2
 will locate one or more modules in higher memory regions that are above
@@ -17,20 +15,6 @@ This fix attempts to locate such modules and move them down into
 the RAM area inhabited by TBOOT itself (and safely into the region that
 will be PMR protected).
 
-################################################################################
-CHANGELOG 
-################################################################################
-Origins: 1.7.0 patch, Ross Philipson, ross.philipson@citrix.com
-
-Ported: Ross Philipson, philipsonr@ainfosec.com, 8/27/2015
-
-################################################################################
-REMOVAL 
-################################################################################
-
-################################################################################
-UPSTREAM PLAN 
-################################################################################
 A more complete fix that could be upstreamed will attempt to always
 moved the MBI and modules to locations just above TBOOT to provide a
 more consistent environment and to prevent future issues with boot
@@ -40,21 +24,23 @@ This patch should be modified per the above and upstreamed.
 
 https://openxt.atlassian.net/browse/OXT-363
 
-################################################################################
-INTERNAL DEPENDENCIES 
-################################################################################
-None
+Signed-off-by: Ross Philipson <rphilipsonr@ainfosec.com>
+Signed-off-by: Eric Chanudet <chanudete@ainfosec.com>
+---
+ tboot/common/e820.c    |  23 +++++++
+ tboot/common/loader.c  | 177 +++++++++++++++++++++++++++++++++++++++++++++++++
+ tboot/common/tboot.c   |   3 +
+ tboot/include/e820.h   |   2 +
+ tboot/include/loader.h |   1 +
+ 5 files changed, 206 insertions(+)
 
-################################################################################
-PATCHES 
-################################################################################
-Index: tboot-1.9.5/tboot/common/e820.c
-===================================================================
---- tboot-1.9.5.orig/tboot/common/e820.c
-+++ tboot-1.9.5/tboot/common/e820.c
-@@ -758,6 +758,29 @@ efi_memory_desc_t
-     return efi_memmap_addr;
+diff --git a/tboot/common/e820.c b/tboot/common/e820.c
+index a42b357..447100b 100644
+--- a/tboot/common/e820.c
++++ b/tboot/common/e820.c
+@@ -688,6 +688,29 @@ void get_highest_sized_ram(uint64_t size, uint64_t limit,
  }
+ 
  
 +/* locate the RAM region that addr is in (first, if there are overlaps) */
 +bool get_ram_region(uint64_t addr, uint64_t *ram_base, uint64_t *ram_size)
@@ -82,11 +68,11 @@ Index: tboot-1.9.5/tboot/common/e820.c
  /*
   * Local variables:
   * mode: C
-Index: tboot-1.9.5/tboot/common/loader.c
-===================================================================
---- tboot-1.9.5.orig/tboot/common/loader.c
-+++ tboot-1.9.5/tboot/common/loader.c
-@@ -1996,6 +1996,183 @@ void determine_loader_type(void *addr, u
+diff --git a/tboot/common/loader.c b/tboot/common/loader.c
+index 524f37d..043bc25 100644
+--- a/tboot/common/loader.c
++++ b/tboot/common/loader.c
+@@ -2082,6 +2082,183 @@ void determine_loader_type(void *addr, uint32_t magic)
       */
  }
  
@@ -270,12 +256,12 @@ Index: tboot-1.9.5/tboot/common/loader.c
  /*
   * Local variables:
   * mode: C
-Index: tboot-1.9.5/tboot/common/tboot.c
-===================================================================
---- tboot-1.9.5.orig/tboot/common/tboot.c
-+++ tboot-1.9.5/tboot/common/tboot.c
-@@ -171,6 +171,9 @@ static void post_launch(void)
-     /* remove all TXT modules before verifying modules */
+diff --git a/tboot/common/tboot.c b/tboot/common/tboot.c
+index 3338fd1..c06b4d3 100644
+--- a/tboot/common/tboot.c
++++ b/tboot/common/tboot.c
+@@ -177,6 +177,9 @@ static void post_launch(void)
+     /* remove all TXT sinit acm modules before verifying modules */
      remove_txt_modules(g_ldr_ctx);
  
 +    /* adjust the MBI, move any modules that were in RAM */
@@ -284,24 +270,24 @@ Index: tboot-1.9.5/tboot/common/tboot.c
      /*
       * verify e820 table and adjust it to protect our memory regions
       */
-Index: tboot-1.9.5/tboot/include/e820.h
-===================================================================
---- tboot-1.9.5.orig/tboot/include/e820.h
-+++ tboot-1.9.5/tboot/include/e820.h
-@@ -88,6 +88,8 @@ extern bool get_ram_ranges(uint64_t *min
+diff --git a/tboot/include/e820.h b/tboot/include/e820.h
+index efe9a79..5664889 100644
+--- a/tboot/include/e820.h
++++ b/tboot/include/e820.h
+@@ -88,6 +88,8 @@ extern bool get_ram_ranges(uint64_t *min_lo_ram, uint64_t *max_lo_ram,
                             uint64_t *min_hi_ram, uint64_t *max_hi_ram);
  extern void get_highest_sized_ram(uint64_t size, uint64_t limit,
                                    uint64_t *ram_base, uint64_t *ram_size);
 +extern bool get_ram_region(uint64_t addr,
 +                           uint64_t *ram_base, uint64_t *ram_size);
  
- /* EFI memory map support */
- extern efi_memory_desc_t *get_efi_memmap(uint32_t *memmap_size);
-Index: tboot-1.9.5/tboot/include/loader.h
-===================================================================
---- tboot-1.9.5.orig/tboot/include/loader.h
-+++ tboot-1.9.5/tboot/include/loader.h
-@@ -82,6 +82,7 @@ extern bool verify_modules(loader_ctx *l
+ /*
+  * Memory map descriptor:
+diff --git a/tboot/include/loader.h b/tboot/include/loader.h
+index bfc4633..c4f258f 100644
+--- a/tboot/include/loader.h
++++ b/tboot/include/loader.h
+@@ -85,6 +85,7 @@ extern bool verify_modules(loader_ctx *lctx);
  extern module_t *get_module(loader_ctx *lctx, unsigned int i);
  extern unsigned int get_module_count(loader_ctx *lctx);
  extern bool remove_txt_modules(loader_ctx *lctx);
@@ -309,3 +295,6 @@ Index: tboot-1.9.5/tboot/include/loader.h
  
  extern bool	have_loader_memlimits(loader_ctx *lctx);
  extern bool have_loader_memmap(loader_ctx *lctx);
+-- 
+2.16.1
+

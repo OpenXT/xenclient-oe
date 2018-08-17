@@ -1,27 +1,29 @@
-################################################################################
-SHORT DESCRIPTION: 
-################################################################################
-Mark TPM region [0xfed40000-0xfed44fff] as reserved in case BIOS does not.
+From d8a47c4cc0b37c33f0a0c45719380c632e6472a1 Mon Sep 17 00:00:00 2001
+From: Eric Chanudet <chanudete@ainfosec.com>
+Date: Mon, 13 Aug 2018 12:02:19 -0400
+Subject: [PATCH 14/22] tboot: Mark TPM region reserved if not already.
 
-################################################################################
-LONG DESCRIPTION: 
-################################################################################
-TPM specification defines one region @0xfed40000-0xfed44fff.  Given a 32bits
-dom0 with "enough" memory (dom_mem=>4G), it is likely that the kernel will try
-to use every last region for RAM, even in upper 32bit regions.
+TPM specification defines one region @0xfed40000-0xfed44fff.  Given a
+32bits dom0 with "enough" memory (dom_mem=>4G), it is likely that the
+kernel will try to use every last region for RAM, even in upper 32bit
+regions.
 
-For some reason, BIOS in HPs or Dells do not report that region in the e820 as
-reserved.  It is only reported in one of the SSDT. This patch tries to work
-that around by doing so in TBoot.
+For some reason, BIOS in HPs or Dells do not report that region in the
+e820 as reserved.  It is only reported in one of the SSDT. This patch
+tries to work that around by doing so in TBoot.
 
-################################################################################
-PATCHES 
-################################################################################
-Index: tboot-1.9.5/tboot/common/tboot.c
-===================================================================
---- tboot-1.9.5.orig/tboot/common/tboot.c
-+++ tboot-1.9.5/tboot/common/tboot.c
-@@ -186,6 +186,9 @@ static void post_launch(void)
+Signed-off-by: Eric Chanudet <chanudete@ainfosec.com>
+---
+ tboot/common/tboot.c |  3 +++
+ tboot/common/tpm.c   | 31 +++++++++++++++++++++++++++++++
+ tboot/include/tpm.h  |  1 +
+ 3 files changed, 35 insertions(+)
+
+diff --git a/tboot/common/tboot.c b/tboot/common/tboot.c
+index 2292227..67be4f0 100644
+--- a/tboot/common/tboot.c
++++ b/tboot/common/tboot.c
+@@ -192,6 +192,9 @@ static void post_launch(void)
      if ( !verify_modules(g_ldr_ctx) )
          apply_policy(TB_ERR_POST_LAUNCH_VERIFICATION);
  
@@ -31,10 +33,10 @@ Index: tboot-1.9.5/tboot/common/tboot.c
      /* verify that tboot is in valid RAM (i.e. E820_RAM) */
      base = (uint64_t)TBOOT_BASE_ADDR;
      size = (uint64_t)((unsigned long)&_end - base);
-Index: tboot-1.9.5/tboot/common/tpm.c
-===================================================================
---- tboot-1.9.5.orig/tboot/common/tpm.c
-+++ tboot-1.9.5/tboot/common/tpm.c
+diff --git a/tboot/common/tpm.c b/tboot/common/tpm.c
+index 5831ea6..e02d1d5 100644
+--- a/tboot/common/tpm.c
++++ b/tboot/common/tpm.c
 @@ -42,6 +42,10 @@
  #include <processor.h>
  #include <io.h>
@@ -46,10 +48,11 @@ Index: tboot-1.9.5/tboot/common/tpm.c
  #include <tpm.h>
  #include <sha1.h>
  
-@@ -899,6 +903,32 @@ void tpm_print(struct tpm_if *ti)
-     printk(TBOOT_INFO"\t timeout values: A: %u, B: %u, C: %u, D: %u\n", ti->timeout.timeout_a, ti->timeout.timeout_b, ti->timeout.timeout_c, ti->timeout.timeout_d);
- }
+@@ -913,6 +917,33 @@ const struct tpm_if_fp *get_tpm_fp(void)
+     return NULL;
  
+ }
++
 +void tpm_protect_mem_regions(void)
 +{
 +    /* TPM specification defines one region @0xfed40000-0xfed44fff.
@@ -79,11 +82,11 @@ Index: tboot-1.9.5/tboot/common/tpm.c
  /*
   * Local variables:
   * mode: C
-Index: tboot-1.9.5/tboot/include/tpm.h
-===================================================================
---- tboot-1.9.5.orig/tboot/include/tpm.h
-+++ tboot-1.9.5/tboot/include/tpm.h
-@@ -490,6 +490,7 @@ extern bool release_locality(uint32_t lo
+diff --git a/tboot/include/tpm.h b/tboot/include/tpm.h
+index bf49d53..4cd9b25 100644
+--- a/tboot/include/tpm.h
++++ b/tboot/include/tpm.h
+@@ -503,6 +503,7 @@ extern bool release_locality(uint32_t locality);
  extern bool prepare_tpm(void);
  extern bool tpm_detect(void);
  extern void tpm_print(struct tpm_if *ti);
@@ -91,3 +94,6 @@ Index: tboot-1.9.5/tboot/include/tpm.h
  extern bool tpm_submit_cmd(u32 locality, u8 *in, u32 in_size, u8 *out, u32 *out_size);
  extern bool tpm_submit_cmd_crb(u32 locality, u8 *in, u32 in_size, u8 *out, u32 *out_size);
  extern bool tpm_wait_cmd_ready(uint32_t locality);
+-- 
+2.16.1
+
