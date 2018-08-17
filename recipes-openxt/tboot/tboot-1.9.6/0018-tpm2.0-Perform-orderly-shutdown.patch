@@ -1,0 +1,86 @@
+From d1579fedfebd65506257b9a5a4df8e47af5c2985 Mon Sep 17 00:00:00 2001
+From: Eric Chanudet <chanudete@ainfosec.com>
+Date: Mon, 13 Aug 2018 13:58:44 -0400
+Subject: [PATCH 18/22] tpm2.0: Perform orderly shutdown.
+
+Avoid TPM_PT_LOCKOUT_COUNTER being incremented unnecessarily.
+
+Signed-off-by: Chris Rogers <rogersc@ainfosec.com>
+---
+ tboot/common/tboot.c  |  9 ++++++++-
+ tboot/common/tpm_20.c | 16 ++++++++++++++++
+ tboot/include/tpm.h   |  3 ++-
+ 3 files changed, 26 insertions(+), 2 deletions(-)
+
+diff --git a/tboot/common/tboot.c b/tboot/common/tboot.c
+index 67be4f0..432f522 100644
+--- a/tboot/common/tboot.c
++++ b/tboot/common/tboot.c
+@@ -639,8 +639,15 @@ void shutdown(void)
+         /* have TPM save static PCRs (in case VMM/kernel didn't) */
+         /* per TCG spec, TPM can invalidate saved state if any other TPM
+            operation is performed afterwards--so do this last */
+-        if ( _tboot_shared.shutdown_type == TB_SHUTDOWN_S3 )
++        if ( _tboot_shared.shutdown_type == TB_SHUTDOWN_S3 ) {
+             tpm_fp->save_state(tpm, tpm->cur_loc);
++        } else if ( _tboot_shared.shutdown_type == TB_SHUTDOWN_REBOOT ||
++                   _tboot_shared.shutdown_type == TB_SHUTDOWN_HALT ||
++                   _tboot_shared.shutdown_type == TB_SHUTDOWN_S5) {
++           if(tpm->major == TPM20_VER_MAJOR){
++               tpm_fp->shutdown(tpm, tpm->cur_loc);
++           }
++        }
+ 
+         /* scrub any secrets by clearing their memory, then flush cache */
+         /* we don't have any secrets to scrub, however */
+diff --git a/tboot/common/tpm_20.c b/tboot/common/tpm_20.c
+index c059c83..1c0313f 100644
+--- a/tboot/common/tpm_20.c
++++ b/tboot/common/tpm_20.c
+@@ -2343,6 +2343,21 @@ static bool tpm20_get_random(struct tpm_if *ti, uint32_t locality,
+     return true;
+ }
+ 
++static uint32_t tpm20_shutdown(struct tpm_if *ti, uint32_t locality)
++{
++    u32 ret;
++
++    if ( ti == NULL )
++        return false;
++
++    ret = _tpm20_shutdown(locality, TPM_SU_CLEAR);
++    if ( ret != TPM_RC_SUCCESS ) {
++        printk(TBOOT_WARN"TPM: Shutdown, return value = %08X\n", ret);
++        ti->error = ret;
++    }
++
++    return ret;
++}
+ static uint32_t tpm20_save_state(struct tpm_if *ti, uint32_t locality)
+ {
+     u32 ret;
+@@ -2629,6 +2644,7 @@ const struct tpm_if_fp tpm_20_if_fp = {
+     .verify_creation = tpm20_verify_creation,
+     .get_random = tpm20_get_random,
+     .save_state = tpm20_save_state,
++    .shutdown = tpm20_shutdown,
+     .cap_pcrs = tpm20_cap_pcrs,
+     .context_save = tpm20_context_save,
+     .context_load = tpm20_context_load,
+diff --git a/tboot/include/tpm.h b/tboot/include/tpm.h
+index 4cd9b25..ab4a43f 100644
+--- a/tboot/include/tpm.h
++++ b/tboot/include/tpm.h
+@@ -482,7 +482,8 @@ struct tpm_if_fp {
+     bool (*get_random)(struct tpm_if *ti, u32 locality, u8 *random_data, u32 *data_size);
+ 
+     uint32_t (*save_state)(struct tpm_if *ti, u32 locality);
+-    
++    uint32_t (*shutdown)(struct tpm_if *ti, u32 locality);
++
+     bool (*context_save)(struct tpm_if *ti, u32 locality, u32 handle, void *context_saved);
+     bool (*context_load)(struct tpm_if *ti, u32 locality, void *context_saved, u32 *handle);
+     bool (*context_flush)(struct tpm_if *ti, u32 locality, u32 handle);
+-- 
+2.16.1
+

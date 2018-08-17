@@ -1,0 +1,62 @@
+From c114977cf6eaee7e392a9fe4783cc5419a8a4906 Mon Sep 17 00:00:00 2001
+From: Ning Sun <ning.sun@intel.com>
+Date: Thu, 15 Mar 2018 08:34:31 -0700
+Subject: [PATCH 08/22] Fix TPM 1.2 locality selection issue.
+
+The current implementation of tboot does not choose correct locality of TPM 1.2.
+Therefore, unseal is failed and PCRs are not recovered when the system wakes up
+after sleep mode.
+
+Signed-off-by: Seunghun Han <kkamagui@gmail.com>
+Reviewed-by: Ning Sun <ning.sun@intel.com>
+(cherry picked from commit b107b8ad3ef61642fc66507780fca42f44b1d6d9)
+---
+ tboot/common/tpm_12.c |  5 +++++
+ tboot/common/tpm_20.c | 13 ++++++-------
+ 2 files changed, 11 insertions(+), 7 deletions(-)
+
+diff --git a/tboot/common/tpm_12.c b/tboot/common/tpm_12.c
+index b2fc522..3808256 100644
+--- a/tboot/common/tpm_12.c
++++ b/tboot/common/tpm_12.c
+@@ -1671,6 +1671,11 @@ static bool tpm12_init(struct tpm_if *ti)
+     if ( ti == NULL )
+         return false;
+ 
++    if (!txt_is_launched())
++        ti->cur_loc = 0;
++    else
++        ti->cur_loc = 2;
++
+     locality = ti->cur_loc;
+     if ( !tpm_validate_locality(locality) ) {
+         printk(TBOOT_WARN"TPM is not available.\n");
+diff --git a/tboot/common/tpm_20.c b/tboot/common/tpm_20.c
+index 9a4cd0d..c059c83 100644
+--- a/tboot/common/tpm_20.c
++++ b/tboot/common/tpm_20.c
+@@ -2481,15 +2481,14 @@ static bool tpm20_init(struct tpm_if *ti)
+     u32 ret;
+     unsigned int i;
+     tpm_info_list_t *info_list = get_tpm_info_list(g_sinit);
+- 
+-   if ( ti == NULL )
++
++    if ( ti == NULL )
+         return false;
+    
+-   if (!txt_is_launched())
+-                ti->cur_loc = 0;
+-     else
+-                ti->cur_loc = 2;
+-   
++    if (!txt_is_launched())
++        ti->cur_loc = 0;
++    else
++        ti->cur_loc = 2;
+ 
+     /* init version */
+     ti->major = TPM20_VER_MAJOR;
+-- 
+2.16.1
+

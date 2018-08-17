@@ -1,0 +1,107 @@
+From 2019f6f1e17451c29e846a1d6afc427fb9d125dd Mon Sep 17 00:00:00 2001
+From: Ning Sun <ning.sun@intel.com>
+Date: Sat, 2 Sep 2017 01:40:15 -0700
+Subject: [PATCH 04/22] Fix openssl-1.0.2 double frees
+
+Changeset 487:4e7bfa7aaa00 introduced double free bugs, which leads to
+segmentation faults when running the lcp_crtpollist and lcp2_crtpollish
+utilities.
+
+The original code copies the BN object pointers to/from the RSA public
+key.  During clean up the code frees the BN objects *and* frees the
+RSA public key, which also tries to free its internal BN objects.
+
+For openssl-1.0.2, this patch uses BN_dup() to create a duplicate BN
+object instead of just copying the pointer.
+
+With this patch in place the segmentation faults are no longer
+witnessed.
+
+Signed-off-by: Curt Brune <curt@cumulusnetworks.com>
+Reviewed-by: Ning Sun <ning.sun@intel.com>
+(cherry picked from commit 69e783621e44b96dd47bfa0d64287ffc931f87db)
+---
+ lcptools-v2/crtpollist.c | 7 +++----
+ lcptools-v2/lcputils.c   | 4 ++--
+ lcptools/crtpollist.c    | 6 +++---
+ lcptools/lcputils2.c     | 4 ++--
+ 4 files changed, 10 insertions(+), 11 deletions(-)
+
+diff --git a/lcptools-v2/crtpollist.c b/lcptools-v2/crtpollist.c
+index 4c1a12a..3a9d349 100644
+--- a/lcptools-v2/crtpollist.c
++++ b/lcptools-v2/crtpollist.c
+@@ -160,15 +160,14 @@ static lcp_signature_t2 *read_rsa_pubkey_file(const char *file)
+ 
+     memset(sig, 0, sizeof(lcp_rsa_signature_t) + 2*keysize);
+     sig->rsa_signature.pubkey_size = keysize;
+-   
+-    BIGNUM *modulus = BN_new();
+-    
++
+     /* OpenSSL Version 1.1.0 and later don't allow direct access to RSA 
+        stuct */    
+     #if OPENSSL_VERSION_NUMBER >= 0x10100000L
++        BIGNUM *modulus = BN_new();
+         RSA_get0_key(pubkey, (const BIGNUM **)&modulus, NULL, NULL); 
+     #else
+-        modulus = pubkey->n;
++        BIGNUM *modulus = BN_dup(pubkey->n);
+     #endif
+ 
+     unsigned char key[keysize];
+diff --git a/lcptools-v2/lcputils.c b/lcptools-v2/lcputils.c
+index 6a85b4a..a81a02f 100644
+--- a/lcptools-v2/lcputils.c
++++ b/lcptools-v2/lcputils.c
+@@ -457,8 +457,8 @@ bool verify_signature(const uint8_t *data, size_t data_size,
+     #if OPENSSL_VERSION_NUMBER >= 0x10100000L
+         RSA_set0_key(rsa_pubkey, modulus, exponent, NULL); 
+     #else
+-        rsa_pubkey->n = modulus;
+-        rsa_pubkey->e = exponent;
++        rsa_pubkey->n = BN_dup(modulus);
++        rsa_pubkey->e = BN_dup(exponent);
+         rsa_pubkey->d = rsa_pubkey->p = rsa_pubkey->q = NULL;
+     #endif
+ 
+diff --git a/lcptools/crtpollist.c b/lcptools/crtpollist.c
+index 0583ffa..01c45f1 100644
+--- a/lcptools/crtpollist.c
++++ b/lcptools/crtpollist.c
+@@ -155,14 +155,14 @@ static lcp_signature_t *read_pubkey_file(const char *file)
+ 
+     memset(sig, 0, sizeof(*sig) + 2*keysize);
+     sig->pubkey_size = keysize;
+-   
+-    BIGNUM *modulus = BN_new();
++
+     /* OpenSSL Version 1.1.0 and later don't allow direct access to RSA 
+        stuct */ 
+     #if OPENSSL_VERSION_NUMBER >= 0x10100000L
++        BIGNUM *modulus = BN_new();
+         RSA_get0_key(pubkey, (const BIGNUM **)&modulus, NULL, NULL); 
+     #else
+-    	modulus = pubkey->n;
++        BIGNUM *modulus = BN_dup(pubkey->n);
+     #endif
+     unsigned char key[keysize];
+     BN_bn2bin(modulus, key);
+diff --git a/lcptools/lcputils2.c b/lcptools/lcputils2.c
+index 3d6f855..797b71d 100644
+--- a/lcptools/lcputils2.c
++++ b/lcptools/lcputils2.c
+@@ -288,8 +288,8 @@ bool verify_signature(const uint8_t *data, size_t data_size,
+     #if OPENSSL_VERSION_NUMBER >= 0x10100000L
+         RSA_set0_key(rsa_pubkey, modulus, exponent, NULL); 
+     #else
+-      	rsa_pubkey->n = modulus;
+-    	rsa_pubkey->e = exponent;
++      	rsa_pubkey->n = BN_dup(modulus);
++    	rsa_pubkey->e = BN_dup(exponent);
+   	rsa_pubkey->d = rsa_pubkey->p = rsa_pubkey->q = NULL;
+     #endif
+ 
+-- 
+2.16.1
+

@@ -1,19 +1,22 @@
-From 6499ffe845f0e01eb9b4fa3d5c53e2d738d01cd9 Mon Sep 17 00:00:00 2001
-From: "Daniel P. Smith" <dpsmith@apertussolutions.com>
-Date: Tue, 16 May 2017 12:59:33 -0400
-Subject: [PATCH 1/2] tboot: export of tpm event log
+From c973c6e07a3b661b219906b3dc5be6ae394f18a4 Mon Sep 17 00:00:00 2001
+From: Eric Chanudet <chanudete@ainfosec.com>
+Date: Mon, 13 Aug 2018 14:02:07 -0400
+Subject: [PATCH 19/22] tboot: Export TPM event log to VMM/Kernel.
 
-This will create a copy of the TPM event log outside of the TXT heap for
-the Xen use case to safe past the log down to a VM.
+Create a copy of the TPM event log outside of the TXT heap for the Xen
+use case to safe past the log down to a VM (see relevant Xen patch
+introducing the hypercall to access the log).
 
 Signed-off-by: Daniel P. Smith <dpsmith@apertussolutions.com>
 ---
  include/tboot.h         |   4 ++
- tboot/common/tboot.c    |   5 ++
+ tboot/common/tboot.c    |  17 ++++---
  tboot/include/txt/txt.h |   1 +
- tboot/txt/txt.c         | 128 ++++++++++++++++++++++++++++++++++++++++++++++++
- 4 files changed, 138 insertions(+)
+ tboot/txt/txt.c         | 129 ++++++++++++++++++++++++++++++++++++++++++++++++
+ 4 files changed, 145 insertions(+), 6 deletions(-)
 
+diff --git a/include/tboot.h b/include/tboot.h
+index abb1ca4..4e7c7be 100644
 --- a/include/tboot.h
 +++ b/include/tboot.h
 @@ -109,6 +109,8 @@ typedef struct __packed {
@@ -25,7 +28,7 @@ Signed-off-by: Daniel P. Smith <dpsmith@apertussolutions.com>
  } tboot_shared_t;
  
  #define TB_SHUTDOWN_REBOOT      0
-@@ -163,6 +165,8 @@ static inline void print_tboot_shared(co
+@@ -163,6 +165,8 @@ static inline void print_tboot_shared(const tboot_shared_t *tboot_shared)
      printk(TBOOT_DETA"\t flags: 0x%8.8x\n", tboot_shared->flags);
      printk(TBOOT_DETA"\t ap_wake_addr: 0x%08x\n", (uint32_t)tboot_shared->ap_wake_addr);
      printk(TBOOT_DETA"\t ap_wake_trigger: %u\n", tboot_shared->ap_wake_trigger);
@@ -34,10 +37,12 @@ Signed-off-by: Daniel P. Smith <dpsmith@apertussolutions.com>
  }
  
  #endif    /* __TBOOT_H__ */
+diff --git a/tboot/common/tboot.c b/tboot/common/tboot.c
+index 432f522..a8a9b33 100644
 --- a/tboot/common/tboot.c
 +++ b/tboot/common/tboot.c
-@@ -215,12 +215,6 @@ static void post_launch(void)
-         if ( !e820_protect_region(base, size, E820_RESERVED) )         apply_policy(TB_ERR_FATAL);
+@@ -223,12 +223,6 @@ static void post_launch(void)
+             apply_policy(TB_ERR_FATAL);
      }
  
 -    /* replace map in loader context with copy */
@@ -49,7 +54,7 @@ Signed-off-by: Daniel P. Smith <dpsmith@apertussolutions.com>
      /*
       * verify modules against policy
       */
-@@ -258,6 +252,17 @@ static void post_launch(void)
+@@ -273,6 +267,17 @@ static void post_launch(void)
          printk(TBOOT_ERR"ap_wake_mwait specified but the CPU doesn't support it.\n");
      }
  
@@ -67,9 +72,11 @@ Signed-off-by: Daniel P. Smith <dpsmith@apertussolutions.com>
      print_tboot_shared(&_tboot_shared);
  
      launch_kernel(true);
+diff --git a/tboot/include/txt/txt.h b/tboot/include/txt/txt.h
+index 1c12d40..55c1ec0 100644
 --- a/tboot/include/txt/txt.h
 +++ b/tboot/include/txt/txt.h
-@@ -54,6 +54,7 @@ extern void display_last_boot_error(void
+@@ -55,6 +55,7 @@ extern void display_last_boot_error(void);
  extern void txt_shutdown(void);
  extern bool txt_is_powercycle_required(void);
  extern void ap_wait(unsigned int cpuid);
@@ -77,9 +84,11 @@ Signed-off-by: Daniel P. Smith <dpsmith@apertussolutions.com>
  
  extern uint32_t g_using_da;
  #endif      /* __TXT_TXT_H__ */
+diff --git a/tboot/txt/txt.c b/tboot/txt/txt.c
+index 37d43bc..031c15c 100644
 --- a/tboot/txt/txt.c
 +++ b/tboot/txt/txt.c
-@@ -320,6 +320,43 @@ bool evtlog_append_tpm12(uint8_t pcr, tb
+@@ -355,6 +355,43 @@ bool evtlog_append_tpm12(uint8_t pcr, tb_hash_t *hash, uint32_t type)
      return true;
  }
  
@@ -123,7 +132,7 @@ Signed-off-by: Daniel P. Smith <dpsmith@apertussolutions.com>
  void dump_event_2(void)
  {
      heap_event_log_descr_t *log_descr;
-@@ -394,6 +431,81 @@ bool evtlog_append_tpm20(uint8_t pcr, ui
+@@ -429,6 +466,81 @@ bool evtlog_append_tpm20(uint8_t pcr, uint16_t alg, tb_hash_t *hash, uint32_t ty
      return true;
  }
  
@@ -204,14 +213,15 @@ Signed-off-by: Daniel P. Smith <dpsmith@apertussolutions.com>
 +
  bool evtlog_append(uint8_t pcr, hash_list_t *hl, uint32_t type)
  {
-     switch (g_tpm->major) {
-@@ -412,6 +524,22 @@ bool evtlog_append(uint8_t pcr, hash_lis
+     struct tpm_if *tpm = get_tpm();
+@@ -451,6 +563,23 @@ bool evtlog_append(uint8_t pcr, hash_list_t *hl, uint32_t type)
      return true;
  }
  
 +void export_evtlog(uint64_t *log, uint64_t *size)
 +{
-+    switch (g_tpm->major) {
++    struct tpm_if *tpm = get_tpm();
++    switch (tpm->major) {
 +    case TPM12_VER_MAJOR:
 +        export_evtlog_tpm12(log, size);
 +        break;
@@ -228,3 +238,6 @@ Signed-off-by: Daniel P. Smith <dpsmith@apertussolutions.com>
  __data uint32_t g_using_da = 0;
  __data acm_hdr_t *g_sinit = 0;
  
+-- 
+2.16.1
+
