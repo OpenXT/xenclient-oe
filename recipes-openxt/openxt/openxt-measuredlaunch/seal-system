@@ -31,6 +31,29 @@ contains_only() {
     [[ -z "${s//$c}" ]]
 }
 
+usage() {
+    cat <<EOF >&2
+Usage: seal-system [-h] [-s|-u|-f] [-ctpgbr path] -[48 object[,objects]]"
+  -h      Display this usage.
+  -s      Seal operation.
+  -u      Unseal operation.
+  -f      Forward sealing operation.
+  -c path Path to configuration key.
+  -t path Path to sealed key.
+  -p path Path to pcr list file.
+  -g path Path to "good" pcrs log file.
+  -b path Path to "bad" pcrs log file.
+  -r path Path to root block device to be measured.
+
+  -4 object[,objects] List, comma ',' separated, of objects measured in pcr4
+                      for UEFI installations. The hash of the first object
+                      in the list is calculated by pesign, while the following
+                      will extend as raw-buffers the initial Authenticode hash.
+  -8 object[,objects] List, comma ',' separated, of objects measured in pcr8
+                      for UEFI installations. Order is significant.
+EOF
+}
+
 # Globals
 TPM_DEV="$(find /sys/class -name tpm0)/device"
 
@@ -48,7 +71,28 @@ good_pcrs="/config/good.pcrs"
 bad_pcrs="/boot/system/tpm/bad.pcrs"
 root_dev="/dev/mapper/xenclient-root"
 
-while getopts ":sufc:t:p:g:b:r:" opt; do
+# First file is parsed and signed with pesign, following object will extend the
+# hash:
+# According to the UEFI specification PCR4 should contain measurement of UEFI
+# executables using the Authenticode hash, which is what pesign produces. Since
+# the shim gets loaded by the firmware directly it gets measured as
+# Authenticode. Due to a firmware bug on Dell systems the other executables
+# (xen/dom0 kernel) can't be measured with Authenticode, so they are measured
+# as raw buffers. Ideally once Dell fixes their issue (they have been notified)
+# and all firmwares uniformly can measure with Authenticode we would make this
+# UEFI spec compliant.
+pcr4_objs=(
+    /boot/shimx64.efi
+    /boot/xen.efi
+    /boot/bzImage
+)
+pcr8_objs=(
+    /usr/share/xenclient/bootloader/openxt.cfg
+    /boot/initramfs.gz
+    /etc/xen/xenrefpolicy/policy/policy.24
+)
+
+while getopts ":sufc:t:p:g:b:r:4:8:h" opt; do
     case $opt in
     s)
         operation="seal"
@@ -76,6 +120,13 @@ while getopts ":sufc:t:p:g:b:r:" opt; do
     ;;
     r)
         root_dev=${OPTARG}
+    ;;
+    [48])
+        IFS=', ' read -r -a "pcr${opt}_objs" <<< "${OPTARG}"
+    ;;
+    h)
+        usage
+        exit 0
     ;;
     *)
         err "invalid option: -$opt"
@@ -138,10 +189,6 @@ forward)
 
     pcr_forward=()
     if ! contains_only "${pcr8}" 0; then
-        ESP=$(sfdisk -l 2>/dev/null | grep "EFI System" | awk '{print $1}')
-        mkdir -p /tmp/esp
-        mount -o ro $ESP /tmp/esp || err "Failed to mount ESP ${ESP}"
-
         # PCR4 is first extended with the digest of EV_SEPARATOR
         # See TCG EFI Protocol Specification 5.2 Crypto Agile Log Entry Format
         ev_separator=""
@@ -158,31 +205,23 @@ forward)
 
         pcr4=$(hash_extend 0 "${ev_separator}" "${hashalg}")
 
-        hash=$(pesign -h -d ${hashalg} -i /tmp/esp/EFI/OpenXT/shimx64.efi | awk '{ print $2 }')
+        hash=$(pesign -h -d ${hashalg} -i "${pcr4_objs[0]}" | awk '{ print $2 }')
         pcr4=$(hash_extend $pcr4 $hash $hashalg) ||
             err "failed to calculate pcr4"
 
-        hash=$(${hashalg}sum /tmp/esp/EFI/OpenXT/xen.efi | awk '{ print $1 }')
-        pcr4=$(hash_extend $pcr4 $hash $hashalg) ||
-            err "failed to calculate pcr4"
+        for o in ${pcr4_objs[@]:1}; do
+            hash=$(${hashalg}sum "${o}" | awk '{ print $1 }')
+            pcr4=$(hash_extend $pcr4 $hash $hashalg) ||
+                err "failed to calculate pcr4"
+        done
 
-        hash=$(${hashalg}sum /tmp/esp/EFI/OpenXT/bzImage | awk '{ print $1 }')
-        pcr4=$(hash_extend $pcr4 $hash $hashalg) ||
-            err "failed to calculate pcr4"
+        pcr8="0"
 
-        hash=$(${hashalg}sum /tmp/esp/EFI/OpenXT/openxt.cfg | awk '{ print $1 }')
-        pcr8=$(hash_extend 0 $hash $hashalg) ||
-            err "failed to calculate pcr8"
-
-        hash=$(${hashalg}sum /tmp/esp/EFI/OpenXT/initramfs.gz | awk '{ print $1 }')
-        pcr8=$(hash_extend $pcr8 $hash $hashalg) ||
-            err "failed to calculate pcr8"
-
-        hash=$(${hashalg}sum /tmp/esp/EFI/OpenXT/policy.24 | awk '{ print $1 }')
-        pcr8=$(hash_extend $pcr8 $hash $hashalg) ||
-            err "failed to calculate pcr8"
-
-        umount /tmp/esp
+        for o in ${pcr8_objs[@]}; do
+            hash=$(${hashalg}sum "${o}" | awk '{ print $1 }')
+            pcr8=$(hash_extend $pcr8 $hash $hashalg) ||
+                err "failed to calculate pcr8"
+        done
 
         pcr_forward[4]=":${pcr4}"
         pcr_forward[8]=":${pcr8}"
