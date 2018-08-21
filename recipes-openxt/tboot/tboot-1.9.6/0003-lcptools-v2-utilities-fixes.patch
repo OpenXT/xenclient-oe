@@ -1,0 +1,441 @@
+From 7771d61b221a76c9f52f4869009f3a64a5961aeb Mon Sep 17 00:00:00 2001
+From: Ning Sun <ning.sun@intel.com>
+Date: Fri, 1 Sep 2017 14:05:34 -0700
+Subject: [PATCH 03/22] lcptools-v2 utilities fixes
+
+This is a significant patch that corrects omissions I found in the lcptools-v2 utilities.
+It adds definitions based on the Intel TXT Software Development Guide
+(https://www.intel.com/content/www/us/en/software-developers/intel-txt-software-development-guide.html).
+I used Revision 013. Looking at Section 4.6 of Revision 014, it seems my patch still applies.
+Appendix E has a couple changes, notably the removal of ECDSA as an approved signing algorithm.
+This could be changed from what I'm providing if we want to update the tools to match Revision 014.
+
+I've added the following:
+-Ability to define the allowed policy hashing algorithms (stored in a mask)
+-Ability to define the signing algorithm
+-Ability to define the AUX hashing algorithm -constants for hashing and signing algorithms
+-Ability to define LCP version
+
+I also changed some of the options as well as some of my added options to required based on
+my experience of ACMs rejecting LCPs without those fields and common sense. For example,
+the policy hash could be defined without defining the allowed policy hashing algorithms.
+Now, since you have to define the policy hash, you must also define the policy hashing "allowed algorithms" mask.
+
+Signed-off-by: Travis Gilbert <travis.gilbert@dell.com>
+Reviewed-by: Ning Sun <ning.sun@intel.com>
+(cherry picked from commit cda9c10daf9d01eb2bb633e2bad6688db47f345c)
+---
+ include/lcp3.h         |  23 ++++++++-
+ lcptools-v2/crtpol.c   | 123 ++++++++++++++++++++++++++++++++++++++++++-------
+ lcptools-v2/lcputils.c |  79 +++++++++++++++++++++++++++++--
+ lcptools-v2/lcputils.h |  20 ++++----
+ 4 files changed, 215 insertions(+), 30 deletions(-)
+
+diff --git a/include/lcp3.h b/include/lcp3.h
+index 4c717fe..e730ff0 100644
+--- a/include/lcp3.h
++++ b/include/lcp3.h
+@@ -55,13 +55,16 @@
+ #define LCP_POLTYPE_LIST    0
+ #define LCP_POLTYPE_ANY     1
+ 
++#define LCP_VER_2_0  0x0200
++#define LCP_VER_3_0  0x0300
++#define LCP_VER_3_1  0x0301
++#define LCP_VER_NULL    0x0000
+ 
+-#define LCP_DEFAULT_POLICY_VERSION     0x0300
++#define LCP_DEFAULT_POLICY_VERSION     LCP_VER_3_0
+ #define LCP_DEFAULT_POLICY_CONTROL     0x00
+ 
+ #define LCP_MAX_LISTS      8
+ 
+-
+ /*--------- with LCP_POLICY version 2.0 ------------*/
+ #define SHA1_LENGTH        20
+ #define SHA256_LENGTH      32
+@@ -140,6 +143,22 @@ typedef struct __packed {
+ #define TPM_ALG_SHA512	0x000D
+ #define TPM_ALG_NULL	0x0010
+ #define TPM_ALG_SM3_256	0x0012
++ 
++#define TPM_ALG_MASK_NULL	    0x0000
++#define TPM_ALG_MASK_SHA1	    0x0001
++#define TPM_ALG_MASK_SHA256	    0x0008
++#define TPM_ALG_MASK_SM3_256	    0x0020
++#define TPM_ALG_MASK_SHA384	    0x0040
++#define TPM_ALG_MASK_SHA512	    0x0080
++
++#define SIGN_ALG_MASK_NULL                  0x00000000
++#define SIGN_ALG_MASK_RSASSA_1024_SHA1      0x00000001
++#define SIGN_ALG_MASK_RSASSA_1024_SHA256    0x00000002
++#define SIGN_ALG_MASK_RSASSA_2048_SHA1      0x00000004
++#define SIGN_ALG_MASK_RSASSA_2048_SHA256    0x00000008
++#define SIGN_ALG_MASK_ECDSA_P256            0x00001000
++#define SIGN_ALG_MASK_ECDSA_P384            0x00002000
++#define SIGN_ALG_MASK_SM2                   0x00010000
+ 
+ #define TPM_ALG_RSASSA  0x0014
+ #define TPM_ALG_ECDSA   0x0018
+diff --git a/lcptools-v2/crtpol.c b/lcptools-v2/crtpol.c
+index 9379745..d1c61fd 100644
+--- a/lcptools-v2/crtpol.c
++++ b/lcptools-v2/crtpol.c
+@@ -60,18 +60,23 @@
+ #include "pollist1.h"
+ 
+ static const char help[] =
+-    "Usage: lcp_crtpol2 <COMMAND> [OPTION]\n"
++    "Usage: lcp2_crtpol <COMMAND> [OPTION]\n"
+     "Create an Intel(R) TXT policy (and policy data file)\n\n"
+     "--create\n"
+-    "        --alg <sha1|sha256|sm3>    hash_alg\n"
++    
++    "        --alg <sha1|sha256|sm3>    hash algorithm for the policy\n"
+     "        --type <any|list>          type\n"
+     "        [--minver <ver>]           SINITMinVersion\n"
+     "        [--rev <ctr1>[,ctrN]       revocation values (comma separated,\n"
+     "                                   no spaces\n"
+     "        [--ctrl <pol ctrl]         policy control\n"
+     "        --pol <FILE>               policy file\n"
+-    "        [--data <FILE>             policy data file\n"
++    "        [--data <FILE>]            policy data file\n"
+     "        [FILE]...                  policy list files\n"
++    "        [--mask]                   Allowed policy hash algorithm(s)\n"
++    "        [--auxalg]                 AUX allowed hash algorithm(s)\n"
++    "        --sign                     LCP allowed signing algorithm(s)\n"
++    "        [--polver]                 LCP version\n"
+     "--show\n"
+     "        [--brief]                  brief format output\n"
+     "        [policy file]              policy file\n"
+@@ -99,21 +104,34 @@ static struct option long_opts[] =
+     {"pol",            required_argument,    NULL,     'p'},
+     {"data",           required_argument,    NULL,     'd'},
+     {"brief",          no_argument,          NULL,     'b'},
++    {"mask",           required_argument,    NULL,     'k'},
++    {"auxalg",         required_argument,    NULL,     'x'},
++    {"sign",           required_argument,    NULL,     's'},
++    {"polver",         required_argument,    NULL,     'e'},
+ 
+     {"verbose",        no_argument,          (int *)&verbose, true},
+     {0, 0, 0, 0}
+ };
+ 
+-uint16_t       version = LCP_DEFAULT_POLICY_VERSION;
++uint16_t       pol_ver = LCP_DEFAULT_POLICY_VERSION;
+ char           policy_file[MAX_PATH] = "";
+ char           poldata_file[MAX_PATH] = "";
+-char           alg_name[32] = "";
+-uint16_t       alg_type = TPM_ALG_NULL;
++
++char           lcp_alg_name[32] = "";
++char           aux_alg_name[32] = "";
++char           sign_alg_name[32] = "";
++char           pol_ver_name[32] = "";
++char           lcp_hash_mask_name[32] = "";
++uint16_t       lcp_hash_alg = TPM_ALG_NULL;
++uint16_t       aux_hash_alg = TPM_ALG_MASK_NULL;
++uint16_t       lcp_hash_mask = TPM_ALG_MASK_NULL;
++ 
+ char           type[32] = "";
+ uint8_t        sinit_min_ver = 0;
+ unsigned int   nr_rev_ctrs = 0;
+ uint16_t       rev_ctrs[LCP_MAX_LISTS] = { 0 };
+ uint32_t       policy_ctrl = LCP_DEFAULT_POLICY_CONTROL;
++uint32_t       lcp_sign_alg = SIGN_ALG_MASK_NULL;
+ bool           brief = false;
+ unsigned int   nr_files = 0;
+ char           files[LCP_MAX_LISTS][MAX_PATH];
+@@ -128,12 +146,27 @@ static int create(void)
+         return 1;
+     }
+     memset(pol, 0, sizeof(*pol));
+-    pol->version = version;
+-    pol->hash_alg = alg_type;
++    pol->version = pol_ver;
++    pol->hash_alg = lcp_hash_alg;
+     pol->sinit_min_version = sinit_min_ver;
+     for ( unsigned int i = 0; i < nr_rev_ctrs; i++ )
+         pol->data_revocation_counters[i] = rev_ctrs[i];
+     pol->policy_control = policy_ctrl;
++  
++    if(aux_hash_alg == TPM_ALG_MASK_NULL){
++        pol->aux_hash_alg_mask = convert_hash_alg_to_mask(pol->hash_alg);
++    }
++    else{
++        pol->aux_hash_alg_mask = aux_hash_alg;
++    }
++
++    if(lcp_hash_mask == TPM_ALG_MASK_NULL){
++        pol->lcp_hash_alg_mask = convert_hash_alg_to_mask(pol->hash_alg);
++    }
++    else{
++        pol->lcp_hash_alg_mask = lcp_hash_mask;
++    }
++    pol->lcp_sign_alg_mask = lcp_sign_alg;
+ 
+     if ( strcmp(type, "any") == 0 ) {
+         pol->policy_type = LCP_POLTYPE_ANY;
+@@ -178,6 +211,8 @@ static int create(void)
+         }
+         calc_policy_data_hash(poldata, &pol->policy_hash, pol->hash_alg);
+     }
++    
++    LOG("pol alg=0x%x, mask=0x%x, aux_mask=0x%x, sign_mask=0x%x\n", pol->hash_alg, pol->lcp_hash_alg_mask, pol->aux_hash_alg_mask, pol->lcp_sign_alg_mask);
+ 
+     bool ok;
+     ok = write_file(policy_file, pol, get_policy_size(pol));
+@@ -280,7 +315,7 @@ int main (int argc, char *argv[])
+ 
+     do {
+         c = getopt_long_only(argc, argv, "", long_opts, NULL);
+-
++        /*LOG("getopt: %c %s\n", c, optarg);*/
+         switch (c) {
+             /* commands */
+         case 'H':          /* help */
+@@ -295,12 +330,13 @@ int main (int argc, char *argv[])
+             LOG("cmdline opt: command: %c\n", cmd);
+             break;
+ 
+-	case 'a':
+-            strlcpy(alg_name, optarg, sizeof(alg_name));
+-            LOG("cmdline opt: alg: %s\n", alg_name);
++	    case 'a':
++            strlcpy(lcp_alg_name, optarg, sizeof(lcp_alg_name));
++            lcp_hash_alg = str_to_hash_alg(lcp_alg_name);
++            LOG("cmdline opt: alg: %s\n", lcp_alg_name);
+             break;
+ 
+-        case 'p':            /* policy file */
++    	    case 'p':            /* policy file */
+             strlcpy(policy_file, optarg, sizeof(policy_file));
+             LOG("cmdline opt: pol: %s\n", policy_file);
+             break;
+@@ -339,6 +375,47 @@ int main (int argc, char *argv[])
+             LOG("cmdline opt: brief: %u\n", brief);
+             break;
+ 
++        case 'k':           /* policy hash algorithm mask */
++            strlcpy(lcp_hash_mask_name, optarg, sizeof(lcp_hash_mask_name));
++            lcp_hash_mask = str_to_lcp_hash_mask(lcp_hash_mask_name);
++            LOG("cmdline opt: mask: %s = 0x%04X\n", lcp_hash_mask_name, lcp_hash_mask);
++            if ( lcp_hash_mask == TPM_ALG_MASK_NULL ) {
++                 ERROR("Error: LCP hash alg not supported\n");
++                 return 1;
++            }
++            break;
++
++        case 'x':           /* AUX hash algorithm */
++            strlcpy(aux_alg_name, optarg, sizeof(aux_alg_name));
++            LOG("cmdline opt: auxalg: %s\n", aux_alg_name);
++            aux_hash_alg = str_to_lcp_hash_mask(aux_alg_name);
++            if ( aux_hash_alg == TPM_ALG_MASK_NULL) {
++                 ERROR("Error: AUX hash alg not supported\n");
++                 return 1;
++            }
++            break;
++
++        case 's':           /* LCP signing algorithm */
++            strlcpy(sign_alg_name, optarg, sizeof(sign_alg_name));
++            LOG("cmdline opt: sign: %s\n", sign_alg_name);
++
++            lcp_sign_alg = str_to_sig_alg_mask(sign_alg_name, pol_ver);
++            if ( lcp_sign_alg == SIGN_ALG_MASK_NULL) {
++                 ERROR("Error: signing alg not supported\n");
++                 return 1;
++            }
++            break;
++        case 'e':           /* LCP version */
++            strlcpy(pol_ver_name, optarg, sizeof(pol_ver_name));
++            LOG("cmdline opt: sign: %s\n", pol_ver_name);
++
++            pol_ver = str_to_pol_ver(pol_ver_name);
++            if ( pol_ver == LCP_VER_NULL) {
++                 ERROR("Error: Invalid policy version\n");
++                 return 1;
++            }
++            break;
++
+         case 0:
+         case -1:
+             break;
+@@ -365,11 +442,23 @@ int main (int argc, char *argv[])
+         return 0;
+     }
+     else if ( cmd == 'C' ) {      /* --create */
+-	alg_type = str_to_hash_alg(alg_name);
+-        if ( alg_type == TPM_ALG_NULL) {
+-             ERROR("Error: alg not supported\n");
+-             return 1;
++	uint16_t lcp_major_version = pol_ver & 0xFF00;
++
++        if ( lcp_hash_alg == TPM_ALG_NULL) {
++            ERROR("Error: alg not supported\n");
++            return 1;
++        }
++        LOG("pol_ver & 0xFF00 is 0x%x", lcp_major_version);
++        if ( lcp_major_version == LCP_VER_2_0 ){
++            if ( lcp_sign_alg != SIGN_ALG_MASK_NULL) {
++                LOG("Info: Signature algorithm mask not defined for LCPv2, specified mask is ignored.\n");
++            }        
+         }
++        else if ( lcp_sign_alg == SIGN_ALG_MASK_NULL) {
++            ERROR("Error: LCPv3 signing alg mask not supported or not specified\n");
++            return 1;
++        }
++
+         if ( *type == '\0' ) {
+             ERROR("Error: no type specified\n");
+             return 1;
+diff --git a/lcptools-v2/lcputils.c b/lcptools-v2/lcputils.c
+index 5bf0de4..6a85b4a 100644
+--- a/lcptools-v2/lcputils.c
++++ b/lcptools-v2/lcputils.c
+@@ -292,7 +292,7 @@ const char *sig_alg_to_str(uint16_t alg)
+     }
+ }
+ 
+-extern uint16_t str_to_hash_alg(const char *str) 
++uint16_t str_to_hash_alg(const char *str) 
+ {
+     if (strcmp(str,"sha1") == 0)
+         return TPM_ALG_SHA1;
+@@ -308,12 +308,32 @@ extern uint16_t str_to_hash_alg(const char *str)
+         return  TPM_ALG_NULL;
+ }
+ 
+-extern uint16_t str_to_sig_alg(const char *str, const uint16_t version)
++uint16_t str_to_lcp_hash_mask(const char *str)
++{
++    if (strcmp(str,"sha1") == 0)
++        return TPM_ALG_MASK_SHA1;
++    else if (strcmp(str,"sha256") == 0)
++        return TPM_ALG_MASK_SHA256;
++    else if (strcmp(str,"sha384") == 0)
++        return TPM_ALG_MASK_SHA384;
++    else if (strcmp(str,"sha512") == 0)
++        return TPM_ALG_MASK_SHA512;
++    else if (strcmp(str,"sm3") == 0)
++        return TPM_ALG_MASK_SM3_256;
++    else if(strncmp(str, "0X", 2) || strncmp(str, "0x", 2))
++        return strtoul(str, NULL, 0);
++    else
++        return  TPM_ALG_MASK_NULL;
++}
++
++uint16_t str_to_sig_alg(const char *str, const uint16_t version)
+ {
+     LOG("str_to_sig_alg:version=%x\n",version);
+     if( version == LCP_TPM12_POLICY_LIST_VERSION) {
+         if (strcmp(str,"rsa") == 0)
+             return LCP_POLSALG_RSA_PKCS_15;
++        else if(strncmp(str, "0X", 2) || strncmp(str, "0x", 2))
++            return strtoul(str, NULL, 0);
+         else 
+             return LCP_POLSALG_NONE;
+     }
+@@ -329,9 +349,62 @@ extern uint16_t str_to_sig_alg(const char *str, const uint16_t version)
+         else 
+             return TPM_ALG_NULL;
+     }
+-    else 
++    else if(strncmp(str, "0X", 2) || strncmp(str, "0x", 2))
++        return strtoul(str, NULL, 0);
++    else
+         return TPM_ALG_NULL;
+ }
++uint32_t str_to_sig_alg_mask(const char *str, const uint16_t version)
++{
++    LOG("str_to_sig_alg_mask:version=%x\n",version);
++    uint16_t lcp_major_ver = version & 0xFF00;
++    if( lcp_major_ver == LCP_VER_2_0 ) {
++        //signature algorithm mask is undefined in LCPv2
++        return SIGN_ALG_MASK_NULL;
++    }
++    else if( lcp_major_ver == LCP_VER_3_0) {
++        if(strncmp(str, "0X", 2) || strncmp(str, "0x", 2)){
++            return strtoul(str, NULL, 0);
++        }
++        else{
++            //mask must be specified explicitly, no string parsing yet
++            return SIGN_ALG_MASK_NULL;
++        }
++    }
++    else 
++        return SIGN_ALG_MASK_NULL;
++}
++uint16_t str_to_pol_ver(const char *str)
++{
++    if( strcmp(str,"2.0") == 0)
++       return LCP_VER_2_0;
++    else if ( strcmp(str,"3.0") == 0)
++        return LCP_VER_3_0;
++    else if ( strcmp(str,"3.1") == 0)
++        return LCP_VER_3_1;
++    else 
++        return LCP_VER_NULL;
++}
++
++uint16_t convert_hash_alg_to_mask(uint16_t hash_alg)
++{
++    LOG("convert_hash_alg_to_mask hash_alg = 0x%x\n", hash_alg);
++    switch(hash_alg){
++    case TPM_ALG_SHA1:
++        return TPM_ALG_MASK_SHA1;
++    case TPM_ALG_SHA256:
++        return TPM_ALG_MASK_SHA256;
++    case TPM_ALG_SHA384:
++        return TPM_ALG_MASK_SHA384;
++    case TPM_ALG_SHA512:
++        return TPM_ALG_MASK_SHA512;
++    case TPM_ALG_SM3_256:
++        return TPM_ALG_MASK_SM3_256;
++    default:
++        return 0;
++    }
++    return 0;
++}
+ 
+ size_t get_lcp_hash_size(uint16_t hash_alg)
+ {
+diff --git a/lcptools-v2/lcputils.h b/lcptools-v2/lcputils.h
+index 3509ab4..d7e4c7b 100644
+--- a/lcptools-v2/lcputils.h
++++ b/lcptools-v2/lcputils.h
+@@ -62,20 +62,24 @@ extern bool parse_line_hashes(const char *line, tb_hash_t *hash, uint16_t alg);
+ extern bool parse_file(const char *filename,
+ 		       bool (*parse_line)(const char *line));
+ 
+-extern const char *hash_alg_to_str(uint16_t alg);
++const char *hash_alg_to_str(uint16_t alg);
+ 
+-extern const char *sig_alg_to_str(uint16_t alg);
++const char *sig_alg_to_str(uint16_t alg);
+ 
+-extern uint16_t str_to_hash_alg(const char *str);
++uint16_t str_to_hash_alg(const char *str);
++uint16_t str_to_lcp_hash_mask(const char *str);
++uint16_t convert_hash_alg_to_mask(uint16_t hash_alg);
+ 
+-extern uint16_t str_to_sig_alg(const char *str, const uint16_t version);
++uint16_t str_to_sig_alg(const char *str, const uint16_t version);
++uint32_t str_to_sig_alg_mask(const char *str, const uint16_t version);
+ 
+-extern size_t get_lcp_hash_size(uint16_t hash_alg);
++uint16_t str_to_pol_ver(const char *str);
+ 
+-extern bool verify_signature(const uint8_t *data, size_t data_size,
+-                             const uint8_t *pubkey, size_t pubkey_size,
+-                             const uint8_t *sig, bool is_sig_little_endian);
++size_t get_lcp_hash_size(uint16_t hash_alg);
+ 
++bool verify_signature(const uint8_t *data, size_t data_size,
++                      const uint8_t *pubkey, size_t pubkey_size,
++                      const uint8_t *sig, bool is_sig_little_endian);
+ #endif    /* __LCPUTILS_H__ */
+ 
+ 
+-- 
+2.16.1
+
