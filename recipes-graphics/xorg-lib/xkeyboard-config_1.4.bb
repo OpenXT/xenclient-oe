@@ -8,7 +8,7 @@ DEPENDS = "intltool-native xkbcomp-native glib-2.0 glib-2.0-native"
 RDEPENDS_${PN} = "xkbcomp"
 PR = "r4"
 
-SRC_URI = "http://xlibs.freedesktop.org/xkbdesc/xkeyboard-config-${PV}.tar.bz2 \
+SRC_URI = "http://xorg.freedesktop.org/releases/individual/data/${BPN}/${BPN}-${PV}.tar.bz2 \
            file://abnt2-fixes.patch;patch=1 \
            file://symlink-fix.patch;patch=1 \
            file://remove-generated-files.patch;patch=1 \
