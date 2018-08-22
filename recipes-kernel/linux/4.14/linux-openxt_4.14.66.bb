@@ -47,9 +47,9 @@ SRC_URI += "${KERNELORG_MIRROR}/linux/kernel/v${PV_MAJOR}.x/linux-${PV}.tar.xz;n
     file://lookup_swap_cache-bandaid.patch \
     file://defconfig \
     "
-SRC_URI_append_xenclient-dom0 = "file://efi-tables-for-dom0.patch;patch=1 \ 
+SRC_URI_append_xenclient-dom0 = "file://efi-tables-for-dom0.patch;patch=1 \
 	"
 
-SRC_URI[kernel.md5sum] = "bd17095c0db7c53cc08172f6ad4f23ca"
-SRC_URI[kernel.sha256sum] = "cd2e52f0e7ba861afa91cf487b2f45e5174115870f256a1d65996647b7bcc6d3"
 LIC_FILES_CHKSUM = "file://COPYING;md5=d7810fab7487fb0aad327b76f1be7cd7"
+SRC_URI[kernel.md5sum] = "2be54b83c5017a18179593048b47e9cb"
+SRC_URI[kernel.sha256sum] = "a38061ca4c864d11a72beb3dc5918a99f13372fe9ee35508d004fdfabd460413"
