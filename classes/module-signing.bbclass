@@ -39,3 +39,6 @@ do_sign_modules() {
 }
 
 addtask sign_modules after do_install before do_package
+# lockfiles needs to match module.bbclass make_scripts value
+# Otherwise sign-file could disappear from ${STAGING_KERNEL_BUILDDIR}
+do_sign_modules[lockfiles] = "${TMPDIR}/kernel-scripts.lock"
