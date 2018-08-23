@@ -18,6 +18,7 @@ SRC_URI_append = " \
     file://xsa265.patch \
     file://xsa266-4.9/0001-libxl-qemu_disk_scsi_drive_string-Break-out-common-p.patch \
     file://xsa266-4.9/0002-libxl-restore-passing-readonly-to-qemu-for-SCSI-disk.patch \
+    file://xsa269-4.10.patch \
     file://defconfig \
     file://config.patch \
     file://disable-xen-root-check.patch \
