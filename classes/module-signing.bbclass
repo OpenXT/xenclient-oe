@@ -30,7 +30,7 @@ do_sign_modules() {
                          ${B}/scripts/sign-file ; do
             [ -x "$SIGN_FILE" ] && break
         done
-        [ -z "$SIGN_FILE" ] && bbfatal "Cannot find scripts/sign-file"
+        [ -x "$SIGN_FILE" ] || bbfatal "Cannot find scripts/sign-file"
 
         find ${D} -name "*.ko" -print0 | \
           xargs -0 -n 1 $SIGN_FILE $SIG_HASH ${KERNEL_MODULE_SIG_KEY} \
@@ -39,3 +39,6 @@ do_sign_modules() {
 }
 
 addtask sign_modules after do_install before do_package
+# lockfiles needs to match module.bbclass make_scripts value
+# Otherwise sign-file could disappear from ${STAGING_KERNEL_BUILDDIR}
+do_sign_modules[lockfiles] = "${TMPDIR}/kernel-scripts.lock"
