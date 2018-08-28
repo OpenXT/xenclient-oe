@@ -11,12 +11,14 @@ DESCRIPTION = "The microcode data file contains the latest microcode\
  if the file is placed in the /etc/firmware directory of the Linux system."
 
 LICENSE = "Intel-Microcode-License"
-LIC_FILES_CHKSUM = "file://microcode.dat;md5=6c543cc4fd163ec8b73f7f1947709ba0"
+LIC_FILES_CHKSUM = "file://Intel-Microcode-License;md5=9052c0dbf7250dc0bef70bd8212b0573"
 
-SRC_URI = "https://downloadmirror.intel.com/27591/eng/microcode-${PV}.tgz"
-SRC_URI[md5sum] = "be315cd99a7ca392a2f917ceacbe14f2"
-SRC_URI[sha256sum] = "0b381face2df1b0a829dc4fa8fa93f47f39e11b1c9c22ebd44f8614657c1e779"
+SRC_URI = "https://downloadmirror.intel.com/28039/eng/microcode-${PV}.tgz \
+           file://Intel-Microcode-License \
+           "
 
+SRC_URI[md5sum] = "49f534f1079d3c5bc178a150c1c105aa"
+SRC_URI[sha256sum] = "29f9e8dc27e6c9b6488cecd7fe2394030307799e511db2d197d9e6553a7f9e40"
 DEPENDS = "iucode-tool-native"
 S = "${WORKDIR}"
 
@@ -30,18 +32,18 @@ inherit deploy
 UCODE_FILTER_PARAMETERS ?= ""
 
 do_compile() {
-	mkdir -p ${WORKDIR}/ucode/kernel/x86/microcode
+	rm -f ${WORKDIR}/intel-ucode/list
 	${STAGING_DIR_NATIVE}${sbindir_native}/iucode_tool \
 		${UCODE_FILTER_PARAMETERS} \
 		--overwrite \
 		--write-to=${WORKDIR}/microcode_${PV}.bin \
-		${WORKDIR}/microcode.dat
+		${WORKDIR}/intel-ucode/*
 
 	${STAGING_DIR_NATIVE}${sbindir_native}/iucode_tool \
 		${UCODE_FILTER_PARAMETERS} \
 		--overwrite \
 		--write-earlyfw=${WORKDIR}/microcode_${PV}.cpio \
-		${WORKDIR}/microcode.dat
+		${WORKDIR}/intel-ucode/*
 }
 
 do_install() {

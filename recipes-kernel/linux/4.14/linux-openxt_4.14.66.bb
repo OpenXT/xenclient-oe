@@ -44,12 +44,12 @@ SRC_URI += "${KERNELORG_MIRROR}/linux/kernel/v${PV_MAJOR}.x/linux-${PV}.tar.xz;n
     file://xsa-155-qsb-023-xen-netfront-add-range-check-for-Tx-response-id.patch;patch=1 \
     file://xsa-155-qsb-023-xen-netfront-copy-response-out-of-shared-buffer-befo.patch;patch=1 \
     file://xsa-155-qsb-023-xen-netfront-do-not-use-data-already-exposed-to-back.patch;patch=1 \
-    file://0001-mm-handle_mm_fault-xen_pmd_val-radix_tree_lookup_slo.patch;patch=1 \
+    file://lookup_swap_cache-bandaid.patch \
     file://defconfig \
     "
-SRC_URI_append_xenclient-dom0 = "file://efi-tables-for-dom0.patch;patch=1 \ 
+SRC_URI_append_xenclient-dom0 = "file://efi-tables-for-dom0.patch;patch=1 \
 	"
 
-SRC_URI[kernel.md5sum] = "7badf9d4911a2c26601f862199243fca"
-SRC_URI[kernel.sha256sum] = "4a9540f256b8ee91d49c3d55def90be3af8c0ddb1ff274d20bc56a42dcdbd810"
 LIC_FILES_CHKSUM = "file://COPYING;md5=d7810fab7487fb0aad327b76f1be7cd7"
+SRC_URI[kernel.md5sum] = "2be54b83c5017a18179593048b47e9cb"
+SRC_URI[kernel.sha256sum] = "a38061ca4c864d11a72beb3dc5918a99f13372fe9ee35508d004fdfabd460413"
