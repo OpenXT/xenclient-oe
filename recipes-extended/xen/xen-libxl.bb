@@ -82,7 +82,7 @@ FILES_${PN}-dbg += " \
     ${libdir}/.debug \
     /usr/src/debug \
 "
-FILES_${PN}-misc += "\
+FILES_xen-misc += "\
     ${sbindir}/xen-diag \
 "
 
