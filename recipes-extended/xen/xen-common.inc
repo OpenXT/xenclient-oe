@@ -93,6 +93,7 @@ SRC_URI_append = " \
     file://efi-load-option-support.patch \
     file://shim-support-for-shim-lock-measure.patch \
     file://efi-require-shim.patch \
+    file://tboot-measure-and-launch-from-xen-efi.patch \
 "
 
 COMPATIBLE_HOST = 'i686-oe-linux|(x86_64.*).*-linux|aarch64.*-linux'
