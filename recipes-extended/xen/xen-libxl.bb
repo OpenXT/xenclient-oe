@@ -82,9 +82,6 @@ FILES_${PN}-dbg += " \
     ${libdir}/.debug \
     /usr/src/debug \
 "
-FILES_xen-misc += "\
-    ${sbindir}/xen-diag \
-"
 
 CFLAGS_prepend += "${@bb.utils.contains('DISTRO_FEATURES', 'blktap2', '', '-I${STAGING_INCDIR}/blktap',d)}"
 

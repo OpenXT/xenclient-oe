@@ -78,6 +78,10 @@ INITSCRIPT_PARAMS_${PN}-console = "defaults 20"
 INITSCRIPT_NAME_${PN}-xenstored-c = "xenstored"
 INITSCRIPT_PARAMS_${PN}-xenstored-c = "defaults 05"
 
+FILES_${PN}-misc += " \
+    ${sbindir}/xen-diag \
+    "
+
 EXTRA_OEMAKE += "ETHERBOOT_ROMS=${STAGING_DIR_HOST}/usr/share/firmware/intel.rom"
 
 pkg_postinst_${PN}-xenstored-c () {
