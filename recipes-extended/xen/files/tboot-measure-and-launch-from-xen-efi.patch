@@ -37,11 +37,9 @@ Signed-off-by: Tamas K Lengyel <lengyelt@ainfosec.com>
  xen/include/xen/libelf.h          |   1 +
  9 files changed, 753 insertions(+), 27 deletions(-)
 
-diff --git a/docs/misc/efi.markdown b/docs/misc/efi.markdown
-index 5b54314134..8b80036d39 100644
 --- a/docs/misc/efi.markdown
 +++ b/docs/misc/efi.markdown
-@@ -112,6 +112,20 @@ Specifies an alternate configuration file to use in case the specified section
+@@ -112,6 +112,20 @@ Specifies an alternate configuration fil
  specified) configuration file. This is only meaningful in the [global] section
  and really not meant to be used together with the `-cfg=` command line option.
  
@@ -62,11 +60,9 @@ index 5b54314134..8b80036d39 100644
  Filenames must be specified relative to the location of the EFI binary.
  
  Extra options to be passed to Xen can also be specified on the command line,
-diff --git a/xen/arch/arm/efi/efi-boot.h b/xen/arch/arm/efi/efi-boot.h
-index ca655ff003..5aaaa23635 100644
 --- a/xen/arch/arm/efi/efi-boot.h
 +++ b/xen/arch/arm/efi/efi-boot.h
-@@ -392,7 +392,8 @@ static void __init efi_arch_cfg_file_early(EFI_FILE_HANDLE dir_handle, char *sec
+@@ -392,7 +392,8 @@ static void __init efi_arch_cfg_file_ear
          blexit(L"Unable to create new FDT");
  }
  
@@ -76,7 +72,7 @@ index ca655ff003..5aaaa23635 100644
  {
  }
  
-@@ -415,6 +416,16 @@ static void __init efi_arch_memory_setup(void)
+@@ -415,6 +416,16 @@ static void __init efi_arch_memory_setup
  {
  }
  
@@ -93,8 +89,6 @@ index ca655ff003..5aaaa23635 100644
  static void __init efi_arch_handle_cmdline(CHAR16 *image_name,
                                             CHAR16 *cmdline_options,
                                             char *cfgfile_options)
-diff --git a/xen/arch/x86/efi/efi-boot.h b/xen/arch/x86/efi/efi-boot.h
-index 5789d2cb70..f10a59f6f7 100644
 --- a/xen/arch/x86/efi/efi-boot.h
 +++ b/xen/arch/x86/efi/efi-boot.h
 @@ -8,16 +8,43 @@
@@ -142,7 +136,7 @@ index 5789d2cb70..f10a59f6f7 100644
  
  static void __init edd_put_string(u8 *dst, size_t n, const char *src)
  {
-@@ -212,6 +239,224 @@ static void __init efi_arch_process_memory_map(EFI_SYSTEM_TABLE *SystemTable,
+@@ -212,6 +239,224 @@ static void __init efi_arch_process_memo
  
  }
  
@@ -367,7 +361,7 @@ index 5789d2cb70..f10a59f6f7 100644
  static void *__init efi_arch_allocate_mmap_buffer(UINTN map_size)
  {
      return ebmalloc(map_size);
-@@ -227,12 +472,56 @@ static void __init efi_arch_pre_exit_boot(void)
+@@ -227,12 +472,56 @@ static void __init efi_arch_pre_exit_boo
      }
  }
  
@@ -376,7 +370,9 @@ index 5789d2cb70..f10a59f6f7 100644
  {
 -    u64 cr4 = XEN_MINIMAL_CR4 & ~X86_CR4_PGE, efer;
 +    u32 mbi_addr = setup_tboot_mbi();
-+
+ 
+-    efi_arch_relocate_image(__XEN_VIRT_START - xen_phys_start);
+-    memcpy((void *)trampoline_phys, trampoline_start, cfg.size);
 +    asm volatile(
 +        "cli\n"
 +
@@ -419,16 +415,14 @@ index 5789d2cb70..f10a59f6f7 100644
 +    );
 +    unreachable();
 +}
- 
--    efi_arch_relocate_image(__XEN_VIRT_START - xen_phys_start);
--    memcpy((void *)trampoline_phys, trampoline_start, cfg.size);
++
 +static void __init noreturn enter_xen_context(unsigned long mbi_p, unsigned long cr3)
 +{
 +    u64 cr4 = XEN_MINIMAL_CR4 & ~X86_CR4_PGE, efer;
  
      /* Set system registers and transfer control. */
      asm volatile("pushq $0\n\tpopfq");
-@@ -262,22 +551,35 @@ static void __init noreturn efi_arch_post_exit_boot(void)
+@@ -262,22 +551,35 @@ static void __init noreturn efi_arch_pos
                     "lretq  %[stkoff]-16"
                     : [rip] "=&r" (efer/* any dead 64-bit variable */),
                       [cr4] "+&r" (cr4)
@@ -467,7 +461,7 @@ index 5789d2cb70..f10a59f6f7 100644
  
      name.s = get_value(&cfg, section, "ucode");
      if ( !name.s )
-@@ -289,6 +591,112 @@ static void __init efi_arch_cfg_file_late(EFI_FILE_HANDLE dir_handle, char *sect
+@@ -289,6 +591,112 @@ static void __init efi_arch_cfg_file_lat
          read_file(dir_handle, s2w(&name), &ucode, NULL);
          efi_bs->FreePool(name.w);
      }
@@ -580,7 +574,7 @@ index 5789d2cb70..f10a59f6f7 100644
  }
  
  static void __init efi_arch_handle_cmdline(CHAR16 *image_name,
-@@ -561,6 +969,10 @@ static void __init efi_arch_memory_setup(void)
+@@ -557,6 +965,10 @@ static void __init efi_arch_memory_setup
      unsigned int i;
      EFI_STATUS status;
  
@@ -591,7 +585,7 @@ index 5789d2cb70..f10a59f6f7 100644
      /* Allocate space for trampoline (in first Mb). */
      cfg.addr = 0x100000;
  
-@@ -709,6 +1121,146 @@ void __init efi_multiboot2(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable
+@@ -705,6 +1117,146 @@ void __init efi_multiboot2(EFI_HANDLE Im
      efi_exit_boot(ImageHandle, SystemTable);
  }
  
@@ -738,8 +732,6 @@ index 5789d2cb70..f10a59f6f7 100644
  /*
   * Local variables:
   * mode: C
-diff --git a/xen/arch/x86/efi/stub.c b/xen/arch/x86/efi/stub.c
-index 0c481e3235..5be578a3d1 100644
 --- a/xen/arch/x86/efi/stub.c
 +++ b/xen/arch/x86/efi/stub.c
 @@ -50,6 +50,11 @@ bool efi_enabled(unsigned int feature)
@@ -754,11 +746,9 @@ index 0c481e3235..5be578a3d1 100644
  void efi_update_l4_pgtable(unsigned int l4idx, l4_pgentry_t l4e) { }
  
  bool efi_rs_using_pgtables(void)
-diff --git a/xen/arch/x86/tboot.c b/xen/arch/x86/tboot.c
-index d36bf33407..79952b5488 100644
 --- a/xen/arch/x86/tboot.c
 +++ b/xen/arch/x86/tboot.c
-@@ -6,6 +6,7 @@
+@@ -7,6 +7,7 @@
  #include <xen/iommu.h>
  #include <xen/acpi.h>
  #include <xen/pfn.h>
@@ -766,7 +756,7 @@ index d36bf33407..79952b5488 100644
  #include <asm/fixmap.h>
  #include <asm/page.h>
  #include <asm/processor.h>
-@@ -69,6 +70,19 @@ typedef struct __packed {
+@@ -73,6 +74,19 @@ typedef struct __packed {
      uint32_t     vtd_dmars_off;
  } sinit_mle_data_t;
  
@@ -786,7 +776,7 @@ index d36bf33407..79952b5488 100644
  static void __init tboot_copy_memory(unsigned char *va, uint32_t size,
                                       unsigned long pa)
  {
-@@ -88,6 +102,77 @@ static void __init tboot_copy_memory(unsigned char *va, uint32_t size,
+@@ -92,6 +106,77 @@ static void __init tboot_copy_memory(uns
      }
  }
  
@@ -864,7 +854,7 @@ index d36bf33407..79952b5488 100644
  void __init tboot_probe(void)
  {
      tboot_shared_t *tboot_shared;
-@@ -136,6 +221,9 @@ void __init tboot_probe(void)
+@@ -140,6 +225,9 @@ void __init tboot_probe(void)
                        TXT_PUB_CONFIG_REGS_BASE + TXTCR_SINIT_BASE);
      tboot_copy_memory((unsigned char *)&sinit_size, sizeof(sinit_size),
                        TXT_PUB_CONFIG_REGS_BASE + TXTCR_SINIT_SIZE);
@@ -874,7 +864,7 @@ index d36bf33407..79952b5488 100644
      clear_fixmap(FIX_TBOOT_MAP_ADDRESS);
  }
  
-@@ -440,7 +528,6 @@ int __init tboot_protect_mem_regions(void)
+@@ -444,7 +532,6 @@ int __init tboot_protect_mem_regions(voi
  int __init tboot_parse_dmar_table(acpi_table_handler dmar_handler)
  {
      int rc;
@@ -882,7 +872,7 @@ index d36bf33407..79952b5488 100644
      uint32_t dmar_table_length;
      unsigned long pa;
      sinit_mle_data_t sinit_mle_data;
-@@ -456,22 +543,8 @@ int __init tboot_parse_dmar_table(acpi_table_handler dmar_handler)
+@@ -460,22 +547,8 @@ int __init tboot_parse_dmar_table(acpi_t
          return 1;
  
      /* map TXT heap into Xen addr space */
@@ -906,11 +896,9 @@ index d36bf33407..79952b5488 100644
      /* get addr of DMAR table */
      pa += sinit_mle_data.vtd_dmars_off - sizeof(uint64_t);
      tboot_copy_memory((unsigned char *)&dmar_table_length,
-diff --git a/xen/common/efi/boot.c b/xen/common/efi/boot.c
-index d49288eb9f..c0237c4c51 100644
 --- a/xen/common/efi/boot.c
 +++ b/xen/common/efi/boot.c
-@@ -614,7 +614,7 @@ static bool __init read_file(EFI_FILE_HANDLE dir_handle, CHAR16 *name,
+@@ -640,7 +640,7 @@ static bool __init read_file(EFI_FILE_HA
          what = what ?: L"Seek";
      else
      {
@@ -919,7 +907,7 @@ index d49288eb9f..c0237c4c51 100644
                           HYPERVISOR_VIRT_END - DIRECTMAP_VIRT_START);
          ret = efi_bs->AllocatePages(AllocateMaxAddress, EfiLoaderData,
                                      PFN_UP(size), &file->addr);
-@@ -1128,6 +1128,8 @@ efi_start(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
+@@ -1154,6 +1154,8 @@ efi_start(EFI_HANDLE ImageHandle, EFI_SY
      __set_bit(EFI_RS, &efi_flags);
  #endif
  
@@ -928,7 +916,7 @@ index d49288eb9f..c0237c4c51 100644
      efi_init(ImageHandle, SystemTable);
  
      use_cfg_file = efi_arch_use_config_file(SystemTable);
-@@ -1216,6 +1218,13 @@ efi_start(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
+@@ -1244,6 +1246,13 @@ efi_start(EFI_HANDLE ImageHandle, EFI_SY
          /* Get the file system interface. */
          dir_handle = get_parent_handle(loaded_image, &file_name);
  
@@ -942,7 +930,7 @@ index d49288eb9f..c0237c4c51 100644
          /* Read and parse the config file. */
          if ( !cfg_file_name )
          {
-@@ -1340,7 +1349,7 @@ efi_start(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
+@@ -1388,7 +1397,7 @@ efi_start(EFI_HANDLE ImageHandle, EFI_SY
              }
          }
  
@@ -951,11 +939,9 @@ index d49288eb9f..c0237c4c51 100644
  
          efi_bs->FreePages(cfg.addr, PFN_UP(cfg.size));
          cfg.addr = 0;
-diff --git a/xen/common/libelf/libelf-loader.c b/xen/common/libelf/libelf-loader.c
-index 0f468727d0..c0a5bc4107 100644
 --- a/xen/common/libelf/libelf-loader.c
 +++ b/xen/common/libelf/libelf-loader.c
-@@ -184,6 +184,13 @@ static elf_errorstatus elf_load_image(struct elf_binary *elf, elf_ptrval dst, el
+@@ -184,6 +184,13 @@ static elf_errorstatus elf_load_image(st
          return -1;
      return 0;
  }
@@ -969,7 +955,7 @@ index 0f468727d0..c0a5bc4107 100644
  #endif
  
  /* Calculate the required additional kernel space for the elf image */
-@@ -546,6 +553,59 @@ elf_errorstatus elf_load_binary(struct elf_binary *elf)
+@@ -546,6 +553,59 @@ elf_errorstatus elf_load_binary(struct e
      return 0;
  }
  
@@ -1029,11 +1015,9 @@ index 0f468727d0..c0a5bc4107 100644
  elf_ptrval elf_get_ptr(struct elf_binary *elf, unsigned long addr)
  {
      return ELF_REALPTR2PTRVAL(elf->dest_base) + addr - elf->pstart;
-diff --git a/xen/include/xen/efi.h b/xen/include/xen/efi.h
-index b944c59e3f..a043000be8 100644
 --- a/xen/include/xen/efi.h
 +++ b/xen/include/xen/efi.h
-@@ -44,6 +44,7 @@ int efi_runtime_call(struct xenpf_efi_runtime_call *);
+@@ -44,6 +44,7 @@ int efi_runtime_call(struct xenpf_efi_ru
  int efi_compat_get_info(uint32_t idx, union compat_pf_efi_info *);
  int efi_compat_runtime_call(struct compat_pf_efi_runtime_call *);
  bool efi_secureboot_enabled(void);
@@ -1041,11 +1025,9 @@ index b944c59e3f..a043000be8 100644
  
  #endif /* !__ASSEMBLY__ */
  
-diff --git a/xen/include/xen/libelf.h b/xen/include/xen/libelf.h
-index b73998150f..3b9f4f9fa9 100644
 --- a/xen/include/xen/libelf.h
 +++ b/xen/include/xen/libelf.h
-@@ -364,6 +364,7 @@ void elf_set_log(struct elf_binary *elf, elf_log_callback*,
+@@ -364,6 +364,7 @@ void elf_set_log(struct elf_binary *elf,
  
  void elf_parse_binary(struct elf_binary *elf);
  elf_errorstatus elf_load_binary(struct elf_binary *elf);
@@ -1053,6 +1035,3 @@ index b73998150f..3b9f4f9fa9 100644
  
  elf_ptrval elf_get_ptr(struct elf_binary *elf, unsigned long addr);
  uint64_t elf_lookup_addr(struct elf_binary *elf, const char *symbol);
--- 
-2.18.0
-
