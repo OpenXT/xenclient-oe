@@ -36,7 +36,7 @@ PATCHES
 ################################################################################
 --- a/tools/libxl/libxl.h
 +++ b/tools/libxl/libxl.h
-@@ -1477,6 +1477,7 @@ int libxl_domain_remus_start(libxl_ctx *
+@@ -1518,6 +1518,7 @@ int libxl_domain_remus_start(libxl_ctx *
                               const libxl_asyncop_how *ao_how)
                               LIBXL_EXTERNAL_CALLERS_ONLY;
  
@@ -46,7 +46,7 @@ PATCHES
  int libxl_domain_sleep(libxl_ctx *ctx, uint32_t domid);
 --- a/tools/libxl/libxl_create.c
 +++ b/tools/libxl/libxl_create.c
-@@ -684,11 +684,30 @@ retry_transaction:
+@@ -687,11 +687,30 @@ retry_transaction:
                      roperm, ARRAY_SIZE(roperm));
      libxl__xs_mknod(gc, t,
                      GCSPRINTF("%s/control", dom_path),
@@ -79,7 +79,7 @@ PATCHES
  
      libxl__xs_mknod(gc, t,
                      GCSPRINTF("%s/control/shutdown", dom_path),
-@@ -755,6 +774,11 @@ retry_transaction:
+@@ -758,6 +777,11 @@ retry_transaction:
      libxl__xs_writev(gc, t, dom_path, info->xsdata);
      libxl__xs_writev(gc, t, GCSPRINTF("%s/platform", dom_path), info->platformdata);
  
@@ -91,7 +91,7 @@ PATCHES
      xs_write(ctx->xsh, t, GCSPRINTF("%s/control/platform-feature-multiprocessor-suspend", dom_path), "1", 1);
      xs_write(ctx->xsh, t, GCSPRINTF("%s/control/platform-feature-xs_reset_watches", dom_path), "1", 1);
  
-@@ -1409,17 +1433,12 @@ static void domcreate_launch_dm(libxl__e
+@@ -1415,17 +1439,12 @@ static void domcreate_launch_dm(libxl__e
      {
          libxl__device_console console;
          libxl__device device;
@@ -109,7 +109,7 @@ PATCHES
          dcs->sdss.dm.guest_domid = domid;
          if (libxl_defbool_val(d_config->b_info.device_model_stubdomain))
              libxl__spawn_stub_dm(egc, &dcs->sdss);
-@@ -1442,7 +1461,14 @@ static void domcreate_launch_dm(libxl__e
+@@ -1448,7 +1467,14 @@ static void domcreate_launch_dm(libxl__e
          libxl__device_console console, vuart;
          libxl__device device;
  
@@ -124,7 +124,7 @@ PATCHES
              libxl__device_add(gc, domid, &libxl__vfb_devtype,
                                &d_config->vfbs[i]);
              libxl__device_add(gc, domid, &libxl__vkb_devtype,
-@@ -1456,23 +1482,17 @@ static void domcreate_launch_dm(libxl__e
+@@ -1462,23 +1488,17 @@ static void domcreate_launch_dm(libxl__e
              libxl__device_console_dispose(&vuart);
          }
  
@@ -156,7 +156,7 @@ PATCHES
          ret = ERROR_INVAL;
 --- a/tools/libxl/libxl_disk.c
 +++ b/tools/libxl/libxl_disk.c
-@@ -452,6 +452,11 @@ static void device_disk_add(libxl__egc *
+@@ -451,6 +451,11 @@ static void device_disk_add(libxl__egc *
      aodev->action = LIBXL__DEVICE_ACTION_ADD;
      libxl__wait_device_connection(egc, aodev);
  
@@ -170,7 +170,7 @@ PATCHES
  out:
 --- a/tools/libxl/libxl_dm.c
 +++ b/tools/libxl/libxl_dm.c
-@@ -2118,6 +2118,20 @@ retry_transaction:
+@@ -2123,6 +2123,20 @@ retry_transaction:
      libxl__xs_printf(gc, XBT_NULL,
                       DEVICE_MODEL_XS_PATH(gc, dm_domid, guest_domid, "/xen_extended_power_mgmt"), "2");
  
@@ -193,7 +193,7 @@ PATCHES
      /* OpenXT: Again, no disk for the stubdom itself */
 --- a/tools/libxl/libxl_domain.c
 +++ b/tools/libxl/libxl_domain.c
-@@ -669,6 +669,13 @@ static int libxl__domain_pvcontrol(libxl
+@@ -703,6 +703,13 @@ static int libxl__domain_pvcontrol(libxl
      return libxl__domain_pvcontrol_write(gc, XBT_NULL, domid, cmd);
  }
  
@@ -207,7 +207,7 @@ PATCHES
  int libxl_domain_shutdown(libxl_ctx *ctx, uint32_t domid)
  {
      GC_INIT(ctx);
-@@ -938,6 +945,8 @@ void libxl__domain_destroy(libxl__egc *e
+@@ -972,6 +979,8 @@ void libxl__domain_destroy(libxl__egc *e
          dds->stubdom.domid = stubdomid;
          dds->stubdom.callback = stubdom_destroy_callback;
          dds->stubdom.soft_reset = false;
@@ -216,18 +216,18 @@ PATCHES
          libxl__destroy_domid(egc, &dds->stubdom);
      } else {
          dds->stubdom_finished = 1;
-@@ -1752,7 +1761,7 @@ int libxl_retrieve_domain_configuration(
+@@ -1786,7 +1795,7 @@ int libxl_retrieve_domain_configuration(
                          break;
                  }
  
 -                if (j < num) {         /* found in xenstore */
-+                if ((j < num) || !strncmp(dt->type, "nic", 4)) { /* found in xenstore */
++                if ((j < num) || dt->type == LIBXL__DEVICE_KIND_VIF) { /* found in xenstore */
                      if (dt->merge)
                          dt->merge(ctx, p + dt->dev_elem_size * j, q);
                  } else {                /* not found in xenstore */
 --- a/tools/libxl/libxl_internal.h
 +++ b/tools/libxl/libxl_internal.h
-@@ -1823,6 +1823,8 @@ _hidden int libxl__qmp_pci_del(libxl__gc
+@@ -1832,6 +1832,8 @@ _hidden int libxl__qmp_pci_del(libxl__gc
                                 libxl_device_pci *pcidev);
  /* Resume hvm domain */
  _hidden int libxl__qmp_system_wakeup(libxl__gc *gc, int domid);
@@ -238,7 +238,7 @@ PATCHES
  /* Resume QEMU. */
 --- a/tools/libxl/libxl_nic.c
 +++ b/tools/libxl/libxl_nic.c
-@@ -145,6 +145,8 @@ static int libxl__set_xenstore_nic(libxl
+@@ -129,6 +129,8 @@ static int libxl__set_xenstore_nic(libxl
                                     flexarray_t *back, flexarray_t *front,
                                     flexarray_t *ro_front)
  {
@@ -247,7 +247,7 @@ PATCHES
      flexarray_grow(back, 2);
  
      if (nic->script)
-@@ -252,6 +254,9 @@ static int libxl__set_xenstore_nic(libxl
+@@ -236,6 +238,9 @@ static int libxl__set_xenstore_nic(libxl
      flexarray_append(front, "mac");
      flexarray_append(front, GCSPRINTF(
                                      LIBXL_MAC_FMT, LIBXL_MAC_BYTES(nic->mac)));
@@ -257,20 +257,6 @@ PATCHES
  
      return 0;
  }
---- a/tools/libxl/libxl_qmp.c
-+++ b/tools/libxl/libxl_qmp.c
-@@ -913,6 +913,11 @@ int libxl__qmp_system_wakeup(libxl__gc *
-     return qmp_run_command(gc, domid, "system_wakeup", NULL, NULL, NULL);
- }
- 
-+int libxl__qmp_quit(libxl__gc *gc, int domid)
-+{
-+    return qmp_run_command(gc, domid, "quit", NULL, NULL, NULL);
-+}
-+
- int libxl__qmp_save(libxl__gc *gc, int domid, const char *filename)
- {
-     libxl__json_object *args = NULL;
 --- a/tools/libxl/libxl_types.idl
 +++ b/tools/libxl/libxl_types.idl
 @@ -508,6 +508,10 @@ libxl_domain_build_info = Struct("domain
@@ -294,12 +280,12 @@ PATCHES
      XLU_Config *config;
 -    XLU_ConfigList *cpus, *vbds, *nics, *pcis, *cvfbs, *cpuids, *vtpms,
 +    XLU_ConfigList *cpus, *vbds, *nics, *pcis, *cpuids, *vtpms,
-                    *usbctrls, *usbdevs, *p9devs, *vdispls;
+                    *usbctrls, *usbdevs, *p9devs, *vdispls, *pvcallsifs_devs;
      XLU_ConfigList *channels, *ioports, *irqs, *iomem, *viridian, *dtdevs,
                     *mca_caps;
-@@ -1233,6 +1234,11 @@ void parse_config_data(const char *confi
+@@ -1229,6 +1230,11 @@ void parse_config_data(const char *confi
+ 
      xlu_cfg_get_defbool(config, "nestedhvm", &b_info->nested_hvm, 0);
-     xlu_cfg_get_defbool(config, "apic", &b_info->apic, 0);
  
 +    if(!xlu_cfg_get_long(config, "restrictdisplaydepth", &l, 0))
 +        b_info->display_depth = l;
@@ -309,7 +295,7 @@ PATCHES
      switch(b_info->type) {
      case LIBXL_DOMAIN_TYPE_HVM:
          kernel_basename = libxl_basename(b_info->kernel);
-@@ -1824,64 +1830,38 @@ skip_nic:
+@@ -1856,64 +1862,38 @@ skip_nic:
          fprintf(stderr, "WARNING: vif2: netchannel2 is deprecated and not supported by xl\n");
      }
  
@@ -501,7 +487,7 @@ PATCHES
  
      libxl_domain_config_init(&d_config);
  
-@@ -967,7 +977,6 @@ int create_domain(struct domain_create *
+@@ -937,7 +947,6 @@ int create_domain(struct domain_create *
      if (dom_info->dryrun)
          goto out;
  
@@ -509,7 +495,7 @@ PATCHES
      assert(domid == INVALID_DOMID);
  
      rc = acquire_lock();
-@@ -1161,8 +1170,6 @@ start:
+@@ -1131,8 +1140,6 @@ start:
                   */
                  dom_info->console_autoconnect = 0;
  
@@ -520,7 +506,15 @@ PATCHES
                      d_config.c_info.name = strdup(common_domname);
 --- a/tools/libxl/libxl_console.c
 +++ b/tools/libxl/libxl_console.c
-@@ -740,6 +740,8 @@ static int libxl__set_xenstore_vfb(libxl
+@@ -727,11 +727,16 @@ out:
+     return AO_INPROGRESS;
+ }
+ 
++static LIBXL_DEFINE_UPDATE_DEVID(vfb)
++static LIBXL_DEFINE_DEVICE_FROM_TYPE(vfb)
++
+ static int libxl__set_xenstore_vfb(libxl__gc *gc, uint32_t domid,
+                                    libxl_device_vfb *vfb,
                                    flexarray_t *back, flexarray_t *front,
                                    flexarray_t *ro_front)
  {
@@ -529,7 +523,7 @@ PATCHES
      flexarray_append_pair(back, "vnc",
                            libxl_defbool_val(vfb->vnc.enable) ? "1" : "0");
      flexarray_append_pair(back, "vnclisten", vfb->vnc.listen);
-@@ -758,6 +760,13 @@ static int libxl__set_xenstore_vfb(libxl
+@@ -750,6 +755,13 @@ static int libxl__set_xenstore_vfb(libxl
      if (vfb->sdl.display) {
          flexarray_append_pair(back, "display", vfb->sdl.display);
      }
@@ -543,9 +537,19 @@ PATCHES
  
      return 0;
  }
+@@ -781,9 +793,6 @@ DEFINE_DEVICE_TYPE_STRUCT(vkb, VKBD,
+ #define libxl_device_vfb_list NULL
+ #define libxl_device_vfb_compare NULL
+ 
+-static LIBXL_DEFINE_UPDATE_DEVID(vfb)
+-static LIBXL_DEFINE_DEVICE_FROM_TYPE(vfb)
+-
+ /* vfb */
+ LIBXL_DEFINE_DEVICE_REMOVE(vfb)
+ 
 --- a/tools/libxl/libxl_device.c
 +++ b/tools/libxl/libxl_device.c
-@@ -1953,6 +1953,12 @@ void libxl__device_add_async(libxl__egc
+@@ -1993,6 +1993,12 @@ void libxl__device_add_async(libxl__egc
      aodev->action = LIBXL__DEVICE_ACTION_ADD;
      libxl__wait_device_connection(egc, aodev);
  
@@ -558,3 +562,17 @@ PATCHES
      rc = 0;
  
  out:
+--- a/tools/libxl/libxl_qmp.c
++++ b/tools/libxl/libxl_qmp.c
+@@ -940,6 +940,11 @@ int libxl__qmp_system_wakeup(libxl__gc *
+     return qmp_run_command(gc, domid, "system_wakeup", NULL, NULL, NULL);
+ }
+ 
++int libxl__qmp_quit(libxl__gc *gc, int domid)
++{
++    return qmp_run_command(gc, domid, "quit", NULL, NULL, NULL);
++}
++
+ int libxl__qmp_save(libxl__gc *gc, int domid, const char *filename, bool live)
+ {
+     libxl__json_object *args = NULL;
