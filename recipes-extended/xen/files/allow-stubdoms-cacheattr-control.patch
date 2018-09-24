@@ -22,14 +22,11 @@ attributes configured in the new pinned region when mappings are introduced.
 Patch changes:
 
 * Reorder the EPT page table entry logic to respect memory regions that have
-  been pinned via the XEN_DOMCTL_pin_mem_cacheattr operation, even for guests
+  been pinned via the XEN_DMOP_pin_memory_cacheattr operation, even for guests
   that do not have I/O privileges.
 
-* Update the dummy XSM policy, active when XSM is disabled, to grant
-  stubdomains permission to use XEN_DOMCTL_pin_mem_cacheattr on their guest.
-
 If appropriate for your trust model, guests themselves can be prevented from
-using XEN_DOMCTL_pin_mem_cacheattr via XSM policy.
+using XEN_DMOP_pin_memory_cacheattr via XSM policy.
 
 ################################################################################
 CHANGELOG
@@ -68,26 +65,16 @@ INTERNAL DEPENDENCIES
 ################################################################################
 
 Recommended: XSM policy should grant stubdomains access to
-XEN_DOMCTL_pin_mem_cacheattr applied to their target guests.
+XEN_DMOP_pin_memory_cacheattr applied to their target guests.
 It should disallow guests themselves access to it unless needed for passed
 through devices.
 
 ################################################################################
 PATCHES
 ################################################################################
---- a/xen/include/xsm/dummy.h
-+++ b/xen/include/xsm/dummy.h
-@@ -127,6 +127,7 @@ static XSM_INLINE int xsm_domctl(XSM_DEF
-     case XEN_DOMCTL_memory_mapping:
-     case XEN_DOMCTL_bind_pt_irq:
-     case XEN_DOMCTL_unbind_pt_irq:
-+    case XEN_DOMCTL_pin_mem_cacheattr:
-         return xsm_default_action(XSM_DM_PRIV, current->domain, d);
-     case XEN_DOMCTL_getdomaininfo:
-         return xsm_default_action(XSM_XS_PRIV, current->domain, d);
 --- a/xen/arch/x86/hvm/mtrr.c
 +++ b/xen/arch/x86/hvm/mtrr.c
-@@ -798,12 +798,6 @@ int epte_get_entry_emt(struct domain *d,
+@@ -803,12 +803,6 @@ int epte_get_entry_emt(struct domain *d,
          return MTRR_TYPE_UNCACHABLE;
      }
  
@@ -100,7 +87,7 @@ PATCHES
      gmtrr_mtype = hvm_get_mem_pinned_cacheattr(d, _gfn(gfn), order);
      if ( gmtrr_mtype >= 0 )
      {
-@@ -814,6 +808,12 @@ int epte_get_entry_emt(struct domain *d,
+@@ -819,6 +813,12 @@ int epte_get_entry_emt(struct domain *d,
      if ( gmtrr_mtype == -EADDRNOTAVAIL )
          return -1;
  

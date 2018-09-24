@@ -36,7 +36,7 @@ PATCHES
 ################################################################################
 --- a/xen/arch/x86/hvm/hvm.c
 +++ b/xen/arch/x86/hvm/hvm.c
-@@ -3193,6 +3193,37 @@ enum hvm_translation_result hvm_translat
+@@ -3199,6 +3199,37 @@ enum hvm_translation_result hvm_translat
      return HVMTRANS_okay;
  }
  
@@ -74,7 +74,7 @@ PATCHES
  #define HVMCOPY_from_guest (0u<<0)
  #define HVMCOPY_to_guest   (1u<<0)
  #define HVMCOPY_phys       (0u<<2)
-@@ -3253,9 +3284,9 @@ static enum hvm_translation_result __hvm
+@@ -3259,9 +3290,9 @@ static enum hvm_translation_result __hvm
              else
              {
                  if ( buf )
@@ -83,17 +83,17 @@ PATCHES
                  else
 -                    memset(p, 0, count);
 +                    __hvm_atomic_zero(p, count);
-                 paging_mark_dirty(v->domain, _mfn(page_to_mfn(page)));
+                 paging_mark_pfn_dirty(v->domain, _pfn(gfn_x(gfn)));
              }
          }
---- a/xen/arch/x86/mm/shadow/multi.c
-+++ b/xen/arch/x86/mm/shadow/multi.c
-@@ -4705,6 +4705,26 @@ static void emulate_unmap_dest(struct vc
-     sh_emulate_unmap_dest(v, addr, bytes, sh_ctxt);
+--- a/xen/arch/x86/mm/shadow/common.c
++++ b/xen/arch/x86/mm/shadow/common.c
+@@ -263,6 +263,26 @@ hvm_emulate_insn_fetch(enum x86_segment
+     return X86EMUL_OKAY;
  }
  
 +/*
-+ * Routine to make sh_x86_emulate_write appropriate to use for copying the
++ * Routine to make hvm_emulate_write appropriate to use for copying the
 + * results of instruction emulation back to guest memory - these
 + * typically require 64-bit, 32-bit and 16-bit writes to be atomic
 + * whereas memcpy is only atomic for 64-bit writes. This is still
@@ -113,14 +113,14 @@ PATCHES
 +}
 +
  static int
- sh_x86_emulate_write(struct vcpu *v, unsigned long vaddr, void *src,
-                      u32 bytes, struct sh_emulate_ctxt *sh_ctxt)
-@@ -4720,7 +4740,7 @@ sh_x86_emulate_write(struct vcpu *v, uns
-         return ~PTR_ERR(addr);
+ hvm_emulate_write(enum x86_segment seg,
+                   unsigned long offset,
+@@ -295,7 +315,7 @@ hvm_emulate_write(enum x86_segment seg,
+         return ~PTR_ERR(ptr);
  
      paging_lock(v->domain);
--    memcpy(addr, src, bytes);
-+    __sh_atomic_write(addr, src, bytes);
+-    memcpy(ptr, p_data, bytes);
++    __sh_atomic_write(ptr, p_data, bytes);
  
      if ( tb_init_done )
-     {
+         v->arch.paging.mode->shadow.trace_emul_write_val(ptr, addr,

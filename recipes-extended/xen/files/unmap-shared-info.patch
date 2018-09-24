@@ -38,8 +38,8 @@ PATCHES
 ################################################################################
 --- a/xen/common/domain.c
 +++ b/xen/common/domain.c
-@@ -406,6 +406,9 @@ struct domain *domain_create(domid_t dom
-         spin_unlock(&domlist_update_lock);
+@@ -412,6 +412,9 @@ struct domain *domain_create(domid_t dom
+         memcpy(d->handle, config->handle, sizeof(d->handle));
      }
  
 +    d->prev_mfn_shinfo = mfn_x(INVALID_MFN);
@@ -50,7 +50,7 @@ PATCHES
   fail:
 --- a/xen/include/xen/sched.h
 +++ b/xen/include/xen/sched.h
-@@ -476,6 +476,10 @@ struct domain
+@@ -483,6 +483,10 @@ struct domain
      unsigned int last_alloc_node;
      spinlock_t node_affinity_lock;
  
@@ -63,7 +63,7 @@ PATCHES
      struct vnuma_info *vnuma;
 --- a/xen/arch/x86/mm.c
 +++ b/xen/arch/x86/mm.c
-@@ -4237,6 +4237,9 @@ int xenmem_add_to_physmap_one(
+@@ -4280,6 +4280,9 @@ int xenmem_add_to_physmap_one(
      int rc = 0;
      mfn_t mfn = INVALID_MFN;
      p2m_type_t p2mt;
@@ -73,21 +73,19 @@ PATCHES
  
      if ( !paging_mode_translate(d) )
          return -EACCES;
-@@ -4246,7 +4249,12 @@ int xenmem_add_to_physmap_one(
+@@ -4289,6 +4292,11 @@ int xenmem_add_to_physmap_one(
          case XENMAPSPACE_shared_info:
              if ( idx == 0 )
-                 mfn = _mfn(virt_to_mfn(d->shared_info));
--            break;
+                 mfn = virt_to_mfn(d->shared_info);
 +            /* unmap shared info page if guest passed INVALID_MFN */
 +            if ( gpfn_new == (hvm_guest_x86_mode(current) == 8
 +                              ? mfn_x(INVALID_MFN)
 +                              : mfn_x(INVALID_MFN) >> 32) )
 +                unmap_shinfo = 1;
-+           break;
+             break;
          case XENMAPSPACE_grant_table:
              rc = gnttab_map_frame(d, idx, gpfn, &mfn);
-             if ( rc )
-@@ -4277,25 +4285,26 @@ int xenmem_add_to_physmap_one(
+@@ -4318,25 +4326,26 @@ int xenmem_add_to_physmap_one(
              break;
      }
  
@@ -120,7 +118,7 @@ PATCHES
  
      if ( rc )
          goto put_both;
-@@ -4314,13 +4323,28 @@ int xenmem_add_to_physmap_one(
+@@ -4354,13 +4363,28 @@ int xenmem_add_to_physmap_one(
  
      /* Map at new location. */
      if ( !rc )
@@ -128,8 +126,8 @@ PATCHES
 +        rc = guest_physmap_add_page(d, _gfn(gpfn_new), mfn, PAGE_ORDER_4K);
  
   put_both:
-     /* In the XENMAPSPACE_gmfn, we took a ref of the gfn at the top */
-     if ( space == XENMAPSPACE_gmfn || space == XENMAPSPACE_gmfn_range )
+     /* In the XENMAPSPACE_gmfn case, we took a ref of the gfn at the top. */
+     if ( space == XENMAPSPACE_gmfn )
          put_gfn(d, gfn);
  
 +    if ( space == XENMAPSPACE_shared_info || unmap_shinfo )
