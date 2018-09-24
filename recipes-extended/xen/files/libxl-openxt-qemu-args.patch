@@ -6,9 +6,7 @@ LibXL QEMU argument fixes to match the version used by OpenXT.
 ################################################################################
 LONG DESCRIPTION:
 ################################################################################
-* Fix the path to qemu-ifup
 * Don't use "-vnc none" or "-net none", our version of QEMU doesn't support it
-* Replace "-std-vga" with "-vga std"
 * More QEMU option changes to satisfy our version
 
 ################################################################################
@@ -38,59 +36,7 @@ PATCHES
 ################################################################################
 --- a/tools/libxl/libxl_dm.c
 +++ b/tools/libxl/libxl_dm.c
-@@ -34,10 +34,10 @@ static const char *libxl_tapif_script(li
- {
- #if defined(__linux__) || defined(__FreeBSD__)
-     if (info->stubdomain_version == LIBXL_STUBDOMAIN_VERSION_LINUX)
--        return GCSPRINTF("/etc/qemu-ifup%s", "");
-+        return GCSPRINTF("/etc/qemu/qemu-ifup%s", "");
-     return libxl__strdup(gc, "no");
- #else
--    return GCSPRINTF("%s/qemu-ifup", libxl__xen_script_dir_path());
-+    return GCSPRINTF("%s/qemu/qemu-ifup", libxl__xen_script_dir_path());
- #endif
- }
- 
-@@ -461,14 +461,7 @@ static int libxl__build_device_model_arg
-         if (libxl_defbool_val(vnc->findunused)) {
-             flexarray_append(dm_args, "-vncunused");
-         }
--    } else
--        /*
--         * VNC is not enabled by default by qemu-xen-traditional,
--         * however passing -vnc none causes SDL to not be
--         * (unexpectedly) enabled by default. This is overridden by
--         * explicitly passing -sdl below as required.
--         */
--        flexarray_append_pair(dm_args, "-vnc", "none");
-+    } /* OpenXT: no else here, we don't support "-vnc none" */
- 
-     if (sdl) {
-         flexarray_append(dm_args, "-sdl");
-@@ -527,7 +520,7 @@ static int libxl__build_device_model_arg
- 
-         switch (b_info->u.hvm.vga.kind) {
-         case LIBXL_VGA_INTERFACE_TYPE_STD:
--            flexarray_append(dm_args, "-std-vga");
-+            flexarray_append_pair(dm_args, "-vga", "std");
-             break;
-         case LIBXL_VGA_INTERFACE_TYPE_CIRRUS:
-             break;
-@@ -612,10 +605,9 @@ static int libxl__build_device_model_arg
-                 ioemu_nics++;
-             }
-         }
--        /* If we have no emulated nics, tell qemu not to create any */
--        if ( ioemu_nics == 0 ) {
--            flexarray_vappend(dm_args, "-net", "none", NULL);
--        }
-+
-+        /* OpenXT: We don't support -net none, adding nothing if there's 0 nic */
-+
-         if (libxl_defbool_val(b_info->u.hvm.gfx_passthru)) {
-             switch (b_info->u.hvm.gfx_passthru_kind) {
-             case LIBXL_GFX_PASSTHRU_KIND_DEFAULT:
-@@ -950,17 +942,15 @@ static int libxl__build_device_model_arg
+@@ -949,17 +949,15 @@ static int libxl__build_device_model_arg
                        "-xen-domid",
                        GCSPRINTF("%d", guest_domid), NULL);
  
@@ -114,7 +60,7 @@ PATCHES
      }
  
      for (i = 0; i < guest_config->num_channels; i++) {
-@@ -1002,7 +992,7 @@ static int libxl__build_device_model_arg
+@@ -1001,7 +999,7 @@ static int libxl__build_device_model_arg
      }
  
      if (c_info->name) {
@@ -123,7 +69,7 @@ PATCHES
      }
  
      if (vnc && !is_stubdom) {
-@@ -1044,17 +1034,12 @@ static int libxl__build_device_model_arg
+@@ -1043,17 +1041,12 @@ static int libxl__build_device_model_arg
          }
  
          flexarray_append(dm_args, vncarg);
@@ -144,7 +90,7 @@ PATCHES
  
      if (sdl && !is_stubdom) {
          flexarray_append(dm_args, "-sdl");
-@@ -1112,6 +1097,9 @@ static int libxl__build_device_model_arg
+@@ -1111,6 +1104,9 @@ static int libxl__build_device_model_arg
  
          if (libxl_defbool_val(b_info->u.hvm.nographic) && (!sdl && !vnc)) {
              flexarray_append(dm_args, "-nographic");
@@ -154,16 +100,7 @@ PATCHES
          }
  
          if (libxl_defbool_val(b_info->u.hvm.spice.enable) && !is_stubdom) {
-@@ -1156,7 +1144,7 @@ static int libxl__build_device_model_arg
- 
-         if (b_info->u.hvm.boot) {
-             flexarray_vappend(dm_args, "-boot",
--                    GCSPRINTF("order=%s", b_info->u.hvm.boot), NULL);
-+                    GCSPRINTF("%s", b_info->u.hvm.boot), NULL);
-         }
-         if (libxl_defbool_val(b_info->u.hvm.usb)
-             || b_info->u.hvm.usbdevice
-@@ -1224,6 +1212,9 @@ static int libxl__build_device_model_arg
+@@ -1223,6 +1219,9 @@ static int libxl__build_device_model_arg
          }
          if (!libxl__acpi_defbool_val(b_info)) {
              flexarray_append(dm_args, "-no-acpi");
@@ -173,7 +110,7 @@ PATCHES
          }
          if (b_info->max_vcpus > 1) {
              flexarray_append(dm_args, "-smp");
-@@ -1249,7 +1240,7 @@ static int libxl__build_device_model_arg
+@@ -1248,7 +1247,7 @@ static int libxl__build_device_model_arg
                                                  LIBXL_NIC_TYPE_VIF_IOEMU);
                  flexarray_append(dm_args, "-device");
                  flexarray_append(dm_args,
@@ -182,7 +119,7 @@ PATCHES
                               nics[i].model, nics[i].devid,
                               nics[i].devid, smac));
                  flexarray_append(dm_args, "-netdev");
-@@ -1400,11 +1391,9 @@ static int libxl__build_device_model_arg
+@@ -1399,11 +1398,9 @@ static int libxl__build_device_model_arg
  #undef APPEND_COLO_SOCK_CLIENT
              }
          }
@@ -197,7 +134,7 @@ PATCHES
      } else {
          if (!sdl && !vnc) {
              flexarray_append(dm_args, "-nographic");
-@@ -1518,7 +1507,7 @@ static int libxl__build_device_model_arg
+@@ -1517,7 +1514,7 @@ static int libxl__build_device_model_arg
              } else if ((disks[i].is_cdrom) && (b_info->stubdomain_version ==
                                                 LIBXL_STUBDOMAIN_VERSION_LINUX))
              {
