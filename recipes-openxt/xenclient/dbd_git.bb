@@ -7,6 +7,8 @@ DEPENDS = " \
     xenclient-toolstack \
 "
 
+PV = "0+git${SRCPV}"
+
 SRCREV = "${AUTOREV}"
 SRC_URI = " \
     git://${OPENXT_GIT_MIRROR}/manager.git;protocol=${OPENXT_GIT_PROTOCOL};branch=${OPENXT_BRANCH} \

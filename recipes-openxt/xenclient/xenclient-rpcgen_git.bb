@@ -1,6 +1,8 @@
 RPCGEN_VERSION = "1.0"
 require xenclient-rpcgen.inc
 
+PV = "0+git${SRCPV}"
+
 BBCLASSEXTEND = "native"
 
 S = "${WORKDIR}/git/rpcgen"
