@@ -16,6 +16,7 @@ require ${@bb.utils.contains('DISTRO_FEATURES', 'blktap2', 'xen-blktap2.inc', 'x
 SRC_URI_append = " \
     file://defconfig \
     file://config.patch \
+    file://revert-5191c1ef51b00ec112206917647faea55be8b02f.patch \
     file://disable-xen-root-check.patch \
     file://hvm-pm-hibernate-s-state.patch;patch=1 \
     file://prune-vga-acpi-dev.patch;patch=1 \
