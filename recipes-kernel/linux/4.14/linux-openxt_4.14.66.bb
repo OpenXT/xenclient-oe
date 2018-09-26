@@ -16,7 +16,6 @@ SRC_URI += "${KERNELORG_MIRROR}/linux/kernel/v${PV_MAJOR}.x/linux-${PV}.tar.xz;n
     file://acpi-video-delay-init.patch;patch=1 \
     file://skb-forward-copy-bridge-param.patch;patch=1 \
     file://dont-suspend-xen-serial-port.patch;patch=1 \
-    file://break-8021d.patch;patch=1 \
     file://extra-mt-input-devices.patch;patch=1 \
     file://tpm-log-didvid.patch;patch=1 \
     file://blktap2.patch;patch=1 \
