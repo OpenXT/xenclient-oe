@@ -33,7 +33,7 @@ PATCHES
 ################################################################################
 --- a/tools/libxc/include/xenctrl.h
 +++ b/tools/libxc/include/xenctrl.h
-@@ -2611,6 +2611,18 @@ int xc_domain_cacheflush(xc_interface *x
+@@ -2625,6 +2625,18 @@ int xc_domain_cacheflush(xc_interface *x
  /* Compat shims */
  #include "xenctrl_compat.h"
  
@@ -54,7 +54,7 @@ PATCHES
  /*
 --- a/tools/libxc/xc_domain.c
 +++ b/tools/libxc/xc_domain.c
-@@ -2201,6 +2201,68 @@ int xc_domain_set_machine_address_size(x
+@@ -2197,6 +2197,68 @@ int xc_domain_set_machine_address_size(x
      return do_domctl(xch, &domctl);
  }
  
@@ -123,171 +123,9 @@ PATCHES
  
  int xc_domain_get_machine_address_size(xc_interface *xch, uint32_t domid)
  {
---- a/xen/common/compat/memory.c
-+++ b/xen/common/compat/memory.c
-@@ -71,6 +71,8 @@ int compat_memory_op(unsigned int cmd, X
-             struct xen_remove_from_physmap *xrfp;
-             struct xen_vnuma_topology_info *vnuma;
-             struct xen_mem_access_op *mao;
-+            struct xen_translate_gpfn_list *xlat;
-+            struct xen_release_mfn_list *xrel;
-         } nat;
-         union {
-             struct compat_memory_reservation rsrv;
-@@ -79,6 +81,8 @@ int compat_memory_op(unsigned int cmd, X
-             struct compat_add_to_physmap_batch atpb;
-             struct compat_vnuma_topology_info vnuma;
-             struct compat_mem_access_op mao;
-+            struct compat_translate_gpfn_list xlat;
-+            struct compat_release_mfn_list xrel;
-         } cmp;
- 
-         set_xen_guest_handle(nat.hnd, COMPAT_ARG_XLAT_VIRT_BASE);
-@@ -395,6 +399,92 @@ int compat_memory_op(unsigned int cmd, X
-         }
- #endif
- 
-+        case XENMEM_translate_gpfn_list:
-+            if ( copy_from_guest(&cmp.xlat, compat, 1) )
-+                return -EFAULT;
-+
-+            /* Is size too large for us to encode a continuation? */
-+            if ( cmp.xlat.nr_gpfns > (UINT_MAX >> MEMOP_EXTENT_SHIFT) )
-+                return -EINVAL;
-+
-+            if ( !compat_handle_okay(cmp.xlat.gpfn_list, cmp.xlat.nr_gpfns) ||
-+                 !compat_handle_okay(cmp.xlat.mfn_list,  cmp.xlat.nr_gpfns) )
-+                return -EFAULT;
-+
-+            end_extent = start_extent + (COMPAT_ARG_XLAT_SIZE - sizeof(*nat.xlat)) /
-+                                        sizeof(*space);
-+            if ( end_extent > cmp.xlat.nr_gpfns )
-+                end_extent = cmp.xlat.nr_gpfns;
-+
-+            space = (xen_pfn_t *)(nat.xlat + 1);
-+            /* Code below depends upon .gpfn_list preceding .mfn_list. */
-+            BUILD_BUG_ON(offsetof(xen_translate_gpfn_list_t, gpfn_list) > offsetof(xen_translate_gpfn_list_t, mfn_list));
-+#define XLAT_translate_gpfn_list_HNDL_gpfn_list(_d_, _s_) \
-+            do \
-+            { \
-+                set_xen_guest_handle((_d_)->gpfn_list, space - start_extent); \
-+                for ( i = start_extent; i < end_extent; ++i ) \
-+                { \
-+                    compat_pfn_t pfn; \
-+                    if ( __copy_from_compat_offset(&pfn, (_s_)->gpfn_list, i, 1) ) \
-+                        return -EFAULT; \
-+                    *space++ = pfn; \
-+                } \
-+            } while (0)
-+#define XLAT_translate_gpfn_list_HNDL_mfn_list(_d_, _s_) \
-+            (_d_)->mfn_list = (_d_)->gpfn_list
-+            XLAT_translate_gpfn_list(nat.xlat, &cmp.xlat);
-+#undef XLAT_translate_gpfn_list_HNDL_mfn_list
-+#undef XLAT_translate_gpfn_list_HNDL_gpfn_list
-+
-+            if ( end_extent < cmp.xlat.nr_gpfns )
-+            {
-+                nat.xlat->nr_gpfns = end_extent;
-+                ++split;
-+            }
-+
-+            break;
-+
-+        case XENMEM_release_mfn_list:
-+            if ( copy_from_guest(&cmp.xrel, compat, 1) )
-+                return -EFAULT;
-+
-+            /* Is size too large for us to encode a continuation? */
-+            if ( cmp.xrel.nr_mfns > (UINT_MAX >> MEMOP_EXTENT_SHIFT) )
-+                return -EINVAL;
-+
-+            if ( !compat_handle_okay(cmp.xrel.mfn_list, cmp.xrel.nr_mfns) )
-+                return -EFAULT;
-+
-+            end_extent = start_extent + (COMPAT_ARG_XLAT_SIZE - sizeof(*nat.xrel)) /
-+                                        sizeof(*space);
-+            if ( end_extent > cmp.xrel.nr_mfns )
-+                end_extent = cmp.xrel.nr_mfns;
-+
-+            space = (xen_pfn_t *)(nat.xrel + 1);
-+#define XLAT_release_mfn_list_HNDL_mfn_list(_d_, _s_) \
-+            do \
-+            { \
-+                set_xen_guest_handle((_d_)->mfn_list, space - start_extent); \
-+                for ( i = start_extent; i < end_extent; ++i ) \
-+                { \
-+                    compat_pfn_t pfn; \
-+                    if ( __copy_from_compat_offset(&pfn, (_s_)->mfn_list, i, 1) ) \
-+                        return -EFAULT; \
-+                    *space++ = pfn; \
-+                } \
-+            } while (0)
-+            XLAT_release_mfn_list(nat.xrel, &cmp.xrel);
-+#undef XLAT_release_mfn_list_HNDL_mfn_list
-+
-+            if ( end_extent < cmp.xrel.nr_mfns )
-+            {
-+                nat.xrel->nr_mfns = end_extent;
-+                ++split;
-+            }
-+
-+            break;
-+
-         default:
-             return compat_arch_memory_op(cmd, compat);
-         }
-@@ -535,6 +625,48 @@ int compat_memory_op(unsigned int cmd, X
-                 rc = -EFAULT;
-             break;
- 
-+        case XENMEM_translate_gpfn_list:
-+            if ( split < 0 )
-+                end_extent = cmd >> MEMOP_EXTENT_SHIFT;
-+            else
-+                BUG_ON(rc);
-+
-+            for ( ; start_extent < end_extent; ++start_extent )
-+            {
-+                compat_pfn_t pfn = nat.xlat->mfn_list.p[start_extent];
-+
-+                BUG_ON(pfn != nat.xlat->mfn_list.p[start_extent]);
-+                if ( __copy_to_compat_offset(cmp.xlat.mfn_list, start_extent, &pfn, 1) )
-+                {
-+                    if ( split < 0 )
-+                        /* Cannot cancel the continuation... */
-+                        domain_crash(current->domain);
-+                    return -EFAULT;
-+                }
-+            }
-+            break;
-+
-+        case XENMEM_release_mfn_list:
-+            if ( split < 0 )
-+                end_extent = cmd >> MEMOP_EXTENT_SHIFT;
-+            else
-+                BUG_ON(rc);
-+
-+            for ( ; start_extent < end_extent; ++start_extent )
-+            {
-+                compat_pfn_t pfn = nat.xrel->mfn_list.p[start_extent];
-+
-+                BUG_ON(pfn != nat.xrel->mfn_list.p[start_extent]);
-+                if ( __copy_to_compat_offset(cmp.xrel.mfn_list, start_extent, &pfn, 1) )
-+                {
-+                    if ( split < 0 )
-+                        /* Cannot cancel the continuation... */
-+                        domain_crash(current->domain);
-+                    return -EFAULT;
-+                }
-+            }
-+            break;
-+
-         default:
-             domain_crash(current->domain);
-             split = 0;
 --- a/xen/common/memory.c
 +++ b/xen/common/memory.c
-@@ -454,6 +454,162 @@ static bool propagate_node(unsigned int
+@@ -493,6 +493,162 @@ static bool propagate_node(unsigned int
      return true;
  }
  
@@ -450,7 +288,7 @@ PATCHES
  static long memory_exchange(XEN_GUEST_HANDLE_PARAM(xen_memory_exchange_t) arg)
  {
      struct xen_memory_exchange exch;
-@@ -977,6 +1133,7 @@ long do_memory_op(unsigned long cmd, XEN
+@@ -1077,6 +1233,7 @@ long do_memory_op(unsigned long cmd, XEN
      struct memop_args args;
      domid_t domid;
      unsigned long start_extent = cmd >> MEMOP_EXTENT_SHIFT;
@@ -458,9 +296,9 @@ PATCHES
      int op = cmd & MEMOP_CMD_MASK;
  
      switch ( op )
-@@ -1424,6 +1581,27 @@ long do_memory_op(unsigned long cmd, XEN
-     }
- #endif
+@@ -1529,6 +1686,27 @@ long do_memory_op(unsigned long cmd, XEN
+             guest_handle_cast(arg, xen_mem_acquire_resource_t));
+         break;
  
 +    case XENMEM_translate_gpfn_list:
 +        progress = cmd >> MEMOP_EXTENT_SHIFT;
@@ -521,9 +359,9 @@ PATCHES
  
  /*
   * Returns the pseudo-physical memory map as it was when the domain
-@@ -652,6 +674,26 @@ DEFINE_XEN_GUEST_HANDLE(xen_vnuma_topolo
+@@ -714,6 +736,26 @@ DEFINE_XEN_GUEST_HANDLE(xen_vnuma_topolo
  
- /* Next available subop number is 28 */
+ /* Next available subop number is 29 */
  
 +/*
 + * Decrement the ref count of a list of mfns (previously incremented with
@@ -550,9 +388,9 @@ PATCHES
  /*
 --- a/xen/include/xlat.lst
 +++ b/xen/include/xlat.lst
-@@ -85,6 +85,8 @@
- !	memory_reservation		memory.h
+@@ -89,6 +89,8 @@
  !	mem_access_op			memory.h
+ !	mem_acquire_resource		memory.h
  !	pod_target			memory.h
 +!	translate_gpfn_list		memory.h
 +!	release_mfn_list		memory.h
@@ -561,7 +399,7 @@ PATCHES
  ?	vmemrange			memory.h
 --- a/xen/include/xsm/dummy.h
 +++ b/xen/include/xsm/dummy.h
-@@ -213,6 +213,12 @@ static XSM_INLINE int xsm_memory_stat_re
+@@ -227,6 +227,12 @@ static XSM_INLINE int xsm_memory_stat_re
      return xsm_default_action(action, d1, d2);
  }
  
@@ -584,7 +422,7 @@ PATCHES
  
      int (*console_io) (struct domain *d, int cmd);
  
-@@ -380,6 +381,11 @@ static inline int xsm_claim_pages(xsm_de
+@@ -381,6 +382,11 @@ static inline int xsm_claim_pages(xsm_de
      return xsm_ops->claim_pages(d);
  }
  
@@ -598,16 +436,17 @@ PATCHES
      return xsm_ops->console_io(d, cmd);
 --- a/xen/xsm/dummy.c
 +++ b/xen/xsm/dummy.c
-@@ -156,5 +156,6 @@ void __init xsm_fixup_ops (struct xsm_op
+@@ -156,6 +156,7 @@ void __init xsm_fixup_ops (struct xsm_op
      set_to_dummy_if_null(ops, pmu_op);
      set_to_dummy_if_null(ops, dm_op);
  #endif
 +    set_to_dummy_if_null(ops, memory_translate);
      set_to_dummy_if_null(ops, xen_version);
+     set_to_dummy_if_null(ops, domain_resource_map);
  }
 --- a/xen/include/asm-x86/mm.h
 +++ b/xen/include/asm-x86/mm.h
-@@ -257,9 +257,12 @@ struct page_info
+@@ -77,9 +77,12 @@
  #define PGC_state_offlined PG_mask(2, 9)
  #define PGC_state_free    PG_mask(3, 9)
  #define page_state_is(pg, st) (((pg)->count_info&PGC_state) == PGC_state_##st)
@@ -621,3 +460,163 @@ PATCHES
  #define PGC_count_mask    ((1UL<<PGC_count_width)-1)
  
  /*
+--- a/xen/common/compat/memory.c
++++ b/xen/common/compat/memory.c
+@@ -72,6 +72,8 @@ int compat_memory_op(unsigned int cmd, X
+             struct xen_vnuma_topology_info *vnuma;
+             struct xen_mem_access_op *mao;
+             struct xen_mem_acquire_resource *mar;
++            struct xen_translate_gpfn_list *xlat;
++            struct xen_release_mfn_list *xrel;
+         } nat;
+         union {
+             struct compat_memory_reservation rsrv;
+@@ -81,6 +83,8 @@ int compat_memory_op(unsigned int cmd, X
+             struct compat_vnuma_topology_info vnuma;
+             struct compat_mem_access_op mao;
+             struct compat_mem_acquire_resource mar;
++            struct compat_translate_gpfn_list xlat;
++            struct compat_release_mfn_list xrel;
+         } cmp;
+ 
+         set_xen_guest_handle(nat.hnd, COMPAT_ARG_XLAT_VIRT_BASE);
+@@ -448,6 +452,91 @@ int compat_memory_op(unsigned int cmd, X
+ 
+             break;
+         }
++        case XENMEM_translate_gpfn_list:
++            if ( copy_from_guest(&cmp.xlat, compat, 1) )
++                return -EFAULT;
++
++            /* Is size too large for us to encode a continuation? */
++            if ( cmp.xlat.nr_gpfns > (UINT_MAX >> MEMOP_EXTENT_SHIFT) )
++                return -EINVAL;
++
++            if ( !compat_handle_okay(cmp.xlat.gpfn_list, cmp.xlat.nr_gpfns) ||
++                 !compat_handle_okay(cmp.xlat.mfn_list,  cmp.xlat.nr_gpfns) )
++                return -EFAULT;
++
++            end_extent = start_extent + (COMPAT_ARG_XLAT_SIZE - sizeof(*nat.xlat)) /
++                                        sizeof(*space);
++            if ( end_extent > cmp.xlat.nr_gpfns )
++                end_extent = cmp.xlat.nr_gpfns;
++
++            space = (xen_pfn_t *)(nat.xlat + 1);
++            /* Code below depends upon .gpfn_list preceding .mfn_list. */
++            BUILD_BUG_ON(offsetof(xen_translate_gpfn_list_t, gpfn_list) > offsetof(xen_translate_gpfn_list_t, mfn_list));
++#define XLAT_translate_gpfn_list_HNDL_gpfn_list(_d_, _s_) \
++            do \
++            { \
++                set_xen_guest_handle((_d_)->gpfn_list, space - start_extent); \
++                for ( i = start_extent; i < end_extent; ++i ) \
++                { \
++                    compat_pfn_t pfn; \
++                    if ( __copy_from_compat_offset(&pfn, (_s_)->gpfn_list, i, 1) ) \
++                        return -EFAULT; \
++                    *space++ = pfn; \
++                } \
++            } while (0)
++#define XLAT_translate_gpfn_list_HNDL_mfn_list(_d_, _s_) \
++            (_d_)->mfn_list = (_d_)->gpfn_list
++            XLAT_translate_gpfn_list(nat.xlat, &cmp.xlat);
++#undef XLAT_translate_gpfn_list_HNDL_mfn_list
++#undef XLAT_translate_gpfn_list_HNDL_gpfn_list
++
++            if ( end_extent < cmp.xlat.nr_gpfns )
++            {
++                nat.xlat->nr_gpfns = end_extent;
++                ++split;
++            }
++
++            break;
++
++        case XENMEM_release_mfn_list:
++            if ( copy_from_guest(&cmp.xrel, compat, 1) )
++                return -EFAULT;
++
++            /* Is size too large for us to encode a continuation? */
++            if ( cmp.xrel.nr_mfns > (UINT_MAX >> MEMOP_EXTENT_SHIFT) )
++                return -EINVAL;
++
++            if ( !compat_handle_okay(cmp.xrel.mfn_list, cmp.xrel.nr_mfns) )
++                return -EFAULT;
++
++            end_extent = start_extent + (COMPAT_ARG_XLAT_SIZE - sizeof(*nat.xrel)) /
++                                        sizeof(*space);
++            if ( end_extent > cmp.xrel.nr_mfns )
++                end_extent = cmp.xrel.nr_mfns;
++
++            space = (xen_pfn_t *)(nat.xrel + 1);
++#define XLAT_release_mfn_list_HNDL_mfn_list(_d_, _s_) \
++            do \
++            { \
++                set_xen_guest_handle((_d_)->mfn_list, space - start_extent); \
++                for ( i = start_extent; i < end_extent; ++i ) \
++                { \
++                    compat_pfn_t pfn; \
++                    if ( __copy_from_compat_offset(&pfn, (_s_)->mfn_list, i, 1) ) \
++                        return -EFAULT; \
++                    *space++ = pfn; \
++                } \
++            } while (0)
++            XLAT_release_mfn_list(nat.xrel, &cmp.xrel);
++#undef XLAT_release_mfn_list_HNDL_mfn_list
++
++            if ( end_extent < cmp.xrel.nr_mfns )
++            {
++                nat.xrel->nr_mfns = end_extent;
++                ++split;
++            }
++
++            break;
+         default:
+             return compat_arch_memory_op(cmd, compat);
+         }
+@@ -634,6 +723,47 @@ int compat_memory_op(unsigned int cmd, X
+ 
+             break;
+         }
++        case XENMEM_translate_gpfn_list:
++            if ( split < 0 )
++                end_extent = cmd >> MEMOP_EXTENT_SHIFT;
++            else
++                BUG_ON(rc);
++
++            for ( ; start_extent < end_extent; ++start_extent )
++            {
++                compat_pfn_t pfn = nat.xlat->mfn_list.p[start_extent];
++
++                BUG_ON(pfn != nat.xlat->mfn_list.p[start_extent]);
++                if ( __copy_to_compat_offset(cmp.xlat.mfn_list, start_extent, &pfn, 1) )
++                {
++                    if ( split < 0 )
++                        /* Cannot cancel the continuation... */
++                        domain_crash(current->domain);
++                    return -EFAULT;
++                }
++            }
++            break;
++
++        case XENMEM_release_mfn_list:
++            if ( split < 0 )
++                end_extent = cmd >> MEMOP_EXTENT_SHIFT;
++            else
++                BUG_ON(rc);
++
++            for ( ; start_extent < end_extent; ++start_extent )
++            {
++                compat_pfn_t pfn = nat.xrel->mfn_list.p[start_extent];
++
++                BUG_ON(pfn != nat.xrel->mfn_list.p[start_extent]);
++                if ( __copy_to_compat_offset(cmp.xrel.mfn_list, start_extent, &pfn, 1) )
++                {
++                    if ( split < 0 )
++                        /* Cannot cancel the continuation... */
++                        domain_crash(current->domain);
++                    return -EFAULT;
++                }
++            }
++            break;
+ 
+         default:
+             domain_crash(current->domain);
