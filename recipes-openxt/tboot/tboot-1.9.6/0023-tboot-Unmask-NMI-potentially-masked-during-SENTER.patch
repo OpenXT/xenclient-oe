@@ -1,0 +1,89 @@
+From 4412c46d5ce1f392e1893c443ef0a6d4a8441cc0 Mon Sep 17 00:00:00 2001
+From: Eric Chanudet <chanudete@ainfosec.com>
+Date: Wed, 3 Oct 2018 14:22:09 -0400
+Subject: [PATCH] tboot: Unmask NMI potentially masked during SENTER
+
+Add an IRET-to-self entry point ot re-enable NMI and do so right after
+re-enabling SMI on BSP and APs. NMIs should be reactivated late to
+protect the MLE.
+
+At boot time, Xen 4.11 patches alternatives in NMI context[1] to avoid
+NMI or MCE happening while altering their code path. If the self-NMI has
+been masked during an SENTER (and apparently it is in some cases), Xen
+will panic() with:
+    "Timed out waiting for alternatives self-NMI to hit"
+
+Thanks to Ross Philipson at Oracle for his detailed explanations on how
+to solve this.
+
+[1] https://github.com/xen-project/xen/commit/5191c1ef51
+    5191c1ef51 x86/boot: Make alternative patching NMI-safe
+
+Signed-off-by: Eric Chanudet <chanudete@ainfosec.com>
+---
+ tboot/common/boot.S | 14 ++++++++++++++
+ tboot/txt/txt.c     |  9 +++++++++
+ 2 files changed, 23 insertions(+)
+
+diff --git a/tboot/common/boot.S b/tboot/common/boot.S
+index 47feaff..28463ff 100644
+--- a/tboot/common/boot.S
++++ b/tboot/common/boot.S
+@@ -303,6 +303,20 @@ ENTRY(_prot_to_real)
+ 	ADDR16
+ 	ljmp    *_real_mode_entry_point
+ 
++/* Entry point to (re-)enable NMI.
++ */
++ENTRY(nmi_enable)
++	/* An IRET-to-self can be used to unmask NMIs */
++	push %eax
++	leal .Lnmi_enable_done, %eax
++	pushfl
++	pushl $(cs_sel)
++	pushl %eax
++	iret
++.Lnmi_enable_done:
++	pop %eax
++	ret
++
+ /*
+  * interrupt handler
+  */
+diff --git a/tboot/txt/txt.c b/tboot/txt/txt.c
+index 3021c97..1293fc2 100644
+--- a/tboot/txt/txt.c
++++ b/tboot/txt/txt.c
+@@ -88,6 +88,7 @@ extern void apply_policy(tb_error_t error);
+ extern void cpu_wakeup(uint32_t cpuid, uint32_t sipi_vec);
+ extern void print_event(const tpm12_pcr_event_t *evt);
+ extern void print_event_2(void *evt, uint16_t alg);
++extern void nmi_enable(void);
+ 
+ 
+ /*
+@@ -759,6 +760,10 @@ static void txt_wakeup_cpus(void)
+     printk(TBOOT_DETA"enabling SMIs on BSP\n");
+     __getsec_smctrl();
+ 
++    /* enable NMIs on BSP. */
++    printk(TBOOT_DETA"enabling NMIs on BSP\n");
++    nmi_enable();
++
+     atomic_set(&ap_wfs_count, 0);
+ 
+     /* RLPs will use our GDT and CS */
+@@ -1221,6 +1226,10 @@ void txt_cpu_wakeup(void)
+     printk(TBOOT_DETA"enabling SMIs on cpu %u\n", cpuid);
+     __getsec_smctrl();
+ 
++    /* enable NMIs. */
++    printk(TBOOT_DETA"enabling NMIs on cpu %u\n", cpuid);
++    nmi_enable();
++
+     atomic_inc(&ap_wfs_count);
+     if ( use_mwait() )
+         ap_wait(cpuid);
+-- 
+2.18.0
+

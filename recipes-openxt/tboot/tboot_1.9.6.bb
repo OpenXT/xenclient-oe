@@ -29,6 +29,7 @@ SRC_URI = " \
     file://0020-tboot-utils-Fix-tools-build-in-64bits-env.patch \
     file://0021-tboot-find-e820-regions-that-include-the-limit.patch \
     file://0022-tboot-add-support-for-launching-64-bit-PE-kernels.patch \
+    file://0023-tboot-Unmask-NMI-potentially-masked-during-SENTER.patch \
 "
 
 SRC_URI[md5sum] = "bf785aa8637846f4c741d436146227fa"
