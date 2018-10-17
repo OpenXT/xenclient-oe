@@ -46,8 +46,6 @@ Signed-off-by: Daniel P. Smith <dpsmith@apertussolutions.com>
  create mode 100644 pcr-calc/util.h
  create mode 100644 pcr-calc/uuid.h
 
-diff --git a/Makefile b/Makefile
-index efb17e3..0e85e73 100644
 --- a/Makefile
 +++ b/Makefile
 @@ -14,7 +14,7 @@ export ROOTDIR=$(CURDIR)
@@ -59,9 +57,6 @@ index efb17e3..0e85e73 100644
  
  #
  # build rules
-diff --git a/pcr-calc/Makefile b/pcr-calc/Makefile
-new file mode 100644
-index 0000000..25e0591
 --- /dev/null
 +++ b/pcr-calc/Makefile
 @@ -0,0 +1,70 @@
@@ -135,9 +130,6 @@ index 0000000..25e0591
 +
 +%.o : %.c $(BUILD_DEPS)
 +	$(CC) $(CFLAGS) -DNO_TBOOT_LOGLVL -c $< -o $@
-diff --git a/pcr-calc/eventlog.c b/pcr-calc/eventlog.c
-new file mode 100644
-index 0000000..b232449
 --- /dev/null
 +++ b/pcr-calc/eventlog.c
 @@ -0,0 +1,119 @@
@@ -260,9 +252,6 @@ index 0000000..b232449
 +out:
 +	return NULL;
 +}
-diff --git a/pcr-calc/eventlog.h b/pcr-calc/eventlog.h
-new file mode 100644
-index 0000000..7329125
 --- /dev/null
 +++ b/pcr-calc/eventlog.h
 @@ -0,0 +1,42 @@
@@ -308,9 +297,6 @@ index 0000000..7329125
 +struct tpm *parse_tpm20_log(char *buffer, size_t size);
 +
 +#endif
-diff --git a/pcr-calc/hash.c b/pcr-calc/hash.c
-new file mode 100644
-index 0000000..fafaade
 --- /dev/null
 +++ b/pcr-calc/hash.c
 @@ -0,0 +1,210 @@
@@ -524,9 +510,6 @@ index 0000000..fafaade
 + * indent-tabs-mode: nil
 + * End:
 + */
-diff --git a/pcr-calc/heap.h b/pcr-calc/heap.h
-new file mode 100644
-index 0000000..c7bf9b7
 --- /dev/null
 +++ b/pcr-calc/heap.h
 @@ -0,0 +1,354 @@
@@ -884,9 +867,6 @@ index 0000000..c7bf9b7
 + * indent-tabs-mode: nil
 + * End:
 + */
-diff --git a/pcr-calc/module_hash.c b/pcr-calc/module_hash.c
-new file mode 100644
-index 0000000..4cf1579
 --- /dev/null
 +++ b/pcr-calc/module_hash.c
 @@ -0,0 +1,427 @@
@@ -1317,12 +1297,9 @@ index 0000000..4cf1579
 +	if (cmdline != NULL) free(cmdline);
 +	return 1;
 +}
-diff --git a/pcr-calc/pcr-calc.c b/pcr-calc/pcr-calc.c
-new file mode 100644
-index 0000000..e51c3d9
 --- /dev/null
 +++ b/pcr-calc/pcr-calc.c
-@@ -0,0 +1,352 @@
+@@ -0,0 +1,376 @@
 +/*
 + *
 + * Copyright (c) 2017 Daniel P. Smith
@@ -1371,9 +1348,9 @@ index 0000000..e51c3d9
 +#include "../include/hash.h"
 +#include "uuid.h"
 +#include "tb_policy.h"
++#include "tpm.h"
 +#include "util.h"
 +#include "eventlog.h"
-+#include "tpm.h"
 +
 +
 +/* flags */
@@ -1392,7 +1369,7 @@ index 0000000..e51c3d9
 +bool __hash_start_use_extend = false;
 +
 +static void print_help(void) {
-+	error_msg("pcr-calc [-h2dclvq] [-a sha1|sha256] -p policy_file -m hash_str\n"
++	error_msg("pcr-calc [-h2dclvqe] [-a sha1|sha256] -p policy_file -m hash_str\n"
 +		"\t-h Help: will print out this help message.\n"
 +		"\t-2 TPM 2.0.\n"
 +		"\t-d D/A mode.\n"
@@ -1402,12 +1379,13 @@ index 0000000..e51c3d9
 +		"\t-q Hash start quirk mode.\n"
 +		"\t-a alg Alogrithm: select what hash alogrithm to use.\n"
 +		"\t-p policy_file Tboot Policy: the policy that was/will be used.\n"
-+		"\t-m hash_str Multiboot Module: include module hash (MLE first).\n");
++		"\t-m hash_str Multiboot Module: include module hash (MLE first).\n"
++		"\t-e evt_type:hash_str Override PCR events type found in the logs with the provided value.\n");
 +}
 +
 +static bool apply_lg_policy(struct tpm *t, tb_policy_t *policy, size_t pol_size,
-+		     tb_hash_t *mb, int mb_count)
-+{
++			    tb_hash_t *mb, int mb_count,
++			    const struct pcr_event *evt, int evt_count) {
 +	tb_hash_t *pol_hash;
 +	struct pcr *p;
 +	struct pcr_event *pe;
@@ -1418,6 +1396,10 @@ index 0000000..e51c3d9
 +
 +	pe = tpm_find_event(t, policy->hash_alg, TPM_EVT_MLE_HASH, 1);
 +	pe->digest = mb[0];
++
++	for (i = 0; i < evt_count; ++i)
++		if (!tpm_substitute_event(t, policy->hash_alg, &evt[i]))
++			goto out;
 +
 +	if (!tpm_recalculate(t))
 +		goto out;
@@ -1459,7 +1441,8 @@ index 0000000..e51c3d9
 +}
 +
 +static bool apply_da_policy(struct tpm *t, tb_policy_t *policy, size_t pol_size,
-+		     tb_hash_t *mb, int mb_count) {
++			    tb_hash_t *mb, int mb_count,
++			    const struct pcr_event *evt, int evt_count) {
 +	tb_hash_t *pol_hash;
 +	struct pcr *p;
 +	struct pcr_event *pe;
@@ -1473,6 +1456,10 @@ index 0000000..e51c3d9
 +
 +	pe = tpm_find_event(t, hash_alg, TPM_EVT_MLE_HASH, 1);
 +	pe->digest = mb[0];
++
++	for (i = 0; i < evt_count; ++i)
++		if (!tpm_substitute_event(t, hash_alg, &evt[i]))
++			goto out;
 +
 +	if (!tpm_recalculate(t))
 +		goto out;
@@ -1519,8 +1506,9 @@ index 0000000..e51c3d9
 +
 +int main(int argc, char *argv[]) {
 +	extern int optind;
-+	int opt, flags, mb_count = 0, ret = 0;
++	int opt, flags, mb_count = 0, evt_count = 0, ret = 0;
 +	tb_hash_t mb[20];
++	struct pcr_event evt[20];
 +	struct tpm *t = NULL;
 +	uint16_t alg_override = 0;
 +	size_t pol_size = 0;
@@ -1528,10 +1516,10 @@ index 0000000..e51c3d9
 +
 +	flags = FLAG_TPM12;
 +
-+	while ((opt = getopt(argc, (char ** const)argv, "h2dclvqa:p:m:")) != -1) {
++	while ((opt = getopt(argc, (char ** const)argv, "h2dclvqa:p:m:e:")) != -1) {
 +		switch (opt) {
 +			case 'm':
-+				if (mb_count > 20) {
++				if (mb_count >= 20) {
 +					error_msg("passed max number of hashes to -m\n");
 +					ret = 1;
 +					goto out;
@@ -1583,6 +1571,19 @@ index 0000000..e51c3d9
 +			break;
 +			case 'q':
 +				set_hash_start_extend();
++			break;
++			case 'e':
++				if (evt_count >= 20) {
++					error_msg("passed max number of pcr events to -e\n");
++					ret = 1;
++					goto out;
++				}
++				if (read_pcr_event(optarg, &evt[evt_count]) <= 0) {
++					error_msg("failed to pass valid pcr event to -e\n");
++					ret = 1;
++					goto out;
++				}
++				++evt_count;
 +			break;
 +			case 'h':
 +				print_help();
@@ -1650,13 +1651,13 @@ index 0000000..e51c3d9
 +	}
 +
 +	if (flags & FLAG_DA) {
-+		if (!apply_da_policy(t, policy_file, pol_size, mb, mb_count)) {
++		if (!apply_da_policy(t, policy_file, pol_size, mb, mb_count, evt, evt_count)) {
 +			error_msg("failed applying DA policy.\n");
 +			ret = 1;
 +			goto out_destroy;
 +		}
 +	} else {
-+		if (!apply_lg_policy(t, policy_file, pol_size, mb, mb_count)) {
++		if (!apply_lg_policy(t, policy_file, pol_size, mb, mb_count, evt, evt_count)) {
 +			error_msg("failed applying LG policy.\n");
 +			ret = 1;
 +			goto out_destroy;
@@ -1675,9 +1676,6 @@ index 0000000..e51c3d9
 +out:
 +	return ret;
 +}
-diff --git a/pcr-calc/tb_policy.c b/pcr-calc/tb_policy.c
-new file mode 100644
-index 0000000..4f39ae6
 --- /dev/null
 +++ b/pcr-calc/tb_policy.c
 @@ -0,0 +1,82 @@
@@ -1763,9 +1761,6 @@ index 0000000..4f39ae6
 +out:
 +	return NULL;
 +}
-diff --git a/pcr-calc/tb_policy.h b/pcr-calc/tb_policy.h
-new file mode 100644
-index 0000000..cc23f2f
 --- /dev/null
 +++ b/pcr-calc/tb_policy.h
 @@ -0,0 +1,43 @@
@@ -1812,12 +1807,9 @@ index 0000000..cc23f2f
 +tb_hash_t *tb_policy_hash(tb_policy_t *pol, size_t size, uint16_t alg);
 +
 +#endif
-diff --git a/pcr-calc/tpm.c b/pcr-calc/tpm.c
-new file mode 100644
-index 0000000..478fcee
 --- /dev/null
 +++ b/pcr-calc/tpm.c
-@@ -0,0 +1,391 @@
+@@ -0,0 +1,408 @@
 +/*
 + *
 + * Copyright (c) 2017 Daniel P. Smith
@@ -2054,18 +2046,15 @@ index 0000000..478fcee
 +
 +int tpm_count_event(struct tpm *t, uint16_t alg, uint32_t evt_type)
 +{
-+	int i,j,bank,count = 0;
++	int i, j, count = 0;
 +	struct pcr_bank *b;
 +
-+	if (!t) {
-+		return false;
-+	}
-+
-+	if (!(t->active_banks & alg_to_mask(alg)))
++	if (!t)
 +		return 0;
 +
-+	bank = alg_to_bank(alg);
-+	b = &t->banks[bank];
++	b = tpm_get_bank(t, alg);
++	if (!b)
++		return 0;
 +
 +	for (i = 0; i < MAX_PCR; i++) {
 +		struct pcr *p = &b->pcrs[i];
@@ -2083,18 +2072,15 @@ index 0000000..478fcee
 +struct pcr_event *tpm_find_event(struct tpm *t, uint16_t alg,
 +				uint32_t evt_type, int n)
 +{
-+	int i,j,bank,count = 1;
++	int i, j, count = 1;
 +	struct pcr_bank *b;
 +
-+	if (!t) {
-+		return false;
-+	}
-+
-+	if (!(t->active_banks & alg_to_mask(alg)))
++	if (!t)
 +		return NULL;
 +
-+	bank = alg_to_bank(alg);
-+	b = &t->banks[bank];
++	b = tpm_get_bank(t, alg);
++	if (!b)
++		return NULL;
 +
 +	for (i = 0; i < MAX_PCR; i++) {
 +		struct pcr *p = &b->pcrs[i];
@@ -2112,20 +2098,43 @@ index 0000000..478fcee
 +	return NULL;
 +}
 +
-+bool tpm_clear_all_event(struct tpm *t, uint16_t alg, uint32_t evt_type)
++bool tpm_substitute_event(struct tpm *t, uint16_t alg,
++			  const struct pcr_event *evt)
 +{
-+	int i,j,bank;
++	unsigned int i, j;
 +	struct pcr_bank *b;
 +
-+	if (!t) {
++	if (!t || !evt)
 +		return false;
++
++	b = tpm_get_bank(t, alg);
++	if (!b)
++		return false;
++
++	for (i = 0; i < MAX_PCR; ++i) {
++		struct pcr *p = &b->pcrs[i];
++
++		for (j = 0; j < p->log_idx; ++j) {
++			if (p->log[j].type == evt->type) {
++				p->log[j].digest = evt->digest;
++			}
++		}
 +	}
 +
-+	if (!(t->active_banks & alg_to_mask(alg)))
++	return true;
++}
++
++bool tpm_clear_all_event(struct tpm *t, uint16_t alg, uint32_t evt_type)
++{
++	int i, j;
++	struct pcr_bank *b;
++
++	if (!t)
 +		return false;
 +
-+	bank = alg_to_bank(alg);
-+	b = &t->banks[bank];
++	b = tpm_get_bank(t, alg);
++	if (!b)
++		return false;
 +
 +	for (i = 0; i < MAX_PCR; i++) {
 +		struct pcr *p = &b->pcrs[i];
@@ -2209,12 +2218,9 @@ index 0000000..478fcee
 +		pcr_print(&bank->pcrs[i], alg);
 +	}
 +}
-diff --git a/pcr-calc/tpm.h b/pcr-calc/tpm.h
-new file mode 100644
-index 0000000..6538409
 --- /dev/null
 +++ b/pcr-calc/tpm.h
-@@ -0,0 +1,167 @@
+@@ -0,0 +1,186 @@
 +/*
 + * pcr.h: pcr definitions
 + *
@@ -2358,6 +2364,23 @@ index 0000000..6538409
 +		return 0;
 +}
 +
++static inline struct pcr_bank *tpm_get_bank(const struct tpm *t, uint16_t alg)
++{
++	int bank;
++
++	if (!t)
++		return NULL;
++
++	bank = alg_to_bank(alg);
++	if (bank < 0)
++		return NULL;
++
++	if (!(t->active_banks & alg_to_mask(alg)))
++		return NULL;
++
++	return &t->banks[bank];
++}
++
 +extern bool __hash_start_use_extend;
 +static inline void set_hash_start_extend(void)
 +{
@@ -2375,6 +2398,8 @@ index 0000000..6538409
 +int tpm_count_event(struct tpm *t, uint16_t alg, uint32_t evt_type);
 +struct pcr_event *tpm_find_event(struct tpm *t, uint16_t alg,
 +				uint32_t evt_type, int n);
++bool tpm_substitute_event(struct tpm *t, uint16_t alg,
++			  const struct pcr_event *evt);
 +bool tpm_clear_all_event(struct tpm *t, uint16_t alg, uint32_t evt_type);
 +bool tpm_recalculate(struct tpm *t);
 +void tpm_print(struct tpm *t, uint16_t alg);
@@ -2382,12 +2407,9 @@ index 0000000..6538409
 +bool pcr_record_event(struct pcr *p, uint16_t alg, uint32_t type, tb_hash_t *hash);
 +
 +#endif
-diff --git a/pcr-calc/util.c b/pcr-calc/util.c
-new file mode 100644
-index 0000000..65c8064
 --- /dev/null
 +++ b/pcr-calc/util.c
-@@ -0,0 +1,134 @@
+@@ -0,0 +1,167 @@
 +/*
 + *
 + * Copyright (c) 2017 Daniel P. Smith
@@ -2431,8 +2453,11 @@ index 0000000..65c8064
 +#include <sys/stat.h>
 +#include <fcntl.h>
 +#include <unistd.h>
++#include <limits.h>
 +
 +#include "../include/hash.h"
++#include "uuid.h"
++#include "tpm.h"
 +
 +#define error_msg(fmt, ...)         fprintf(stderr, fmt, ##__VA_ARGS__)
 +
@@ -2522,12 +2547,39 @@ index 0000000..65c8064
 +	return 0;
 +}
 +
-diff --git a/pcr-calc/util.h b/pcr-calc/util.h
-new file mode 100644
-index 0000000..6a7e998
++/*
++ * Parse a string representing a pcr event.
++ * Format: <event-id>:<hash>
++ * e.g, for sha256: '0x40f:5a3e80a37915b1601c363acd1601df7ef257d5d32c664004a2ec0484a4f60628'
++ * e.g, for sha512: '0x40f:be688838ca8686e5c90689bf2ab585cef1137c999b48c70b92f67a5c34dc15697b5d11c982ed6d71be1e1e7f7b4e0733884aa97c3f7a339a8ed03577cf74be09
++ */
++#define PCREVT_BUF_LEN 135
++int read_pcr_event(const char *s, struct pcr_event *evt)
++{
++	size_t len = strnlen(s, PCREVT_BUF_LEN);
++	char *end = NULL;
++	unsigned long type;
++	tb_hash_t digest;
++
++	if (len >= PCREVT_BUF_LEN)
++		return -1;
++
++	type = strtoul(s, &end, 0);
++	if (type == ULONG_MAX)
++		return -1;
++	if (!end || *end != ':' || s == end)
++		return -1;
++
++	if (!read_hash(&end[1], &digest))
++		return -1;
++
++	evt->type = type;
++	evt->digest = digest;
++	return len;
++}
 --- /dev/null
 +++ b/pcr-calc/util.h
-@@ -0,0 +1,45 @@
+@@ -0,0 +1,46 @@
 +/*
 + *
 + * Copyright (c) 2017 Daniel P. Smith
@@ -2571,11 +2623,9 @@ index 0000000..6a7e998
 +
 +bool read_hash(const char *hexstr, tb_hash_t *hash);
 +size_t read_file(const char *path, char **buffer);
++int read_pcr_event(const char *s, struct pcr_event *evt);
 +
 +#endif
-diff --git a/pcr-calc/uuid.h b/pcr-calc/uuid.h
-new file mode 100644
-index 0000000..7cd7e28
 --- /dev/null
 +++ b/pcr-calc/uuid.h
 @@ -0,0 +1,53 @@
@@ -2632,6 +2682,3 @@ index 0000000..7cd7e28
 +} uuid_t;
 +
 +#endif
--- 
-2.16.1
-
