@@ -413,9 +413,10 @@ check_txt_quirk() {
 calculate_drtm_pcrs() {
     local root="${1:-/}"
     local conf=${2}
-    local hashalg=${3:-"sha1"}
-    local srtm="${4:-0}"
-    local args=''
+    local hashalg=${3}
+    local srtm="${4}"
+    shift 4
+    local evtlog_ovr="${@}"
     local p17=''
     local p18=''
     local p19=''
@@ -440,6 +441,7 @@ calculate_drtm_pcrs() {
         local modhashes=''
         local policy=''
         local pcrs=''
+        local args=''
 
         modhashes=$(hash_modules ${root} ${hashalg} "${modules}" ${srtm})
         [[ $? -ne 0 ]] && return 1
@@ -447,9 +449,6 @@ calculate_drtm_pcrs() {
         # get a tmp file name to store policy
         policy=$(mktemp -qu)
         [[ $? -ne 0 ]] && return 1
-
-        is_tpm_2_0
-        [[ $? -eq 0 ]] && args="-2 -a sha256"
 
         create_policy ${policy} ${hashalg}
         [[ $? -ne 0 ]] && return 1
@@ -462,7 +461,13 @@ calculate_drtm_pcrs() {
             args="${args} -m ${m}"
         done
 
-        pcrs=$(pcr-calc ${args}|tr -d ' ')
+        if [ -n "${evtlog_ovr}" ]; then
+            for o in ${evtlog_ovr} ; do
+                args="${args} -e ${o}"
+            done
+        fi
+
+        pcrs=$(pcr-calc -2 -a sha256 ${args}|tr -d ' ')
         [[ $? -ne 0 ]] && return 1
 
         for l in $pcrs; do
