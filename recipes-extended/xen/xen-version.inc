@@ -1,3 +1,3 @@
-XEN_PV = "4.9.3-pre"
+XEN_PV = "4.9.3"
 XEN_BRANCH = "stable-4.9"
-XEN_SRCREV = "71e51140fdeb98c8fefc3a7067b554212bb61ac9"
+XEN_SRCREV = "RELEASE-4.9.3"
