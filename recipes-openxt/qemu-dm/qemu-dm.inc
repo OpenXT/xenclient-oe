@@ -51,11 +51,10 @@ SRC_URI += "file://compile-time-stubdom-flag.patch \
             file://block-remove-unused-block-format-support.patch \
             file://net-Remove-unused-network-options.patch \
             file://round-pci-region-sizes.patch \
-            file://vhost-stubs.patch \
             "
 
-SRC_URI[md5sum] = "122fd7cdf241ff7eb1e42c0b503b5d1b"
-SRC_URI[sha256sum] = "c9f4a147bc915d24df9784affc611a115f42d24720a89210b479f1ba7a3f679c"
+SRC_URI[md5sum] = "25440304a1ee31935475e9aedf604d5c"
+SRC_URI[sha256sum] = "933e62ad604f5f8d0a93f5e0a98fd95f9d2e23ff1dbd0c744c6c7506bba8ebe8"
 
 S = "${WORKDIR}/qemu-${PV}"
 
@@ -96,7 +95,10 @@ EXTRA_OECONF += " \
     --disable-tcg-interpreter \
     --disable-tcg \
     --disable-vhost-net \
+    --disable-vhost-crypto \
     --disable-vhost-scsi \
+    --disable-vhost-vsock \
+    --disable-vhost-user \
     --disable-bzip2 \
     --disable-libusb \
     --disable-usb-redir \
@@ -167,6 +169,16 @@ do_compile_prepend() {
 	dev_disable CONFIG_HYPERV_TESTDEV
 	dev_disable CONFIG_VIRTIO_PCI
 	dev_disable CONFIG_VIRTIO
+	dev_disable CONFIG_VIRTIO_9P
+	dev_disable CONFIG_VIRTIO_BALLOON
+	dev_disable CONFIG_VIRTIO_BLK
+	dev_disable CONFIG_VIRTIO_CRYPTO
+	dev_disable CONFIG_VIRTIO_GPU
+	dev_disable CONFIG_VIRTIO_INPUT
+	dev_disable CONFIG_VIRTIO_NET
+	dev_disable CONFIG_VIRTIO_RNG
+	dev_disable CONFIG_VIRTIO_SCSI
+	dev_disable CONFIG_VIRTIO_SERIAL
 	dev_disable CONFIG_USB_OHCI
 	# Things blow up without xhci
 	#dev_disable CONFIG_USB_XHCI

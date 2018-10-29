@@ -52,7 +52,7 @@ PATCHES
 ################################################################################
 --- a/hw/display/vga.c
 +++ b/hw/display/vga.c
-@@ -559,6 +559,28 @@ void vga_ioport_write(void *opaque, uint
+@@ -560,6 +560,28 @@ void vga_ioport_write(void *opaque, uint
      }
  }
  
@@ -81,7 +81,7 @@ PATCHES
  /*
   * Sanity check vbe register writes.
   *
-@@ -610,7 +632,10 @@ static void vbe_fixup_regs(VGACommonStat
+@@ -611,7 +633,10 @@ static void vbe_fixup_regs(VGACommonStat
      }
  
      /* check height */
@@ -93,8 +93,8 @@ PATCHES
      maxy = s->vbe_size / linelength;
      if (r[VBE_DISPI_INDEX_YRES] == 0) {
          r[VBE_DISPI_INDEX_YRES] = 1;
-@@ -724,6 +749,30 @@ uint32_t vbe_ioport_read_data(void *opaq
-         val = s->vbe_size / (64 * 1024);
+@@ -725,6 +750,30 @@ uint32_t vbe_ioport_read_data(void *opaq
+         val = s->vbe_size / (64 * KiB);
      } else {
          val = 0;
 +        if (!(s->vbe_regs[VBE_DISPI_INDEX_ENABLE] & VBE_DISPI_GETCAPS)) {
@@ -124,7 +124,7 @@ PATCHES
      }
      trace_vga_vbe_read(s->vbe_index, val);
      return val;
-@@ -793,6 +842,15 @@ void vbe_ioport_write_data(void *opaque,
+@@ -794,6 +843,15 @@ void vbe_ioport_write_data(void *opaque,
          default:
              break;
          }
@@ -142,23 +142,7 @@ PATCHES
  
 --- a/hw/display/vga_int.h
 +++ b/hw/display/vga_int.h
-@@ -49,6 +49,15 @@
- #define VBE_DISPI_INDEX_NB              0xa /* size of vbe_regs[] */
- #define VBE_DISPI_INDEX_VIDEO_MEMORY_64K 0xa /* read-only, not in vbe_regs */
- 
-+#define VBE_DISPI_EXT_INDEX_START           0xd
-+#define VBE_DISPI_EXT_INDEX_STRIDE          (VBE_DISPI_EXT_INDEX_START + 0x0) /* 0xd */
-+#define VBE_DISPI_EXT_INDEX_NB              0x1 /* size of vbe_ext_regs[] */
-+#define VBE_DISPI_EXT_INDEX_EDID_XRES       (VBE_DISPI_EXT_INDEX_START + 0x1) /* 0xe -- read-only, not in vbe_regs */
-+#define VBE_DISPI_EXT_INDEX_EDID_YRES       (VBE_DISPI_EXT_INDEX_START + 0x2) /* 0xf -- read-only, not in vbe_regs */
-+#define VBE_DISPI_EXT_INDEX_STRIDE_ALIGN    (VBE_DISPI_EXT_INDEX_START + 0x3) /* 0x10 -- read-only, not in vbe_regs */
-+#define VBE_DISPI_EXT_INDEX_32BPP_ONLY      (VBE_DISPI_EXT_INDEX_START + 0x4) /* 0x11 -- read-only, not in vbe_regs */
-+#define VBE_DISPI_EXT_INDEX_LEGACY_RES_ONLY (VBE_DISPI_EXT_INDEX_START + 0x5) /* 0x12 -- read-only, not in vbe_regs */
-+
- #define VBE_DISPI_ID0                   0xB0C0
- #define VBE_DISPI_ID1                   0xB0C1
- #define VBE_DISPI_ID2                   0xB0C2
-@@ -134,6 +143,7 @@ typedef struct VGACommonState {
+@@ -103,6 +103,7 @@ typedef struct VGACommonState {
      /* bochs vbe state */
      uint16_t vbe_index;
      uint16_t vbe_regs[VBE_DISPI_INDEX_NB];
@@ -168,7 +152,7 @@ PATCHES
      uint32_t vbe_bank_mask;
 --- a/hw/xen/xen_backend.c
 +++ b/hw/xen/xen_backend.c
-@@ -822,3 +822,35 @@ int xenstore_update_power(enum xenstore_
+@@ -974,3 +974,35 @@ int xenstore_update_power(enum xenstore_
  
      return xenstore_write_int(dompath, "power-state", type);
  }
@@ -226,7 +210,7 @@ PATCHES
      void (*dpy_cursor_define)(DisplayChangeListener *dcl,
                                QEMUCursor *cursor);
  
-@@ -297,6 +300,9 @@ void dpy_text_cursor(QemuConsole *con, i
+@@ -298,6 +301,9 @@ void dpy_text_cursor(QemuConsole *con, i
  void dpy_text_update(QemuConsole *con, int x, int y, int w, int h);
  void dpy_text_resize(QemuConsole *con, int w, int h);
  void dpy_mouse_set(QemuConsole *con, int x, int y, int on);
@@ -238,7 +222,7 @@ PATCHES
  bool dpy_gfx_check_format(QemuConsole *con,
 --- a/ui/console.c
 +++ b/ui/console.c
-@@ -1703,6 +1703,29 @@ void dpy_mouse_set(QemuConsole *con, int
+@@ -1732,6 +1732,29 @@ void dpy_mouse_set(QemuConsole *con, int
      }
  }
  
@@ -268,3 +252,21 @@ PATCHES
  void dpy_cursor_define(QemuConsole *con, QEMUCursor *cursor)
  {
      DisplayState *s = con->ds;
+--- a/include/hw/display/bochs-vbe.h
++++ b/include/hw/display/bochs-vbe.h
+@@ -22,6 +22,15 @@
+ #define VBE_DISPI_INDEX_NB              0xa /* size of vbe_regs[] */
+ #define VBE_DISPI_INDEX_VIDEO_MEMORY_64K 0xa /* read-only, not in vbe_regs */
+ 
++#define VBE_DISPI_EXT_INDEX_START           0xd
++#define VBE_DISPI_EXT_INDEX_STRIDE          (VBE_DISPI_EXT_INDEX_START + 0x0) /* 0xd */
++#define VBE_DISPI_EXT_INDEX_NB              0x1 /* size of vbe_ext_regs[] */
++#define VBE_DISPI_EXT_INDEX_EDID_XRES       (VBE_DISPI_EXT_INDEX_START + 0x1) /* 0xe -- read-only, not in vbe_regs */
++#define VBE_DISPI_EXT_INDEX_EDID_YRES       (VBE_DISPI_EXT_INDEX_START + 0x2) /* 0xf -- read-only, not in vbe_regs */
++#define VBE_DISPI_EXT_INDEX_STRIDE_ALIGN    (VBE_DISPI_EXT_INDEX_START + 0x3) /* 0x10 -- read-only, not in vbe_regs */
++#define VBE_DISPI_EXT_INDEX_32BPP_ONLY      (VBE_DISPI_EXT_INDEX_START + 0x4) /* 0x11 -- read-only, not in vbe_regs */
++#define VBE_DISPI_EXT_INDEX_LEGACY_RES_ONLY (VBE_DISPI_EXT_INDEX_START + 0x5) /* 0x12 -- read-only, not in vbe_regs */
++
+ /* VBE_DISPI_INDEX_ID */
+ #define VBE_DISPI_ID0                   0xB0C0
+ #define VBE_DISPI_ID1                   0xB0C1

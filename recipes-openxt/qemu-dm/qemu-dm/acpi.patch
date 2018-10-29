@@ -108,7 +108,7 @@ PATCHES
          }
 --- a/hw/acpi/piix4.c
 +++ b/hw/acpi/piix4.c
-@@ -359,7 +359,15 @@ static void piix4_reset(void *opaque)
+@@ -358,7 +358,15 @@ static void piix4_reset(void *opaque)
          /* Mark SMM as already inited (until KVM supports SMM). */
          pci_conf[0x5B] = 0x02;
      }
@@ -125,7 +125,7 @@ PATCHES
      acpi_pcihp_reset(&s->acpi_pci_hotplug);
  }
  
-@@ -502,6 +510,9 @@ static void piix4_pm_realize(PCIDevice *
+@@ -501,6 +509,9 @@ static void piix4_pm_realize(PCIDevice *
      /* APM */
      apm_init(dev, &s->apm, apm_ctrl_changed, s);
  
@@ -137,13 +137,37 @@ PATCHES
           * support SMM mode. */
 --- a/hw/i386/xen/xen-hvm.c
 +++ b/hw/i386/xen/xen-hvm.c
-@@ -1420,6 +1420,9 @@ void destroy_hvm_domain(bool reboot)
+@@ -1510,6 +1510,15 @@ err:
+     exit(1);
+ }
+ 
++static void _xenstore_update_power(bool reboot)
++{
++    fprintf(stderr, "Issued domain %d %s\n", xen_domid,
++          reboot ? "reboot" : "poweroff");
++    if (reboot) {
++      xenstore_update_power(XENSTORE_PM_TYPE_REBOOT);
++    }
++}
++
+ void destroy_hvm_domain(bool reboot)
+ {
+     xc_interface *xc_handle;
+@@ -1521,6 +1530,7 @@ void destroy_hvm_domain(bool reboot)
+     if (xen_dmod) {
+         rc = xendevicemodel_shutdown(xen_dmod, xen_domid, reason);
+         if (!rc) {
++            _xenstore_update_power(reboot);
+             return;
+         }
+         if (errno != ENOTTY /* old Xen */) {
+@@ -1539,8 +1549,7 @@ void destroy_hvm_domain(bool reboot)
+                     "sts %d, %s\n", reboot ? "reboot" : "poweroff",
+                     sts, strerror(errno));
          } else {
-             fprintf(stderr, "Issued domain %d %s\n", xen_domid,
-                     reboot ? "reboot" : "poweroff");
-+            if (reboot) {
-+                xenstore_update_power(XENSTORE_PM_TYPE_REBOOT);
-+            }
+-            fprintf(stderr, "Issued domain %d %s\n", xen_domid,
+-                    reboot ? "reboot" : "poweroff");
++            _xenstore_update_power(reboot);
          }
          xc_interface_close(xc_handle);
      }
@@ -159,7 +183,7 @@ PATCHES
  DeviceState *xen_sysdev;
  BusState *xen_sysbus;
  
-@@ -803,3 +806,19 @@ int xenstore_generic_init(void)
+@@ -955,3 +958,19 @@ int xenstore_generic_init(void)
  
      return 0;
  }

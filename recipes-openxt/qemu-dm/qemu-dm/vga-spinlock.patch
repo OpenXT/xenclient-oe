@@ -49,14 +49,15 @@ PATCHES
  } ISAVGAState;
  
  static void vga_isa_reset(DeviceState *dev)
-@@ -56,17 +57,19 @@ static void vga_isa_realizefn(DeviceStat
+@@ -56,18 +57,20 @@ static void vga_isa_realizefn(DeviceStat
      ISAVGAState *d = ISA_VGA(dev);
      VGACommonState *s = &d->state;
      MemoryRegion *vga_io_memory;
 -    const MemoryRegionPortio *vga_ports, *vbe_ports;
 +    const MemoryRegionPortio *vga_ports, *vbe_ports, *oxt_ports;
  
-     vga_common_init(s, OBJECT(dev), true);
+     s->global_vmstate = true;
+     vga_common_init(s, OBJECT(dev));
      s->legacy_address_space = isa_address_space(isadev);
 -    vga_io_memory = vga_init_io(s, OBJECT(dev), &vga_ports, &vbe_ports);
 +    vga_io_memory = vga_init_io(s, OBJECT(dev), &vga_ports, &vbe_ports, &oxt_ports);
@@ -73,7 +74,7 @@ PATCHES
                                          vga_io_memory, 1);
 --- a/hw/display/vga.c
 +++ b/hw/display/vga.c
-@@ -1803,6 +1803,11 @@ static void vga_update_display(void *opa
+@@ -1819,6 +1819,11 @@ static void vga_update_display(void *opa
  
      qemu_flush_coalesced_mmio_buffer();
  
@@ -85,7 +86,7 @@ PATCHES
      if (surface_bits_per_pixel(surface) == 0) {
          /* nothing to do */
      } else {
-@@ -1830,6 +1835,8 @@ static void vga_update_display(void *opa
+@@ -1846,6 +1851,8 @@ static void vga_update_display(void *opa
              break;
          }
      }
@@ -94,7 +95,7 @@ PATCHES
  }
  
  /* force a full display refresh */
-@@ -2252,6 +2259,7 @@ void vga_common_init(VGACommonState *s,
+@@ -2268,6 +2275,7 @@ void vga_common_init(VGACommonState *s,
      s->get_offsets = vga_get_offsets;
      s->get_resolution = vga_get_resolution;
      s->hw_ops = &vga_ops;
@@ -102,7 +103,7 @@ PATCHES
      switch (vga_retrace_method) {
      case VGA_RETRACE_DUMB:
          s->retrace = vga_dumb_retrace;
-@@ -2295,15 +2303,45 @@ static const MemoryRegionPortio vbe_port
+@@ -2311,15 +2319,45 @@ static const MemoryRegionPortio vbe_port
      PORTIO_END_OF_LIST(),
  };
  
@@ -149,7 +150,7 @@ PATCHES
  
      vga_mem = g_malloc(sizeof(*vga_mem));
      memory_region_init_io(vga_mem, obj, &vga_mem_ops, s,
-@@ -2317,7 +2355,7 @@ void vga_init(VGACommonState *s, Object
+@@ -2333,7 +2371,7 @@ void vga_init(VGACommonState *s, Object
                MemoryRegion *address_space_io, bool init_vga_ports)
  {
      MemoryRegion *vga_io_memory;
@@ -158,7 +159,7 @@ PATCHES
  
      qemu_register_reset(vga_reset, s);
  
-@@ -2325,7 +2363,7 @@ void vga_init(VGACommonState *s, Object
+@@ -2341,7 +2379,7 @@ void vga_init(VGACommonState *s, Object
  
      s->legacy_address_space = address_space;
  
@@ -167,7 +168,7 @@ PATCHES
      memory_region_add_subregion_overlap(address_space,
                                          0x000a0000,
                                          vga_io_memory,
-@@ -2340,6 +2378,8 @@ void vga_init(VGACommonState *s, Object
+@@ -2356,6 +2394,8 @@ void vga_init(VGACommonState *s, Object
          portio_list_init(&s->vbe_port_list, obj, vbe_ports, s, "vbe");
          portio_list_add(&s->vbe_port_list, address_space_io, 0x1ce);
      }
@@ -178,7 +179,7 @@ PATCHES
  void vga_init_vbe(VGACommonState *s, Object *obj, MemoryRegion *system_memory)
 --- a/hw/display/vga_int.h
 +++ b/hw/display/vga_int.h
-@@ -77,6 +77,9 @@
+@@ -37,6 +37,9 @@
  #define CH_ATTR_SIZE (160 * 100)
  #define VGA_MAX_HEIGHT 2048
  
@@ -188,7 +189,7 @@ PATCHES
  struct vga_precise_retrace {
      int64_t ticks_per_char;
      int64_t total_chars;
-@@ -140,6 +143,7 @@ typedef struct VGACommonState {
+@@ -100,6 +103,7 @@ typedef struct VGACommonState {
                          int *pheight);
      PortioList vga_port_list;
      PortioList vbe_port_list;
@@ -196,7 +197,7 @@ PATCHES
      /* bochs vbe state */
      uint16_t vbe_index;
      uint16_t vbe_regs[VBE_DISPI_INDEX_NB];
-@@ -188,6 +192,8 @@ typedef struct VGACommonState {
+@@ -149,6 +153,8 @@ typedef struct VGACommonState {
      vga_update_retrace_info_fn update_retrace_info;
      union vga_retrace retrace_info;
      uint8_t is_vbe_vmstate;
@@ -205,7 +206,7 @@ PATCHES
  } VGACommonState;
  
  static inline int c6_to_8(int v)
-@@ -203,7 +209,8 @@ void vga_init(VGACommonState *s, Object
+@@ -164,7 +170,8 @@ void vga_init(VGACommonState *s, Object
                MemoryRegion *address_space_io, bool init_vga_ports);
  MemoryRegion *vga_init_io(VGACommonState *s, Object *obj,
                            const MemoryRegionPortio **vga_ports,
