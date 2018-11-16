@@ -5,9 +5,11 @@ DEPENDS = "json-c pciutils"
 
 PV = "0+git${SRCPV}"
 
+FILESEXTRAPATHS_prepend := "${THISDIR}/files:${THISDIR}/patches:"
 SRC_URI = "git://github.com/achartier/heimdallr.git;protocol=git \
            file://pci-quirks.json \
            file://fix-json-pkgconfig-name.patch \
+           file://json-0.13-interface-change.patch \
            "
 SRCREV = "16b0da1e69e92ef8c0834e8a377c13aea823cfa2"
 
