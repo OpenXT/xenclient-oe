@@ -69,5 +69,6 @@ INITSCRIPT_PACKAGES += "${PN}-sshd-tcp-init"
 INITSCRIPT_NAME_${PN}-sshd-tcp-init = "sshd"
 INITSCRIPT_PARAMS_${PN}-sshd-tcp-init = "defaults 9"
 
-RDEPENDS_${PN}-ssh += "bash"
-RDEPENDS_${PN}-scp += "bash"
+RDEPENDS_${PN}-sshd += "libv4v"
+RDEPENDS_${PN}-ssh += "bash libv4v"
+RDEPENDS_${PN}-scp += "bash libv4v"
