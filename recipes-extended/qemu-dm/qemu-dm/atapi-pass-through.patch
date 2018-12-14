@@ -185,7 +185,7 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
 
 --- a/block.c
 +++ b/block.c
-@@ -5338,3 +5338,21 @@ bool bdrv_can_store_new_dirty_bitmap(Blo
+@@ -5493,3 +5493,21 @@ bool bdrv_can_store_new_dirty_bitmap(Blo
  
      return drv->bdrv_can_store_new_dirty_bitmap(bs, name, granularity, errp);
  }
@@ -209,7 +209,7 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
 +}
 --- a/block/Makefile.objs
 +++ b/block/Makefile.objs
-@@ -10,6 +10,7 @@ block-obj-y += block-backend.o snapshot.
+@@ -18,6 +18,7 @@ block-obj-y += block-backend.o snapshot.
  block-obj-$(CONFIG_WIN32) += file-win32.o win32-aio.o
  block-obj-$(CONFIG_POSIX) += file-posix.o
  block-obj-$(CONFIG_LINUX_AIO) += linux-aio.o
@@ -1732,17 +1732,17 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
  };
  
  static int if_max_devs[IF_COUNT] = {
-@@ -792,6 +795,9 @@ DriveInfo *drive_new(QemuOpts *all_opts,
+@@ -770,6 +773,9 @@ DriveInfo *drive_new(QemuOpts *all_opts,
      QemuOpts *legacy_opts;
      DriveMediaType media = MEDIA_DISK;
      BlockInterfaceType type;
 +#ifdef CONFIG_ATAPI_PT
 +    bool atapi_pt = false;
 +#endif
-     int cyls, heads, secs, translation;
      int max_devs, bus_id, unit_id, index;
-     const char *devaddr;
-@@ -898,7 +904,9 @@ DriveInfo *drive_new(QemuOpts *all_opts,
+     const char *werror, *rerror;
+     bool read_only = false;
+@@ -860,7 +866,9 @@ DriveInfo *drive_new(QemuOpts *all_opts,
              media = MEDIA_DISK;
          } else if (!strcmp(value, "cdrom")) {
              media = MEDIA_CDROM;
@@ -1750,9 +1750,9 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
              read_only = true;
 +#endif
          } else {
-             error_report("'%s' invalid media", value);
+             error_setg(errp, "'%s' invalid media", value);
              goto fail;
-@@ -932,6 +940,13 @@ DriveInfo *drive_new(QemuOpts *all_opts,
+@@ -894,6 +902,13 @@ DriveInfo *drive_new(QemuOpts *all_opts,
          type = block_default_type;
      }
  
@@ -1763,10 +1763,10 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
 +    }
 +#endif
 +
-     /* Geometry */
-     cyls  = qemu_opt_get_number(legacy_opts, "cyls", 0);
-     heads = qemu_opt_get_number(legacy_opts, "heads", 0);
-@@ -1119,11 +1134,19 @@ DriveInfo *drive_new(QemuOpts *all_opts,
+     /* Device address specified by bus/unit or index.
+      * If none was specified, try to find the first free one. */
+     bus_id  = qemu_opt_get_number(legacy_opts, "bus", 0);
+@@ -1011,11 +1026,19 @@ DriveInfo *drive_new(QemuOpts *all_opts,
      blk_set_legacy_dinfo(blk, dinfo);
  
      switch(type) {
@@ -1788,7 +1788,7 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
          break;
 --- a/configure
 +++ b/configure
-@@ -450,6 +450,8 @@ crypto_afalg="no"
+@@ -452,6 +452,8 @@ crypto_afalg="no"
  seccomp=""
  glusterfs=""
  stubdom="no"
@@ -1797,7 +1797,7 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
  glusterfs_xlator_opt="no"
  glusterfs_discard="no"
  glusterfs_fallocate="no"
-@@ -1343,6 +1345,14 @@ for opt do
+@@ -1357,6 +1359,14 @@ for opt do
    ;;
    --enable-glusterfs) glusterfs="yes"
    ;;
@@ -1812,7 +1812,7 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
    --disable-virtio-blk-data-plane|--enable-virtio-blk-data-plane)
        echo "$0: $opt is obsolete, virtio-blk data-plane is always on" >&2
    ;;
-@@ -6039,6 +6049,8 @@ echo "GlusterFS support $glusterfs"
+@@ -6128,6 +6138,8 @@ echo "GlusterFS support $glusterfs"
  echo "gcov              $gcov_tool"
  echo "gcov enabled      $gcov"
  echo "OpenXT stubdomain support $stubdom"
@@ -1821,7 +1821,7 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
  echo "TPM support       $tpm"
  echo "libssh2 support   $libssh2"
  echo "TPM passthrough   $tpm_passthrough"
-@@ -6711,6 +6723,14 @@ if test "$stubdom" = "yes" ; then
+@@ -6802,6 +6814,14 @@ if test "$stubdom" = "yes" ; then
    echo "CONFIG_STUBDOM=y" >> $config_host_mak
  fi
  
@@ -3906,7 +3906,7 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
 +}
 --- a/hw/ide/core.c
 +++ b/hw/ide/core.c
-@@ -1729,7 +1729,11 @@ static bool cmd_packet(IDEState *s, uint
+@@ -1730,7 +1730,11 @@ static bool cmd_packet(IDEState *s, uint
      }
      s->nsector = 1;
      ide_transfer_start(s, s->io_buffer, ATAPI_PACKET_SIZE,
@@ -3918,7 +3918,7 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
      return false;
  }
  
-@@ -2285,7 +2289,12 @@ void ide_cmd_write(void *opaque, uint32_
+@@ -2286,7 +2290,12 @@ void ide_cmd_write(void *opaque, uint32_
  static bool ide_is_pio_out(IDEState *s)
  {
      if (s->end_transfer_func == ide_sector_write ||
@@ -3932,7 +3932,7 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
          return false;
      } else if (s->end_transfer_func == ide_sector_read ||
                 s->end_transfer_func == ide_transfer_stop ||
-@@ -2498,6 +2507,12 @@ int ide_init_drive(IDEState *s, BlockBac
+@@ -2499,6 +2508,12 @@ int ide_init_drive(IDEState *s, BlockBac
      uint64_t nb_sectors;
  
      s->blk = blk;
@@ -3945,7 +3945,7 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
      s->drive_kind = kind;
  
      blk_get_geometry(blk, &nb_sectors);
-@@ -2540,7 +2555,19 @@ int ide_init_drive(IDEState *s, BlockBac
+@@ -2541,7 +2556,19 @@ int ide_init_drive(IDEState *s, BlockBac
      } else {
          switch (kind) {
          case IDE_CD:
@@ -3966,7 +3966,7 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
              break;
          case IDE_CFATA:
              strcpy(s->drive_model_str, "QEMU MICRODRIVE");
-@@ -2572,8 +2599,15 @@ static void ide_init1(IDEBus *bus, int u
+@@ -2573,8 +2600,15 @@ static void ide_init1(IDEBus *bus, int u
      s->drive_serial = drive_serial++;
      /* we need at least 2k alignment for accessing CDROMs using O_DIRECT */
      s->io_buffer_total_len = IDE_DMA_BUF_SECTORS*512 + 4;
@@ -3982,7 +3982,7 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
  
      s->smart_selftest_data = blk_blockalign(s->blk, 512);
      memset(s->smart_selftest_data, 0, 512);
-@@ -2747,6 +2781,10 @@ static EndTransferFunc* transfer_end_tab
+@@ -2748,6 +2782,10 @@ static EndTransferFunc* transfer_end_tab
          ide_atapi_cmd_reply_end,
          ide_atapi_cmd,
          ide_dummy_transfer_stop,
@@ -4035,7 +4035,7 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
      qdev_prop_set_uint32(dev, "unit", unit);
      qdev_prop_set_drive(dev, "drive", blk_by_legacy_dinfo(drive),
                          &error_fatal);
-@@ -345,6 +357,35 @@ static const TypeInfo ide_cd_info = {
+@@ -344,6 +356,35 @@ static const TypeInfo ide_cd_info = {
      .class_init    = ide_cd_class_init,
  };
  
@@ -4071,7 +4071,7 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
  static Property ide_drive_properties[] = {
      DEFINE_IDE_DEV_PROPERTIES(),
      DEFINE_PROP_END_OF_LIST(),
-@@ -394,6 +435,9 @@ static void ide_register_types(void)
+@@ -393,6 +434,9 @@ static void ide_register_types(void)
      type_register_static(&ide_cd_info);
      type_register_static(&ide_drive_info);
      type_register_static(&ide_device_type_info);
@@ -4219,7 +4219,7 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
 +#endif /* !_ATAPI_PT_V4V_H_ */
 --- a/include/block/block.h
 +++ b/include/block/block.h
-@@ -394,6 +394,9 @@ void bdrv_aio_cancel_async(BlockAIOCB *a
+@@ -397,6 +397,9 @@ void bdrv_aio_cancel_async(BlockAIOCB *a
  /* sg packet commands */
  int bdrv_co_ioctl(BlockDriverState *bs, int req, void *buf);
  
@@ -4483,9 +4483,9 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
      IF_COUNT
  } BlockInterfaceType;
  
-@@ -39,6 +42,9 @@ struct DriveInfo {
+@@ -36,6 +39,9 @@ struct DriveInfo {
+     int media_cd;
      QemuOpts *opts;
-     char *serial;
      QTAILQ_ENTRY(DriveInfo) next;
 +#ifdef CONFIG_ATAPI_PT
 +    bool atapi_pt;
