@@ -1,0 +1,94 @@
+#!/bin/sh
+#
+# Copyright (C) 2017 Assured Information Solutions, Inc.
+# Copyright (C) 2018 Apertus Solutions, LLC
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+#
+
+#listpcrs sample output:
+#Supported Bank/Algorithm: TPM_ALG_SHA1(0x0004) TPM_ALG_SHA256(0x000b)
+#Cuts and for loop isolate "TPM_ALG_<hash_type>" and compare against input
+pcr_bank_exists () {
+    local alg_in=$1
+
+    banks=$(tpm2_pcrlist -s | cut -d ':' -f 2)
+    for bank in $banks; do
+        alg=$(echo $bank | cut -d '(' -f 1)
+        if [ "$alg" = $alg_in ]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+tpm2_enabled() {
+    if [ ! -e "${ROOTFS_DIR}/boot/system/tpm/enabled" ]; then
+        return 1
+    fi
+
+    load_kernel_module tpm_tis
+
+    local dev_path="$(find /sys/class -name tpm0)"
+    if [ -z "${dev_path}" ]; then
+        info "could not locate a TPM"
+        return 1
+    fi
+
+    if [ -e "${dev_path}/device/caps" ]; then
+        local v="$(awk '/TCG version:/ { print $3 }' ${dev_path}/device/caps)"
+
+        if [ "${v}" = "1.2" ]; then
+            info "found a TPM 1.2 device looking for a TPM 2.0"
+            return 1
+        fi
+    fi
+
+    # This hits for two reasons:
+    #  1. There is a TPM device but does not export device/caps
+    #  2. There was a device/caps file which did not report being a 1.2 device
+    return 0
+}
+
+tpm2_run() {
+    if [ ! -e ${bootparam_root} ]; then
+        info "unable to locate root device: ${bootparam_root}"
+        return
+    fi
+
+    info -n "Measuring rootfs device..."
+    if pcr_bank_exists "sha256"; then
+        local digest="$(sha256sum $bootparam_root | head -c64)"
+        local algid="0xB"
+    else
+        local digest="$(sha1sum $bootparam_root | head -c40)"
+        local algid="0x4"
+    fi
+    info "done"
+
+    info -n "Extending TPM PCR..."
+    tpm2_extendpcr -c 15 -g ${algid} -s ${digest}
+    if [ $? -ne 0 ]; then
+        info "PCR-15 extend failed"
+        return
+    fi
+    info "done"
+
+    openxt_measured=true
+}

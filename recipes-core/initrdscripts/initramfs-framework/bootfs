@@ -1,0 +1,48 @@
+#!/bin/sh
+# Copyright (C) 2018 Apertus Solutions, LLC
+# Licensed on MIT
+
+bootfs_enabled() {
+    if [ -n "${bootparam_boot}" ]; then
+        info "using boot device ${bootparam_boot}"
+        return 0
+    else
+        debug "no boot device parameter provided"
+        return 1
+    fi
+}
+
+bootfs_run() {
+    BOOTFS_DIR="/${ROOTFS_DIR}/boot/system"
+    if [ ! -d "${BOOTFS_DIR}" ]; then
+        return
+    fi
+
+    debug "No e2fs compatible filesystem has been mounted, mounting ${bootparam_boot}..."
+
+    key=${bootparam_boot%%=*}
+    boot_uuid=${bootparam_boot#*=}
+
+    case ${key} in
+        UUID)
+            bootparam_boot="/dev/disk/by-uuid/${boot_uuid}"
+            ;;
+        PARTUUID)
+            bootparam_boot="/dev/disk/by-partuuid/${boot_uuid}"
+            ;;
+    esac
+
+    if [ -e "${bootparam_boot}" ]; then
+        flags=""
+        if [ -n "${bootparam_bootfstype}" ]; then
+            flags="${flags} -t${bootparam_bootfstype}"
+        fi
+        mount ${flags} ${bootparam_boot} ${BOOTFS_DIR}
+        if [ -d "${BOOTFS_DIR}/grub" ]; then
+            return
+        else
+            info "disk ${bootparam_boot} does not appear to be valid"
+            umount ${BOOTFS_DIR}
+        fi
+    fi
+}
