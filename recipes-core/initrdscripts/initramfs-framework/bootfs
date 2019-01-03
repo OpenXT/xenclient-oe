@@ -1,0 +1,59 @@
+#!/bin/sh
+# Copyright (C) 2018 Apertus Solutions, LLC
+# Licensed on MIT
+
+bootfs_enabled() {
+	if [ -n "${bootparam_boot}" ]; then
+		return 0
+	else
+		return 1
+	fi
+}
+
+bootfs_run() {
+	BOOTFS_DIR="/${ROOTFS_DIR}/boot/system"
+        if [ -z "$BOOTFS_DIR" ]; then
+                return
+        fi
+        C=0
+	# will use rootfs' delay and timeout values
+        delay=${bootparam_rootdelay:-1}
+        timeout=${bootparam_roottimeout:-5}
+        while [ ! -d $BOOTFS_DIR/grub ]; do
+                if [ $(( $C * $delay )) -gt $timeout ]; then
+                        fatal "boot '$bootparam_boot' doesn't exist or does not contain a /grub."
+                fi
+
+                if [ -n "$bootparam_boot" ]; then
+                        debug "No e2fs compatible filesystem has been mounted, mounting $bootparam_boot..."
+
+                        if [ "`echo ${bootparam_boot} | cut -c1-5`" = "UUID=" ]; then
+                                boot_uuid=`echo $bootparam_boot | cut -c6-`
+                                bootparam_boot="/dev/disk/by-uuid/$boot_uuid"
+                        fi
+
+                        if [ "`echo ${bootparam_boot} | cut -c1-9`" = "PARTUUID=" ]; then
+                                boot_uuid=`echo $bootparam_boot | cut -c10-`
+                                bootparam_boot="/dev/disk/by-partuuid/$boot_uuid"
+                        fi
+
+                        if [ -e "$bootparam_boot" ]; then
+                                flags=""
+                                if [ -n "$bootparam_bootfstype" ]; then
+                                        flags="$flags -t$bootparam_bootfstype"
+                                fi
+                                mount $flags $bootparam_boot $BOOTFS_DIR
+                                if [ -d $BOOTFS_DIR/grub ]; then
+                                        break
+                                else
+                                        # It is unlikely to change, but keep trying anyway.
+                                        # Perhaps we pick a different device next time.
+                                        umount $BOOTFS_DIR
+				fi
+			fi
+                fi
+                debug "Sleeping for $delay second(s) to wait root to settle..."
+                sleep $delay
+                C=$(( $C + 1 ))
+        done
+}
