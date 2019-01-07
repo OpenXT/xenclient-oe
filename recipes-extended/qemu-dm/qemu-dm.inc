@@ -14,6 +14,8 @@ DEPENDS = " \
     pixman \
 "
 
+PV = "3.1.0"
+
 # Leave this in it's own definition so that it can be replaced with a local
 # tarball (the QEMU download speed is terrible). If this is combined with the
 # other patches, it doesn't seem to work
