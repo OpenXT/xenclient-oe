@@ -108,6 +108,5 @@ FILES_${PN} = " \
 "
 
 RDEPENDS_${PN} += " \
-    xdotool \
     xrdb \
 "

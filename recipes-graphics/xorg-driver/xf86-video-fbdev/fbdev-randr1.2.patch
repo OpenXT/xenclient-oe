@@ -1,5 +1,5 @@
---- a/src/fbdev.c	2012-06-12 21:12:07.736497811 +0000
-+++ b/src/fbdev.c	2012-06-12 21:12:17.760498058 +0000
+--- a/src/fbdev.c
++++ b/src/fbdev.c
 @@ -8,6 +8,8 @@
  #endif
  
@@ -9,7 +9,7 @@
  
  /* all driver need this */
  #include "xf86.h"
-@@ -37,6 +39,9 @@
+@@ -38,6 +40,9 @@
  #include <pciaccess.h>
  #endif
  
@@ -19,7 +19,16 @@
  static Bool debug = 0;
  
  #define TRACE_ENTER(str) \
-@@ -230,7 +235,6 @@
+@@ -193,6 +198,8 @@ typedef struct {
+ 	DGAModePtr			pDGAMode;
+ 	int				nDGAMode;
+ 	OptionInfoPtr			Options;
++	xf86CrtcPtr                     crtc;
++
+ } FBDevRec, *FBDevPtr;
+ 
+ #define FBDEVPTR(p) ((FBDevPtr)((p)->driverPrivate))
+@@ -230,7 +237,6 @@ FBDevIdentify(int flags)
  	xf86PrintChipsets(FBDEV_NAME, "driver for framebuffer", FBDevChipsets);
  }
  
@@ -27,21 +36,21 @@
  #ifdef XSERVER_LIBPCIACCESS
  static Bool FBDevPciProbe(DriverPtr drv, int entity_num,
  			  struct pci_device *dev, intptr_t match_data)
-@@ -276,6 +280,13 @@
+@@ -276,6 +282,13 @@ static Bool FBDevPciProbe(DriverPtr drv,
  }
  #endif
  
 +static Bool
-+FBDevSwitchMode(int scrnIndex, DisplayModePtr mode, int flags)
++FBDevSwitchMode(SWITCH_MODE_ARGS_DECL)
 +{
-+	ScrnInfoPtr scrn = xf86Screens[scrnIndex];
++	SCRN_INFO_PTR(arg);
 +
-+	return xf86SetSingleMode(scrn, mode, RR_Rotate_0);
++	return xf86SetSingleMode(pScrn, mode, RR_Rotate_0);
 +}
  
  static Bool
  FBDevProbe(DriverPtr drv, int flags)
-@@ -370,7 +381,7 @@
+@@ -372,7 +385,7 @@ FBDevProbe(DriverPtr drv, int flags)
  		    pScrn->Probe         = FBDevProbe;
  		    pScrn->PreInit       = FBDevPreInit;
  		    pScrn->ScreenInit    = FBDevScreenInit;
@@ -50,31 +59,10 @@
  		    pScrn->AdjustFrame   = fbdevHWAdjustFrameWeak();
  		    pScrn->EnterVT       = fbdevHWEnterVTWeak();
  		    pScrn->LeaveVT       = fbdevHWLeaveVTWeak();
-@@ -387,12 +398,284 @@
+@@ -389,12 +402,281 @@ FBDevProbe(DriverPtr drv, int flags)
  }
  
  static Bool
-+
-+FBDevRebuildPixmap(ScrnInfoPtr pScrn);
-+
-+static Bool
-+FBDevCrtcResize(ScrnInfoPtr scrn, int width, int height)
-+{
-+        scrn->virtualX = width;
-+        scrn->virtualY = height;
-+        scrn->displayWidth = width;
-+
-+        FBDevRebuildPixmap(scrn);
-+
-+        return TRUE;
-+}
-+
-+
-+static const xf86CrtcConfigFuncsRec FBDevCrtcConfigFuncs = {
-+        FBDevCrtcResize
-+};
-+
-+static Bool
 +FBDevRebuildPixmap(ScrnInfoPtr pScrn)
 +{
 +        FBDevPtr fPtr = FBDEVPTR(pScrn);
@@ -103,6 +91,23 @@
 +
 +        return TRUE;
 +}
++
++static Bool
++FBDevCrtcResize(ScrnInfoPtr scrn, int width, int height)
++{
++        scrn->virtualX = width;
++        scrn->virtualY = height;
++        scrn->displayWidth = width;
++
++        FBDevRebuildPixmap(scrn);
++
++        return TRUE;
++}
++
++
++static const xf86CrtcConfigFuncsRec FBDevCrtcConfigFuncs = {
++        FBDevCrtcResize
++};
 +
 +static void
 +FBDevCrtcDpms(xf86CrtcPtr crtc, int mode)
@@ -154,7 +159,7 @@
 +              FBDevRebuildPixmap(pScrn);
 +          }
 +
-+        pScrn->AdjustFrame(pScrn->scrnIndex, x, y, 0);
++        (*pScrn->AdjustFrame)(ADJUST_FRAME_ARGS(pScrn, x, y));
 +}
 +
 +static void
@@ -321,6 +326,8 @@
 +#endif
 +        .destroy = FBDevOutputDestroy
 +};
++
++static Bool
  FBDevPreInit(ScrnInfoPtr pScrn, int flags)
  {
  	FBDevPtr fPtr;
@@ -331,17 +338,16 @@
 +        ClockRangePtr clockRanges;
 +        xf86OutputPtr output;
 +        xf86CrtcPtr crtc;
-+
  
  	if (flags & PROBE_DETECT) return FALSE;
  
-@@ -445,6 +728,19 @@
+@@ -447,6 +729,19 @@ FBDevPreInit(ScrnInfoPtr pScrn, int flag
  	if (!xf86SetDefaultVisual(pScrn, -1))
  		return FALSE;
  
 +        xf86CrtcConfigInit(pScrn, &FBDevCrtcConfigFuncs);
 +        xf86CrtcSetSizeRange(pScrn, 64, 64, 32000, 32000);
-+        crtc = xf86CrtcCreate(pScrn, &FBDevCrtcFuncs);
++        fPtr->crtc = xf86CrtcCreate(pScrn, &FBDevCrtcFuncs);
 +        output = xf86OutputCreate(pScrn, &FBDevOutputFuncs, "FBDev");
 +        xf86OutputUseScreenMonitor(output, FALSE);
 +        output->possible_crtcs = 1;
@@ -355,7 +361,7 @@
  	/* We don't currently support DirectColor at > 8bpp */
  	if (pScrn->depth > 8 && pScrn->defaultVisual != TrueColor) {
  		xf86DrvMsg(pScrn->scrnIndex, X_ERROR, "requested default visual"
-@@ -464,10 +760,10 @@
+@@ -466,10 +761,10 @@ FBDevPreInit(ScrnInfoPtr pScrn, int flag
  	pScrn->progClock = TRUE;
  	pScrn->rgbBits   = 8;
  	pScrn->chipset   = "fbdev";
@@ -368,7 +374,7 @@
  
  	/* handle options */
  	xf86CollectOptions(pScrn, NULL);
-@@ -515,26 +811,12 @@
+@@ -517,21 +812,9 @@ FBDevPreInit(ScrnInfoPtr pScrn, int flag
  	  }
  	}
  
@@ -391,29 +397,24 @@
 +		xf86DrvMsg(pScrn->scrnIndex, X_ERROR, "No modes.\n");
 +		return FALSE;
  	}
--
--	if (NULL == pScrn->modes)
--		fbdevHWUseBuildinMode(pScrn);
- 	pScrn->currentMode = pScrn->modes;
-+        xf86CrtcSetMode(crtc, pScrn->currentMode, RR_Rotate_0, 0, 0);
  
- 	/* First approximation, may be refined in ScreenInit */
- 	pScrn->displayWidth = pScrn->virtualX;
-@@ -737,7 +1019,7 @@
+ 	if (NULL == pScrn->modes)
+@@ -688,6 +971,8 @@ FBDevScreenInit(SCREEN_INIT_ARGS_DECL)
+ 	fbdevHWSaveScreen(pScreen, SCREEN_SAVER_ON);
+ 	fbdevHWAdjustFrame(ADJUST_FRAME_ARGS(pScrn, 0, 0));
  
- 	if (fPtr->shadowFB) {
- 	    fPtr->shadow = xcalloc(1, pScrn->virtualX * pScrn->virtualY *
--				   pScrn->bitsPerPixel);
-+                    pScrn->bitsPerPixel);
- 
- 	    if (!fPtr->shadow) {
- 		xf86DrvMsg(pScrn->scrnIndex, X_ERROR,
-@@ -888,6 +1170,8 @@
- 
- 	xf86DPMSInit(pScreen, fbdevHWDPMSSetWeak(), 0);
- 
++	xf86CrtcSetMode(fPtr->crtc, pScrn->currentMode, RR_Rotate_0, 0, 0);
++
+ 	/* mi layer */
+ 	miClearVisualTypes();
+ 	if (pScrn->bitsPerPixel > 8) {
+@@ -882,6 +1167,9 @@ FBDevScreenInit(SCREEN_INIT_ARGS_DECL)
+ 			   "(%d) encountered in FBDevScreenInit()\n", type);
+ 		return FALSE;
+ 	}
++
 +	xf86CrtcScreenInit(pScreen);
 +
- 	pScreen->SaveScreen = fbdevHWSaveScreenWeak();
- 
- 	/* Wrap the current CloseScreen function */
+ 	flags = CMAP_PALETTED_TRUECOLOR;
+ 	if(!xf86HandleColormaps(pScreen, 256, 8, fbdevHWLoadPaletteWeak(), 
+ 				NULL, flags))

@@ -9,6 +9,7 @@ LIC_FILES_CHKSUM = " \
 IMAGE_FEATURES += " \
     package-management \
     read-only-rootfs \
+    empty-root-password \
 "
 IMAGE_FSTYPES = "ext3.vhd.gz"
 export IMAGE_BASENAME = "xenclient-uivm-image"
@@ -25,8 +26,6 @@ PACKAGE_REMOVE = " \
     busybox-hwclock \
 "
 
-XSERVER ?= "xserver-kdrive-fbdev"
-
 # Specifies the list of locales to install into the image during the root
 # filesystem construction process.
 # http://www.yoctoproject.org/docs/current/ref-manual/ref-manual.html#var-IMAGE_LINGUAS
@@ -39,11 +38,19 @@ IMAGE_LINGUAS = " \
     zh-cn \
 "
 
-IMAGE_FEATURES += "empty-root-password"
+
+# Refine xserver packages installed by packagegroup-core-x11-xserver.
+XSERVER = " \
+    xserver-xorg \
+    xf86-input-evdev \
+    xf86-input-mouse \
+    xf86-video-fbdev \
+    xf86-input-keyboard \
+"
 
 IMAGE_INSTALL = "\
     ${ROOTFS_PKGMANAGE} \
-    ${XSERVER} \
+    packagegroup-core-x11-xserver \
     modules \
     packagegroup-xenclient-common \
     packagegroup-xenclient-xfce-minimal \
