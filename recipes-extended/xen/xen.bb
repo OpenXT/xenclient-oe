@@ -151,9 +151,7 @@ do_install() {
         -i ${D}${sysconfdir}/init.d/xenstored.${PN}-xenstored-c
 
     # These files are not packaged, removing them to silence QA warnings
-    # ${datadir} is the OE way of saying "/usr/share".
     #   sbindir == /usr/sbin, bindir == /usr/bin, sysconfig == /etc
-    rm -rf ${D}/${datadir}
     rm -rf ${D}/${sbindir}/xen-livepatch
     rm -rf ${D}/${bindir}/xen-cpuid
     rm -rf ${D}/${sysconfdir}/init.d/xencommons
