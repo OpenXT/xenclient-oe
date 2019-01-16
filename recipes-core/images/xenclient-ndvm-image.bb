@@ -43,8 +43,9 @@ IMAGE_INSTALL = " \
     libv4v \
     libv4v-bin \
     dbus \
-    xenclient-dbusbouncer \
+    rpc-broker \
     networkmanager \
+    ndvm-rpc-broker-config \
     xenclient-toolstack \
     linux-firmware-iwlwifi \
     linux-firmware-bnx2 \

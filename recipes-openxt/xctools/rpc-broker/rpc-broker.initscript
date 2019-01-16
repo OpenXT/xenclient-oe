@@ -1,0 +1,63 @@
+#!/bin/bash
+#
+# Copyright (c) 2018 AIS, Inc.
+# 
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+# 
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+# 
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+#
+
+#
+# Starts rpc-broker daemon.
+#
+PIDFILE=/var/run/rpc-broker.pid
+PIDFILE_WEBSOCKETS=/var/run/rpc-broker-websockets.pid
+
+# Make sure the progam exists
+[ -f /usr/sbin/rpc-broker ] || exit 0
+
+start() {
+	echo "Starting rpc-broker"    
+	export LD_PRELOAD=/usr/lib/libv4v-1.0.so.0    
+	export INET_IS_V4V=1
+	start-stop-daemon --start --quiet --oknodo --background --make-pidfile --pidfile $PIDFILE --exec /usr/sbin/rpc-broker -- -r 5555
+	start-stop-daemon --start --quiet --oknodo --background --make-pidfile --pidfile $PIDFILE_WEBSOCKETS --exec /usr/bin/runcon -- -t rpcbroker_websockets_t /usr/sbin/rpc-broker -w 8080
+}
+stop() {
+	echo "Stopping rpc-broker"
+	start-stop-daemon --stop --quiet --oknodo --pidfile $PIDFILE
+	start-stop-daemon --stop --quiet --oknodo --pidfile $PIDFILE_WEBSOCKETS    
+}
+
+restart() {
+	stop
+	start
+}
+
+case "$1" in
+  start)
+	start
+	;;
+  stop)
+	stop
+	;;
+  restart|reload)
+	echo "Restarting rpc-broker"
+	restart
+	;;
+  *)
+	echo $"Usage: $0 {start|stop|restart}"
+	exit 1
+esac
+
+exit $?
