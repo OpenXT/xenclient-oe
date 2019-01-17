@@ -1,19 +1,64 @@
-commit e4c796ddadda49305bb24249078accacca98446b
-Author: Chris Rogers <rogersc@ainfosec.com>
-Date:   Thu May 18 14:40:39 2017 -0400
+################################################################################
+SHORT DESCRIPTION:
+################################################################################
+Add tpm2_extendpcr binary.
 
-    [tpm2.0-tools] Extendpcr tool for OpenXT
-    
-      Implement new tool to extend a pcr of a specified bank with a
-      specified hash.
-    
-    Signed-off-by: Chris Rogers <rogersc@ainfosec.com>
+################################################################################
+LONG DESCRIPTION:
+################################################################################
 
-Index: tpm2-tools/tools/tpm2_extendpcr.c
-===================================================================
+################################################################################
+CHANGELOG
+################################################################################
+Add tpm2_extendpcr: Chris Rogers <rogersc@ainfosec.com>
+Uprev from v2.0.0 to v3.1.3: Nicholas Tsirakis <tsirakisn@ainfosec.com>
+
+################################################################################
+REMOVAL
+################################################################################
+The upstream tpm2-tools added their own tpm2_pcrextend tool in
+version 3.X.Y. This patch can be removed if that tool provides
+the same functionality, though it is currently untested.
+
+################################################################################
+UPSTREAM PLAN
+################################################################################
+
+################################################################################
+INTERNAL DEPENDENCIES
+################################################################################
+
+################################################################################
+PATCHES
+################################################################################
+
+commit 3978a8c5f05f5b35c34bd63e974493044ae4df6e
+Author: Nicholas Tsirakis <tsirakisn@ainfosec.com>
+Date:   Thu May 24 16:05:16 2018 -0400
+
+    Apply tpm2-extendpcr-support patch
+
+--- a/Makefile.am
++++ b/Makefile.am
+@@ -75,7 +75,6 @@ bin_PROGRAMS = \
+     tools/tpm2_nvrelease \
+     tools/tpm2_nvwrite \
+     tools/tpm2_pcrevent \
+-    tools/tpm2_pcrextend \
+     tools/tpm2_pcrlist \
+     tools/tpm2_quote \
+     tools/tpm2_rc_decode \
+@@ -169,7 +168,6 @@ tools_tpm2_rsaencrypt_SOURCES = tools/tp
+ tools_tpm2_sign_SOURCES = tools/tpm2_sign.c $(TOOL_SRC)
+ tools_tpm2_unseal_SOURCES = tools/tpm2_unseal.c $(TOOL_SRC)
+ tools_tpm2_dictionarylockout_SOURCES = tools/tpm2_dictionarylockout.c $(TOOL_SRC)
+-tools_tpm2_pcrextend_SOURCES = tools/tpm2_pcrextend.c $(TOOL_SRC)
+ tools_tpm2_pcrevent_SOURCES = tools/tpm2_pcrevent.c $(TOOL_SRC)
+ tools_tpm2_rc_decode_SOURCES = tools/tpm2_rc_decode.c $(TOOL_SRC)
+ tools_tpm2_extendpcr_SOURCES = tools/tpm2_extendpcr.c $(TOOL_SRC)
 --- /dev/null
-+++ tpm2-tools/tools/tpm2_extendpcr.c
-@@ -0,0 +1,198 @@
++++ b/tools/tpm2_extendpcr.c
+@@ -0,0 +1,192 @@
 +//**********************************************************************;
 +// Copyright (c) 2015, Intel Corporation
 +// Copyright (c) 2017, Assured Information Security
@@ -55,160 +100,154 @@ Index: tpm2-tools/tools/tpm2_extendpcr.c
 +#include <ctype.h>
 +#include <getopt.h>
 +
-+#include <sapi/tpm20.h>
-+#include <tcti/tcti_socket.h>
++#include <tss2/tss2_sys.h>
++#include <tss2/tss2_tcti_mssim.h>
 +#include "pcr.h"
-+#include "options.h"
-+#include "string-bytes.h"
++#include "log.h"
 +#include "tpm_session.h"
++#include "tpm2_options.h"
++#include "tpm2_util.h"
 +
-+int pcr_extend(TSS2_SYS_CONTEXT *sapi_context, BYTE * byteHash, UINT32 pcr, TPMI_ALG_HASH hashAlgIn)
-+{
++typedef struct tpm_extendpcr_ctx tpm_extendpcr_ctx;
++struct tpm_extendpcr_ctx {
++    BYTE byteHash[TPM2_SHA512_DIGEST_SIZE];
++    TPMI_ALG_HASH algorithmId;
++    UINT32 pcr;
++
++    struct {
++        UINT16 g : 1;
++        UINT16 s : 1;
++        UINT16 c : 1;
++    } flags;
++};
++
++static tpm_extendpcr_ctx ctx = {
++    .algorithmId = 0,
++    .pcr = -1
++};
++
++int pcr_extend(TSS2_SYS_CONTEXT *sapi_context) {
 +    TPMS_AUTH_COMMAND sessionData;
-+    TSS2_SYS_CMD_AUTHS sessionsData;
++    TSS2L_SYS_AUTH_COMMAND sessionsData;
 +    TPML_PCR_SELECTION pcrSelection;
 +    TPML_DIGEST_VALUES digests;
 +    TSS2_RC rval;
 +
-+    TPMS_AUTH_COMMAND *sessionDataArray[1];
++    sessionsData.auths[0] = sessionData;
 +
-+    sessionDataArray[0] = &sessionData;
-+    sessionsData.cmdAuths = &sessionDataArray[0];
++    sessionData.sessionHandle = TPM2_RS_PW;
 +
-+    sessionData.sessionHandle = TPM_RS_PW;
-+
-+    sessionData.nonce.t.size = 0;
-+    sessionData.hmac.t.size = 0;
++    sessionData.nonce.size = 0;
++    sessionData.hmac.size = 0;
 +
 +    *( (UINT8 *)((void *)&sessionData.sessionAttributes ) ) = 0;
 +
 +    digests.count = 1;
-+    digests.digests[0].hashAlg = hashAlgIn;
++    digests.digests[0].hashAlg = ctx.algorithmId;
 +
-+    switch (hashAlgIn) {
++    switch (ctx.algorithmId) {
 +
-+        case TPM_ALG_SHA1:
-+            memcpy(digests.digests[0].digest.sha1, byteHash, SHA1_DIGEST_SIZE);
++        case TPM2_ALG_SHA1:
++            memcpy(digests.digests[0].digest.sha1, ctx.byteHash, TPM2_SHA1_DIGEST_SIZE);
 +            break;
-+        case TPM_ALG_SHA256:
-+            memcpy(digests.digests[0].digest.sha256, byteHash, SHA256_DIGEST_SIZE);
++        case TPM2_ALG_SHA256:
++            memcpy(digests.digests[0].digest.sha256, ctx.byteHash, TPM2_SHA256_DIGEST_SIZE);
 +            break;
-+        case TPM_ALG_SHA384:
-+            memcpy(digests.digests[0].digest.sha384, byteHash, SHA384_DIGEST_SIZE);
++        case TPM2_ALG_SHA384:
++            memcpy(digests.digests[0].digest.sha384, ctx.byteHash, TPM2_SHA384_DIGEST_SIZE);
 +            break;
-+        case TPM_ALG_SHA512:
-+            memcpy(digests.digests[0].digest.sha512, byteHash, SHA512_DIGEST_SIZE);
++        case TPM2_ALG_SHA512:
++            memcpy(digests.digests[0].digest.sha512, ctx.byteHash, TPM2_SHA512_DIGEST_SIZE);
 +            break;
-+        case TPM_ALG_SM3_256:
-+            memcpy(digests.digests[0].digest.sha1, byteHash, SM3_256_DIGEST_SIZE);
++        case TPM2_ALG_SM3_256:
++            memcpy(digests.digests[0].digest.sha1, ctx.byteHash, TPM2_SM3_256_DIGEST_SIZE);
 +            break;
 +        default:
-+            printf("Invalid algorithm.  Exiting");
++            LOG_ERR("Invalid algorithm.  Exiting");
 +            return -1;
 +    }
 +
 +    pcrSelection.count = 1;
-+    pcrSelection.pcrSelections[0].hash = hashAlgIn;
++    pcrSelection.pcrSelections[0].hash = ctx.algorithmId;
 +    pcrSelection.pcrSelections[0].sizeofSelect = 3;
 +
 +    CLEAR_PCR_SELECT_BITS(pcrSelection.pcrSelections[0]);
 +
-+    SET_PCR_SELECT_BIT(pcrSelection.pcrSelections[0], pcr);
++    SET_PCR_SELECT_BIT(pcrSelection.pcrSelections[0], ctx.pcr);
 +
-+    sessionsData.cmdAuthsCount = 1;
-+    sessionsData.cmdAuths[0] = &sessionData;
++    sessionsData.count = 1;
++    sessionsData.auths[0] = sessionData;
 +
-+    rval = Tss2_Sys_PCR_Extend( sapi_context, pcr, &sessionsData, &digests, 0 );
-+    if( rval != TPM_RC_SUCCESS) {
-+        printf("Failed to extend PCR: %d\n", pcr);
++    rval = Tss2_Sys_PCR_Extend( sapi_context, ctx.pcr, &sessionsData, &digests, 0 );
++    if( rval != TPM2_RC_SUCCESS) {
++        LOG_ERR("Failed to extend PCR: %d\n", ctx.pcr);
 +        return -2;
 +    }
 +    return 0;
 +}
 +
-+int
-+execute_tool(int                   argc,
-+             char*                 argv[],
-+             char*                 envp[],
-+             common_opts_t         *opts,
-+             TSS2_SYS_CONTEXT      *sapi_context)
-+{
-+    (void) opts;
-+    (void) envp;
-+    BYTE byteHash[SHA512_DIGEST_SIZE];
-+    UINT32 pcr = -1;
++static bool on_option(char key, char *value) {
++
 +    UINT16 size;
 +
-+    setbuf(stdout, NULL);
-+    setvbuf (stdout, NULL, _IONBF, BUFSIZ);
-+
-+    int opt = -1;
-+    const char *optstring = "g:s:c:";
-+    static struct option long_options[] = {
-+        {"algorithm",1,NULL,'g'},
-+        {"hash",1,NULL,'s'},
-+        {"pcr",1,NULL,'c'},
-+        {0,0,0,0}
-+    };
-+
-+    TPMI_ALG_HASH algorithmId = 0;
-+
-+    int returnVal = 0;
-+    int flagCnt = 0;
-+    int s_flag = 0,
-+        c_flag = 0,
-+        g_flag = 0;
-+
-+    while((opt = getopt_long(argc,argv,optstring,long_options,NULL)) != -1)
-+    {
-+        switch(opt)
-+        {
-+        case 's':
-+            size = strlen(optarg); //set initial size of hash, hex2Byte will fail if size is wrong
-+            if(hex2ByteStructure(optarg, &size, byteHash) != 0)
-+            {
-+                printf("Invalid hex value.\n");
-+                returnVal = -8;
-+            }
-+            s_flag = 1;
-+            break;
-+        case 'c':
-+            if (pcr_get_id(optarg, &pcr))
-+            {
-+                printf("Invalid pcr value.\n");
-+                returnVal = -7;
-+            }
-+            c_flag = 1;
-+            break;
-+        case 'g':
-+            if(!string_bytes_get_uint16(optarg,&algorithmId))
-+            {
-+                showArgError(optarg, argv[0]);
-+                returnVal = -1;
-+                break;
-+            }
-+            g_flag = 1;
-+            break;
-+        case ':':
-+            returnVal = -8;
-+            break;
-+        case '?':
-+            returnVal = -9;
-+            break;
++    switch(key) {
++    case 's':
++        size = strlen(value); //set initial size of hash, hex2Byte will fail if size is wrong
++        if(tpm2_util_hex_to_byte_structure(value, &size, ctx.byteHash) != 0) {
++            LOG_ERR("Invalid hex value.\n");
++            return false;
 +        }
-+        if(returnVal)
-+            return returnVal;
++        ctx.flags.s = 1;
++        break;
++    case 'c':
++        if (pcr_get_id(value, &ctx.pcr)) {
++            LOG_ERR("Invalid pcr value.\n");
++            return false;
++        }
++        ctx.flags.c = 1;
++        break;
++    case 'g':
++        if(!tpm2_util_string_to_uint16(value, &ctx.algorithmId)) {
++            return false;
++        }
++        ctx.flags.g = 1;
++        break;
++    case ':':
++        return false;
++    case '?':
++        return false;
++    }
++
++    return true;
++}
++
++bool tpm2_tool_onstart(tpm2_options **opts) {
++
++    const struct option topts[] = {
++        {"algorithm", required_argument, NULL, 'g'},
++        {"hash",      required_argument, NULL, 's'},
++        {"pcr",       required_argument, NULL, 'c'}
 +    };
 +
-+    flagCnt = g_flag + s_flag + c_flag;
++    *opts = tpm2_options_new("g:s:c:", ARRAY_LEN(topts), topts,
++            on_option, NULL, TPM2_OPTIONS_SHOW_USAGE);
 +
-+    if(flagCnt < 3)
-+    {
-+        showArgMismatch(argv[0]);
++    return *opts != NULL;
++}
++
++int tpm2_tool_onrun(TSS2_SYS_CONTEXT *sapi_context, tpm2_option_flags flags) {
++
++    UNUSED(flags);
++
++    int returnVal;
++    int flagCnt = 0;
++    flagCnt = ctx.flags.g + ctx.flags.s + ctx.flags.c;
++
++    if(flagCnt < 3) {
 +        return -10;
 +    }
 +
-+    returnVal = pcr_extend(sapi_context, byteHash, pcr, algorithmId);
++    returnVal = pcr_extend(sapi_context);
 +
 +    return returnVal;
 +}

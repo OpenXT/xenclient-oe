@@ -44,13 +44,13 @@ is_tpm_2_0 () {
     [ "${tpm_ver}" = "2.0" ]
 }
 
-#listpcrs sample output:
-#Supported Bank/Algorithm: TPM_ALG_SHA1(0x0004) TPM_ALG_SHA256(0x000b)
-#Cuts and for loop isolate "TPM_ALG_<hash_type>" and compare against input
+# pcrlist -s output:
+# Supported Bank/Algorithm: sha1(0x0004) sha256(0x000b)
+# Cuts and for loop isolate hash type and compare against input
 pcr_bank_exists () {
     local alg_in=$1
 
-    banks=$(tpm2_listpcrs -s | cut -d ':' -f 2)
+    banks=$(tpm2_pcrlist -s | cut -d ':' -f 2)
     for bank in $banks; do
         alg=$(echo $bank | cut -d '(' -f 1)
         if [ "$alg" = $alg_in ]; then
@@ -224,7 +224,7 @@ tpm_setup() {
         echo "Measuring for tpm 2.0"
         #Prefer the more secure alg, but try sha1 as a last resort since most
         #platforms support it for legacy.
-        if pcr_bank_exists "TPM_ALG_SHA256"; then
+        if pcr_bank_exists "sha256"; then
             s=$(sha256sum $ROOT_DEVICE)
             echo $s
             DIGEST=$(echo -n ${s:0:64})

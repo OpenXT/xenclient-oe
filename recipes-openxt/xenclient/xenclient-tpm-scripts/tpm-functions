@@ -49,7 +49,7 @@ is_tpm_2_0 () {
 pcr_bank_exists () {
     local alg_in=$1
 
-    banks=$(tpm2_listpcrs -s | cut -d ':' -f 2)
+    banks=$(tpm2_pcrlist -s | cut -d ':' -f 2)
     for bank in $banks; do
         alg=$(echo $bank | cut -d '(' -f 1)
         if [ "$alg" = $alg_in ]; then
@@ -96,16 +96,16 @@ TPM_ALG_SYMCIPHER=0x25
 
 handle_type() {
     case "$1" in
-        ${OXT_HANDLE_SHA256}) echo "${TPM_ALG_RSA}" ;;
-        ${OXT_HANDLE_SHA1})   echo "${TPM_ALG_RSA}" ;;
+        ${OXT_HANDLE_SHA256}) echo "rsa" ;;
+        ${OXT_HANDLE_SHA1})   echo "rsa" ;;
         *)                    echo "INVALID_TYPE" ;;
     esac
 }
 
 handle_alg() {
     case "$1" in
-        ${OXT_HANDLE_SHA256}) echo "${TPM_ALG_SHA256}" ;;
-        ${OXT_HANDLE_SHA1})   echo "${TPM_ALG_SHA1}" ;;
+        ${OXT_HANDLE_SHA256}) echo "sha256" ;;
+        ${OXT_HANDLE_SHA1})   echo "sha1" ;;
         *)                    echo "INVALID_ALG" ;;
     esac
 }
@@ -149,7 +149,7 @@ tpm_is_active() {
     local val
 
     if is_tpm_2_0 ; then
-        msg=$(tpm2_dump_capability --capability=properties-variable 2>&1) || \
+        msg=$(tpm2_getcap --capability=properties-variable 2>&1) || \
             return 2
 
         # Ensure Hierarchies are enabled; otherwise the TPM2 is unusable.
@@ -178,7 +178,7 @@ tpm_is_enabled() {
     local state=""
 
     if is_tpm_2_0 ; then
-        tpm2_dump_capability --capability=properties-fixed 1>/dev/null 2>&1
+        tpm2_getcap --capability=properties-fixed 1>/dev/null 2>&1
         return $?
     else
         state=$(cat ${tpm}/enabled)
@@ -200,16 +200,14 @@ tpm2_handle_defined() {
     local oxt_handle="$1"
     local handles=$( tpm2_listpersistent )
     local handle=$( echo "${handles}" | \
-                    sed -n "/Persistent handle: ${oxt_handle}/,/\}/p" )
+                    sed -nr "/persistent-handle\[[0-9]+\]:${oxt_handle}/p" )
     if [ -z "${handle}" ]; then
             return 1
     fi
 
-    local h_type=$( echo "${handles}" | awk '/Type/ { print $2 }' )
-    local alg=$( echo "${handles}" | \
-                   awk '/Hash algorithm\(nameAlg\):/ { print $3 }' )
-    h_type=$( tpm2_normalize "${h_type}" )
-    alg=$( tpm2_normalize "${alg}" )
+    local h_type=$( echo "${handles}" | cut -d ' ' -f 2 | cut -d ':' -f 2 )
+    local alg=$( echo "${handles}" | cut -d ' ' -f 3 | cut -d ':' -f 2)
+
     if [ "${h_type}" != "$( handle_type "${oxt_handle}" )" -o \
             "${alg}" != "$( handle_alg "${oxt_handle}" )" ]; then
         return 2
@@ -223,9 +221,7 @@ tpm2_handle_defined() {
 #         1 if the handles are not defined
 #         2 if the handles are incorrect
 tpm2_handles_defined() {
-    local handles=$( tpm2_listpersistent )
-    local num_handles=$( echo "${handles}" | \
-                         awk '/persistent objects defined./ { print $1 }')
+    local num_handles=$( tpm2_listpersistent | wc -l )
 
     if [ "${num_handles}" -eq 0 ]; then
         return 1
@@ -271,7 +267,8 @@ tpm_clear_handles() {
     is_tpm_2_0 || return 0
 
     handles=$( tpm2_listpersistent | \
-               awk -F: '/Persistent handle:/ { print $2 }' )
+               cut -d ' ' -f 1 | \
+               cut -d ':' -f 2 )
     for handle in ${handles} ; do
         tpm2_clear_handle "${passwd}" "${handle}"
     done
@@ -310,7 +307,7 @@ tpm_is_owned() {
     local tpm2=$?
     if [ "${tpm2}" -eq 0 ];
     then
-        tpm2_dump_capability --capability=properties-variable | grep -q 'ownerAuthSet:[[:space:]]\+set'
+        tpm2_getcap --capability=properties-variable | grep -q 'ownerAuthSet:[[:space:]]\+set'
         ret=$?
         if [ "${ret}" -eq 0 ]; then
             state=1
@@ -364,7 +361,7 @@ tpm2_check_password() {
     msg=$( tpm2_takeownership -O $(cat "${passwd}") -o $(cat "${passwd}") \
                               -E $(cat "${passwd}") -e $(cat "${passwd}") \
                               -L $(cat "${passwd}") -l $(cat "${passwd}") \
-                              2>&1 )
+                              2>&1 | head -n 1 )
     [ $? -eq 0 ] && return 0
 
     msg=${msg#*TPM Error:}
@@ -492,7 +489,7 @@ tpm2_create_handle() {
     local passwd=$( cat $1 )
 
     #Create our primary object
-    handle=$(echo -n "${passwd}" | tpm2_createprimary -A o -g ${TPM_ALG_SHA256} -G ${TPM_ALG_RSA} -P | grep Handle | cut -d ':' -f 2)
+    handle=$(echo -n "${passwd}" | tpm2_createprimary -H o -g ${TPM_ALG_SHA256} -G ${TPM_ALG_RSA} -P | grep Handle | cut -d ':' -f 2)
     ret=$?
     [ ${ret} -ne 0 ] && echo "Failed to create primary" && return ${ret}
     #Make it permanent for this measured install
@@ -584,10 +581,14 @@ tpm2_write_tboot_policy() {
                                                  TPMA_NV_TPMA_NV_OWNERREAD  | \
                                                  TPMA_NV_TPMA_NV_AUTHREAD )) )"
 
-    local idx=$( tpm2_nvlist | sed -n "/NV Index: ${tboot_idx}/,/\}/p" )
-    local alg=$( echo "${idx}" | awk -F: '/\(nameAlg\)/ { print $2 }' )
-    local attr=$( echo "${idx}" | awk -F: '/\(attributes\)/ { print $2 }' )
-    local size=$( echo "${idx}" | awk -F: '/\(dataSize\)/ { print $2 }' )
+    local idx=$( tpm2_nvlist | sed -n "/${tboot_idx}:/,/^$/p" | sed "/^$/d" )
+    local attr=$( echo "${idx}" | \
+                  sed -n "/attributes:/,/value:/p" | \
+                  awk -F: '/value:/ { print $2 }' | \
+                  tr -d ' ' )
+    local size=$( echo "${idx}" | \
+                  awk -F: '/size:/ { print $2 }' | \
+                  tr -d ' ' )
 
     # Read the current contents into a temp file.
     # tpm2_nvread could fail, and this ends up being a big pipeline to
@@ -614,7 +615,7 @@ tpm2_write_tboot_policy() {
     fi
 
     tpm2_nvwrite -x "${tboot_idx}" -a "${TPM_RH_OWNER}" -P "${password}" \
-                 -f "${policy}" >/dev/null 2>&1
+                 "${policy}" >/dev/null 2>&1
 }
 
 tpm_get_pcr() {
@@ -622,7 +623,11 @@ tpm_get_pcr() {
 
     is_tpm_2_0
     if [ $? -eq 0 ]; then
-        echo "$(tpm2_listpcrs|grep PCR_${pcr}|tail -1|cut -f2 -d:|tr 'A-Z' 'a-z'|tr -d \ )"
+        if pcr_bank_exists "sha256"; then
+            echo "$(tpm2_pcrlist -L sha256:${pcr} | tail -1 | cut -f2 -d: | tr 'A-Z' 'a-z' | tr -d \ )"
+        else
+            echo "$(tpm2_pcrlist -L sha1:${pcr} | tail -1 | cut -f2 -d: | tr 'A-Z' 'a-z' | tr -d \ )"
+        fi
     else
         local tpm="$(find /sys/class -name tpm0 2>/dev/null)/device"
 
@@ -666,7 +671,7 @@ tpm_seal() {
 
     is_tpm_2_0
     if [ $? -eq 0 ]; then
-        pcr_bank_exists "TPM_ALG_$(echo $hashalg|tr [a-z] [A-Z])"
+        pcr_bank_exists "${hashalg}"
         [ $? -eq 0 ] || return 1
 
         case $hashalg in
@@ -735,7 +740,7 @@ tpm_forward_seal() {
     then
         seal_file=${key}
         clean_old_tpm_files
-        if pcr_bank_exists "TPM_ALG_SHA256"; then
+        if pcr_bank_exists "sha256"; then
             tpm2_sealdata -H ${OXT_HANDLE_SHA256} -I ${seal_file} \
                           -O ${tss}.sha256 -o ${tss}.pub.sha256 \
                           -g ${TPM_ALG_SHA256} -G ${TPM_ALG_KEYEDHASH} \
@@ -788,7 +793,7 @@ tpm_unseal() {
             pcr_params="${pcr_params} -r ${p}"
         done
 
-        pcr_bank_exists "TPM_ALG_$(echo $hashalg|tr [a-z] [A-Z])"
+        pcr_bank_exists "${hashalg}"
         [ $? -eq 0 ] || return 1
 
         case $hashalg in

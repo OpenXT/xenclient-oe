@@ -1,72 +1,123 @@
-commit 8fabfe7daa9d9dcc86c2d14b59929a7097d8ea14
-Author: Chris Rogers <rogersc@ainfosec.com>
-Date:   Thu May 18 14:35:31 2017 -0400
+################################################################################
+SHORT DESCRIPTION:
+################################################################################
+Provide supporting changes for tpm2_sealdata, tpm2_unsealdata, and
+tpm2_extendpcr.
 
-    [tpm2.0-tools] Header and lib changes for OpenXT
-    
-      - Implement a pcr policy builder for sealing/unsealing
-      - Various changes to library headers and source to support
-        OpenXT specific changes.
-    
-    Signed-off-by: Chris Rogers <rogersc@ainfosec.com>
+################################################################################
+LONG DESCRIPTION:
+################################################################################
+Prep repository for new binaries by adding/modifying Make targets, adding
+useful shared library functions, and creating a new pcr policy library for 
+building and exporting policies.
 
-diff --git a/Makefile.am b/Makefile.am
-index 9325dcc..4d3de41 100644
+Note that this patch absorbed the lib/pcr.* changes from the old
+tpm2-fix-forward-seal.patch.
+
+################################################################################
+CHANGELOG
+################################################################################
+Add supporting changes: Chris Rogers <rogersc@ainfosec.com>
+Uprev from v2.0.0 to v3.1.3: Nicholas Tsirakis <tsirakisn@ainfosec.com>
+
+################################################################################
+REMOVAL
+################################################################################
+
+################################################################################
+UPSTREAM PLAN
+################################################################################
+
+################################################################################
+INTERNAL DEPENDENCIES
+################################################################################
+
+################################################################################
+PATCHES
+################################################################################
+
+commit 34e920e2af5f16b9fe4d7302deb34409270024a7
+Author: Nicholas Tsirakis <tsirakisn@ainfosec.com>
+Date:   Mon May 21 14:34:00 2018 -0400
+
+    Apply tpm2-tools-lib-support patch
+
 --- a/Makefile.am
 +++ b/Makefile.am
-@@ -41,7 +41,6 @@ AM_LDFLAGS   := $(EXTRA_LDFLAGS)
- LDADD = $(LIB_COMMON) $(TPM20_TSS_LIBS) $(TCTI_SOCK_LIBS) $(TCTI_DEV_LIBS)
+@@ -29,8 +29,6 @@
+ # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
+ # THE POSSIBILITY OF SUCH DAMAGE.
+ #;**********************************************************************;
+-@CODE_COVERAGE_RULES@
+-
+ ACLOCAL_AMFLAGS = -I m4
  
- sbin_PROGRAMS = \
+ INCLUDE_DIRS = -I$(top_srcdir)/tools -I$(top_srcdir)/lib
+@@ -53,13 +51,13 @@ LDADD = \
+ bin_PROGRAMS = \
+     tools/tpm2_activatecredential \
+     tools/tpm2_certify \
 -    tools/tpm2_create \
+     tools/tpm2_createpolicy \
      tools/tpm2_createprimary \
-     tools/tpm2_load \
-     tools/tpm2_send_command \
-@@ -76,7 +75,10 @@ sbin_PROGRAMS = \
+     tools/tpm2_dictionarylockout \
+     tools/tpm2_getcap \
+     tools/tpm2_encryptdecrypt \
+     tools/tpm2_evictcontrol \
++    tools/tpm2_extendpcr \
+     tools/tpm2_getmanufec \
+     tools/tpm2_getpubak \
+     tools/tpm2_getpubek \
+@@ -84,11 +82,13 @@ bin_PROGRAMS = \
+     tools/tpm2_readpublic \
      tools/tpm2_rsadecrypt \
      tools/tpm2_rsaencrypt \
-     tools/tpm2_sign \
--    tools/tpm2_unseal
-+    tools/tpm2_unseal \
 +    tools/tpm2_sealdata \
+     tools/tpm2_send \
+     tools/tpm2_sign \
+     tools/tpm2_startup \
+     tools/tpm2_takeownership \
+     tools/tpm2_unseal \
 +    tools/tpm2_unsealdata \
-+    tools/tpm2_extendpcr
+     tools/tpm2_verifysignature
  
  noinst_LIBRARIES = $(LIB_COMMON)
- lib_libcommon_a_SOURCES = \
-@@ -94,7 +96,6 @@ lib_libcommon_a_SOURCES = \
-     lib/tpm_kdfa.c \
-     lib/tpm_session.c
+@@ -132,7 +132,7 @@ lib_libcommon_a_SOURCES = \
  
--tools_tpm2_create_SOURCES = tools/tpm2_create.c tools/main.c
- tools_tpm2_createprimary_SOURCES = tools/tpm2_createprimary.c tools/main.c
- tools_tpm2_dump_capability_SOURCES = tools/tpm2_dump_capability.c tools/main.c
- tools_tpm2_listpcrs_SOURCES = tools/tpm2_listpcrs.c tools/main.c
-@@ -134,6 +135,9 @@ tools_tpm2_unseal_SOURCES = tools/tpm2_unseal.c tools/main.c
+ TOOL_SRC := tools/tpm2_tool.c tools/tpm2_tool.h
  
- # rc_decode does not use common main, since it does not need a dynamic TCTI.
- tools_tpm2_rc_decode_SOURCES = lib/rc-decode.c tools/tpm2_rc_decode.c
-+tools_tpm2_extendpcr_SOURCES = tools/tpm2_extendpcr.c tools/main.c
-+tools_tpm2_sealdata_SOURCES = tools/tpm2_sealdata.c tools/main.c tools/tpm2_create.c lib/build-policy.c
-+tools_tpm2_unsealdata_SOURCES = tools/tpm2_unsealdata.c tools/main.c lib/build-policy.c
+-tools_tpm2_create_SOURCES = tools/tpm2_create.c $(TOOL_SRC)
++tools_tpm2_createpolicy_SOURCES = tools/tpm2_createpolicy.c $(TOOL_SRC)
+ tools_tpm2_createprimary_SOURCES = tools/tpm2_createprimary.c $(TOOL_SRC)
+ tools_tpm2_getcap_SOURCES = tools/tpm2_getcap.c $(TOOL_SRC)
+ tools_tpm2_pcrlist_SOURCES = tools/tpm2_pcrlist.c $(TOOL_SRC)
+@@ -169,10 +169,12 @@ tools_tpm2_rsaencrypt_SOURCES = tools/tp
+ tools_tpm2_sign_SOURCES = tools/tpm2_sign.c $(TOOL_SRC)
+ tools_tpm2_unseal_SOURCES = tools/tpm2_unseal.c $(TOOL_SRC)
+ tools_tpm2_dictionarylockout_SOURCES = tools/tpm2_dictionarylockout.c $(TOOL_SRC)
+-tools_tpm2_createpolicy_SOURCES = tools/tpm2_createpolicy.c $(TOOL_SRC)
+ tools_tpm2_pcrextend_SOURCES = tools/tpm2_pcrextend.c $(TOOL_SRC)
+ tools_tpm2_pcrevent_SOURCES = tools/tpm2_pcrevent.c $(TOOL_SRC)
+ tools_tpm2_rc_decode_SOURCES = tools/tpm2_rc_decode.c $(TOOL_SRC)
++tools_tpm2_extendpcr_SOURCES = tools/tpm2_extendpcr.c $(TOOL_SRC)
++tools_tpm2_sealdata_SOURCES = tools/tpm2_sealdata.c $(TOOL_SRC) tools/tpm2_create.c lib/build-policy.c
++tools_tpm2_unsealdata_SOURCES = tools/tpm2_unsealdata.c $(TOOL_SRC) lib/build-policy.c
  
  if UNIT
  TESTS = $(check_PROGRAMS)
-diff --git a/lib/build-policy.c b/lib/build-policy.c
-new file mode 100644
-index 0000000..4313c72
 --- /dev/null
 +++ b/lib/build-policy.c
-@@ -0,0 +1,128 @@
-+#include <sapi/tpm20.h>
-+#include <tcti/tcti_socket.h>
+@@ -0,0 +1,129 @@
++#include <tss2/tss2_sys.h>
++#include <tss2/tss2_tcti_mssim.h>
 +#include <stdio.h>
++#include <string.h>
 +#include "tpm_session.h"
 +#include "tpm_hash.h"
 +#include "string-bytes.h"
 +#include "pcr.h"
 +
-+#define INIT_SIMPLE_TPM2B_SIZE( type ) (type).t.size = sizeof( type ) - 2;
++#define INIT_SIMPLE_TPM2B_SIZE( type ) (type).size = sizeof( type ) - 2;
 +
 +void zero_pcr_selection(TPML_PCR_SELECTION *pcrsIn, TPMI_ALG_HASH nameAlg)
 +{
@@ -88,7 +139,7 @@ index 0000000..4313c72
 +    TPML_PCR_SELECTION pcrs, pcrsTmp, pcrSelectionOut;
 +    UINT32 pcrUpdateCounter;
 +
-+    TPM_RC rval = TPM_RC_SUCCESS;
++    TPM2_RC rval = TPM2_RC_SUCCESS;
 +    char empty[32] = {0};
 +    zero_pcr_selection(&pcrs, nameAlg);
 +
@@ -104,25 +155,25 @@ index 0000000..4313c72
 +            SET_PCR_SELECT_BIT(pcrsTmp.pcrSelections[0], pcrList[i]->pcr);
 +            memset(&tmpPcrValues, 0, sizeof(TPML_DIGEST));
 +            rval = Tss2_Sys_PCR_Read( sysContext, 0, &pcrsTmp, &pcrUpdateCounter, &pcrSelectionOut, &tmpPcrValues, 0 );
-+            if( rval != TPM_RC_SUCCESS )
++            if( rval != TPM2_RC_SUCCESS )
 +                return rval;
 +
-+            pcrValues[i].t.size = tmpPcrValues.digests[0].t.size;
-+            memcpy(pcrValues[i].t.buffer, tmpPcrValues.digests[0].t.buffer, tmpPcrValues.digests[0].t.size);
++            pcrValues[i].size = tmpPcrValues.digests[0].size;
++            memcpy(pcrValues[i].buffer, tmpPcrValues.digests[0].buffer, tmpPcrValues.digests[0].size);
 +        } else {
 +            //Forward hash provided, copy into digest buffer
-+            memcpy(pcrValues[i].t.buffer, pcrList[i]->forwardHash, sizeof(pcrList[i]->forwardHash));
++            memcpy(pcrValues[i].buffer, pcrList[i]->forwardHash, sizeof(pcrList[i]->forwardHash));
 +        }
 +    }
 +
 +    // Hash them together
 +    INIT_SIMPLE_TPM2B_SIZE( pcrDigest );
-+    rval = hash_sequence_ex( sysContext, policySession->authHash, pcrCountIn, &pcrValues[0], &pcrDigest );
-+    if( rval != TPM_RC_SUCCESS )
++    rval = tpm_hash_sequence( sysContext, policySession->authHash, TPM2_RH_NULL, pcrCountIn, &pcrValues[0], &pcrDigest, NULL );
++    if( rval != TPM2_RC_SUCCESS )
 +        return rval;
 +
 +    rval = Tss2_Sys_PolicyPCR( sysContext, policySession->sessionHandle, 0, &pcrDigest, &pcrs, 0 );
-+    if( rval != TPM_RC_SUCCESS )
++    if( rval != TPM2_RC_SUCCESS )
 +        return rval;
 +
 +   return rval;
@@ -131,19 +182,19 @@ index 0000000..4313c72
 +int build_policy_external(TSS2_SYS_CONTEXT *sysContext, SESSION **policySession, int trial, pcr_struct **pcrList, INT32 pcrCount, TPM2B_DIGEST *policyDigestOut, TPMI_ALG_HASH nameAlg)
 +{
 +    TPM2B_DIGEST policyDigest;
-+    TPM2B_ENCRYPTED_SECRET  encryptedSalt = { {0}, };
++    TPM2B_ENCRYPTED_SECRET  encryptedSalt = { 0, };
 +    TPMT_SYM_DEF symmetric;
-+    TPM_RC rval;
++    TPM2_RC rval;
 +    TPM2B_NONCE nonceCaller;
 +
-+    nonceCaller.t.size = 0;
-+    policyDigest.t.size = 0;
++    nonceCaller.size = 0;
++    policyDigest.size = 0;
 +
 +    // Start policy session.
-+    symmetric.algorithm = TPM_ALG_NULL;
-+    rval = tpm_session_start_auth_with_params(sysContext, policySession, TPM_RH_NULL, 0, TPM_RH_NULL, 0, &nonceCaller, &encryptedSalt,
-+        trial ? TPM_SE_TRIAL : TPM_SE_POLICY, &symmetric, nameAlg);
-+    if( rval != TPM_RC_SUCCESS )
++    symmetric.algorithm = TPM2_ALG_NULL;
++    rval = tpm_session_start_auth_with_params(sysContext, policySession, TPM2_RH_NULL, 0, TPM2_RH_NULL, 0, &nonceCaller, &encryptedSalt,
++        trial ? TPM2_SE_TRIAL : TPM2_SE_POLICY, &symmetric, nameAlg);
++    if( rval != TPM2_RC_SUCCESS )
 +    {
 +        printf("build_policy_external, Unable to Start Auth Session, Error Code: 0x%x\n", rval);
 +        return rval;
@@ -151,7 +202,7 @@ index 0000000..4313c72
 +
 +    // Send policy command.
 +    rval = build_pcr_policy( sysContext, *policySession, pcrList, pcrCount, nameAlg);
-+    if( rval != TPM_RC_SUCCESS )
++    if( rval != TPM2_RC_SUCCESS )
 +    {
 +        printf("build_pcr_policy, Error Code: 0x%x\n", rval);
 +        return rval;
@@ -161,7 +212,7 @@ index 0000000..4313c72
 +    INIT_SIMPLE_TPM2B_SIZE( policyDigest );
 +    rval = Tss2_Sys_PolicyGetDigest( sysContext, (*policySession)->sessionHandle,
 +            0, &policyDigest, 0 );
-+    if( rval != TPM_RC_SUCCESS )
++    if( rval != TPM2_RC_SUCCESS )
 +    {
 +        printf("PolicyGetDigest, Error Code: 0x%x\n", rval);
 +        return rval;
@@ -171,89 +222,75 @@ index 0000000..4313c72
 +    {
 +        // Need to flush the session here.
 +        rval = Tss2_Sys_FlushContext( sysContext, (*policySession)->sessionHandle );
-+        if( rval != TPM_RC_SUCCESS )
++        if( rval != TPM2_RC_SUCCESS )
 +            return rval;
 +
 +        // And remove the session from sessions table.
 +        rval = tpm_session_auth_end( *policySession );
-+        if( rval != TPM_RC_SUCCESS )
++        if( rval != TPM2_RC_SUCCESS )
 +            return rval;
 +    }
 +
-+    memcpy(policyDigestOut->t.buffer, policyDigest.t.buffer, policyDigest.t.size);
-+    policyDigestOut->t.size = policyDigest.t.size;
++    memcpy(policyDigestOut->buffer, policyDigest.buffer, policyDigest.size);
++    policyDigestOut->size = policyDigest.size;
 +    return rval;
 +
 +}
 +
-diff --git a/lib/context-util.c b/lib/context-util.c
-index 7b9a454..d61e913 100644
---- a/lib/context-util.c
-+++ b/lib/context-util.c
-@@ -142,7 +142,7 @@ sapi_ctx_init (TSS2_TCTI_CONTEXT *tcti_ctx)
-         .tssVersion = TSS_SAPI_FIRST_VERSION,
-     };
- 
--    size = Tss2_Sys_GetContextSize (0);
-+    size = Tss2_Sys_GetContextSize (12000);
-     sapi_ctx = (TSS2_SYS_CONTEXT*)calloc (1, size);
-     if (sapi_ctx == NULL) {
-         fprintf (stderr,
-diff --git a/lib/pcr.c b/lib/pcr.c
-index d781ab5..f5d719b 100644
 --- a/lib/pcr.c
 +++ b/lib/pcr.c
-@@ -7,7 +7,7 @@
- #include "pcr.h"
- #include "string-bytes.h"
+@@ -40,7 +40,7 @@
+ #include "tpm2_util.h"
+ #include "tpm2_alg_util.h"
  
 -static int pcr_get_id(const char *arg, UINT32 *pcrId)
 +int pcr_get_id(const char *arg, UINT32 *pcrId)
  {
      UINT32 n = 0;
  
-@@ -61,6 +61,25 @@ static int pcr_parse_selection(const char *str, int len, TPMS_PCR_SELECTION *pcr
-     return 0;
+@@ -96,6 +96,29 @@ static bool pcr_parse_selection(const ch
+     return true;
  }
  
-+int pcr_parse_arg(char *arg, UINT32 *pcrId, BYTE *forwardHash)
++int pcr_parse_arg(char *arg, UINT32 *pcrId, BYTE *forwardHash, bool *hash_set)
 +{
 +    char * pstr;
 +    UINT16 length;
 +    int ret = 0;
-+    if (strchr(arg, ':')) {
++
++    *hash_set = (strchr(arg, ':') != NULL);
++    if (*hash_set) {
 +        //read forward hash and convert to hex to byte
 +        pstr = strtok(arg, ":");
 +        if (pstr)
 +            ret = pcr_get_id(pstr, pcrId);
 +
-+        pstr = strtok(arg, ":");
-+        if (pstr)
-+            hex2ByteStructure(pstr, &length, forwardHash);
++        pstr = strtok(NULL, ":");
++        if (pstr) {
++            length = sizeof(BYTE)*32;
++            tpm2_util_hex_to_byte_structure(pstr, &length, forwardHash);
++        }
 +    } else {
 +        ret = pcr_get_id(arg, pcrId);
 +    }
 +    return ret;
 +}
  
- int pcr_parse_selections(const char *arg, TPML_PCR_SELECTION *pcrSels) {
+ bool pcr_parse_selections(const char *arg, TPML_PCR_SELECTION *pcrSels) {
      const char *strLeft = arg;
-diff --git a/lib/pcr.h b/lib/pcr.h
-index 4a998d2..caf976f 100644
 --- a/lib/pcr.h
 +++ b/lib/pcr.h
-@@ -3,7 +3,29 @@
- 
- #include <sapi/tpm20.h>
+@@ -39,4 +39,27 @@ bool pcr_parse_selections(const char *ar
+ bool pcr_parse_list(const char *str, size_t len, TPMS_PCR_SELECTION *pcrSel);
+ TSS2_RC get_max_supported_pcrs(TSS2_SYS_CONTEXT *sapi_context, UINT32 *max_pcrs);
  
 +int pcr_get_id(const char *arg, UINT32 *pcrId);
- int pcr_parse_selections(const char *arg, TPML_PCR_SELECTION *pcrSels);
- int pcr_parse_list(const char *str, int len, TPMS_PCR_SELECTION *pcrSel);
-+int pcr_parse_arg(char *arg, UINT32 *pcrId, BYTE *forwardHash);
++int pcr_parse_arg(char *arg, UINT32 *pcrId, BYTE *forwardHash, bool *hash_set);
 +
 +typedef struct pcr_struct {
 +	UINT32 pcr;
 +	BYTE forwardHash[32];
++	bool hash_set;
 +} pcr_struct;
 +
 +#define SET_PCR_SELECT_BIT( pcrSelection, pcr ) \
@@ -270,111 +307,88 @@ index 4a998d2..caf976f 100644
 +#define TEST_PCR_SELECT_BIT( pcrSelection, pcr ) \
 +    ((pcrSelection).pcrSelect[( (pcr)/8 )] & ( 1 << ( (pcr) % 8) ))
 +
- 
  #endif /* SRC_PCR_H_ */
-diff --git a/lib/tpm_hash.c b/lib/tpm_hash.c
-index fcd107b..a28afbb 100644
+--- a/lib/tpm2_util.h
++++ b/lib/tpm2_util.h
+@@ -108,8 +108,7 @@ struct TPM2B {
+         } while ((__result & 0x0000ffff) == TPM2_RC_RETRY); \
+         __result;                                          \
+     })
+-
+-int tpm2_util_hex_to_byte_structure(const char *inStr, UINT16 *byteLenth, BYTE *byteBuffer);
++int tpm2_util_hex_to_byte_structure(const char *inStr, UINT16 *byteLength, BYTE *byteBuffer);
+ 
+ /**
+  * Appends a TPM2B_DIGEST buffer to a TPM2B_MAX buffer.
 --- a/lib/tpm_hash.c
 +++ b/lib/tpm_hash.c
-@@ -1,4 +1,5 @@
+@@ -30,6 +30,7 @@
+ //**********************************************************************;
+ #include <errno.h>
  #include <string.h>
 +#include <stdio.h>
  
- #include <sapi/tpm20.h>
+ #include <tss2/tss2_sys.h>
  
-@@ -12,7 +13,7 @@ UINT32 tpm_hash(TSS2_SYS_CONTEXT *sapi_context, TPMI_ALG_HASH hashAlg,
-             TPM_RH_NULL, result, 0, 0);
- }
- 
--static TPM_RC hash_sequence_ex(TSS2_SYS_CONTEXT *sapi_context,
-+TPM_RC hash_sequence_ex(TSS2_SYS_CONTEXT *sapi_context,
- 
-     TPMI_ALG_HASH hashAlg, UINT32 numBuffers, TPM2B_MAX_BUFFER *bufferList,
-     TPM2B_DIGEST *result) {
-@@ -41,6 +42,7 @@ static TPM_RC hash_sequence_ex(TSS2_SYS_CONTEXT *sapi_context,
-     rval = Tss2_Sys_HashSequenceStart(sapi_context, 0, &nullAuth, hashAlg,
-             &sequenceHandle, 0);
-     if (rval != TPM_RC_SUCCESS) {
+@@ -64,6 +65,7 @@ TSS2_RC tpm_hash_sequence(TSS2_SYS_CONTE
+     UINT32 rval = Tss2_Sys_HashSequenceStart(sapi_context, 0, &null_auth,
+             hash_alg, &sequence_handle, 0);
+     if (rval != TPM2_RC_SUCCESS) {
 +        printf("HashSequenceStart failed, rc=%x\n", rval);
          return rval;
      }
  
-@@ -50,15 +52,18 @@ static TPM_RC hash_sequence_ex(TSS2_SYS_CONTEXT *sapi_context,
-                 &cmdAuthArray, &bufferList[i], 0);
+@@ -74,6 +76,7 @@ TSS2_RC tpm_hash_sequence(TSS2_SYS_CONTE
+                 &cmd_auth_array, (TPM2B_MAX_BUFFER *) &buffer_list[i], 0);
  
-         if (rval != TPM_RC_SUCCESS) {
+         if (rval != TPM2_RC_SUCCESS) {
 +            printf("SequenceUpdate failed, i=%d rc=%x\n", i, rval);
              return rval;
          }
      }
- 
-+    result->t.size = sizeof( *result ) - 2;
-     rval = Tss2_Sys_SequenceComplete(sapi_context, sequenceHandle,
-             &cmdAuthArray, (TPM2B_MAX_BUFFER *) &emptyBuffer,
-             TPM_RH_PLATFORM, result, &validation, 0);
- 
-     if (rval != TPM_RC_SUCCESS) {
+@@ -123,6 +126,7 @@ TSS2_RC tpm_hash_file(TSS2_SYS_CONTEXT *
+             halg, &sequenceHandle, NULL);
+     if (rval != TPM2_RC_SUCCESS) {
+         LOG_ERR("Tss2_Sys_HashSequenceStart failed: 0x%X", rval);
 +        printf("SequenceComplete failed, rc=%x\n", rval);
          return rval;
      }
  
-diff --git a/lib/tpm_hash.h b/lib/tpm_hash.h
-index 153ce6a..9736966 100644
 --- a/lib/tpm_hash.h
 +++ b/lib/tpm_hash.h
-@@ -5,5 +5,6 @@
+@@ -103,4 +103,6 @@ TSS2_RC tpm_hash_file(TSS2_SYS_CONTEXT *
+         TPMI_RH_HIERARCHY hierarchy, FILE *input, TPM2B_DIGEST *result,
+         TPMT_TK_HASHCHECK *validation);
  
- UINT32 tpm_hash(TSS2_SYS_CONTEXT *sapi_context, TPMI_ALG_HASH hashAlg, UINT16 size, BYTE *data, TPM2B_DIGEST *result);
- int tpm_hash_compute_data(TSS2_SYS_CONTEXT *sapi_context, BYTE *buffer, UINT16 length, TPMI_ALG_HASH halg, TPM2B_DIGEST *result);
-+TPM_RC hash_sequence_ex(TSS2_SYS_CONTEXT *sapi_context, TPMI_ALG_HASH hashAlg, UINT32 numBuffers, TPM2B_MAX_BUFFER *bufferList, TPM2B_DIGEST *result);
- 
- #endif /* SRC_TPM_HASH_H_ */
-diff --git a/lib/tpm_session.c b/lib/tpm_session.c
-index 414f1f7..6cb89ff 100644
---- a/lib/tpm_session.c
-+++ b/lib/tpm_session.c
-@@ -69,7 +69,7 @@ HASH_SIZE_INFO   hashSizes[] = {
-     {TPM_ALG_NULL,0}
- };
- 
--static UINT16 GetDigestSize( TPM_ALG_ID authHash )
-+UINT16 GetDigestSize( TPM_ALG_ID authHash )
- {
-     UINT32 i;
-     for(i = 0; i < (sizeof(hashSizes)/sizeof(HASH_SIZE_INFO)); i++ )
-diff --git a/lib/tpm_session.h b/lib/tpm_session.h
-index 5e8c89e..b1643c5 100644
---- a/lib/tpm_session.h
-+++ b/lib/tpm_session.h
-@@ -133,4 +133,10 @@ TPM_RC tpm_session_start_auth_with_params(TSS2_SYS_CONTEXT *sapi_context, SESSIO
-  */
- TPM_RC tpm_session_auth_end( SESSION *session);
- 
-+/**
-+ * @param authHash
-+ * @return
-+ */
-+UINT16 GetDigestSize( TPM_ALG_ID authHash);
++UINT32 tpm_hash(TSS2_SYS_CONTEXT *sapi_context, TPMI_ALG_HASH hashAlg, UINT16 size, BYTE *data, TPM2B_DIGEST *result);
 +
- #endif /* SRC_TPM_SESSION_H_ */
-diff --git a/tools/shared.h b/tools/shared.h
-new file mode 100644
-index 0000000..3af8624
+ #endif /* SRC_TPM_HASH_H_ */
 --- /dev/null
 +++ b/tools/shared.h
 @@ -0,0 +1,15 @@
 +#ifndef SRC_SHARED_H
 +#define SRC_SHARED_H
 +
-+#include <sapi/tpm20.h>
++#include <tss2/tss2_sys.h>
 +
 +#include "tpm_session.h"
 +#include "pcr.h"
 +
-+int setAlg(TPMI_ALG_PUBLIC type,TPMI_ALG_HASH nameAlg,TPM2B_PUBLIC *inPublic, int I_flag);
++int setup_alg(TPMI_ALG_PUBLIC type, TPMI_ALG_HASH nameAlg, TPM2B_PUBLIC *in_public, int I_flag);
 +
-+int create(TSS2_SYS_CONTEXT *sysContext, TPMI_DH_OBJECT parentHandle, TPM2B_PUBLIC *inPublic, TPM2B_SENSITIVE_CREATE *inSensitive, TPMI_ALG_PUBLIC type, TPMI_ALG_HASH nameAlg, const char *opuFilePath, const char *oprFilePath, int o_flag, int O_flag, int I_flag, int A_flag, UINT32 objectAttributes);
++int create(TSS2_SYS_CONTEXT *sysContext, TPMI_DH_OBJECT parent_handle, TPM2B_PUBLIC *in_public, TPM2B_SENSITIVE_CREATE *in_sensitive, TPMI_ALG_PUBLIC type, TPMI_ALG_HASH nameAlg, const char *opu_path, const char *opr_path, int o_flag, int O_flag, int I_flag, int A_flag, UINT32 objectAttributes);
 +
 +int build_policy_external(TSS2_SYS_CONTEXT *sysContext, SESSION **policySession, int trial, pcr_struct **pcrList, INT32 pcrCount, TPM2B_DIGEST *policyDigestOut, TPMI_ALG_HASH nameAlg);
 +
 +#endif /* SRC_SHARED_H */
+--- a/tools/tpm2_tool.c
++++ b/tools/tpm2_tool.c
+@@ -80,7 +80,7 @@ static TSS2_SYS_CONTEXT* sapi_ctx_init(T
+ 
+     TSS2_ABI_VERSION abi_version = SUPPORTED_ABI_VERSION;
+ 
+-    size_t size = Tss2_Sys_GetContextSize(0);
++    size_t size = Tss2_Sys_GetContextSize(12000);
+     TSS2_SYS_CONTEXT *sapi_ctx = (TSS2_SYS_CONTEXT*) calloc(1, size);
+     if (sapi_ctx == NULL) {
+         LOG_ERR("Failed to allocate 0x%zx bytes for the SAPI context\n",
