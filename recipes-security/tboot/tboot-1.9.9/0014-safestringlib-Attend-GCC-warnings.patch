@@ -1,0 +1,129 @@
+From 87aac922b656ae8d92fb48a015a40849552695d9 Mon Sep 17 00:00:00 2001
+From: Eric Chanudet <chanudete@ainfosec.com>
+Date: Thu, 17 Jan 2019 19:26:08 -0500
+Subject: [PATCH 14/14] safestringlib: Attend GCC warnings.
+
+Allow compilation with -Werror (OE default).
+
+-Wunused-parameter, are macro related.
+-Wswitch-default, are a bunch of fallthrough in format parsing that
+would be caught during compilation by GCC (invalid formats).
+-Wdiscarded-qualifiers are missing const around error messages which are
+usually literals.
+-Wincompatible-pointer-types, mem_prim_set32() takes a uint32_t* from
+wwmemset_s() wchar_t input without a cast.
+
+Signed-off-by: Eric Chanudet <chanudete@ainfosec.com>
+---
+ safestringlib/safeclib/abort_handler_s.c     | 1 +
+ safestringlib/safeclib/ignore_handler_s.c    | 4 +++-
+ safestringlib/safeclib/safe_str_constraint.h | 6 ++++--
+ safestringlib/safeclib/snprintf_support.c    | 3 +++
+ safestringlib/safeclib/wmemset_s.c           | 2 +-
+ 5 files changed, 12 insertions(+), 4 deletions(-)
+
+diff --git a/safestringlib/safeclib/abort_handler_s.c b/safestringlib/safeclib/abort_handler_s.c
+index 1613575..60c0d4d 100644
+--- a/safestringlib/safeclib/abort_handler_s.c
++++ b/safestringlib/safeclib/abort_handler_s.c
+@@ -67,6 +67,7 @@
+ 
+ void abort_handler_s(const char *msg, void *ptr, errno_t error)
+ {
++	(void) ptr;
+ 	slprintf("ABORT CONSTRAINT HANDLER: (%u) %s\n", error,
+ 		 (msg) ? msg : "Null message");
+ 	slabort();
+diff --git a/safestringlib/safeclib/ignore_handler_s.c b/safestringlib/safeclib/ignore_handler_s.c
+index 54b65c9..5086551 100644
+--- a/safestringlib/safeclib/ignore_handler_s.c
++++ b/safestringlib/safeclib/ignore_handler_s.c
+@@ -64,7 +64,9 @@
+ 
+ void ignore_handler_s(const char *msg, void *ptr, errno_t error)
+ {
+-
++	(void) ptr;
++	(void) error;
++	(void) msg;
+ 	sldebug_printf("IGNORE CONSTRAINT HANDLER: (%u) %s\n", error,
+ 		       (msg) ? msg : "Null message");
+ 	return;
+diff --git a/safestringlib/safeclib/safe_str_constraint.h b/safestringlib/safeclib/safe_str_constraint.h
+index a1fba3e..d9bc204 100644
+--- a/safestringlib/safeclib/safe_str_constraint.h
++++ b/safestringlib/safeclib/safe_str_constraint.h
+@@ -48,12 +48,13 @@ extern void invoke_safe_str_constraint_handler(
+  * Safe C Lib internal string routine to consolidate error handling
+  */
+ static inline void handle_error(char *orig_dest, rsize_t orig_dmax,
+-                                char *err_msg, errno_t err_code)
++                                const char *err_msg, errno_t err_code)
+ {
+ #ifdef SAFECLIB_STR_NULL_SLACK
+     /* null string to eliminate partial copy */
+     while (orig_dmax) { *orig_dest = '\0'; orig_dmax--; orig_dest++; }
+ #else
++    (void) orig_dmax;
+     *orig_dest = '\0';
+ #endif
+ 
+@@ -62,12 +63,13 @@ static inline void handle_error(char *orig_dest, rsize_t orig_dmax,
+ }
+ 
+ static inline void handle_wc_error(wchar_t *orig_dest, rsize_t orig_dmax,
+-                                char *err_msg, errno_t err_code)
++                                   const char *err_msg, errno_t err_code)
+ {
+ #ifdef SAFECLIB_STR_NULL_SLACK
+     /* null string to eliminate partial copy */
+     while (orig_dmax) { *orig_dest = L'\0'; orig_dmax--; orig_dest++; }
+ #else
++    (void) orig_dmax;
+     *orig_dest = L'\0';
+ #endif
+ 
+diff --git a/safestringlib/safeclib/snprintf_support.c b/safestringlib/safeclib/snprintf_support.c
+index 52a0739..3b93ba4 100644
+--- a/safestringlib/safeclib/snprintf_support.c
++++ b/safestringlib/safeclib/snprintf_support.c
+@@ -78,6 +78,7 @@ parse_format(const char *format, char pformatList[], unsigned int maxFormats)
+ 			case '+' : // force a sign be used
+ 				index++; // skip the flag character
+ 				break;
++			default: break;
+ 			}
+ 			// check for and skip the optional field width
+ 			while ( format[index] != '\0' && format[index] >= '0' && format[index] <= '9') {
+@@ -112,6 +113,7 @@ parse_format(const char *format, char pformatList[], unsigned int maxFormats)
+ 			case 'z' :
+ 			case 't' : index++;
+ 			           break;
++			default: break;
+ 			}
+ 
+ 			// Recognize and record the actual modifier
+@@ -212,6 +214,7 @@ check_integer_format(const char format)
+ 		case FMT_INT   :
+ 			retValue = 1;
+ 			break;
++		default: break;
+ 	}
+ 	return retValue;
+ }
+diff --git a/safestringlib/safeclib/wmemset_s.c b/safestringlib/safeclib/wmemset_s.c
+index 2de4e51..a323943 100644
+--- a/safestringlib/safeclib/wmemset_s.c
++++ b/safestringlib/safeclib/wmemset_s.c
+@@ -98,7 +98,7 @@ wmemset_s (wchar_t *dest, wchar_t value, rsize_t len)
+         return (RCNEGATE(ESLEMAX));
+     }
+ 
+-    mem_prim_set32(dest, len, value);
++    mem_prim_set32((void*)dest, len, value);
+ 
+     return (RCNEGATE(EOK));
+ }
+-- 
+2.20.1
+
