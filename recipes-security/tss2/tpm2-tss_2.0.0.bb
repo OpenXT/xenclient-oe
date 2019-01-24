@@ -11,9 +11,11 @@ SRCREV = "ced20c209397f58d81da79810f49976ba2d36566"
 
 SRC_URI = " \
     git://github.com/01org/tpm2-tss.git;protocol=git;branch=master \
-    "
+"
 
 S = "${WORKDIR}/git"
+
+inherit autotools pkgconfig
 
 # https://lists.yoctoproject.org/pipermail/yocto/2013-November/017042.html
 
@@ -75,12 +77,10 @@ FILES_libtctisocket-dev = " \
 FILES_libtctisocket-staticdev = "${libdir}/libtss2-tcti-mssim.*a"
 FILES_resourcemgr = "${sbindir}/resourcemgr"
 
-inherit autotools pkgconfig
-
 do_configure_prepend () {
-	# execute the bootstrap script
-	currentdir=$(pwd)
-	cd ${S}
-	ACLOCAL="aclocal --system-acdir=${STAGING_DATADIR}/aclocal" ./bootstrap
-	cd ${currentdir}
+    # Creates the src_vars.mk file used by automake to handle source-files for
+    # each component. Modified to not call autotools and let OE handle that.
+    pushd ${S}
+    AUTORECONF=true ./bootstrap
+    popd
 }
