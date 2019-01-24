@@ -45,7 +45,7 @@ IMAGE_INSTALL = " \
     dbus \
     rpc-broker \
     networkmanager \
-    ndvm-rpc-broker-config \
+    rpc-broker-ndvm-config \
     xenclient-toolstack \
     linux-firmware-iwlwifi \
     linux-firmware-bnx2 \

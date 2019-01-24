@@ -91,7 +91,7 @@ RDEPENDS_${PN} = " \
     usb-modeswitch \
     upgrade-db \
     rpc-broker \
-    dom0-rpc-broker-config \
+    rpc-broker-dom0-config \
     dbd \
     xenclient-language-sync \
     atapi-pt-helper \

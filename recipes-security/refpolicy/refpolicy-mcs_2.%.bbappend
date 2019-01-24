@@ -46,9 +46,6 @@ SRC_URI += " \
     file://policy/modules/services/dbd.fc \
     file://policy/modules/services/dbd.if \
     file://policy/modules/services/dbd.te \
-    file://policy/modules/services/dbusbouncer.fc \
-    file://policy/modules/services/dbusbouncer.if \
-    file://policy/modules/services/dbusbouncer.te \
     file://policy/modules/services/icbinn.fc \
     file://policy/modules/services/icbinn.if \
     file://policy/modules/services/icbinn.te \
@@ -61,9 +58,6 @@ SRC_URI += " \
     file://policy/modules/services/network-daemon.fc \
     file://policy/modules/services/network-daemon.if \
     file://policy/modules/services/network-daemon.te \
-    file://policy/modules/services/rpcproxy.fc \
-    file://policy/modules/services/rpcproxy.if \
-    file://policy/modules/services/rpcproxy.te \
     file://policy/modules/services/rpcbroker.fc \
     file://policy/modules/services/rpcbroker.if \
     file://policy/modules/services/rpcbroker.te \
