@@ -1,0 +1,355 @@
+################################################################################
+SHORT DESCRIPTION: 
+################################################################################
+Fix error checks.
+
+################################################################################
+LONG DESCRIPTION: 
+################################################################################
+Replace atoi() with strtol().
+atoi() has limited functionality when it comes to error checks on the input.
+strtol() provides broader error checks on the input.
+
+################################################################################
+CHANGELOG 
+################################################################################
+Author(s):
+Mahantesh Salimath <salimathm@ainfosec.com>
+
+################################################################################
+REMOVAL 
+################################################################################
+
+################################################################################
+UPSTREAM PLAN
+################################################################################
+Yes, could be upstreamed.
+
+################################################################################
+INTERNAL DEPENDENCIES 
+################################################################################
+
+################################################################################
+PATCHES 
+################################################################################
+--- a/control/tap-ctl.c
++++ b/control/tap-ctl.c
+@@ -41,6 +41,7 @@
+ #include <sys/time.h>
+ #include <sys/stat.h>
+ #include <sys/sysmacros.h>
++#include <errno.h>
+ 
+ #include "tap-ctl.h"
+ 
+@@ -118,6 +119,7 @@ tap_cli_list(int argc, char **argv)
+ 	struct list_head list = LIST_HEAD_INIT(list);
+ 	int c, minor, tty, err;
+ 	const char *type, *file;
++	char *endptr;
+ 	tap_list_t *entry;
+ 	pid_t pid;
+ 
+@@ -129,10 +131,18 @@ tap_cli_list(int argc, char **argv)
+ 	while ((c = getopt(argc, argv, "m:p:t:f:h")) != -1) {
+ 		switch (c) {
+ 		case 'm':
+-			minor = atoi(optarg);
+-		break;
++			minor = strtol(optarg, &endptr, 10);
++			if((*endptr != '\0') || (errno == ERANGE) || (errno == EINVAL) || (minor < 0)) {
++				fprintf(stderr, "\n invalid minor value \n");
++				minor = -1;
++			}
++			break;
+ 		case 'p':
+-			pid = atoi(optarg);
++			pid = strtol(optarg, &endptr, 10);
++			if((*endptr != '\0') || (errno == ERANGE) || (errno == EINVAL) || (pid < 0)) {
++				fprintf(stderr, "\n invalid pid value \n");
++				pid = -1;
++			}
+ 			break;
+ 		case 't':
+ 			type = optarg;
+@@ -238,6 +248,7 @@ tap_cli_free_usage(FILE *stream)
+ static int
+ tap_cli_free(int argc, char **argv)
+ {
++	char *endptr;
+ 	int c, minor;
+ 
+ 	minor = -1;
+@@ -246,7 +257,11 @@ tap_cli_free(int argc, char **argv)
+ 	while ((c = getopt(argc, argv, "m:h")) != -1) {
+ 		switch (c) {
+ 		case 'm':
+-			minor = atoi(optarg);
++			minor = strtol(optarg, &endptr, 10);
++			if((*endptr != '\0') || (errno == ERANGE) || (errno == EINVAL) || (minor < 0)) {
++				fprintf(stderr, "\n invalid minor value \n");
++				minor = -1;
++			}
+ 			break;
+ 		case '?':
+ 			goto usage;
+@@ -388,6 +403,7 @@ tap_cli_destroy(int argc, char **argv)
+ 	int c, pid, minor;
+ 	struct timeval *timeout;
+ 	const char *device;
++	char *endptr;
+ 
+ 	pid     = -1;
+ 	minor   = -1;
+@@ -398,10 +414,18 @@ tap_cli_destroy(int argc, char **argv)
+ 	while ((c = getopt(argc, argv, "p:m:t:d:h")) != -1) {
+ 		switch (c) {
+ 		case 'p':
+-			pid = atoi(optarg);
++			pid = strtol(optarg, &endptr, 10);
++			if((*endptr != '\0') || (errno == ERANGE) || (errno == EINVAL) || (pid < 0)) {
++				fprintf(stderr, "\n invalid pid value \n");
++				pid = -1;
++			}
+ 			break;
+ 		case 'm':
+-			minor = atoi(optarg);
++			minor = strtol(optarg, &endptr, 10);
++			if((*endptr != '\0') || (errno == ERANGE) || (errno == EINVAL) || (minor < 0)) {
++				fprintf(stderr, "\n invalid minor value \n");
++				minor = -1;
++			}
+ 			break;
+ 		case 't':
+ 			timeout = tap_cli_timeout(optarg);
+@@ -447,7 +471,7 @@ tap_cli_destroy(int argc, char **argv)
+ 
+ 	if (pid == -1) {
+ 		pid = tap_ctl_find_pid(minor);
+-		if (pid == -1) {
++		if (pid < 0) {
+ 			fprintf(stderr, "failed to find pid for %d\n", minor);
+ 			return pid;
+ 		}
+@@ -514,6 +538,7 @@ static int
+ tap_cli_attach(int argc, char **argv)
+ {
+ 	int c, pid, minor;
++	char *endptr;
+ 
+ 	pid   = -1;
+ 	minor = -1;
+@@ -522,10 +547,18 @@ tap_cli_attach(int argc, char **argv)
+ 	while ((c = getopt(argc, argv, "p:m:h")) != -1) {
+ 		switch (c) {
+ 		case 'p':
+-			pid = atoi(optarg);
++			pid = strtol(optarg, &endptr, 10);
++			if((*endptr != '\0') || (errno == ERANGE) || (errno == EINVAL) || (pid < 0)) {
++				fprintf(stderr, "\n invalid pid value \n");
++				pid = -1;
++			}
+ 			break;
+ 		case 'm':
+-			minor = atoi(optarg);
++			minor = strtol(optarg, &endptr, 10);
++			if((*endptr != '\0') || (errno == ERANGE) || (errno == EINVAL) || (minor < 0)) {
++				fprintf(stderr, "\n invalid minor value \n");
++				minor = -1;
++			}
+ 			break;
+ 		case '?':
+ 			goto usage;
+@@ -555,6 +588,7 @@ static int
+ tap_cli_detach(int argc, char **argv)
+ {
+ 	int c, pid, minor;
++	char *endptr;
+ 
+ 	pid   = -1;
+ 	minor = -1;
+@@ -563,10 +597,18 @@ tap_cli_detach(int argc, char **argv)
+ 	while ((c = getopt(argc, argv, "p:m:h")) != -1) {
+ 		switch (c) {
+ 		case 'p':
+-			pid = atoi(optarg);
++			pid = strtol(optarg, &endptr, 10);
++			if((*endptr != '\0') || (errno == ERANGE) || (errno == EINVAL) || (pid < 0)) {
++				fprintf(stderr, "\n invalid pid value \n");
++				pid = -1;
++			}
+ 			break;
+ 		case 'm':
+-			minor = atoi(optarg);
++			minor = strtol(optarg, &endptr, 10);
++			if((*endptr != '\0') || (errno == ERANGE) || (errno == EINVAL) || (minor < 0)) {
++				fprintf(stderr, "\n invalid minor value \n");
++				minor = -1;
++			}
+ 			break;
+ 		case '?':
+ 			goto usage;
+@@ -597,6 +639,7 @@ tap_cli_close(int argc, char **argv)
+ {
+ 	int c, pid, minor, force;
+ 	struct timeval *timeout;
++	char *endptr;
+ 
+ 	pid     = -1;
+ 	minor   = -1;
+@@ -607,10 +650,18 @@ tap_cli_close(int argc, char **argv)
+ 	while ((c = getopt(argc, argv, "p:m:ft:h")) != -1) {
+ 		switch (c) {
+ 		case 'p':
+-			pid = atoi(optarg);
++			pid = strtol(optarg, &endptr, 10);
++			if((*endptr != '\0') || (errno == ERANGE) || (errno == EINVAL) || (pid < 0)) {
++				fprintf(stderr, "\n invalid pid value \n");
++				pid = -1;
++			}
+ 			break;
+ 		case 'm':
+-			minor = atoi(optarg);
++			minor = strtol(optarg, &endptr, 10);
++			if((*endptr != '\0') || (errno == ERANGE) || (errno == EINVAL) || (minor < 0)) {
++				fprintf(stderr, "\n invalid minor value \n");
++				minor = -1;
++			}
+ 			break;
+ 		case 'f':
+ 			force = -1;
+@@ -649,6 +700,7 @@ tap_cli_pause(int argc, char **argv)
+ {
+ 	int c, pid, minor;
+ 	struct timeval *timeout;
++	char *endptr;
+ 
+ 	pid     = -1;
+ 	minor   = -1;
+@@ -658,10 +710,18 @@ tap_cli_pause(int argc, char **argv)
+ 	while ((c = getopt(argc, argv, "p:m:t:h")) != -1) {
+ 		switch (c) {
+ 		case 'p':
+-			pid = atoi(optarg);
++			pid = strtol(optarg, &endptr, 10);
++			if((*endptr != '\0') || (errno == ERANGE) || (errno == EINVAL) || (pid < 0)) {
++				fprintf(stderr, "\n invalid pid value \n");
++				pid = -1;
++			}
+ 			break;
+ 		case 'm':
+-			minor = atoi(optarg);
++			minor = strtol(optarg, &endptr, 10);
++			if((*endptr != '\0') || (errno == ERANGE) || (errno == EINVAL) || (minor < 0)) {
++				fprintf(stderr, "\n invalid minor value \n");
++				minor = -1;
++			}
+ 			break;
+ 		case 't':
+ 			timeout = tap_cli_timeout(optarg);
+@@ -680,7 +740,7 @@ tap_cli_pause(int argc, char **argv)
+ 
+ 	if (pid == -1) {
+ 		pid = tap_ctl_find_pid(minor);
+-		if (pid == -1) {
++		if (pid < 0) {
+ 			fprintf(stderr, "failed to find pid for %d\n", minor);
+ 			return pid;
+ 		}
+@@ -705,7 +765,7 @@ int
+ tap_cli_unpause(int argc, char **argv)
+ {
+ 	const char *args, *logpath;
+-	char *secondary;
++	char *secondary, *endptr;
+ 	int c, pid, minor, flags;
+ 
+ 	pid        = -1;
+@@ -719,10 +779,18 @@ tap_cli_unpause(int argc, char **argv)
+ 	while ((c = getopt(argc, argv, "p:m:a:2:c:h")) != -1) {
+ 		switch (c) {
+ 		case 'p':
+-			pid = atoi(optarg);
++			pid = strtol(optarg, &endptr, 10);
++			if((*endptr != '\0') || (errno == ERANGE) || (errno == EINVAL) || (pid < 0)) {
++				fprintf(stderr, "\n invalid pid value \n");
++				pid = -1;
++			}
+ 			break;
+ 		case 'm':
+-			minor = atoi(optarg);
++			minor = strtol(optarg, &endptr, 10);
++			if((*endptr != '\0') || (errno == ERANGE) || (errno == EINVAL) || (minor < 0)) {
++				fprintf(stderr, "\n invalid minor value \n");
++				minor = -1;
++			}
+ 			break;
+ 		case 'a':
+ 			args = optarg;
+@@ -748,7 +816,7 @@ tap_cli_unpause(int argc, char **argv)
+ 
+ 	if (pid == -1) {
+ 		pid = tap_ctl_find_pid(minor);
+-		if (pid == -1) {
++		if (pid < 0) {
+ 			fprintf(stderr, "failed to find pid for %d\n", minor);
+ 			return pid;
+ 		}
+@@ -825,6 +893,7 @@ tap_cli_open_usage(FILE *stream)
+ static int
+ tap_cli_open(int argc, char **argv)
+ {
++	char *endptr;
+ 	const char *args, *secondary, *logpath;
+ 	int c, pid, minor, flags, prt_minor, timeout;
+ 	uint8_t *encryption_key;
+@@ -844,10 +913,18 @@ tap_cli_open(int argc, char **argv)
+ 	while ((c = getopt(argc, argv, "a:RDm:p:e:r2:st:C:Eh")) != -1) {
+ 		switch (c) {
+ 		case 'p':
+-			pid = atoi(optarg);
++			pid = strtol(optarg, &endptr, 10);
++			if((*endptr != '\0') || (errno == ERANGE) || (errno == EINVAL) || (pid < 0)) {
++				fprintf(stderr, "\n invalid pid value \n");
++				pid = -1;
++			}
+ 			break;
+ 		case 'm':
+-			minor = atoi(optarg);
++			minor = strtol(optarg, &endptr, 10);
++			if((*endptr != '\0') || (errno == ERANGE) || (errno == EINVAL) || (minor < 0)) {
++				fprintf(stderr, "\n invalid minor value \n");
++				minor = -1;
++			}
+ 			break;
+ 		case 'a':
+ 			args = optarg;
+@@ -937,6 +1014,7 @@ tap_cli_stats(int argc, char **argv)
+ {
+ 	pid_t pid;
+ 	int c, minor, err;
++	char *endptr;
+ 
+ 	pid  = -1;
+ 	minor   = -1;
+@@ -945,10 +1023,18 @@ tap_cli_stats(int argc, char **argv)
+ 	while ((c = getopt(argc, argv, "p:m:h")) != -1) {
+ 		switch (c) {
+ 		case 'p':
+-			pid = atoi(optarg);
++			pid = strtol(optarg, &endptr, 10);
++			if((*endptr != '\0') || (errno == ERANGE) || (errno == EINVAL) || (pid < 0)) {
++				fprintf(stderr, "\n invalid pid value \n");
++				pid = -1;
++			}
+ 			break;
+ 		case 'm':
+-			minor = atoi(optarg);
++			minor = strtol(optarg, &endptr, 10);
++			if((*endptr != '\0') || (errno == ERANGE) || (errno == EINVAL) || (minor < 0)) {
++				fprintf(stderr, "\n invalid minor value \n");
++				minor = -1;
++			}
+ 			break;
+ 		case '?':
+ 			goto usage;

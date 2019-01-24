@@ -1,0 +1,174 @@
+################################################################################
+SHORT DESCRIPTION: 
+################################################################################
+Resolve format specifier errors.
+
+################################################################################
+LONG DESCRIPTION: 
+################################################################################
+Resolve format specifier errors.
+
+################################################################################
+CHANGELOG 
+################################################################################
+Author(s):
+Mahantesh Salimath <salimathm@ainfosec.com>
+
+################################################################################
+REMOVAL 
+################################################################################
+
+################################################################################
+UPSTREAM PLAN
+################################################################################
+Yes, should be upstreamed.
+
+################################################################################
+INTERNAL DEPENDENCIES 
+################################################################################
+
+################################################################################
+PATCHES 
+################################################################################
+--- a/control/tap-ctl-allocate.c
++++ b/control/tap-ctl-allocate.c
+@@ -42,7 +42,7 @@
+ #include <libgen.h>
+ #include <sys/file.h>
+ #include <sys/stat.h>
+-#include <sys/types.h>
++#include <sys/sysmacros.h>
+ #include <sys/ioctl.h>
+ #include <linux/major.h>
+ 
+--- a/drivers/tapdisk-blktap.c
++++ b/drivers/tapdisk-blktap.c
+@@ -40,7 +40,7 @@
+ #include <limits.h>
+ #include <sys/mman.h>
+ #include <sys/ioctl.h>
+-#include <sys/types.h>
++#include <sys/sysmacros.h>
+ #include <sys/stat.h>
+ 
+ #include "blktap.h"
+--- a/vhd/lib/vhd-util-copy.c
++++ b/vhd/lib/vhd-util-copy.c
+@@ -129,7 +129,7 @@ vhd_encrypt_copy_block(vhd_context_t *so
+ 
+ 	err = vhd_io_write(target_vhd, buf, sec, source_vhd->spb);
+ 	if (err) {
+-		printf("Failed to write block %lu : %d\n", block, err);
++		printf("Failed to write block %"PRIu64": %d\n", block, err);
+ 	}
+ 
+ done:
+--- a/vhd/lib/libvhd.c
++++ b/vhd/lib/libvhd.c
+@@ -1117,7 +1117,7 @@ vhd_read_bat(vhd_context_t *ctx, vhd_bat
+ 	 * sometimes preallocate BAT + batmap for max VHD size, so only read in
+ 	 * the BAT entries that are in use for curr_size */
+ 	vhd_blks = (ctx->footer.curr_size + ((1 << VHD_BLOCK_SHIFT) - 1)) >> VHD_BLOCK_SHIFT;
+-	VHDLOG("Calculated entries for size %lu is %u", ctx->footer.curr_size, vhd_blks);
++	VHDLOG("Calculated entries for size %"PRIu64" is %u", ctx->footer.curr_size, vhd_blks);
+ 	if (ctx->header.max_bat_size < vhd_blks) {
+ 		VHDLOG("more VHD blocks (%u) than possible (%u)\n",
+ 		       vhd_blks, ctx->header.max_bat_size);
+--- a/drivers/block-ntnx.c
++++ b/drivers/block-ntnx.c
+@@ -267,7 +267,7 @@ tdntnx_open(td_driver_t* driver, const c
+         return -ENOENT;
+     }
+ 
+-    DPRINTF("Target %s has %ld sectors of %ld bytes\n",
++    DPRINTF("Target %s has %"PRIu64" sectors of %ld bytes\n",
+             name, driver->info.size, driver->info.sector_size);
+ 
+     prv->freelist = NULL;
+--- a/drivers/td-req.c
++++ b/drivers/td-req.c
+@@ -307,7 +307,7 @@ xenio_blkif_put_response(struct td_xenbl
+             if (err < 0) {
+                 err = -errno;
+                 if (req) {
+-                    RING_ERR(blkif, "req %lu: failed to notify event channel: "
++                    RING_ERR(blkif, "req %"PRIu64": failed to notify event channel: "
+                             "%s\n", req->msg.id, strerror(-err));
+                 } else {
+                     RING_ERR(blkif, "failed to notify event channel: %s\n",
+@@ -429,7 +429,7 @@ guest_copy2(struct td_xenblkif * const b
+ 			 * xen/extras/mini-os/include/gnttab.h (header not available to
+ 			 * user space)
+ 			 */
+-			RING_ERR(blkif, "req %lu: failed to grant-copy segment %d: %d\n",
++			RING_ERR(blkif, "req %"PRIu64": failed to grant-copy segment %d: %d\n",
+                     tapreq->msg.id, i, gcopy_seg->status);
+ 			err = -EIO;
+ 			goto out;
+@@ -506,7 +506,7 @@ tapdisk_xenblkif_complete_request(struct
+ 				_err = guest_copy2(blkif, tapreq);
+ 				if (unlikely(_err)) {
+ 					err = _err;
+-					RING_ERR(blkif, "req %lu: failed to copy from/to guest: "
++					RING_ERR(blkif, "req %"PRIu64": failed to copy from/to guest: "
+ 							"%s\n", tapreq->msg.id, strerror(-err));
+ 				}
+ 			}
+@@ -648,7 +648,7 @@ tapdisk_xenblkif_parse_request(struct td
+          * must be transferred.
+          */
+         if (seg->last_sect < seg->first_sect) {
+-            RING_ERR(blkif, "req %lu: invalid sectors %d-%d\n",
++            RING_ERR(blkif, "req %"PRIu64": invalid sectors %d-%d\n",
+                     req->msg.id, seg->first_sect, seg->last_sect);
+             err = EINVAL;
+             goto out;
+@@ -696,7 +696,7 @@ tapdisk_xenblkif_parse_request(struct td
+     if (blkif_rq_wr(&req->msg)) {
+         err = guest_copy2(blkif, req);
+         if (err) {
+-            RING_ERR(blkif, "req %lu: failed to copy from guest: %s\n",
++            RING_ERR(blkif, "req %"PRIu64": failed to copy from guest: %s\n",
+                     req->msg.id, strerror(-err));
+             goto out;
+         }
+@@ -767,7 +767,7 @@ tapdisk_xenblkif_make_vbd_request(struct
+         vreq->op = TD_OP_WRITE;
+         break;
+     default:
+-        RING_ERR(blkif, "req %lu: invalid request type %d\n",
++        RING_ERR(blkif, "req %"PRIu64": invalid request type %d\n",
+                 tapreq->msg.id, tapreq->msg.operation);
+         err = EOPNOTSUPP;
+         goto out;
+@@ -781,7 +781,7 @@ tapdisk_xenblkif_make_vbd_request(struct
+     if (unlikely((tapreq->msg.nr_segments == 0 &&
+                 tapreq->msg.operation != BLKIF_OP_WRITE_BARRIER) ||
+             tapreq->msg.nr_segments > BLKIF_MAX_SEGMENTS_PER_REQUEST)) {
+-        RING_ERR(blkif, "req %lu: bad number of segments in request (%d)\n",
++        RING_ERR(blkif, "req %"PRIu64": bad number of segments in request (%d)\n",
+                 tapreq->msg.id, tapreq->msg.nr_segments);
+         err = EINVAL;
+         goto out;
+--- a/drivers/block-log.c
++++ b/drivers/block-log.c
+@@ -93,7 +93,7 @@ static int bitmap_init(struct tdlog_data
+ 	if (result == 0) {
+ 		//data->size is in number of sectors, convert it to bytes
+ 		bmsize = bitmap_size(data->size * SECTOR_SIZE) + sizeof(struct cbt_log_metadata);
+-		DPRINTF("CBT: allocating %"PRIu64" bytes (bitmap %"PRIu64" + header %lu) for dirty bitmap",
++		DPRINTF("CBT: allocating %"PRIu64" bytes (bitmap %"PRIu64" + header %zu) for dirty bitmap",
+ 								bmsize, bitmap_size(data->size * SECTOR_SIZE),
+ 											sizeof(struct cbt_log_metadata));
+ 
+--- a/drivers/td-blkif.c
++++ b/drivers/td-blkif.c
+@@ -687,7 +687,7 @@ tapdisk_xenblkif_ring_stats_update(struc
+         err = ftruncate(blkif->xenvbd_stats.io_ring.fd, len + sizeof(*chksum));
+         if (unlikely(err)) {
+             err = errno;
+-            EPRINTF("failed to truncate %s to %lu: %s\n",
++            EPRINTF("failed to truncate %s to %zu: %s\n",
+                     blkif->xenvbd_stats.io_ring.path, len + sizeof(*chksum),
+ 					strerror(err));
+         }

@@ -5,9 +5,19 @@ DEPENDS = "xen libicbinn"
 
 PV = "0+git${SRCPV}"
 
-SRCREV = "${AUTOREV}"
-SRC_URI = "git://${OPENXT_GIT_MIRROR}/blktap3.git;protocol=${OPENXT_GIT_PROTOCOL};branch=${OPENXT_BRANCH} \
+SRCREV = "a7832564b4d7e540d2d5a85e2556f571b7f9d89b"
+SRC_URI = "git://github.com/xapi-project/blktap.git;protocol=https \
     file://tapback.initscript \
+    file://fix-format-specifier-errors.patch \
+    file://compiler-errors-fix.patch \
+    file://remove-inline-function-declarations.patch \
+    file://OXT-specific-errors-fix.patch \
+    file://fix-run-time-errors-and-memory-leaks.patch \
+    file://fix-segfault-if-startup-fails.patch \
+    file://remove-creation-of-unused-log-files.patch \
+    file://add-device-string-support-to-tap-destroy.patch \
+    file://fix-error-checks.patch \
+    file://add-missing-files-to-gitignore.patch \
     file://blktap3-vhd-icbinn-support.patch \
 "
 
@@ -17,6 +27,8 @@ inherit autotools-brokensep xenclient update-rc.d
 
 INITSCRIPT_NAME = "tapback-daemon"
 INITSCRIPT_PARAMS = "defaults 61"
+
+TARGET_CPPFLAGS += "-DTAP_CTL_NO_DEFAULT_CGROUP_SLICE"
 
 do_configure_prepend() {
 	touch ${S}/EXTRAVERSION
@@ -37,6 +49,7 @@ FILES_${PN}-dev += " \
     ${libdir}/libblktapctl.so \
     ${libdir}/libvhd.so \
     ${libdir}/libvhdio.so \
+    ${libdir}/libblockcrypto.so \
 "
 FILES_${PN} += " \
     ${libdir}/libvhdio-*.so \

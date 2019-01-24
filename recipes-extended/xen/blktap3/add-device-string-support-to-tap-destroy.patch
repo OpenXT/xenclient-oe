@@ -1,0 +1,218 @@
+################################################################################
+SHORT DESCRIPTION: 
+################################################################################
+Add device string support to tap-ctl destroy.
+
+################################################################################
+LONG DESCRIPTION: 
+################################################################################
+tap-ctl only supports device destruction by minor and pid.
+With device string support, the device path can be used instead.
+
+################################################################################
+CHANGELOG 
+################################################################################
+Author(s):
+Mahantesh Salimath <salimathm@ainfosec.com>
+
+################################################################################
+REMOVAL 
+################################################################################
+
+################################################################################
+UPSTREAM PLAN
+################################################################################
+Yes, could be upstreamed.
+
+################################################################################
+INTERNAL DEPENDENCIES 
+################################################################################
+
+################################################################################
+PATCHES 
+################################################################################
+--- a/control/tap-ctl-list.c
++++ b/control/tap-ctl-list.c
+@@ -428,3 +428,27 @@ tap_ctl_find_minor(const char *type, con
+ 
+ 	return minor >= 0 ? minor : -ENOENT;
+ }
++
++int
++tap_ctl_find_pid(int minor)
++{
++	int pid = -1, err;
++	struct list_head list = LIST_HEAD_INIT(list);
++	tap_list_t *entry;
++
++	err = tap_ctl_list(&list);
++	if (err)
++		return err;
++
++	tap_list_for_each_entry(entry, &list) {
++
++		if (entry->minor == minor) {
++			pid = entry->pid;
++			break;
++		}
++	}
++
++	tap_ctl_list_free(&list);
++
++	return pid >= 0 ? pid : -ENOENT;
++}
+--- a/control/tap-ctl.c
++++ b/control/tap-ctl.c
+@@ -39,6 +39,8 @@
+ #include <getopt.h>
+ #include <signal.h>
+ #include <sys/time.h>
++#include <sys/stat.h>
++#include <sys/sysmacros.h>
+ 
+ #include "tap-ctl.h"
+ 
+@@ -362,7 +364,7 @@ usage:
+ static void
+ tap_cli_destroy_usage(FILE *stream)
+ {
+-	fprintf(stream, "usage: destroy <-p pid> <-m minor>\n");
++	fprintf(stream, "usage: destroy <-p pid> <-m minor> | <-d dev>\n");
+ }
+ 
+ static struct timeval*
+@@ -385,13 +387,15 @@ tap_cli_destroy(int argc, char **argv)
+ {
+ 	int c, pid, minor;
+ 	struct timeval *timeout;
++	const char *device;
+ 
+ 	pid     = -1;
+ 	minor   = -1;
+ 	timeout = NULL;
++	device  = NULL;
+ 
+ 	optind = 0;
+-	while ((c = getopt(argc, argv, "p:m:t:h")) != -1) {
++	while ((c = getopt(argc, argv, "p:m:t:d:h")) != -1) {
+ 		switch (c) {
+ 		case 'p':
+ 			pid = atoi(optarg);
+@@ -404,6 +408,9 @@ tap_cli_destroy(int argc, char **argv)
+ 			if (!timeout)
+ 				goto usage;
+ 			break;
++		case 'd':
++			device = optarg;
++			break;
+ 		case '?':
+ 			goto usage;
+ 		case 'h':
+@@ -412,8 +419,39 @@ tap_cli_destroy(int argc, char **argv)
+ 		}
+ 	}
+ 
+-	if (pid == -1 || minor == -1)
+-		goto usage;
++	if (device) {
++		int maj;
++		struct stat sb;
++
++		if (stat(device, &sb)) {
++			perror("stat");
++			return -errno;
++		}
++
++		maj = tap_ctl_blk_major();
++		if (maj < 0) {
++			fprintf(stderr, "failed to find td major: %d\n", maj);
++			return maj;
++		}
++
++		if (!S_ISBLK(sb.st_mode) || major(sb.st_rdev) != maj) {
++			fprintf(stderr, "invalid device %s\n", device);
++			return -EINVAL;
++		}
++
++		minor = minor(sb.st_rdev);
++	}
++
++	if (minor == -1)
++ 		goto usage;
++
++	if (pid == -1) {
++		pid = tap_ctl_find_pid(minor);
++		if (pid == -1) {
++			fprintf(stderr, "failed to find pid for %d\n", minor);
++			return pid;
++		}
++	}
+ 
+ 	return tap_ctl_destroy(pid, minor, 0, timeout);
+ 
+@@ -603,7 +641,7 @@ usage:
+ static void
+ tap_cli_pause_usage(FILE *stream)
+ {
+-	fprintf(stream, "usage: pause <-p pid> <-m minor>\n");
++	fprintf(stream, "usage: pause <-m minor> [-p pid]\n");
+ }
+ 
+ static int
+@@ -637,9 +675,17 @@ tap_cli_pause(int argc, char **argv)
+ 		}
+ 	}
+ 
+-	if (pid == -1 || minor == -1)
++	if (minor == -1)
+ 		goto usage;
+ 
++	if (pid == -1) {
++		pid = tap_ctl_find_pid(minor);
++		if (pid == -1) {
++			fprintf(stderr, "failed to find pid for %d\n", minor);
++			return pid;
++		}
++	}
++
+ 	return tap_ctl_pause(pid, minor, timeout);
+ 
+ usage:
+@@ -650,7 +696,7 @@ usage:
+ static void
+ tap_cli_unpause_usage(FILE *stream)
+ {
+-	fprintf(stream, "usage: unpause <-p pid> <-m minor> [-a type:/path/to/file] "
++	fprintf(stream, "usage: unpause <-m minor> [-p pid] [-a type:/path/to/file] "
+     "[-2 secondary] "
+     "[-c </path/to/logfile> insert log layer to track changed blocks]\n");
+ }
+@@ -697,9 +743,17 @@ tap_cli_unpause(int argc, char **argv)
+ 		}
+ 	}
+ 
+-	if (pid == -1 || minor == -1)
++	if (minor == -1)
+ 		goto usage;
+ 
++	if (pid == -1) {
++		pid = tap_ctl_find_pid(minor);
++		if (pid == -1) {
++			fprintf(stderr, "failed to find pid for %d\n", minor);
++			return pid;
++		}
++	}
++
+ 	return tap_ctl_unpause(pid, minor, args, flags, secondary, logpath);
+ 
+ usage:
+--- a/include/tap-ctl.h
++++ b/include/tap-ctl.h
+@@ -106,6 +106,7 @@ int tap_ctl_list_pid(pid_t pid, struct l
+ void tap_ctl_list_free(struct list_head *list);
+ 
+ int tap_ctl_find_minor(const char *type, const char *path);
++int tap_ctl_find_pid(int minor);
+ 
+ int tap_ctl_allocate(int *minor, char **devname);
+ int tap_ctl_free(const int minor);
