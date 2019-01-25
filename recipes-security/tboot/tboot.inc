@@ -51,12 +51,6 @@ FILES_${PN}-grub = " \
     ${sysconfdir}/grub.d/20_linux_xen_tboot \
 "
 FILES_${PN}-lcptools = " \
-    ${sbindir}/lcp_crtpconf \
-    ${sbindir}/lcp_crtpol \
-    ${sbindir}/lcp_crtpol2 \
-    ${sbindir}/lcp_crtpolelt \
-    ${sbindir}/lcp_crtpollist \
-    ${sbindir}/lcp_mlehash \
     ${sbindir}/lcp_readpol \
     ${sbindir}/lcp_writepol \
     ${sbindir}/tb_polgen \
