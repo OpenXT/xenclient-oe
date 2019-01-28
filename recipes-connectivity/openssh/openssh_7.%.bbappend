@@ -11,8 +11,6 @@ SRC_URI += " \
     file://scpv4v \
     file://sshd_check_keys_v4v \
     file://volatiles.99_ssh-keygen \
-"
-SRC_URI_append_xenclient-dom0 += " \
     file://init \
 "
 
@@ -64,20 +62,13 @@ CONFFILES_${PN}-sshd += " \
 "
 
 # sshd-tcp-init
-PACKAGES_prepend_xenclient-dom0 = " ${PN}-sshd-tcp-init "
+PACKAGES =+ "${PN}-sshd-tcp-init"
 FILES_${PN}-sshd-tcp-init = "/etc/init.d/sshd"
 
-INITSCRIPT_PACKAGES_append_xenclient-dom0 = " ${PN}-sshd-tcp-init "
+INITSCRIPT_PACKAGES += "${PN}-sshd-tcp-init"
 INITSCRIPT_NAME_${PN}-sshd-tcp-init = "sshd"
 INITSCRIPT_PARAMS_${PN}-sshd-tcp-init = "defaults 9"
 
-SRC_URI_append_openxt-installer = " file://init "
-PACKAGES_prepend_openxt-installer = " ${PN}-sshd-tcp-init "
-FILES_${PN}-sshd-tcp-init = "/etc/init.d/sshd"
-
-INITSCRIPT_PACKAGES_append_openxt-installer = " ${PN}-sshd-tcp-init "
-INITSCRIPT_NAME_${PN}-sshd-tcp-init = "sshd"
-INITSCRIPT_PARAMS_${PN}-sshd-tcp-init = "defaults 9"
-
-RDEPENDS_${PN}-ssh += "bash"
-RDEPENDS_${PN}-scp += "bash"
+RDEPENDS_${PN}-sshd += "libv4v"
+RDEPENDS_${PN}-ssh += "bash libv4v"
+RDEPENDS_${PN}-scp += "bash libv4v"
