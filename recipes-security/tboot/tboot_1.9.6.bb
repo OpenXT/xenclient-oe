@@ -1,4 +1,4 @@
-require recipes-openxt/tboot/tboot.inc
+require tboot.inc
 
 LICENSE = "BSD"
 LIC_FILES_CHKSUM = "file://COPYING;md5=7730ab1e15a162ca347bcc1722486d89"
