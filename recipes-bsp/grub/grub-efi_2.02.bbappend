@@ -16,9 +16,3 @@ GRUB_BUILDIN = " \
 EXTRA_OECONF += " \
     --enable-efiemu=no \
 "
-
-do_deploy_append() {
-    pushd ${DEPLOYDIR} > /dev/null
-    ln -sf ${GRUB_IMAGE} "grubx64.efi"
-    popd > /dev/null
-}
