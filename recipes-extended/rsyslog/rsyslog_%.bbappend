@@ -13,3 +13,12 @@ do_install_append() {
     install -d "${D}${sysconfdir}/logrotate.d"
     install -m 644 ${WORKDIR}/rsyslog.logrotate ${D}${sysconfdir}/logrotate.d/rsyslog
 }
+
+PACKAGES =+ "${PN}-conf"
+RRECOMMENDS_${PN} += "${PN}-conf"
+
+# Only ${PN} expands in ${CONFFILES}_${PN}, so we have to hard code
+#CONFFILES_${PN}-conf += "${CONFFILES}_${PN}"
+CONFFILES_${PN}-conf += "$(sysconfdir}/rsyslog.conf"
+
+FILES_${PN}-conf = "${CONFFILES}_${PN}-conf"

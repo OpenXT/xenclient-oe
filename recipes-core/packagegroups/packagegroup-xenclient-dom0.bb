@@ -79,6 +79,7 @@ RDEPENDS_${PN} = " \
     ethtool \
     intel-microcode \
     rsyslog \
+    rsyslog-conf-dom0 \
     logrotate \
     qemu-wrappers \
     dialog \
