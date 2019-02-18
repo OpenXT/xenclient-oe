@@ -194,9 +194,9 @@ PATCHES
 +    /*         fileline, func&&file?":":"", func?func:"", func||file?": ":"", */
 +    /*         domain, base); */
 +    /* OpenXT: we use syslog */
-+    syslog(LOG_USER | xtl_level_to_syslog_level(msglevel), "%s%s%s%s%s%s",
-+           fileline, func&&file?":":"", func?func:"", func||file?": ":"",
-+           domain, base);
++    syslog(LOG_USER | xtl_level_to_syslog_level(msglevel), "[%d] %s%s%s%s%s%s",
++           getpid(), fileline, func&&file?":":"", func?func:"",
++           func||file?":":"", domain, base);
 +
      if (base != enomem) free(base);
      errno = esave;
@@ -245,7 +245,29 @@ PATCHES
  
 --- a/tools/xl/xl_utils.c
 +++ b/tools/xl/xl_utils.c
-@@ -250,7 +250,6 @@ void print_bitmap(uint8_t *map, int mapl
+@@ -20,6 +20,7 @@
+ #include <sys/stat.h>
+ #include <sys/types.h>
+ #include <unistd.h>
++#include <syslog.h>
+ 
+ #include <libxl.h>
+ #include <libxl_utils.h>
+@@ -36,10 +37,12 @@ void dolog(const char *file, int line, c
+     va_start(ap, fmt);
+     rc = vasprintf(&s, fmt, ap);
+     va_end(ap);
+-    if (rc >= 0)
++    if (rc >= 0) {
+         /* we ignore write errors since we have no way to report them;
+          * the alternative would be to abort the whole program */
+         libxl_write_exactly(NULL, logfile, s, rc, NULL, NULL);
++        syslog(LOG_USER | LOG_INFO, "[%d] %s", getpid(), s);
++    }
+     free(s);
+ }
+ 
+@@ -250,7 +253,6 @@ void print_bitmap(uint8_t *map, int mapl
  
  int do_daemonize(char *name, const char *pidfile)
  {
@@ -253,7 +275,7 @@ PATCHES
      pid_t child1;
      int nullfd, ret = 0;
  
-@@ -264,22 +263,10 @@ int do_daemonize(char *name, const char
+@@ -264,22 +266,10 @@ int do_daemonize(char *name, const char
  
      postfork();
  
