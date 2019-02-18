@@ -1,0 +1,932 @@
+From 1902d82d4c8c4128b5d5111912ccb3a9064249b0 Mon Sep 17 00:00:00 2001
+From: Eric Chanudet <chanudete@ainfosec.com>
+Date: Fri, 15 Feb 2019 01:46:47 -0500
+Subject: [PATCH 1/2] xen: begin syswrap additions post 4.5.
+
+Add interfaces versions for domctl/sysctl up to 4.10.
+
+Syswrap implemented:
+- XENVER_build_id
+- xsm_op FLASK_CONTEXT_TO_SID
+- domctl set_gnttab_limits
+- XEN_SYSCTL_topologyinfo/XEN_SYSCTL_cputopoinfo
+- XEN_SYSCTL_numainfo
+- get/settscinfo for post 4.9
+- XEN_SYSCTL_cpu_featureset
+- XEN_DOMCTL_set_target
+
+To be continued...
+
+xl list and xl create (with a stubdomain) should warn only on OpenXT
+specific (in this case V4V ioctl) when creating a guest with cdrom
+and/or disk and stubdomain, with a flask policy.
+
+Signed-off-by: Eric Chanudet <chanudete@ainfosec.com>
+---
+ coregrind/m_syswrap/syswrap-xen.c | 287 ++++++++++++++++++++++++++----
+ include/vki/vki-xen-domctl.h      |  64 ++++++-
+ include/vki/vki-xen-evtchn.h      |   7 +
+ include/vki/vki-xen-gnttab.h      |   1 +
+ include/vki/vki-xen-memory.h      |   1 +
+ include/vki/vki-xen-schedop.h     |   2 +
+ include/vki/vki-xen-sysctl.h      |  84 ++++++++-
+ include/vki/vki-xen-version.h     |   7 +
+ include/vki/vki-xen-x86.h         |   5 +
+ include/vki/vki-xen-xsm.h         |   2 +
+ 10 files changed, 418 insertions(+), 42 deletions(-)
+
+diff --git a/coregrind/m_syswrap/syswrap-xen.c b/coregrind/m_syswrap/syswrap-xen.c
+index 20341c4a6..dd6b707fe 100644
+--- a/coregrind/m_syswrap/syswrap-xen.c
++++ b/coregrind/m_syswrap/syswrap-xen.c
+@@ -375,6 +375,12 @@ PRE(xsm_op)
+                 sizeof(op->u._union._field))
+ 
+    switch (op->cmd) {
++   case VKI_FLASK_CONTEXT_TO_SID:
++      PRE_XEN_XSM_OP_READ(CONTEXT_TO_SID, sid_context, size);
++      PRE_MEM_READ("FLASK_CONTEXT_TO_SID",
++                   (Addr)op->u.sid_context.context.p,
++                   op->u.sid_context.size * sizeof (char));
++      break;
+    case VKI_FLASK_SID_TO_CONTEXT:
+       PRE_XEN_XSM_OP_READ(SID_TO_CONTEXT, sid_context, sid);
+       PRE_XEN_XSM_OP_READ(SID_TO_CONTEXT, sid_context, size);
+@@ -535,6 +541,13 @@ PRE(xen_version)
+       /* No inputs */
+       break;
+ 
++   case VKI_XENVER_build_id: {
++      vki_xen_build_id_t *bi = (vki_xen_build_id_t*)ARG2;
++      PRE_MEM_READ("VKI_XENVER_build_id len",
++                   (Addr)&bi->len, sizeof(vki_uint32_t));
++      break;
++   }
++
+    default:
+       bad_subop(tid, layout, arrghs, status, flags,
+                 "__HYPERVISOR_xen_version", ARG1);
+@@ -584,6 +597,11 @@ PRE(sysctl) {
+    case 0x00000009:
+    case 0x0000000a:
+    case 0x0000000b:
++   case 0x0000000c:
++   case 0x0000000d:
++   case 0x0000000e:
++   case 0x0000000f:
++   case 0x00000010:
+ 	   break;
+    default:
+       bad_intf_version(tid, layout, arrghs, status, flags,
+@@ -626,6 +644,11 @@ PRE(sysctl) {
+ 	 break;
+       case 0x0000000a:
+       case 0x0000000b:
++      case 0x0000000c:
++      case 0x0000000d:
++      case 0x0000000e:
++      case 0x0000000f:
++      case 0x00000010:
+ 	 PRE_XEN_SYSCTL_READ(getdomaininfolist_0000000a, first_domain);
+ 	 PRE_XEN_SYSCTL_READ(getdomaininfolist_0000000a, max_domains);
+ 	 PRE_XEN_SYSCTL_READ(getdomaininfolist_0000000a, buffer);
+@@ -680,18 +703,49 @@ PRE(sysctl) {
+       /* No input params */
+       break;
+ 
+-   case VKI_XEN_SYSCTL_topologyinfo:
+-      PRE_XEN_SYSCTL_READ(topologyinfo, max_cpu_index);
+-      PRE_XEN_SYSCTL_READ(topologyinfo, cpu_to_core);
+-      PRE_XEN_SYSCTL_READ(topologyinfo, cpu_to_socket);
+-      PRE_XEN_SYSCTL_READ(topologyinfo, cpu_to_node);
+-      break;
++   case VKI_XEN_SYSCTL_cputopoinfo:
++      if (sysctl->interface_version < 0x0000000c) {
++         PRE_XEN_SYSCTL_READ(topologyinfo, max_cpu_index);
++         PRE_XEN_SYSCTL_READ(topologyinfo, cpu_to_core);
++         PRE_XEN_SYSCTL_READ(topologyinfo, cpu_to_socket);
++         PRE_XEN_SYSCTL_READ(topologyinfo, cpu_to_node);
++      } else { /* From 0x0000000c and on. */
++         if (sysctl->u.cputopoinfo.cputopo.p)
++            PRE_XEN_SYSCTL_READ(cputopoinfo, num_cpus);
++      }
++   break;
+ 
+    case VKI_XEN_SYSCTL_numainfo:
+-      PRE_XEN_SYSCTL_READ(numainfo, max_node_index);
+-      PRE_XEN_SYSCTL_READ(numainfo, node_to_memsize);
+-      PRE_XEN_SYSCTL_READ(numainfo, node_to_memfree);
+-      PRE_XEN_SYSCTL_READ(numainfo, node_to_node_distance);
++      if (sysctl->interface_version < 0x0000000c) {
++         PRE_XEN_SYSCTL_READ(numainfo_0000000b, max_node_index);
++         PRE_XEN_SYSCTL_READ(numainfo_0000000b, node_to_memsize);
++         PRE_XEN_SYSCTL_READ(numainfo_0000000b, node_to_memfree);
++         PRE_XEN_SYSCTL_READ(numainfo_0000000b, node_to_node_distance);
++      } else {
++          PRE_XEN_SYSCTL_READ(numainfo_0000000c, num_nodes);
++          if (sysctl->u.numainfo_0000000c.meminfo.p)
++             PRE_MEM_READ("XEN_SYSCTL_numainfo *meminfo",
++                          (Addr)sysctl->u.numainfo_0000000c.meminfo.p,
++                          sysctl->u.numainfo_0000000c.num_nodes *
++                          sizeof(vki_xen_sysctl_meminfo_t));
++          if (sysctl->u.numainfo_0000000c.distance.p)
++             PRE_MEM_READ("XEN_SYSCTL_numainfo *distance",
++                          (Addr)sysctl->u.numainfo_0000000c.distance.p,
++                          sysctl->u.numainfo_0000000c.num_nodes *
++                          sysctl->u.numainfo_0000000c.num_nodes *
++                          sizeof(uint32_t));
++      }
++      break;
++
++   case VKI_XEN_SYSCTL_get_cpu_featureset:
++      PRE_XEN_SYSCTL_READ(cpu_featureset, index);
++      if (sysctl->u.cpu_featureset.features.p) {
++         PRE_XEN_SYSCTL_READ(cpu_featureset, nr_features);
++         PRE_MEM_READ("XEN_SYSCTL_get_cpu_featureset *features",
++                      (Addr)sysctl->u.cpu_featureset.features.p,
++                      sysctl->u.cpu_featureset.nr_features *
++                      sizeof (uint32_t));
++      }
+       break;
+ 
+    default:
+@@ -728,6 +782,11 @@ PRE(domctl)
+    case 0x00000008:
+    case 0x00000009:
+    case 0x0000000a:
++   case 0x0000000b:
++   case 0x0000000c:
++   case 0x0000000d:
++   case 0x0000000e:
++   case 0x0000000f:
+ 	   break;
+    default:
+       bad_intf_version(tid, layout, arrghs, status, flags,
+@@ -816,10 +875,17 @@ PRE(domctl)
+       break;
+ 
+    case VKI_XEN_DOMCTL_settscinfo:
+-      __PRE_XEN_DOMCTL_READ(settscinfo, tsc_info, info.tsc_mode);
+-      __PRE_XEN_DOMCTL_READ(settscinfo, tsc_info, info.gtsc_khz);
+-      __PRE_XEN_DOMCTL_READ(settscinfo, tsc_info, info.incarnation);
+-      __PRE_XEN_DOMCTL_READ(settscinfo, tsc_info, info.elapsed_nsec);
++      if (domctl->interface_version < 0x0000000e) {
++         __PRE_XEN_DOMCTL_READ(settscinfo, tsc_info_0000000d, info.tsc_mode);
++         __PRE_XEN_DOMCTL_READ(settscinfo, tsc_info_0000000d, info.gtsc_khz);
++         __PRE_XEN_DOMCTL_READ(settscinfo, tsc_info_0000000d, info.incarnation);
++         __PRE_XEN_DOMCTL_READ(settscinfo, tsc_info_0000000d, info.elapsed_nsec);
++      } else {
++         __PRE_XEN_DOMCTL_READ(settscinfo, tsc_info_0000000e, tsc_mode);
++         __PRE_XEN_DOMCTL_READ(settscinfo, tsc_info_0000000e, gtsc_khz);
++         __PRE_XEN_DOMCTL_READ(settscinfo, tsc_info_0000000e, incarnation);
++         __PRE_XEN_DOMCTL_READ(settscinfo, tsc_info_0000000e, elapsed_nsec);
++      }
+       break;
+ 
+    case VKI_XEN_DOMCTL_irq_permission:
+@@ -889,6 +955,11 @@ PRE(domctl)
+          __PRE_XEN_DOMCTL_READ(getvcpuaffinity, vcpuaffinity_00000009, cpumap.nr_bits);
+          break;
+       case 0x0000000a:
++      case 0x0000000b:
++      case 0x0000000c:
++      case 0x0000000d:
++      case 0x0000000e:
++      case 0x0000000f:
+          __PRE_XEN_DOMCTL_READ(getvcpuaffinity, vcpuaffinity_0000000a, vcpu);
+          if (domctl->u.vcpuaffinity_0000000a.flags & VKI_XEN_VCPUAFFINITY_HARD)
+             __PRE_XEN_DOMCTL_READ(
+@@ -912,6 +983,11 @@ PRE(domctl)
+                       domctl->u.vcpuaffinity_00000009.cpumap.nr_bits / 8);
+          break;
+       case 0x0000000a:
++      case 0x0000000b:
++      case 0x0000000c:
++      case 0x0000000d:
++      case 0x0000000e:
++      case 0x0000000f:
+          __PRE_XEN_DOMCTL_READ(setvcpuaffinity, vcpuaffinity_0000000a, vcpu);
+          __PRE_XEN_DOMCTL_READ(setvcpuaffinity, vcpuaffinity_0000000a, flags);
+          if (domctl->u.vcpuaffinity_0000000a.flags & VKI_XEN_VCPUAFFINITY_HARD) {
+@@ -968,6 +1044,12 @@ PRE(domctl)
+          break;
+ 
+       case 0x00000009:
++      case 0x0000000a:
++      case 0x0000000b:
++      case 0x0000000c:
++      case 0x0000000d:
++      case 0x0000000e:
++      case 0x0000000f:
+          __PRE_XEN_DOMCTL_READ(get_ext_vcpucontext, ext_vcpucontext_00000009, vcpu);
+          break;
+ 
+@@ -1008,6 +1090,12 @@ PRE(domctl)
+            break;
+ 
+        case 0x00000009:
++       case 0x0000000a:
++       case 0x0000000b:
++       case 0x0000000c:
++       case 0x0000000d:
++       case 0x0000000e:
++       case 0x0000000f:
+            __PRE_XEN_DOMCTL_READ(set_ext_vcpucontext, ext_vcpucontext_00000009, vcpu);
+            __PRE_XEN_DOMCTL_READ(set_ext_vcpucontext, ext_vcpucontext_00000009, size);
+ #if defined(__i386__) || defined(__x86_64__)
+@@ -1161,6 +1249,15 @@ PRE(domctl)
+                    domctl->u.vcpu_msrs.msr_count);
+       break;
+ 
++   case VKI_XEN_DOMCTL_set_gnttab_limits:
++      PRE_XEN_DOMCTL_READ(set_gnttab_limits, grant_frames);
++      PRE_XEN_DOMCTL_READ(set_gnttab_limits, maptrack_frames);
++      break;
++
++   case VKI_XEN_DOMCTL_set_target:
++      PRE_XEN_DOMCTL_READ(set_target, target);
++      break;
++
+    default:
+       bad_subop(tid, layout, arrghs, status, flags,
+                 "__HYPERVISOR_domctl", domctl->cmd);
+@@ -1407,10 +1504,14 @@ POST(xsm_op)
+                      sizeof(op->u._union._field))
+ 
+    switch (op->cmd) {
++   case VKI_FLASK_CONTEXT_TO_SID:
++      POST_XEN_XSM_OP_WRITE(CONTEXT_TO_SID, sid_context, sid);
++      break;
+    case VKI_FLASK_SID_TO_CONTEXT:
+       POST_XEN_XSM_OP_WRITE(SID_TO_CONTEXT, sid_context, size);
+       POST_MEM_WRITE((Addr)op->u.sid_context.context.p,
+                      op->u.sid_context.size);
++      break;
+    }
+ }
+ 
+@@ -1505,6 +1606,11 @@ POST(xen_version)
+    case VKI_XENVER_commandline:
+       POST_MEM_WRITE((Addr)ARG2, sizeof(vki_xen_commandline_t));
+       break;
++   case VKI_XENVER_build_id: {
++      vki_xen_build_id_t *bi = (vki_xen_build_id_t*)ARG2;
++      POST_MEM_WRITE((Addr)bi->buf, bi->len * sizeof(unsigned char));
++      break;
++   }
+    }
+ }
+ 
+@@ -1534,6 +1640,11 @@ POST(sysctl)
+    case 0x00000009:
+    case 0x0000000a:
+    case 0x0000000b:
++   case 0x0000000c:
++   case 0x0000000d:
++   case 0x0000000e:
++   case 0x0000000f:
++   case 0x00000010:
+ 	   break;
+    default:
+       return;
+@@ -1568,6 +1679,11 @@ POST(sysctl)
+ 	 break;
+       case 0x0000000a:
+       case 0x0000000b:
++      case 0x0000000c:
++      case 0x0000000d:
++      case 0x0000000e:
++      case 0x0000000f:
++      case 0x00000010:
+ 	 POST_XEN_SYSCTL_WRITE(getdomaininfolist_0000000a, num_domains);
+ 	 POST_MEM_WRITE((Addr)sysctl->u.getdomaininfolist_0000000a.buffer.p,
+ 			sizeof(*sysctl->u.getdomaininfolist_0000000a.buffer.p)
+@@ -1613,6 +1729,10 @@ POST(sysctl)
+          break;
+       case 0x0000000a:
+       case 0x0000000b:
++      case 0x0000000c:
++      case 0x0000000d:
++      case 0x0000000e:
++      case 0x0000000f:
+          POST_XEN_SYSCTL_WRITE(physinfo_0000000a, threads_per_core);
+          POST_XEN_SYSCTL_WRITE(physinfo_0000000a, cores_per_socket);
+          POST_XEN_SYSCTL_WRITE(physinfo_0000000a, nr_cpus);
+@@ -1627,35 +1747,87 @@ POST(sysctl)
+          POST_XEN_SYSCTL_WRITE(physinfo_0000000a, hw_cap[8]);
+          POST_XEN_SYSCTL_WRITE(physinfo_0000000a, capabilities);
+          break;
++      case 0x00000010:
++         POST_XEN_SYSCTL_WRITE(physinfo_00000010, threads_per_core);
++         POST_XEN_SYSCTL_WRITE(physinfo_00000010, cores_per_socket);
++         POST_XEN_SYSCTL_WRITE(physinfo_00000010, nr_cpus);
++         POST_XEN_SYSCTL_WRITE(physinfo_00000010, max_cpu_id);
++         POST_XEN_SYSCTL_WRITE(physinfo_00000010, nr_nodes);
++         POST_XEN_SYSCTL_WRITE(physinfo_00000010, max_node_id);
++         POST_XEN_SYSCTL_WRITE(physinfo_00000010, cpu_khz);
++         POST_XEN_SYSCTL_WRITE(physinfo_00000010, capabilities);
++         POST_XEN_SYSCTL_WRITE(physinfo_00000010, total_pages);
++         POST_XEN_SYSCTL_WRITE(physinfo_00000010, free_pages);
++         POST_XEN_SYSCTL_WRITE(physinfo_00000010, scrub_pages);
++         POST_XEN_SYSCTL_WRITE(physinfo_00000010, outstanding_pages);
++         POST_XEN_SYSCTL_WRITE(physinfo_00000010, max_mfn);
++         POST_XEN_SYSCTL_WRITE(physinfo_00000010, hw_cap[8]);
++         break;
+       }
+       break;
+ 
+-   case VKI_XEN_SYSCTL_topologyinfo:
+-      POST_XEN_SYSCTL_WRITE(topologyinfo, max_cpu_index);
+-      if (sysctl->u.topologyinfo.cpu_to_core.p)
+-         POST_MEM_WRITE((Addr)sysctl->u.topologyinfo.cpu_to_core.p,
+-                     sizeof(uint32_t) * sysctl->u.topologyinfo.max_cpu_index);
+-      if (sysctl->u.topologyinfo.cpu_to_socket.p)
+-         POST_MEM_WRITE((Addr)sysctl->u.topologyinfo.cpu_to_socket.p,
+-                     sizeof(uint32_t) * sysctl->u.topologyinfo.max_cpu_index);
+-      if (sysctl->u.topologyinfo.cpu_to_node.p)
+-         POST_MEM_WRITE((Addr)sysctl->u.topologyinfo.cpu_to_node.p,
+-                     sizeof(uint32_t) * sysctl->u.topologyinfo.max_cpu_index);
++   case VKI_XEN_SYSCTL_cputopoinfo:
++      if (sysctl->interface_version < 0x0000000c) {
++         POST_XEN_SYSCTL_WRITE(topologyinfo, max_cpu_index);
++         if (sysctl->u.topologyinfo.cpu_to_core.p)
++            POST_MEM_WRITE((Addr)sysctl->u.topologyinfo.cpu_to_core.p,
++                           sizeof(uint32_t) *
++                           sysctl->u.topologyinfo.max_cpu_index);
++         if (sysctl->u.topologyinfo.cpu_to_socket.p)
++            POST_MEM_WRITE((Addr)sysctl->u.topologyinfo.cpu_to_socket.p,
++                           sizeof(uint32_t) *
++                           sysctl->u.topologyinfo.max_cpu_index);
++         if (sysctl->u.topologyinfo.cpu_to_node.p)
++            POST_MEM_WRITE((Addr)sysctl->u.topologyinfo.cpu_to_node.p,
++                           sizeof(uint32_t) *
++                           sysctl->u.topologyinfo.max_cpu_index);
++      } else {
++         POST_XEN_SYSCTL_WRITE(cputopoinfo, num_cpus);
++         if (sysctl->u.cputopoinfo.cputopo.p)
++            POST_MEM_WRITE((Addr)sysctl->u.cputopoinfo.cputopo.p,
++                           sizeof(vki_xen_sysctl_cputopo_t) *
++                           sysctl->u.cputopoinfo.num_cpus);
++      }
+       break;
+ 
+    case VKI_XEN_SYSCTL_numainfo:
+-      POST_XEN_SYSCTL_WRITE(numainfo, max_node_index);
+-      POST_MEM_WRITE((Addr)sysctl->u.numainfo.node_to_memsize.p,
+-                     sizeof(uint64_t) * sysctl->u.numainfo.max_node_index);
+-      POST_MEM_WRITE((Addr)sysctl->u.numainfo.node_to_memfree.p,
+-                     sizeof(uint64_t) * sysctl->u.numainfo.max_node_index);
+-      POST_MEM_WRITE((Addr)sysctl->u.numainfo.node_to_node_distance.p,
+-                     sizeof(uint32_t) * sysctl->u.numainfo.max_node_index);
++      if (sysctl->interface_version < 0x0000000c) {
++         POST_XEN_SYSCTL_WRITE(numainfo_0000000b, max_node_index);
++         POST_MEM_WRITE((Addr)sysctl->u.numainfo_0000000b.node_to_memsize.p,
++                        sizeof(uint64_t) * sysctl->u.numainfo_0000000b.max_node_index);
++         POST_MEM_WRITE((Addr)sysctl->u.numainfo_0000000b.node_to_memfree.p,
++                        sizeof(uint64_t) * sysctl->u.numainfo_0000000b.max_node_index);
++         POST_MEM_WRITE((Addr)sysctl->u.numainfo_0000000b.node_to_node_distance.p,
++                        sizeof(uint32_t) * sysctl->u.numainfo_0000000b.max_node_index);
++      } else {
++         if (!sysctl->u.numainfo_0000000c.meminfo.p &&
++             !sysctl->u.numainfo_0000000c.distance.p)
++            POST_XEN_SYSCTL_WRITE(numainfo_0000000c, num_nodes);
++         else {
++            POST_MEM_WRITE((Addr)sysctl->u.numainfo_0000000c.meminfo.p,
++                           sysctl->u.numainfo_0000000c.num_nodes *
++                           sizeof(vki_xen_sysctl_meminfo_t));
++            POST_MEM_WRITE((Addr)sysctl->u.numainfo_0000000c.distance.p,
++                           sysctl->u.numainfo_0000000c.num_nodes *
++                           sysctl->u.numainfo_0000000c.num_nodes *
++                           sizeof(uint32_t));
++         }
++      }
+       break;
+ 
+    /* No outputs */
+    case VKI_XEN_SYSCTL_debug_keys:
+        break;
++
++   case VKI_XEN_SYSCTL_get_cpu_featureset:
++      if (sysctl->u.cpu_featureset.features.p) {
++         POST_MEM_WRITE((Addr)sysctl->u.cpu_featureset.features.p,
++			sysctl->u.cpu_featureset.nr_features *
++			sizeof (uint32_t));
++      } else {
++         POST_XEN_SYSCTL_WRITE(cpu_featureset, nr_features);
++      }
++      break;
+    }
+ #undef POST_XEN_SYSCTL_WRITE
+ #undef __POST_XEN_SYSCTL_WRITE
+@@ -1669,6 +1841,11 @@ POST(domctl){
+    case 0x00000008:
+    case 0x00000009:
+    case 0x0000000a:
++   case 0x0000000b:
++   case 0x0000000c:
++   case 0x0000000d:
++   case 0x0000000e:
++   case 0x0000000f:
+ 	   break;
+    default:
+ 	   return;
+@@ -1708,6 +1885,7 @@ POST(domctl){
+    case VKI_XEN_DOMCTL_resumedomain:
+    case VKI_XEN_DOMCTL_set_vcpu_msrs:
+    case VKI_XEN_DOMCTL_set_access_required:
++   case VKI_XEN_DOMCTL_set_target:
+       /* No output fields */
+       break;
+ 
+@@ -1720,10 +1898,15 @@ POST(domctl){
+       break;
+ 
+    case VKI_XEN_DOMCTL_gettscinfo:
+-      __POST_XEN_DOMCTL_WRITE(settscinfo, tsc_info, info.tsc_mode);
+-      __POST_XEN_DOMCTL_WRITE(settscinfo, tsc_info, info.gtsc_khz);
+-      __POST_XEN_DOMCTL_WRITE(settscinfo, tsc_info, info.incarnation);
+-      __POST_XEN_DOMCTL_WRITE(settscinfo, tsc_info, info.elapsed_nsec);
++      if (domctl->interface_version < 0x0000000e) {
++         POST_MEM_WRITE((Addr)domctl->u.tsc_info_0000000d.out_info.p,
++                        sizeof (vki_xen_guest_tsc_info_t));
++      } else {
++         __POST_XEN_DOMCTL_WRITE(settscinfo, tsc_info_0000000e, tsc_mode);
++         __POST_XEN_DOMCTL_WRITE(settscinfo, tsc_info_0000000e, gtsc_khz);
++         __POST_XEN_DOMCTL_WRITE(settscinfo, tsc_info_0000000e, incarnation);
++         __POST_XEN_DOMCTL_WRITE(settscinfo, tsc_info_0000000e, elapsed_nsec);
++      }
+       break;
+ 
+    case VKI_XEN_DOMCTL_getvcpuinfo:
+@@ -1791,6 +1974,11 @@ POST(domctl){
+                         domctl->u.vcpuaffinity_00000009.cpumap.nr_bits / 8);
+          break;
+       case 0x0000000a:
++      case 0x0000000b:
++      case 0x0000000c:
++      case 0x0000000d:
++      case 0x0000000e:
++      case 0x0000000f:
+          if (domctl->u.vcpuaffinity_0000000a.flags & VKI_XEN_VCPUAFFINITY_HARD)
+             POST_MEM_WRITE(
+                (Addr)domctl->u.vcpuaffinity_0000000a.cpumap_hard.bitmap.p,
+@@ -1840,6 +2028,10 @@ POST(domctl){
+       break;
+       case 0x00000009:
+       case 0x0000000a:
++      case 0x0000000b:
++      case 0x0000000c:
++      case 0x0000000d:
++      case 0x0000000e:
+ 	 POST_XEN_DOMCTL_WRITE(getdomaininfo_00000009, domain);
+ 	 POST_XEN_DOMCTL_WRITE(getdomaininfo_00000009, flags);
+ 	 POST_XEN_DOMCTL_WRITE(getdomaininfo_00000009, tot_pages);
+@@ -1855,6 +2047,23 @@ POST(domctl){
+ 	 POST_XEN_DOMCTL_WRITE(getdomaininfo_00000009, handle);
+ 	 POST_XEN_DOMCTL_WRITE(getdomaininfo_00000009, cpupool);
+       break;
++      case 0x0000000f:
++         POST_XEN_DOMCTL_WRITE(getdomaininfo_0000000f, domain);
++         POST_XEN_DOMCTL_WRITE(getdomaininfo_0000000f, flags);
++         POST_XEN_DOMCTL_WRITE(getdomaininfo_0000000f, tot_pages);
++         POST_XEN_DOMCTL_WRITE(getdomaininfo_0000000f, max_pages);
++         POST_XEN_DOMCTL_WRITE(getdomaininfo_0000000f, outstanding_pages);
++         POST_XEN_DOMCTL_WRITE(getdomaininfo_0000000f, shr_pages);
++         POST_XEN_DOMCTL_WRITE(getdomaininfo_0000000f, paged_pages);
++         POST_XEN_DOMCTL_WRITE(getdomaininfo_0000000f, shared_info_frame);
++         POST_XEN_DOMCTL_WRITE(getdomaininfo_0000000f, cpu_time);
++         POST_XEN_DOMCTL_WRITE(getdomaininfo_0000000f, nr_online_vcpus);
++         POST_XEN_DOMCTL_WRITE(getdomaininfo_0000000f, max_vcpu_id);
++         POST_XEN_DOMCTL_WRITE(getdomaininfo_0000000f, ssidref);
++         POST_XEN_DOMCTL_WRITE(getdomaininfo_0000000f, handle);
++         POST_XEN_DOMCTL_WRITE(getdomaininfo_0000000f, cpupool);
++         POST_XEN_DOMCTL_WRITE(getdomaininfo_0000000f, arch_config.emulation_flags);
++      break;
+       }
+       break;
+    case VKI_XEN_DOMCTL_getvcpucontext:
+@@ -1892,6 +2101,12 @@ POST(domctl){
+            break;
+ 
+        case 0x00000009:
++       case 0x0000000a:
++       case 0x0000000b:
++       case 0x0000000c:
++       case 0x0000000d:
++       case 0x0000000e:
++       case 0x0000000f:
+            __POST_XEN_DOMCTL_WRITE(get_ext_vcpucontext, ext_vcpucontext_00000009, size);
+ #if defined(__i386__) || defined(__x86_64__)
+            __POST_XEN_DOMCTL_WRITE(get_ext_vcpucontext, ext_vcpucontext_00000009,
+diff --git a/include/vki/vki-xen-domctl.h b/include/vki/vki-xen-domctl.h
+index d381ee6cb..1280bb1ee 100644
+--- a/include/vki/vki-xen-domctl.h
++++ b/include/vki/vki-xen-domctl.h
+@@ -36,6 +36,10 @@
+  * - 0x00000008: Xen 4.2
+  * - 0x00000009: Xen 4.3 & 4.4
+  * - 0x0000000a: Xen 4.5
++ * - 0x0000000b: Xen 4.6 & 4.7
++ * - 0x0000000c: Xen 4.8
++ * - 0x0000000d: Xen 4.9
++ * - 0x0000000f: Xen 4.10
+  *
+  * When adding a new subop be sure to include the variants used by all
+  * of the above, both here and in syswrap-xen.c
+@@ -116,6 +120,13 @@
+ #define VKI_XEN_DOMCTL_cacheflush                    71
+ #define VKI_XEN_DOMCTL_get_vcpu_msrs                 72
+ #define VKI_XEN_DOMCTL_set_vcpu_msrs                 73
++#define VKI_XEN_DOMCTL_setvnumainfo                  74
++#define VKI_XEN_DOMCTL_psr_cmt_op                    75
++#define VKI_XEN_DOMCTL_monitor_op                    77
++#define VKI_XEN_DOMCTL_psr_cat_op                    78
++#define VKI_XEN_DOMCTL_soft_reset                    79
++#define VKI_XEN_DOMCTL_set_gnttab_limits             80
++#define VKI_XEN_DOMCTL_vuart_op                      81
+ #define VKI_XEN_DOMCTL_gdbsx_guestmemio            1000
+ #define VKI_XEN_DOMCTL_gdbsx_pausevcpu             1001
+ #define VKI_XEN_DOMCTL_gdbsx_unpausevcpu           1002
+@@ -186,7 +197,29 @@ struct vki_xen_domctl_getdomaininfo_00000009 {
+ typedef struct vki_xen_domctl_getdomaininfo_00000009 vki_xen_domctl_getdomaininfo_00000009_t;
+ DEFINE_VKI_XEN_GUEST_HANDLE(vki_xen_domctl_getdomaininfo_00000009_t);
+ 
++struct vki_xen_domctl_getdomaininfo_0000000f {
++    /* OUT variables. */
++    vki_xen_domid_t  domain;
++    vki_uint32_t flags;
++    vki_xen_uint64_aligned_t tot_pages;
++    vki_xen_uint64_aligned_t max_pages;
++    vki_xen_uint64_aligned_t outstanding_pages;
++    vki_xen_uint64_aligned_t shr_pages;
++    vki_xen_uint64_aligned_t paged_pages;
++    vki_xen_uint64_aligned_t shared_info_frame;
++    vki_xen_uint64_aligned_t cpu_time;
++    vki_uint32_t nr_online_vcpus;
++    vki_uint32_t max_vcpu_id;
++    vki_uint32_t ssidref;
++    vki_xen_domain_handle_t handle;
++    vki_uint32_t cpupool;
++    vki_xen_arch_domainconfig_t arch_config;
++};
++typedef struct vki_xen_domctl_getdomaininfo_00000009 vki_xen_domctl_getdomaininfo_0000000f_t;
++DEFINE_VKI_XEN_GUEST_HANDLE(vki_xen_domctl_getdomaininfo_0000000f_t);
++
+ /* vki_xen_domctl_getdomaininfo_0000000a is the same as 00000009 */
++/* vki_xen_domctl_getdomaininfo_0000000b is the same as 0000000a */
+ 
+ /* Get/set the NUMA node(s) with which the guest has affinity with. */
+ /* XEN_DOMCTL_setnodeaffinity */
+@@ -366,11 +399,19 @@ struct vki_xen_domctl_hvmcontext_partial {
+ typedef struct vki_xen_domctl_hvmcontext_partial vki_xen_domctl_hvmcontext_partial_t;
+ DEFINE_VKI_XEN_GUEST_HANDLE(vki_xen_domctl_hvmcontext_partial_t);
+ 
+-struct vki_xen_domctl_tsc_info {
++struct vki_xen_domctl_tsc_info_0000000d {
+     VKI_XEN_GUEST_HANDLE_64(vki_xen_guest_tsc_info_t) out_info; /* OUT */
+     vki_xen_guest_tsc_info_t info; /* IN */
+ };
+ 
++struct vki_xen_domctl_tsc_info_0000000e {
++    vki_uint32_t tsc_mode;
++    vki_uint32_t gtsc_khz;
++    vki_uint32_t incarnation;
++    vki_uint32_t pad;
++    vki_xen_uint64_aligned_t elapsed_nsec;
++};
++
+ struct vki_xen_domctl_pin_mem_cacheattr {
+     vki_xen_uint64_aligned_t start, end; /* IN */
+     vki_uint32_t type;                   /* IN */
+@@ -468,6 +509,15 @@ struct vki_xen_domctl_vcpu_msrs {
+     VKI_XEN_GUEST_HANDLE_64(vki_xen_domctl_vcpu_msr_t) msrs;
+ };
+ 
++struct vki_xen_domctl_set_gnttab_limits {
++    vki_uint32_t grant_frames;
++    vki_uint32_t maptrack_frames;
++};
++
++struct vki_xen_domctl_set_target {
++    vki_xen_domid_t target;
++};
++
+ struct vki_xen_domctl {
+     vki_uint32_t cmd;
+     vki_uint32_t interface_version; /* XEN_DOMCTL_INTERFACE_VERSION */
+@@ -477,6 +527,7 @@ struct vki_xen_domctl {
+         struct vki_xen_domctl_getdomaininfo_00000007 getdomaininfo_00000007;
+         struct vki_xen_domctl_getdomaininfo_00000008 getdomaininfo_00000008;
+         struct vki_xen_domctl_getdomaininfo_00000009 getdomaininfo_00000009;
++        struct vki_xen_domctl_getdomaininfo_0000000f getdomaininfo_0000000f;
+         //struct vki_xen_domctl_getmemlist        getmemlist;
+         //struct vki_xen_domctl_getpageframeinfo  getpageframeinfo;
+         //struct vki_xen_domctl_getpageframeinfo2 getpageframeinfo2;
+@@ -499,7 +550,8 @@ struct vki_xen_domctl {
+         //struct vki_xen_domctl_arch_setup        arch_setup;
+         struct vki_xen_domctl_settimeoffset     settimeoffset;
+         //struct vki_xen_domctl_disable_migrate   disable_migrate;
+-        struct vki_xen_domctl_tsc_info          tsc_info;
++        struct vki_xen_domctl_tsc_info_0000000d tsc_info_0000000d;
++        struct vki_xen_domctl_tsc_info_0000000e tsc_info_0000000e;
+         //struct vki_xen_domctl_real_mode_area    real_mode_area;
+         struct vki_xen_domctl_hvmcontext        hvmcontext;
+         struct vki_xen_domctl_hvmcontext_partial hvmcontext_partial;
+@@ -513,7 +565,7 @@ struct vki_xen_domctl {
+         struct vki_xen_domctl_pin_mem_cacheattr pin_mem_cacheattr;
+         struct vki_xen_domctl_ext_vcpucontext_00000008 ext_vcpucontext_00000008;
+         struct vki_xen_domctl_ext_vcpucontext_00000009 ext_vcpucontext_00000009;
+-        //struct vki_xen_domctl_set_target        set_target;
++        struct vki_xen_domctl_set_target        set_target;
+         //struct vki_xen_domctl_subscribe         subscribe;
+         struct vki_xen_domctl_debug_op          debug_op;
+         struct vki_xen_domctl_mem_event_op      mem_event_op;
+@@ -530,6 +582,12 @@ struct vki_xen_domctl {
+         //struct vki_xen_domctl_gdbsx_memio       gdbsx_guest_memio;
+         //struct vki_xen_domctl_set_broken_page_p2m set_broken_page_p2m;
+         struct vki_xen_domctl_cacheflush        cacheflush;
++        //struct vki_xen_domctl_setvnumainfo      setvnumainfo;
++        //struct vki_xen_domctl_psr_cmt_op        psr_cmt_op;
++        //struct vki_xen_domctl_monitor_op        monitor_op;
++        //struct vki_xen_domctl_psr_cat_op        psr_cat_op;
++        struct vki_xen_domctl_set_gnttab_limits set_gnttab_limits;
++        //struct vki_xen_domctl_vuart_op          vuart_op;
+         //struct vki_xen_domctl_gdbsx_pauseunp_vcpu gdbsx_pauseunp_vcpu;
+         //struct vki_xen_domctl_gdbsx_domstatus   gdbsx_domstatus;
+         vki_uint8_t                         pad[128];
+diff --git a/include/vki/vki-xen-evtchn.h b/include/vki/vki-xen-evtchn.h
+index d8ff600a2..650056cef 100644
+--- a/include/vki/vki-xen-evtchn.h
++++ b/include/vki/vki-xen-evtchn.h
+@@ -39,6 +39,10 @@
+ #define VKI_XEN_EVTCHNOP_bind_vcpu        8
+ #define VKI_XEN_EVTCHNOP_unmask           9
+ #define VKI_XEN_EVTCHNOP_reset           10
++#define VKI_XEN_EVTCHNOP_init_control    11
++#define VKI_XEN_EVTCHNOP_expand_array    12
++#define VKI_XEN_EVTCHNOP_set_priority    13
++
+ 
+ typedef vki_uint32_t vki_xen_evtchn_port_t;
+ DEFINE_VKI_XEN_GUEST_HANDLE(vki_xen_evtchn_port_t);
+@@ -63,6 +67,9 @@ struct vki_xen_evtchn_op {
+         //struct vki_xen_evtchn_status           status;
+         //struct vki_xen_evtchn_bind_vcpu        bind_vcpu;
+         //struct vki_xen_evtchn_unmask           unmask;
++        //struct vki_xen_evtchn_init_control     init_control;
++        //struct vki_xen_evtchn_expand_array     expand_array;
++        //struct vki_xen_evtchn_set_priority     set_priority;
+     } u;
+ };
+ 
+diff --git a/include/vki/vki-xen-gnttab.h b/include/vki/vki-xen-gnttab.h
+index 11c4219f6..dd5b62d82 100644
+--- a/include/vki/vki-xen-gnttab.h
++++ b/include/vki/vki-xen-gnttab.h
+@@ -42,6 +42,7 @@ typedef vki_uint32_t vki_xen_grant_ref_t;
+ #define VKI_XEN_GNTTABOP_get_status_frames    9
+ #define VKI_XEN_GNTTABOP_get_version          10
+ #define VKI_XEN_GNTTABOP_swap_grant_ref	      11
++#define VKI_XEN_GNTTABOP_cache_flush	      12
+ 
+ struct vki_xen_gnttab_setup_table {
+     /* IN parameters. */
+diff --git a/include/vki/vki-xen-memory.h b/include/vki/vki-xen-memory.h
+index c3076902d..6a3a8e0c7 100644
+--- a/include/vki/vki-xen-memory.h
++++ b/include/vki/vki-xen-memory.h
+@@ -50,6 +50,7 @@
+ #define VKI_XENMEM_access_op                  21
+ #define VKI_XENMEM_claim_pages                24
+ #define VKI_XENMEM_machphys_compat_mfn_list   25
++#define VKI_XENMEM_get_vnumainfo              26
+ 
+ struct vki_xen_memory_map {
+     unsigned int nr_entries;
+diff --git a/include/vki/vki-xen-schedop.h b/include/vki/vki-xen-schedop.h
+index 30f8a33a5..dfc5898f4 100644
+--- a/include/vki/vki-xen-schedop.h
++++ b/include/vki/vki-xen-schedop.h
+@@ -47,4 +47,6 @@ typedef struct vki_xen_remote_shutdown vki_xen_remote_shutdown_t;
+ 
+ #define VKI_XEN_SCHEDOP_watchdog        6
+ 
++#define VKI_XEN_SCHEDOP_override        7
++
+ #endif /* __VKI_XEN_SCHED_OP_H */
+diff --git a/include/vki/vki-xen-sysctl.h b/include/vki/vki-xen-sysctl.h
+index 8f4eac124..a54405378 100644
+--- a/include/vki/vki-xen-sysctl.h
++++ b/include/vki/vki-xen-sysctl.h
+@@ -9,6 +9,11 @@
+  * - 0x00000009: Xen 4.2
+  * - 0x0000000a: Xen 4.3 & 4.4
+  * - 0x0000000b: Xen 4.5
++ * - 0x0000000c: Xen 4.6
++ * - 0x0000000d: Xen 4.7
++ * - 0x0000000e: Xen 4.8
++ * - 0x0000000f: Xen 4.9
++ * - 0x00000010: Xen 4.10
+  *
+  * When adding a new subop be sure to include the variants used by all
+  * of the above, both here and in syswrap-xen.c
+@@ -33,11 +38,22 @@
+ #define VKI_XEN_SYSCTL_pm_op                         12
+ #define VKI_XEN_SYSCTL_page_offline_op               14
+ #define VKI_XEN_SYSCTL_lockprof_op                   15
+-#define VKI_XEN_SYSCTL_topologyinfo                  16
++#define VKI_XEN_SYSCTL_topologyinfo                  16 /* Pre Xen 4.6 definition. */
++#define VKI_XEN_SYSCTL_cputopoinfo                   16
+ #define VKI_XEN_SYSCTL_numainfo                      17
+ #define VKI_XEN_SYSCTL_cpupool_op                    18
+ #define VKI_XEN_SYSCTL_scheduler_op                  19
+ #define VKI_XEN_SYSCTL_coverage_op                   20
++#define VKI_XEN_SYSCTL_gcov_op                       20
++#define VKI_XEN_SYSCTL_psr_cmt_op                    21
++#define VKI_XEN_SYSCTL_pcitopoinfo                   22
++#define VKI_XEN_SYSCTL_psr_cat_op                    23
++#define VKI_XEN_SYSCTL_tmem_op                       24
++#define VKI_XEN_SYSCTL_get_cpu_levelling_caps        25
++#define VKI_XEN_SYSCTL_get_cpu_featureset            26
++#define VKI_XEN_SYSCTL_livepatch_op                  27
++#define VKI_XEN_SYSCTL_set_parameter                 28
++
+ 
+ struct vki_xen_sysctl_readconsole {
+     /* IN */
+@@ -88,6 +104,7 @@ struct vki_xen_sysctl_getdomaininfolist_0000000a {
+ };
+ 
+ /* vki_xen_sysctl_getdomaininfolist_0000000b is the same as 0000000a */
++/* vki_xen_sysctl_getdomaininfolist_0000000c is the same as 0000000b */
+ 
+ #define VKI_XEN_SYSCTL_CPUPOOL_OP_CREATE                1  /* C */
+ #define VKI_XEN_SYSCTL_CPUPOOL_OP_DESTROY               2  /* D */
+@@ -120,12 +137,38 @@ struct vki_xen_sysctl_topologyinfo {
+     VKI_XEN_GUEST_HANDLE_64(vki_uint32) cpu_to_node;
+ };
+ 
+-struct vki_xen_sysctl_numainfo {
++struct vki_xen_sysctl_cputopo {
++    vki_uint32_t core;
++    vki_uint32_t socket;
++    vki_uint32_t node;
++};
++typedef struct vki_xen_sysctl_cputopo vki_xen_sysctl_cputopo_t;
++DEFINE_VKI_XEN_GUEST_HANDLE(vki_xen_sysctl_cputopo_t);
++
++struct vki_xen_sysctl_cputopoinfo {
++    vki_uint32_t num_cpus;
++    VKI_XEN_GUEST_HANDLE_64(vki_xen_sysctl_cputopo_t) cputopo;
++};
++
++struct vki_xen_sysctl_meminfo {
++    vki_uint64_t memsize;
++    vki_uint64_t memfree;
++};
++typedef struct vki_xen_sysctl_meminfo vki_xen_sysctl_meminfo_t;
++DEFINE_VKI_XEN_GUEST_HANDLE(vki_xen_sysctl_meminfo_t);
++
++struct vki_xen_sysctl_numainfo_0000000b {
+     vki_uint32_t max_node_index;
+     VKI_XEN_GUEST_HANDLE_64(vki_uint64) node_to_memsize;
+     VKI_XEN_GUEST_HANDLE_64(vki_uint64) node_to_memfree;
+     VKI_XEN_GUEST_HANDLE_64(vki_uint32) node_to_node_distance;
+ };
++struct vki_xen_sysctl_numainfo_0000000c {
++    vki_uint32_t num_nodes;
++    VKI_XEN_GUEST_HANDLE_64(vki_xen_sysctl_meminfo_t) meminfo;
++    VKI_XEN_GUEST_HANDLE_64(vki_uint32) distance;
++};
++
+ struct vki_xen_sysctl_physinfo_00000008 {
+     vki_uint32_t threads_per_core;
+     vki_uint32_t cores_per_socket;
+@@ -161,11 +204,34 @@ struct vki_xen_sysctl_physinfo_0000000a {
+ 
+ /* vki_xen_sysctl_physinfo_0000000b is the same as 0000000a */
+ 
++struct vki_xen_sysctl_physinfo_00000010 {
++    vki_uint32_t threads_per_core;
++    vki_uint32_t cores_per_socket;
++    vki_uint32_t nr_cpus;     /* # CPUs currently online */
++    vki_uint32_t max_cpu_id;  /* Largest possible CPU ID on this host */
++    vki_uint32_t nr_nodes;    /* # nodes currently online */
++    vki_uint32_t max_node_id; /* Largest possible node ID on this host */
++    vki_uint32_t cpu_khz;
++    vki_uint32_t capabilities;
++    vki_xen_uint64_aligned_t total_pages;
++    vki_xen_uint64_aligned_t free_pages;
++    vki_xen_uint64_aligned_t scrub_pages;
++    vki_xen_uint64_aligned_t outstanding_pages;
++    vki_xen_uint64_aligned_t max_mfn;
++    vki_uint32_t hw_cap[8];
++};
++
+ struct vki_xen_sysctl_sched_id {
+     /* OUT variable. */
+     vki_uint32_t              sched_id;
+ };
+ 
++struct vki_xen_sysctl_cpu_featureset {
++    vki_uint32_t index; /* IN */
++    vki_uint32_t nr_features; /* IN/OUT */
++    VKI_XEN_GUEST_HANDLE_64(vki_uint32) features; /* IN/OUT */
++};
++
+ struct vki_xen_sysctl {
+     vki_uint32_t cmd;
+     vki_uint32_t interface_version; /* XEN_SYSCTL_INTERFACE_VERSION */
+@@ -174,8 +240,11 @@ struct vki_xen_sysctl {
+         //struct vki_xen_sysctl_tbuf_op           tbuf_op;
+         struct vki_xen_sysctl_physinfo_00000008 physinfo_00000008;
+         struct vki_xen_sysctl_physinfo_0000000a physinfo_0000000a;
++        struct vki_xen_sysctl_physinfo_00000010 physinfo_00000010;
+         struct vki_xen_sysctl_topologyinfo      topologyinfo;
+-        struct vki_xen_sysctl_numainfo          numainfo;
++        struct vki_xen_sysctl_cputopoinfo       cputopoinfo;
++        struct vki_xen_sysctl_numainfo_0000000b numainfo_0000000b;
++        struct vki_xen_sysctl_numainfo_0000000c numainfo_0000000c;
+         struct vki_xen_sysctl_sched_id          sched_id;
+         //struct vki_xen_sysctl_perfc_op          perfc_op;
+         struct vki_xen_sysctl_getdomaininfolist_00000008 getdomaininfolist_00000008;
+@@ -192,6 +261,15 @@ struct vki_xen_sysctl {
+         struct vki_xen_sysctl_cpupool_op        cpupool_op;
+         //struct vki_xen_sysctl_scheduler_op      scheduler_op;
+         //struct vki_xen_sysctl_coverage_op       coverage_op;
++        //struct vki_xen_sysctl_gcov_op           gcov_op;
++        //struct vki_xen_sysctl_psr_cmt_op        psr_cmt_op;
++        //struct vki_xen_sysctl_pcitopoinfo       pcitopoinfo;
++        //struct vki_xen_sysctl_psr_cat_op        psr_cat_op;
++        //struct vki_xen_sysctl_tmem_op           tmem_op;
++        //struct vki_xen_sysctl_cpu_levelling_caps  cpu_levelling_caps;
++        struct vki_xen_sysctl_cpu_featureset      cpu_featureset;
++        //struct vki_xen_sysctl_livepatch_op        livepatch;
++        //struct vki_xen_sysctl_set_parameter       set_parameter;
+ 
+         vki_uint8_t                             pad[128];
+     } u;
+diff --git a/include/vki/vki-xen-version.h b/include/vki/vki-xen-version.h
+index a022c94dc..7fbab6686 100644
+--- a/include/vki/vki-xen-version.h
++++ b/include/vki/vki-xen-version.h
+@@ -38,6 +38,7 @@
+ #define VKI_XENVER_pagesize 7
+ #define VKI_XENVER_guest_handle 8
+ #define VKI_XENVER_commandline 9
++#define VKI_XENVER_build_id 10
+ 
+ typedef char vki_xen_extraversion_t[16];
+ 
+@@ -63,6 +64,12 @@ struct vki_xen_feature_info {
+ 
+ typedef char vki_xen_commandline_t[1024];
+ 
++struct vki_xen_build_id {
++    vki_uint32_t len; /* IN */
++    unsigned char buf; /* OUT */
++};
++typedef struct vki_xen_build_id vki_xen_build_id_t;
++
+ #endif // __VKI_XEN_VERSION_H
+ 
+ /*--------------------------------------------------------------------*/
+diff --git a/include/vki/vki-xen-x86.h b/include/vki/vki-xen-x86.h
+index a54a4de9a..d8708d446 100644
+--- a/include/vki/vki-xen-x86.h
++++ b/include/vki/vki-xen-x86.h
+@@ -270,6 +270,11 @@ struct vki_hvm_hw_cpu {
+ 
+ VKI_DECLARE_HVM_SAVE_TYPE(CPU, 2, struct vki_hvm_hw_cpu);
+ 
++struct vki_xen_arch_domainconfig {
++    vki_uint32_t emulation_flags;
++};
++typedef struct vki_xen_arch_domainconfig vki_xen_arch_domainconfig_t;
++
+ #endif // __VKI_XEN_H
+ 
+ /*--------------------------------------------------------------------*/
+diff --git a/include/vki/vki-xen-xsm.h b/include/vki/vki-xen-xsm.h
+index b8eb50db3..d7a7dc15d 100644
+--- a/include/vki/vki-xen-xsm.h
++++ b/include/vki/vki-xen-xsm.h
+@@ -66,6 +66,7 @@ struct vki_xen_flask_op {
+ #define VKI_FLASK_DEL_OCONTEXT      22
+ #define VKI_FLASK_GET_PEER_SID      23
+ #define VKI_FLASK_RELABEL_DOMAIN    24
++#define FLASK_DEVICETREE_LABEL      25
+     vki_uint32_t interface_version; /* VKI_XEN_FLASK_INTERFACE_VERSION */
+     union {
+         //struct vki_xen_flask_load load;
+@@ -85,6 +86,7 @@ struct vki_xen_flask_op {
+         //struct vki_xen_flask_ocontext ocontext;
+         //struct vki_xen_flask_peersid peersid;
+         //struct vki_xen_flask_relabel relabel;
++        //struct vki_xen_flask_devicetree_label devicetree_label;
+     } u;
+ };
+ 
+-- 
+2.19.1
+

@@ -1,0 +1,248 @@
+From b641adf1c1633ca5e7f4429f3c7ee4111d1e2400 Mon Sep 17 00:00:00 2001
+From: Eric Chanudet <chanudete@ainfosec.com>
+Date: Fri, 15 Feb 2019 21:36:46 -0500
+Subject: [PATCH 2/2] xen/v4v: Add the v4v chardev ioctls.
+
+Check arguments of ioctls used by the V4V chardev as released in OpenXT
+8.
+
+Signed-off-by: Eric Chanudet <chanudete@ainfosec.com>
+---
+ coregrind/m_syswrap/syswrap-linux.c | 142 ++++++++++++++++++++++++++++
+ include/vki/vki-linux.h             |  53 +++++++++++
+ 2 files changed, 195 insertions(+)
+
+diff --git a/coregrind/m_syswrap/syswrap-linux.c b/coregrind/m_syswrap/syswrap-linux.c
+index f2ebc161f..7d1163d43 100644
+--- a/coregrind/m_syswrap/syswrap-linux.c
++++ b/coregrind/m_syswrap/syswrap-linux.c
+@@ -8519,6 +8519,98 @@ PRE(sys_ioctl)
+       PRE_MEM_WRITE("ioctl(VKI_PERF_EVENT_IOC_ID)", (Addr)ARG3, sizeof(__vki_u64));
+       break;
+ 
++   case VKI_V4VIOCSETRINGSIZE:
++      PRE_MEM_READ("ioctl(VKI_V4VIOCSETRINGSIZE)", (Addr)ARG3, sizeof (__vki_u32));
++      break;
++
++   case VKI_V4VIOCBIND: {
++      struct vki_v4v_ring_id *rid = (struct vki_v4v_ring_id *)ARG3;
++      PRE_MEM_READ("ioctl(VKI_V4VIOCBIND)", (Addr)rid, sizeof (*rid));
++      break;
++   }
++   case VKI_V4VIOCGETSOCKNAME: {
++      struct vki_v4v_ring_id *rid = (struct vki_v4v_ring_id *)ARG3;
++      PRE_MEM_READ("ioctl(VKI_V4VIOCGETSOCKNAME)", (Addr)rid, sizeof (*rid));
++      break;
++   }
++   case VKI_V4VIOCACCEPT: {
++      struct vki_v4v_addr *addr = (struct vki_v4v_addr *)ARG3;
++      PRE_MEM_WRITE("ioctl(VKI_V4VIOCACCEPT)", (Addr)addr, sizeof (*addr));
++      break;
++   }
++   case VKI_V4VIOCGETPEERNAME: {
++      struct vki_v4v_addr *addr = (struct vki_v4v_addr *)ARG3;
++      PRE_MEM_WRITE("ioctl(VKI_V4VIOCGETPEERNAME)", (Addr)addr, sizeof (*addr));
++      break;
++   }
++   case VKI_V4VIOCGETCONNECTERR:
++      PRE_MEM_WRITE("ioctl(VKI_V4VIOCGETPEERNAME)", (Addr)ARG3, sizeof (vki_uint));
++      break;
++
++   case VKI_V4VIOCLISTEN:
++      /* No inputs */
++      break;
++
++   case VKI_V4VIOCCONNECT: {
++      struct vki_v4v_addr *addr = (struct vki_v4v_addr *)ARG3;
++      PRE_MEM_WRITE("ioctl(VKI_V4VIOCCONNECT)", (Addr)addr, sizeof (*addr));
++      break;
++   }
++   case VKI_V4VIOCSEND: {
++      struct vki_v4v_dev *dev = (struct vki_v4v_dev *)ARG3;
++      PRE_MEM_READ("ioctl(VKI_V4VIOCSEND).len",
++                   (Addr)&dev->len, sizeof (dev->len));
++      PRE_MEM_READ("ioctl(VKI_V4VIOCSEND).flags",
++                   (Addr)&dev->flags, sizeof (dev->flags));
++      PRE_MEM_READ("ioctl(VKI_V4VIOCSEND).addr",
++                   (Addr)&dev->addr, sizeof (*dev->addr));
++      PRE_MEM_READ("ioctl(VKI_V4VIOCSEND).buf",
++                   (Addr)&dev->addr, sizeof (vki_uint8_t) * dev->len);
++      break;
++   }
++   case VKI_V4VIOCRECV: {
++      struct vki_v4v_dev *dev = (struct vki_v4v_dev *)ARG3;
++      PRE_MEM_READ("ioctl(VKI_V4VIOCSEND).len",
++                   (Addr)&dev->len, sizeof (dev->len));
++      PRE_MEM_READ("ioctl(VKI_V4VIOCSEND).flags",
++                   (Addr)&dev->flags, sizeof (dev->flags));
++      PRE_MEM_READ("ioctl(VKI_V4VIOCSEND).addr",
++                   (Addr)&dev->addr, sizeof (*dev->addr));
++      PRE_MEM_WRITE("ioctl(VKI_V4VIOCSEND).buf",
++                    (Addr)&dev->addr, sizeof (vki_uint8_t) * dev->len);
++      break;
++   }
++   case VKI_V4VIOCVIPTABLESADD: {
++      struct vki_v4v_viptables_rule_pos *r =
++         (struct vki_v4v_viptables_rule_pos *)ARG3;
++      PRE_MEM_READ("ioctl(VKI_V4VIOCVIPTABLESADD).rule",
++                   (Addr)&r->rule, sizeof (*r->rule));
++      PRE_MEM_READ("ioctl(VKI_V4VIOCVIPTABLESADD).position",
++                   (Addr)&r->position, sizeof (r->position));
++      break;
++   }
++   case VKI_V4VIOCVIPTABLESDEL: {
++      struct vki_v4v_viptables_rule_pos *r =
++         (struct vki_v4v_viptables_rule_pos *)ARG3;
++      PRE_MEM_READ("ioctl(VKI_V4VIOCVIPTABLESDEL).rule",
++                   (Addr)&r->rule, sizeof (*r->rule));
++      PRE_MEM_READ("ioctl(VKI_V4VIOCVIPTABLESDEL).position",
++                   (Addr)&r->position, sizeof (r->position));
++      break;
++   }
++   case VKI_V4VIOCVIPTABLESLIST: {
++      struct vki_v4v_viptables_list *l = (struct vki_v4v_viptables_list *)ARG3;
++      PRE_MEM_READ("ioctl(VKI_V4VIOCVIPTABLESLIST).nb_rules",
++                   (Addr)&l->nb_rules, sizeof (l->nb_rules));
++      PRE_MEM_WRITE("ioctl(VKI_V4VIOCVIPTABLESLIST).rules",
++                    (Addr)l->rules, VKI_V4V_VIPTABLES_LIST_SIZE *
++                    sizeof (l->rules[0]));
++      break;
++   }
++   case VKI_V4VIOCGETSOCKTYPE:
++      PRE_MEM_WRITE("ioctl(VKI_V4VIOCGETSOCKTYPE)", (Addr)ARG3, sizeof (int));
++      break;
++
+    default:
+       /* EVIOC* are variable length and return size written on success */
+       switch (ARG2 & ~(_VKI_IOC_SIZEMASK << _VKI_IOC_SIZESHIFT)) {
+@@ -8549,6 +8641,8 @@ PRE(sys_ioctl)
+       }
+       break;
+    }   
++
++   /*  */
+ }
+ 
+ POST(sys_ioctl)
+@@ -10425,6 +10519,54 @@ POST(sys_ioctl)
+       POST_MEM_WRITE((Addr)ARG3, sizeof(__vki_u64));
+       break;
+ 
++   case VKI_V4VIOCSETRINGSIZE:
++   case VKI_V4VIOCBIND:
++   case VKI_V4VIOCCONNECT:
++   case VKI_V4VIOCLISTEN:
++   case VKI_V4VIOCSEND:
++      break;
++
++   case VKI_V4VIOCGETSOCKNAME: {
++      struct vki_v4v_ring_id *rid = (struct vki_v4v_ring_id *)ARG3;
++      POST_MEM_WRITE((Addr)rid, sizeof (*rid));
++      break;
++   }
++   case VKI_V4VIOCGETPEERNAME: {
++      struct vki_v4v_addr *addr = (struct vki_v4v_addr *)ARG3;
++      POST_MEM_WRITE((Addr)addr, sizeof (*addr));
++      break;
++   }
++
++   case VKI_V4VIOCGETCONNECTERR:
++      POST_MEM_WRITE((Addr)ARG3, sizeof(vki_uint));
++      break;
++
++   case VKI_V4VIOCACCEPT: {
++      struct vki_v4v_addr *addr = (struct vki_v4v_addr *)ARG3;
++      POST_MEM_WRITE((Addr)addr, sizeof (*addr));
++      break;
++   }
++   case VKI_V4VIOCRECV: {
++      struct vki_v4v_dev *d = (struct vki_v4v_dev *)ARG3;
++      POST_MEM_WRITE((Addr)d->addr, sizeof (*d->addr));
++      POST_MEM_WRITE((Addr)d->buf, d->len * sizeof (vki_uint8_t));
++      break;
++   }
++   case VKI_V4VIOCVIPTABLESADD:
++   case VKI_V4VIOCVIPTABLESDEL:
++      break;
++
++   case VKI_V4VIOCVIPTABLESLIST: {
++      struct vki_v4v_viptables_list *l = (struct vki_v4v_viptables_list *)ARG3;
++      POST_MEM_WRITE((Addr)&l->nb_rules, sizeof (l->nb_rules));
++      POST_MEM_WRITE((Addr)&l->rules, sizeof (l->rules[0]) * l->nb_rules);
++      break;
++   }
++   case VKI_V4VIOCGETSOCKTYPE: {
++      POST_MEM_WRITE((Addr)ARG3, sizeof (vki_uint));
++      break;
++   }
++
+    default:
+       /* EVIOC* are variable length and return size written on success */
+       switch (ARG2 & ~(_VKI_IOC_SIZEMASK << _VKI_IOC_SIZESHIFT)) {
+diff --git a/include/vki/vki-linux.h b/include/vki/vki-linux.h
+index bdb8f3393..dc29fc465 100644
+--- a/include/vki/vki-linux.h
++++ b/include/vki/vki-linux.h
+@@ -2956,6 +2956,59 @@ struct vki_perf_event_attr {
+ #define VKI_PERF_EVENT_IOC_ID           _VKI_IOR('$', 7, __vki_u64 *)
+ #define VKI_PERF_EVENT_IOC_SET_BPF      _VKI_IOW('$', 8, __vki_u32)
+ 
++/*--------------------------------------------------------------------*/
++// From v4v_dev.h & xen/v4v.h
++/*--------------------------------------------------------------------*/
++
++typedef __vki_u16 vki_v4v_domid_t;
++
++struct vki_v4v_addr {
++    vki_uint32_t port;
++    vki_v4v_domid_t domid;
++};
++
++struct vki_v4v_ring_id {
++    struct vki_v4v_addr addr;
++    vki_v4v_domid_t partner;
++};
++
++struct vki_v4v_dev {
++    void *buf;
++    vki_size_t len;
++    vki_int32_t flags;
++    struct vki_v4v_addr *addr;
++};
++
++struct vki_v4v_viptables_rule {
++    struct vki_v4v_addr src;
++    struct vki_v4v_addr dst;
++    vki_uint32_t accept;
++};
++struct vki_v4v_viptables_rule_pos {
++    struct vki_v4v_viptables_rule *rule;
++    vki_uint position;
++};
++struct vki_v4v_viptables_list {
++#define VKI_V4V_VIPTABLES_LIST_SIZE 8
++    struct vki_v4v_viptables_rule rules[VKI_V4V_VIPTABLES_LIST_SIZE];
++    vki_uint32_t nb_rules;
++};
++
++#define VKI_V4VIOCSETRINGSIZE           _VKI_IOW('W',  1, vki_uint32_t)
++#define VKI_V4VIOCBIND                  _VKI_IOW('W',  2, struct vki_v4v_ring_id)
++#define VKI_V4VIOCGETSOCKNAME           _VKI_IOW('W',  3, struct vki_v4v_ring_id)
++#define VKI_V4VIOCGETPEERNAME           _VKI_IOW('W',  4, struct vki_v4v_addr)
++#define VKI_V4VIOCCONNECT               _VKI_IOW('W',  5, struct vki_v4v_addr)
++#define VKI_V4VIOCGETCONNECTERR         _VKI_IOW('W',  6, vki_uint)
++#define VKI_V4VIOCLISTEN                _VKI_IOW('W',  7, vki_uint32_t) /*unused args */
++#define VKI_V4VIOCACCEPT                _VKI_IOW('W',  8, struct vki_v4v_addr) 
++#define VKI_V4VIOCSEND                  _VKI_IOW('W',  9, struct vki_v4v_dev)
++#define VKI_V4VIOCRECV                  _VKI_IOW('W', 10, struct vki_v4v_dev)
++#define VKI_V4VIOCVIPTABLESADD          _VKI_IOW('W', 11, struct vki_v4v_viptables_rule_pos)
++#define VKI_V4VIOCVIPTABLESDEL          _VKI_IOW('W', 12, struct vki_v4v_viptables_rule_pos)
++#define VKI_V4VIOCVIPTABLESLIST         _VKI_IOW('W', 13, vki_uint32_t) /*unused args */
++#define VKI_V4VIOCGETSOCKTYPE           _VKI_IOW('W', 14, vki_uint)
++
+ /*--------------------------------------------------------------------*/
+ // From linux-2.6.32.4/include/linux/getcpu.h
+ /*--------------------------------------------------------------------*/
+-- 
+2.19.1
+
