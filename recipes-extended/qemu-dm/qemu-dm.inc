@@ -14,6 +14,8 @@ DEPENDS = " \
     pixman \
 "
 
+PV = "3.1.0"
+
 # Leave this in it's own definition so that it can be replaced with a local
 # tarball (the QEMU download speed is terrible). If this is combined with the
 # other patches, it doesn't seem to work
@@ -53,8 +55,8 @@ SRC_URI += "file://compile-time-stubdom-flag.patch \
             file://round-pci-region-sizes.patch \
             "
 
-SRC_URI[md5sum] = "25440304a1ee31935475e9aedf604d5c"
-SRC_URI[sha256sum] = "933e62ad604f5f8d0a93f5e0a98fd95f9d2e23ff1dbd0c744c6c7506bba8ebe8"
+SRC_URI[md5sum] = "8a75cfd18460143d1b352234e437ca8d"
+SRC_URI[sha256sum] = "98fee0c86b299ebaf08587ba8df1dc8bb7152708d62937a0631875d95cc8d921"
 
 S = "${WORKDIR}/qemu-${PV}"
 
