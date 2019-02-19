@@ -17,7 +17,6 @@ IMAGE_INSTALL = " \
     xen-xenstore \
     qemu-dm-stubdom \
     argo-module \
-    rsyslog \
 "
 IMAGE_LINGUAS = ""
 

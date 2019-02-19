@@ -75,8 +75,6 @@ mkdir -p /var/run
 export USE_INTEL_SB=1
 export INTEL_DBUS=1
 
-rsyslogd -f /etc/rsyslog.conf
-
 echo "Starting qemu directly."
 target="$( xenstore-read target )"
 vm_uuid="$( xenstore-read /local/domain/${target}/vm )"
