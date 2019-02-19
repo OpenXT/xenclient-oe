@@ -26,7 +26,6 @@ SRC_URI += "file://compile-time-stubdom-flag.patch \
             file://generic-xenstore-extensions.patch \
             file://readonly-ide.patch \
             file://hvm-param-dm-domain.patch \
-            file://logging-syslog.patch \
             file://dmbus.patch \
             file://switcher.patch \
             file://acpi.patch \
