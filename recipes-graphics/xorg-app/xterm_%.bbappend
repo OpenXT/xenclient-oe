@@ -1,3 +1,5 @@
+# Enable TrueType fonts
+PACKAGECONFIG += "xft"
 
 do_configure_prepend() {
 	echo >> ${S}/XTerm.ad
