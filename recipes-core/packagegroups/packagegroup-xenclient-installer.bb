@@ -41,6 +41,7 @@ RDEPENDS_${PN} = " \
     read-edid \
     refpolicy-mcs \
     rsyslog \
+    rsyslog-conf-dom0 \
     shim \
     syslinux \
     syslinux-isolinux \
