@@ -1,0 +1,98 @@
+--- a/drivers/xen/xen-pciback/pci_stub.c
++++ b/drivers/xen/xen-pciback/pci_stub.c
+@@ -1369,15 +1369,14 @@ out:
+ }
+ static DRIVER_ATTR_RW(quirks);
+ 
+-static ssize_t permissive_store(struct device_driver *drv, const char *buf,
+-				size_t count)
++static int set_confspace_policy(const char *dev_str, bool permissive)
+ {
+ 	int domain, bus, slot, func;
+ 	int err;
+ 	struct pcistub_device *psdev;
+ 	struct xen_pcibk_dev_data *dev_data;
+ 
+-	err = str_to_slot(buf, &domain, &bus, &slot, &func);
++	err = str_to_slot(dev_str, &domain, &bus, &slot, &func);
+ 	if (err)
+ 		goto out;
+ 
+@@ -1393,22 +1392,33 @@ static ssize_t permissive_store(struct d
+ 		err = -ENXIO;
+ 		goto release;
+ 	}
+-	if (!dev_data->permissive) {
+-		dev_data->permissive = 1;
++
++	if (!dev_data->permissive && permissive) {
+ 		/* Let user know that what they're doing could be unsafe */
+ 		dev_warn(&psdev->dev->dev, "enabling permissive mode "
+ 			 "configuration space accesses!\n");
+ 		dev_warn(&psdev->dev->dev,
+ 			 "permissive mode is potentially unsafe!\n");
+ 	}
++	dev_data->permissive = permissive;
+ release:
+ 	pcistub_device_put(psdev);
+ out:
+-	if (!err)
+-		err = count;
+ 	return err;
+ }
+ 
++static ssize_t permissive_store(struct device_driver *drv, const char *buf,
++			      size_t count)
++{
++	int err;
++
++	err = set_confspace_policy(buf, true);
++	if (err) {
++		return err;
++	}
++	return count;
++}
++
+ static ssize_t permissive_show(struct device_driver *drv, char *buf)
+ {
+ 	struct pcistub_device *psdev;
+@@ -1433,6 +1443,20 @@ static ssize_t permissive_show(struct de
+ }
+ static DRIVER_ATTR_RW(permissive);
+ 
++static ssize_t restrictive_store(struct device_driver *drv, const char *buf,
++			       size_t count)
++{
++	int err;
++
++	err = set_confspace_policy(buf, false);
++	if (err) {
++		return err;
++	}
++	return count;
++}
++static DRIVER_ATTR_WO(restrictive);
++
++
+ static void pcistub_exit(void)
+ {
+ 	driver_remove_file(&xen_pcibk_pci_driver.driver, &driver_attr_new_slot);
+@@ -1441,6 +1465,8 @@ static void pcistub_exit(void)
+ 	driver_remove_file(&xen_pcibk_pci_driver.driver, &driver_attr_slots);
+ 	driver_remove_file(&xen_pcibk_pci_driver.driver, &driver_attr_quirks);
+ 	driver_remove_file(&xen_pcibk_pci_driver.driver,
++			   &driver_attr_restrictive);
++	driver_remove_file(&xen_pcibk_pci_driver.driver,
+ 			   &driver_attr_permissive);
+ 	driver_remove_file(&xen_pcibk_pci_driver.driver,
+ 			   &driver_attr_irq_handlers);
+@@ -1532,6 +1558,9 @@ static int __init pcistub_init(void)
+ 	if (!err)
+ 		err = driver_create_file(&xen_pcibk_pci_driver.driver,
+ 					 &driver_attr_permissive);
++	if (!err)
++		err = driver_create_file(&xen_pcibk_pci_driver.driver,
++					 &driver_attr_restrictive);
+ 
+ 	if (!err)
+ 		err = driver_create_file(&xen_pcibk_pci_driver.driver,
