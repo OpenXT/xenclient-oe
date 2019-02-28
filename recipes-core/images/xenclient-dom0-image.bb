@@ -58,7 +58,6 @@ post_rootfs_shell_commands() {
     ln -s ../config/etc/passwd ${IMAGE_ROOTFS}/etc/passwd
     ln -s ../config/etc/shadow ${IMAGE_ROOTFS}/etc/shadow
     ln -s ../config/etc/.pwd.lock ${IMAGE_ROOTFS}/etc/.pwd.lock
-    ln -s ../var/volatile/etc/asound ${IMAGE_ROOTFS}/etc/asound
 
     rm ${IMAGE_ROOTFS}/etc/hosts
     ln -s /var/run/hosts ${IMAGE_ROOTFS}/etc/hosts
