@@ -1,7 +1,7 @@
-From 1250ade5b12ea81aa61e77fb668a5c920db44a54 Mon Sep 17 00:00:00 2001
+From cf8eb0ab848cee4f9f8ae56021e41fcd80ed418b Mon Sep 17 00:00:00 2001
 From: Eric Chanudet <chanudete@ainfosec.com>
 Date: Fri, 10 Aug 2018 22:18:58 -0400
-Subject: [PATCH 13/22] tboot: TB_POLTYPE_WARN_ON_FAILURE with pre/post.
+Subject: [PATCH 04/14] tboot: TB_POLTYPE_WARN_ON_FAILURE with pre/post.
 
 See docs/error_handling.txt.
 
@@ -50,23 +50,23 @@ Original author unknown.
 Signed-off-by: Ross Philipson <rphilipsonr@ainfosec.com>
 Signed-off-by: Eric Chanudet <chanudete@ainfosec.com>
 ---
- docs/error_handling.txt       | 219 ++++++++++++++++++++++++++++++++++++++++++
- include/tb_error.h            |  19 +++-
- include/tb_policy.h           |   8 +-
+ docs/error_handling.txt       | 219 ++++++++++++++++++++++++++++++++++
+ include/tb_error.h            |  19 ++-
+ include/tb_policy.h           |  10 +-
  tb_polgen/param.c             |   4 +-
- tboot/common/boot.S           |  18 ++--
+ tboot/common/boot.S           |  18 ++-
  tboot/common/integrity.c      |   2 +-
  tboot/common/loader.c         |   7 ++
- tboot/common/policy.c         | 202 ++++++++++++++++++++++++--------------
- tboot/common/tb_error.c       |  96 ++++++++++--------
- tboot/common/tboot.c          |  19 ++--
- tboot/include/txt/errorcode.h | 136 ++++++++++++++++++--------
+ tboot/common/policy.c         | 202 ++++++++++++++++++++-----------
+ tboot/common/tb_error.c       |  99 ++++++++-------
+ tboot/common/tboot.c          |  19 ++-
+ tboot/include/txt/errorcode.h | 136 +++++++++++++++------
  tboot/include/txt/txt.h       |   1 +
- tboot/txt/errors.c            |  67 +++++--------
+ tboot/txt/errors.c            |  67 ++++-------
  tboot/txt/txt.c               |   6 +-
- tboot/txt/verify.c            |  18 ++--
- utils/parse_err.c             |  36 +------
- 16 files changed, 596 insertions(+), 262 deletions(-)
+ tboot/txt/verify.c            |  18 ++-
+ utils/parse_err.c             |  36 +-----
+ 16 files changed, 597 insertions(+), 266 deletions(-)
  create mode 100644 docs/error_handling.txt
 
 diff --git a/docs/error_handling.txt b/docs/error_handling.txt
@@ -344,7 +344,7 @@ index f72351b..b4302af 100644
  #endif /* __TB_ERROR_H__ */
  
 diff --git a/include/tb_policy.h b/include/tb_policy.h
-index 118a735..2d2f1cd 100644
+index 736e82d..8cdb7d6 100644
 --- a/include/tb_policy.h
 +++ b/include/tb_policy.h
 @@ -43,9 +43,9 @@
@@ -359,7 +359,7 @@ index 118a735..2d2f1cd 100644
      TB_POLTYPE_MAX
  };
  
-@@ -136,10 +136,10 @@ static inline const char *policy_type_to_string(uint8_t policy_type)
+@@ -133,11 +133,11 @@ static inline const char *policy_type_to_string(uint8_t policy_type)
  {
      if ( policy_type == TB_POLTYPE_CONT_NON_FATAL )
          return "TB_POLTYPE_CONT_NON_FATAL";
@@ -367,16 +367,18 @@ index 118a735..2d2f1cd 100644
 -        return "TB_POLTYPE_CONT_VERIFY_FAIL";
      else if ( policy_type == TB_POLTYPE_HALT )
          return "TB_POLTYPE_HALT";
+-    else 
 +    else if ( policy_type == TB_POLTYPE_WARN_ON_FAILURE )
 +        return "TB_POLTYPE_WARN_ON_FAILURE";
-     else {
-         static char buf[32];
-         snprintf(buf, sizeof(buf), "unsupported (%u)", policy_type);
++    else
+         return "unsupported";
+ }
+ 
 diff --git a/tb_polgen/param.c b/tb_polgen/param.c
-index 26ff6f1..556c3ea 100644
+index 24122f2..b2623b4 100644
 --- a/tb_polgen/param.c
 +++ b/tb_polgen/param.c
-@@ -49,7 +49,7 @@
+@@ -50,7 +50,7 @@
  #include "tb_polgen.h"
  
  static const char *help[] = {
@@ -385,7 +387,7 @@ index 26ff6f1..556c3ea 100644
      "                   [--ctrl       <policy control value>]\n",
      "                   [--verbose]\n",
      "                   <policy file name>\n",
-@@ -111,7 +111,7 @@ typedef struct {
+@@ -112,7 +112,7 @@ typedef struct {
  
  static option_table_t policy_type_opts[] = {
      {"nonfatal",     int_opt : TB_POLTYPE_CONT_NON_FATAL},
@@ -442,7 +444,7 @@ index df910e8..47feaff 100644
  
  ENTRY(__start)
 diff --git a/tboot/common/integrity.c b/tboot/common/integrity.c
-index 3d48502..c070808 100644
+index 562e619..87ff037 100644
 --- a/tboot/common/integrity.c
 +++ b/tboot/common/integrity.c
 @@ -239,7 +239,7 @@ bool seal_pre_k_state(void)
@@ -455,10 +457,10 @@ index 3d48502..c070808 100644
      /* we can't leave the system in a state without valid measurements of
         about-to-execute code in the PCRs, so this is a fatal error */
 diff --git a/tboot/common/loader.c b/tboot/common/loader.c
-index 043bc25..d230661 100644
+index a04f41a..5c40c14 100644
 --- a/tboot/common/loader.c
 +++ b/tboot/common/loader.c
-@@ -1446,6 +1446,9 @@ bool launch_kernel(bool is_measured_launch)
+@@ -1468,6 +1468,9 @@ bool launch_kernel(bool is_measured_launch)
          if(!move_modules_above_elf_kernel(g_ldr_ctx, (elf_header_t *)kernel_image))
              return false;
  
@@ -468,7 +470,7 @@ index 043bc25..d230661 100644
          printk(TBOOT_INFO"transfering control to kernel @%p...\n", 
                 kernel_entry_point);
          /* (optionally) pause when transferring to kernel */
-@@ -1472,6 +1475,10 @@ bool launch_kernel(bool is_measured_launch)
+@@ -1494,6 +1497,10 @@ bool launch_kernel(bool is_measured_launch)
          expand_linux_image(kernel_image, kernel_size,
                             initrd_image, initrd_size,
                             &kernel_entry_point, is_measured_launch);
@@ -480,7 +482,7 @@ index 043bc25..d230661 100644
                 kernel_entry_point);
          /* (optionally) pause when transferring to kernel */
 diff --git a/tboot/common/policy.c b/tboot/common/policy.c
-index 39fd8b2..e72178a 100644
+index 66938b0..b0df9b0 100644
 --- a/tboot/common/policy.c
 +++ b/tboot/common/policy.c
 @@ -57,6 +57,7 @@
@@ -629,7 +631,7 @@ index 39fd8b2..e72178a 100644
      hash_alg       : TB_HALG_SHA1,
      policy_control : TB_POLCTL_EXTEND_PCR17,
      num_entries    : 3,
-@@ -545,30 +575,35 @@ static bool is_hash_in_policy_entry(const tb_policy_entry_t *pol_entry,
+@@ -542,30 +572,35 @@ static bool is_hash_in_policy_entry(const tb_policy_entry_t *pol_entry,
  /*
   * map policy type + error -> action
   */
@@ -675,7 +677,7 @@ index 39fd8b2..e72178a 100644
  }
  
  /*
-@@ -576,34 +611,59 @@ static tb_policy_action_t evaluate_error(tb_error_t error)
+@@ -573,34 +608,59 @@ static tb_policy_action_t evaluate_error(tb_error_t error)
   */
  void apply_policy(tb_error_t error)
  {
@@ -747,7 +749,7 @@ index 39fd8b2..e72178a 100644
 +            case TB_POLACT_WARN:
 +                /* display message to user */
 +                printk("%s\n", warning_msg);
-+                vga_puts(warning_msg, strlen(warning_msg));
++                vga_puts(warning_msg, tb_strlen(warning_msg));
 +                /* wait to let user read it */
 +                delay(WARN_DELAY);
 +                break;
@@ -764,19 +766,19 @@ index 39fd8b2..e72178a 100644
  }
  
 diff --git a/tboot/common/tb_error.c b/tboot/common/tb_error.c
-index e02e9f1..0be8a7f 100644
+index 3507eaa..853a0e8 100644
 --- a/tboot/common/tb_error.c
 +++ b/tboot/common/tb_error.c
-@@ -49,6 +49,8 @@
- #include <tpm.h>
+@@ -50,6 +50,8 @@
  #include <tboot.h>
  #include <txt/config_regs.h>
+ #include <cmdline.h>
 +#include <txt/txt.h>
 +#include <txt/errorcode.h>
  
  #define TB_LAUNCH_ERR_IDX     0x20000002      /* launch error index */
  
-@@ -66,9 +68,6 @@ void print_tb_error_msg(tb_error_t error)
+@@ -67,9 +69,6 @@ void print_tb_error_msg(tb_error_t error)
          case TB_ERR_NONE:
              printk(TBOOT_INFO"succeeded.\n");
              break;
@@ -786,7 +788,7 @@ index e02e9f1..0be8a7f 100644
          case TB_ERR_GENERIC:
              printk(TBOOT_WARN"non-fatal generic error.\n");
              break;
-@@ -87,6 +86,9 @@ void print_tb_error_msg(tb_error_t error)
+@@ -88,6 +87,9 @@ void print_tb_error_msg(tb_error_t error)
  	case TB_ERR_TXT_NOT_SUPPORTED:
              printk(TBOOT_ERR"TXT not supported.\n");
              break;
@@ -796,7 +798,7 @@ index e02e9f1..0be8a7f 100644
          case TB_ERR_MODULES_NOT_IN_POLICY:
              printk(TBOOT_ERR"modules in mbi but not in policy.\n");
              break;
-@@ -127,12 +129,39 @@ void print_tb_error_msg(tb_error_t error)
+@@ -128,12 +130,39 @@ void print_tb_error_msg(tb_error_t error)
  }
  
  /*
@@ -838,7 +840,7 @@ index e02e9f1..0be8a7f 100644
  {
      uint32_t size = sizeof(tb_error_t);
      struct tpm_if *tpm = get_tpm();
-@@ -158,49 +187,36 @@ bool read_tb_error_code(tb_error_t *error)
+@@ -162,52 +191,36 @@ bool read_tb_error_code(tb_error_t *error)
  }
  
  /*
@@ -856,6 +858,9 @@ index e02e9f1..0be8a7f 100644
 -    struct tpm_if *tpm = get_tpm();
 -    const struct tpm_if_fp *tpm_fp = get_tpm_fp();
 -    
+-    if ( get_tboot_ignore_prev_err() )
+-        return true;
+-
 -    if ( !tpm || !tpm_fp || no_err_idx )
 -        return false;
 -
@@ -911,10 +916,10 @@ index e02e9f1..0be8a7f 100644
  }
 -
 diff --git a/tboot/common/tboot.c b/tboot/common/tboot.c
-index c06b4d3..2292227 100644
+index 9652c30..7d52055 100644
 --- a/tboot/common/tboot.c
 +++ b/tboot/common/tboot.c
-@@ -188,8 +188,9 @@ static void post_launch(void)
+@@ -189,8 +189,9 @@ static void post_launch(void)
      err = txt_protect_mem_regions();
      apply_policy(err);
  
@@ -926,7 +931,7 @@ index c06b4d3..2292227 100644
  
      /* verify that tboot is in valid RAM (i.e. E820_RAM) */
      base = (uint64_t)TBOOT_BASE_ADDR;
-@@ -311,7 +312,7 @@ void launch_racm(void)
+@@ -297,7 +298,7 @@ void launch_racm(void)
  
      /* prepare cpu */
      if ( !prepare_cpu() )
@@ -935,7 +940,7 @@ index c06b4d3..2292227 100644
  
      /* prepare tpm */
      if ( !prepare_tpm() )
-@@ -432,6 +433,8 @@ void begin_launch(void *addr, uint32_t magic)
+@@ -418,6 +419,8 @@ void begin_launch(void *addr, uint32_t magic)
  
      /* print any errors on last boot, which must be from TXT launch */
      txt_display_errors();
@@ -944,7 +949,7 @@ index c06b4d3..2292227 100644
      if (txt_has_error() && get_tboot_ignore_prev_err() == false) {
          apply_policy(TB_ERR_PREV_TXT_ERROR);
      }
-@@ -463,13 +466,6 @@ void begin_launch(void *addr, uint32_t magic)
+@@ -449,13 +452,6 @@ void begin_launch(void *addr, uint32_t magic)
          apply_policy(TB_ERR_FATAL);
      }
  
@@ -958,7 +963,7 @@ index c06b4d3..2292227 100644
      if ( !prepare_tpm() )
          apply_policy(TB_ERR_TPM_NOT_READY);
  
-@@ -508,6 +504,9 @@ void s3_launch(void)
+@@ -495,6 +491,9 @@ void s3_launch(void)
      if ( g_vga_delay > 0 )
          delay(g_vga_delay * 1000);
  
@@ -1130,10 +1135,10 @@ index fe85a3c..e7019fb 100644
  #endif    /* __TXT_ERRORCODE_H__ */
  
 diff --git a/tboot/include/txt/txt.h b/tboot/include/txt/txt.h
-index dd734b0..1c12d40 100644
+index 30d07da..28eb6e3 100644
 --- a/tboot/include/txt/txt.h
 +++ b/tboot/include/txt/txt.h
-@@ -51,6 +51,7 @@ extern void txt_post_launch(void);
+@@ -57,6 +57,7 @@ extern void txt_post_launch(void);
  extern tb_error_t txt_protect_mem_regions(void);
  extern tb_error_t txt_post_launch_verify_platform(void);
  extern bool txt_s3_launch_environment(void);
@@ -1249,7 +1254,7 @@ index a85479d..6459504 100644
          return;
      }
 diff --git a/tboot/txt/txt.c b/tboot/txt/txt.c
-index b73e785..37d43bc 100644
+index 7d8e2bc..037609b 100644
 --- a/tboot/txt/txt.c
 +++ b/tboot/txt/txt.c
 @@ -58,6 +58,7 @@
@@ -1260,7 +1265,7 @@ index b73e785..37d43bc 100644
  #include <txt/mtrrs.h>
  #include <txt/heap.h>
  #include <txt/acmod.h>
-@@ -734,7 +735,7 @@ tb_error_t txt_launch_environment(loader_ctx *lctx)
+@@ -809,7 +810,7 @@ tb_error_t txt_launch_environment(loader_ctx *lctx)
                               g_mle_hdr.mle_start_off + TBOOT_BASE_ADDR,
                               g_mle_hdr.mle_end_off - g_mle_hdr.mle_start_off);
      if ( mle_ptab_base == NULL )
@@ -1269,7 +1274,7 @@ index b73e785..37d43bc 100644
  
      /* initialize TXT heap */
      txt_heap = init_txt_heap(mle_ptab_base, g_sinit, lctx);
-@@ -745,7 +746,8 @@ tb_error_t txt_launch_environment(loader_ctx *lctx)
+@@ -820,7 +821,8 @@ tb_error_t txt_launch_environment(loader_ctx *lctx)
      os_mle_data = get_os_mle_data_start(txt_heap);
      save_mtrrs(&(os_mle_data->saved_mtrr_state));
  
@@ -1280,7 +1285,7 @@ index b73e785..37d43bc 100644
          return TB_ERR_FATAL;
  
 diff --git a/tboot/txt/verify.c b/tboot/txt/verify.c
-index df55a84..19497cc 100644
+index 2f5f87d..5cf04e6 100644
 --- a/tboot/txt/verify.c
 +++ b/tboot/txt/verify.c
 @@ -213,6 +213,18 @@ tb_error_t supports_txt(void)
@@ -1382,5 +1387,5 @@ index bfce122..d3cc660 100644
      return 0;
  }
 -- 
-2.16.1
+2.20.1
 

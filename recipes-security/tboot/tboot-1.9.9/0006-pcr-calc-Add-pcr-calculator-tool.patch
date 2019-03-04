@@ -1,7 +1,7 @@
-From 02542c06dfbb13cf2c686076f61dfb19c8eb0530 Mon Sep 17 00:00:00 2001
+From ee18590742e5d1a809bebf387e1b717b1c662b02 Mon Sep 17 00:00:00 2001
 From: Eric Chanudet <chanudete@ainfosec.com>
 Date: Mon, 13 Aug 2018 12:10:22 -0400
-Subject: [PATCH 15/22] pcr-calc: Add pcr calculator tool.
+Subject: [PATCH 06/14] pcr-calc: Add pcr calculator tool.
 
 Usage:
 module_hash [-hjz] [-e hash_str] -c cmd_line module_file\n
@@ -16,21 +16,21 @@ module_hash [-hjz] [-e hash_str] -c cmd_line module_file\n
 Signed-off-by: Daniel P. Smith <dpsmith@apertussolutions.com>
 ---
  Makefile               |   2 +-
- pcr-calc/Makefile      |  70 ++++++++
- pcr-calc/eventlog.c    | 119 ++++++++++++++
- pcr-calc/eventlog.h    |  42 +++++
- pcr-calc/hash.c        | 210 ++++++++++++++++++++++++
- pcr-calc/heap.h        | 354 ++++++++++++++++++++++++++++++++++++++++
- pcr-calc/module_hash.c | 427 +++++++++++++++++++++++++++++++++++++++++++++++++
- pcr-calc/pcr-calc.c    | 352 ++++++++++++++++++++++++++++++++++++++++
- pcr-calc/tb_policy.c   |  82 ++++++++++
+ pcr-calc/Makefile      |  70 +++++++
+ pcr-calc/eventlog.c    | 119 ++++++++++++
+ pcr-calc/eventlog.h    |  42 ++++
+ pcr-calc/hash.c        | 234 ++++++++++++++++++++++
+ pcr-calc/heap.h        | 354 ++++++++++++++++++++++++++++++++++
+ pcr-calc/module_hash.c | 428 +++++++++++++++++++++++++++++++++++++++++
+ pcr-calc/pcr-calc.c    | 376 ++++++++++++++++++++++++++++++++++++
+ pcr-calc/tb_policy.c   |  83 ++++++++
  pcr-calc/tb_policy.h   |  43 +++++
- pcr-calc/tpm.c         | 391 ++++++++++++++++++++++++++++++++++++++++++++
- pcr-calc/tpm.h         | 167 +++++++++++++++++++
- pcr-calc/util.c        | 134 ++++++++++++++++
- pcr-calc/util.h        |  45 ++++++
- pcr-calc/uuid.h        |  53 ++++++
- 15 files changed, 2490 insertions(+), 1 deletion(-)
+ pcr-calc/tpm.c         | 423 ++++++++++++++++++++++++++++++++++++++++
+ pcr-calc/tpm.h         | 186 ++++++++++++++++++
+ pcr-calc/util.c        | 167 ++++++++++++++++
+ pcr-calc/util.h        |  46 +++++
+ pcr-calc/uuid.h        |  53 +++++
+ 15 files changed, 2625 insertions(+), 1 deletion(-)
  create mode 100644 pcr-calc/Makefile
  create mode 100644 pcr-calc/eventlog.c
  create mode 100644 pcr-calc/eventlog.h
@@ -46,17 +46,22 @@ Signed-off-by: Daniel P. Smith <dpsmith@apertussolutions.com>
  create mode 100644 pcr-calc/util.h
  create mode 100644 pcr-calc/uuid.h
 
+diff --git a/Makefile b/Makefile
+index 2ef127e..d896740 100644
 --- a/Makefile
 +++ b/Makefile
 @@ -14,7 +14,7 @@ export ROOTDIR=$(CURDIR)
  include Config.mk
  
  # (txt-test is not included because it requires pathing to Linux src)
--SUBDIRS := tboot lcptools lcptools-v2 tb_polgen utils docs
-+SUBDIRS := tboot lcptools lcptools-v2 tb_polgen utils pcr-calc docs
+-SUBDIRS := tboot safestringlib lcptools lcptools-v2 tb_polgen utils docs
++SUBDIRS := tboot safestringlib lcptools lcptools-v2 tb_polgen utils pcr-calc docs
  
  #
  # build rules
+diff --git a/pcr-calc/Makefile b/pcr-calc/Makefile
+new file mode 100644
+index 0000000..e49102d
 --- /dev/null
 +++ b/pcr-calc/Makefile
 @@ -0,0 +1,70 @@
@@ -77,7 +82,7 @@ Signed-off-by: Daniel P. Smith <dpsmith@apertussolutions.com>
 +
 +CFLAGS += -D_LARGEFILE64_SOURCE
 +
-+LIBS += -lcrypto -lz
++LIBS += -lcrypto -lz $(ROOTDIR)/safestringlib/libsafestring.a
 +
 +ifdef HAVE_BZIP
 +BZIP_LIB := -lbz2
@@ -130,6 +135,9 @@ Signed-off-by: Daniel P. Smith <dpsmith@apertussolutions.com>
 +
 +%.o : %.c $(BUILD_DEPS)
 +	$(CC) $(CFLAGS) -DNO_TBOOT_LOGLVL -c $< -o $@
+diff --git a/pcr-calc/eventlog.c b/pcr-calc/eventlog.c
+new file mode 100644
+index 0000000..b232449
 --- /dev/null
 +++ b/pcr-calc/eventlog.c
 @@ -0,0 +1,119 @@
@@ -252,6 +260,9 @@ Signed-off-by: Daniel P. Smith <dpsmith@apertussolutions.com>
 +out:
 +	return NULL;
 +}
+diff --git a/pcr-calc/eventlog.h b/pcr-calc/eventlog.h
+new file mode 100644
+index 0000000..7329125
 --- /dev/null
 +++ b/pcr-calc/eventlog.h
 @@ -0,0 +1,42 @@
@@ -297,9 +308,12 @@ Signed-off-by: Daniel P. Smith <dpsmith@apertussolutions.com>
 +struct tpm *parse_tpm20_log(char *buffer, size_t size);
 +
 +#endif
+diff --git a/pcr-calc/hash.c b/pcr-calc/hash.c
+new file mode 100644
+index 0000000..6369526
 --- /dev/null
 +++ b/pcr-calc/hash.c
-@@ -0,0 +1,210 @@
+@@ -0,0 +1,234 @@
 +/*
 + * hash.c: support functions for tb_hash_t type
 + *
@@ -340,6 +354,7 @@ Signed-off-by: Daniel P. Smith <dpsmith@apertussolutions.com>
 +#include <stdint.h>
 +#include <stdbool.h>
 +#include <string.h>
++#include <safe_lib.h>
 +#include <openssl/evp.h>
 +#define PRINT   printf
 +#include "../include/config.h"
@@ -354,21 +369,38 @@ Signed-off-by: Daniel P. Smith <dpsmith@apertussolutions.com>
 +bool are_hashes_equal(const tb_hash_t *hash1, const tb_hash_t *hash2,
 +		      uint16_t hash_alg)
 +{
++    int diff;
++    errno_t err;
++    rsize_t len;
++
 +    if ( ( hash1 == NULL ) || ( hash2 == NULL ) )
 +        return false;
 +
-+    if ( hash_alg == TB_HALG_SHA1 )
-+        return (memcmp(hash1, hash2, SHA1_LENGTH) == 0);
-+    else if ( hash_alg == TB_HALG_SHA256 )
-+        return (memcmp(hash1, hash2, SHA256_LENGTH) == 0);
-+    else if ( hash_alg == TB_HALG_SM3 )
-+        return (memcmp(hash1, hash2, SM3_LENGTH) == 0);
-+    else if ( hash_alg == TB_HALG_SHA384 )
-+        return (memcmp(hash1, hash2, SHA384_LENGTH) == 0);
-+    else if ( hash_alg == TB_HALG_SHA512 )
-+        return (memcmp(hash1, hash2, SHA512_LENGTH) == 0);
-+    else
++    switch ( hash_alg ) {
++        case TB_HALG_SHA1:
++            len = SHA1_LENGTH;
++            break;
++        case TB_HALG_SHA256:
++            len = SHA256_LENGTH;
++            break;
++        case TB_HALG_SM3:
++            len = SM3_LENGTH;
++            break;
++        case TB_HALG_SHA384:
++            len = SHA384_LENGTH;
++            break;
++        case TB_HALG_SHA512:
++            len = SHA512_LENGTH;
++            break;
++        default:
++            return false;
++    }
++
++    err = memcmp_s(hash1, sizeof(tb_hash_t), hash2, len, &diff);
++    if ( err )
 +        return false;
++
++    return !diff;
 +}
 +
 +/*
@@ -380,41 +412,42 @@ Signed-off-by: Daniel P. Smith <dpsmith@apertussolutions.com>
 +bool hash_buffer(const unsigned char* buf, size_t size, tb_hash_t *hash,
 +		 uint16_t hash_alg)
 +{
++    EVP_MD_CTX *ctx;
++    const EVP_MD *md;
++    bool ret = false;
++
 +    if ( hash == NULL )
 +        return false;
 +
-+    if ( hash_alg == TB_HALG_SHA1 ) {
-+        EVP_MD_CTX ctx;
-+        const EVP_MD *md;
++    ctx = EVP_MD_CTX_create();
++    if ( ctx == NULL )
++        return false;
 +
++    if ( hash_alg == TB_HALG_SHA1 ) {
 +        md = EVP_sha1();
-+        EVP_DigestInit(&ctx, md);
-+        EVP_DigestUpdate(&ctx, buf, size);
-+        EVP_DigestFinal(&ctx, hash->sha1, NULL);
-+        return true;
++        EVP_DigestInit(ctx, md);
++        EVP_DigestUpdate(ctx, buf, size);
++        EVP_DigestFinal(ctx, hash->sha1, NULL);
++        ret = true;
 +    }
 +    else if (hash_alg == TB_HALG_SHA256) {
-+        EVP_MD_CTX ctx;
-+        const EVP_MD *md;
-+
 +        md = EVP_sha256();
-+        EVP_DigestInit(&ctx, md);
-+        EVP_DigestUpdate(&ctx, buf, size);
-+        EVP_DigestFinal(&ctx, hash->sha256, NULL);
-+        return true;
++        EVP_DigestInit(ctx, md);
++        EVP_DigestUpdate(ctx, buf, size);
++        EVP_DigestFinal(ctx, hash->sha256, NULL);
++        ret = true;
 +    }
 +    else if (hash_alg == TB_HALG_SHA384) {
-+        EVP_MD_CTX ctx;
-+        const EVP_MD *md;
-+
 +        md = EVP_sha384();
-+        EVP_DigestInit(&ctx, md);
-+        EVP_DigestUpdate(&ctx, buf, size);
-+        EVP_DigestFinal(&ctx, hash->sha384, NULL);
-+        return true;
++        EVP_DigestInit(ctx, md);
++        EVP_DigestUpdate(ctx, buf, size);
++        EVP_DigestFinal(ctx, hash->sha384, NULL);
++        ret = true;
 +    }
-+    else
-+        return false;
++
++    EVP_MD_CTX_destroy(ctx);
++
++    return ret;
 +}
 +
 +/*
@@ -426,36 +459,41 @@ Signed-off-by: Daniel P. Smith <dpsmith@apertussolutions.com>
 +bool extend_hash(tb_hash_t *hash1, const tb_hash_t *hash2, uint16_t hash_alg)
 +{
 +    uint8_t buf[2*sizeof(tb_hash_t)];
++    EVP_MD_CTX *ctx;
++    const EVP_MD *md;
++    bool ret = false;
 +
 +    if ( hash1 == NULL || hash2 == NULL )
 +        return false;
 +
-+    if ( hash_alg == TB_HALG_SHA1 ) {
-+        EVP_MD_CTX ctx;
-+        const EVP_MD *md;
++    ctx = EVP_MD_CTX_create();
++    if ( ctx == NULL )
++        return false;
 +
-+        memcpy(buf, &(hash1->sha1), sizeof(hash1->sha1));
-+        memcpy(buf + sizeof(hash1->sha1), &(hash2->sha1), sizeof(hash1->sha1));
++    if ( hash_alg == TB_HALG_SHA1 ) {
++        memcpy_s(buf, sizeof(buf), &(hash1->sha1), sizeof(hash1->sha1));
++        memcpy_s(buf + sizeof(hash1->sha1), sizeof(buf) - sizeof(hash1->sha1),
++                 &(hash2->sha1), sizeof(hash1->sha1));
 +        md = EVP_sha1();
-+        EVP_DigestInit(&ctx, md);
-+        EVP_DigestUpdate(&ctx, buf, 2*sizeof(hash1->sha1));
-+        EVP_DigestFinal(&ctx, hash1->sha1, NULL);
-+        return true;
++        EVP_DigestInit(ctx, md);
++        EVP_DigestUpdate(ctx, buf, 2*sizeof(hash1->sha1));
++        EVP_DigestFinal(ctx, hash1->sha1, NULL);
++        ret = true;
 +    }
 +    else if (hash_alg == TB_HALG_SHA256) {
-+        EVP_MD_CTX ctx;
-+        const EVP_MD *md;
-+
-+        memcpy(buf, &(hash1->sha256), sizeof(hash1->sha256));
-+        memcpy(buf + sizeof(hash1->sha256), &(hash2->sha256), sizeof(hash1->sha256));
++        memcpy_s(buf, sizeof(buf), &(hash1->sha256), sizeof(hash1->sha256));
++        memcpy_s(buf + sizeof(hash1->sha256), sizeof(buf) - sizeof(hash1->sha256),
++                 &(hash2->sha256), sizeof(hash1->sha256));
 +        md = EVP_sha256();
-+        EVP_DigestInit(&ctx, md);
-+        EVP_DigestUpdate(&ctx, buf, 2*sizeof(hash1->sha256));
-+        EVP_DigestFinal(&ctx, hash1->sha256, NULL);
-+        return true;
++        EVP_DigestInit(ctx, md);
++        EVP_DigestUpdate(ctx, buf, 2*sizeof(hash1->sha256));
++        EVP_DigestFinal(ctx, hash1->sha256, NULL);
++        ret = true;
 +    }
-+    else
-+        return false;
++
++    EVP_MD_CTX_destroy(ctx);
++
++    return ret;
 +}
 +
 +void print_hash(const tb_hash_t *hash, uint16_t hash_alg)
@@ -495,7 +533,7 @@ Signed-off-by: Daniel P. Smith <dpsmith@apertussolutions.com>
 +
 +    len = get_hash_size(hash_alg);
 +    if ( len > 0 )
-+        memcpy(dest_hash, src_hash, len);
++        memcpy_s(dest_hash, sizeof(tb_hash_t), src_hash, len);
 +    else
 +        printf("unsupported hash alg (%u)\n", hash_alg);
 +}
@@ -510,6 +548,9 @@ Signed-off-by: Daniel P. Smith <dpsmith@apertussolutions.com>
 + * indent-tabs-mode: nil
 + * End:
 + */
+diff --git a/pcr-calc/heap.h b/pcr-calc/heap.h
+new file mode 100644
+index 0000000..c7bf9b7
 --- /dev/null
 +++ b/pcr-calc/heap.h
 @@ -0,0 +1,354 @@
@@ -867,9 +908,12 @@ Signed-off-by: Daniel P. Smith <dpsmith@apertussolutions.com>
 + * indent-tabs-mode: nil
 + * End:
 + */
+diff --git a/pcr-calc/module_hash.c b/pcr-calc/module_hash.c
+new file mode 100644
+index 0000000..4abd6ad
 --- /dev/null
 +++ b/pcr-calc/module_hash.c
-@@ -0,0 +1,427 @@
+@@ -0,0 +1,428 @@
 +/*
 + *
 + * Copyright (c) 2015-2017 Daniel P. Smith
@@ -912,6 +956,7 @@ Signed-off-by: Daniel P. Smith <dpsmith@apertussolutions.com>
 +#include <stdint.h>
 +#include <stdarg.h>
 +#include <getopt.h>
++#include <safe_lib.h>
 +#include <zlib.h>
 +#include <sys/stat.h>
 +#include <openssl/evp.h>
@@ -1042,7 +1087,7 @@ Signed-off-by: Daniel P. Smith <dpsmith@apertussolutions.com>
 +	*buffer = malloc(*len);
 +	if (*buffer == NULL)
 +		goto fail_tmp;
-+	memset(*buffer, 0, *len);
++	memset_s(*buffer, *len, 0);
 +
 +	if (fread(*buffer, 1, *len, tmpfd) != *len)
 +		goto fail_buf;
@@ -1155,7 +1200,7 @@ Signed-off-by: Daniel P. Smith <dpsmith@apertussolutions.com>
 +	}
 +
 +	if (len == 1 && hexstr[0] == '0') {
-+		memset(buf, 0, hash_length);
++		memset_s(buf, hash_length, 0);
 +		return true;
 +	}
 +
@@ -1297,6 +1342,9 @@ Signed-off-by: Daniel P. Smith <dpsmith@apertussolutions.com>
 +	if (cmdline != NULL) free(cmdline);
 +	return 1;
 +}
+diff --git a/pcr-calc/pcr-calc.c b/pcr-calc/pcr-calc.c
+new file mode 100644
+index 0000000..5e638a0
 --- /dev/null
 +++ b/pcr-calc/pcr-calc.c
 @@ -0,0 +1,376 @@
@@ -1676,9 +1724,12 @@ Signed-off-by: Daniel P. Smith <dpsmith@apertussolutions.com>
 +out:
 +	return ret;
 +}
+diff --git a/pcr-calc/tb_policy.c b/pcr-calc/tb_policy.c
+new file mode 100644
+index 0000000..4215342
 --- /dev/null
 +++ b/pcr-calc/tb_policy.c
-@@ -0,0 +1,82 @@
+@@ -0,0 +1,83 @@
 +/*
 + * Copyright (c) 2015-2017, Daniel P. Smith
 + * Copyright (c) 2006-2008, Intel Corporation
@@ -1719,6 +1770,7 @@ Signed-off-by: Daniel P. Smith <dpsmith@apertussolutions.com>
 +#include <stdbool.h>
 +#include <stdlib.h>
 +#include <string.h>
++#include <safe_lib.h>
 +#include <sys/types.h>
 +#include <sys/stat.h>
 +#include <fcntl.h>
@@ -1742,8 +1794,8 @@ Signed-off-by: Daniel P. Smith <dpsmith@apertussolutions.com>
 +	if (!hash)
 +		goto out;
 +
-+	memset(buf, 0, sizeof(buf));
-+	memcpy(buf, &pol->policy_control, sizeof(pol->policy_control));
++	memset_s(buf, sizeof(buf), 0);
++	memcpy_s(buf, sizeof(buf), &pol->policy_control, sizeof(pol->policy_control));
 +
 +	if ( pol->policy_control & TB_POLCTL_EXTEND_PCR17 )
 +		if ( !hash_buffer((unsigned char *)pol, size,
@@ -1761,6 +1813,9 @@ Signed-off-by: Daniel P. Smith <dpsmith@apertussolutions.com>
 +out:
 +	return NULL;
 +}
+diff --git a/pcr-calc/tb_policy.h b/pcr-calc/tb_policy.h
+new file mode 100644
+index 0000000..cc23f2f
 --- /dev/null
 +++ b/pcr-calc/tb_policy.h
 @@ -0,0 +1,43 @@
@@ -1807,9 +1862,12 @@ Signed-off-by: Daniel P. Smith <dpsmith@apertussolutions.com>
 +tb_hash_t *tb_policy_hash(tb_policy_t *pol, size_t size, uint16_t alg);
 +
 +#endif
+diff --git a/pcr-calc/tpm.c b/pcr-calc/tpm.c
+new file mode 100644
+index 0000000..fb7d501
 --- /dev/null
 +++ b/pcr-calc/tpm.c
-@@ -0,0 +1,408 @@
+@@ -0,0 +1,423 @@
 +/*
 + *
 + * Copyright (c) 2017 Daniel P. Smith
@@ -1846,7 +1904,8 @@ Signed-off-by: Daniel P. Smith <dpsmith@apertussolutions.com>
 +
 +#include <stdio.h>
 +#include <stdlib.h>
-+#include <memory.h>
++#include <string.h>
++#include <safe_lib.h>
 +#include <stdbool.h>
 +#include <stdint.h>
 +#include <stdarg.h>
@@ -1888,7 +1947,7 @@ Signed-off-by: Daniel P. Smith <dpsmith@apertussolutions.com>
 +	if (p->log_idx == 0)
 +		return true;
 +
-+	memset(&p->value, 0, sizeof(tb_hash_t));
++	memset_s(&p->value, sizeof(tb_hash_t), 0);
 +
 +	for (i = 0; i < p->log_idx; i++) {
 +		struct pcr_event *e = &p->log[i];
@@ -1897,11 +1956,11 @@ Signed-off-by: Daniel P. Smith <dpsmith@apertussolutions.com>
 +
 +		if (e->type == TPM_EVT_HASH_START) {
 +			if (extend_hash_start()) {
-+				memset(&p->value, 0, sizeof(tb_hash_t));
++				memset_s(&p->value, sizeof(tb_hash_t), 0);
 +				if (!extend_hash(&p->value, &e->digest, alg))
 +					return false;
 +			} else {
-+				memcpy(&p->value, &e->digest, sizeof(tb_hash_t));
++				memcpy_s(&p->value, sizeof(tb_hash_t), &e->digest, sizeof(tb_hash_t));
 +			}
 +		} else if (!extend_hash(&p->value, &e->digest, alg)) {
 +			return false;
@@ -1927,7 +1986,7 @@ Signed-off-by: Daniel P. Smith <dpsmith@apertussolutions.com>
 +
 +	if (type == TPM_EVT_HASH_START) {
 +		if (extend_hash_start()) {
-+			memset(&p->value, 0, sizeof(tb_hash_t));
++			memset_s(&p->value, sizeof(tb_hash_t), 0);
 +			if (!extend_hash(&p->value, hash, alg)) {
 +				error_msg("failed to extend PCR%d with hash\n",
 +					p->num);
@@ -1935,7 +1994,7 @@ Signed-off-by: Daniel P. Smith <dpsmith@apertussolutions.com>
 +			}
 +
 +		} else {
-+			memcpy(&p->value, hash, sizeof(tb_hash_t));
++			memcpy_s(&p->value, sizeof(tb_hash_t), hash, sizeof(tb_hash_t));
 +		}
 +	} else if (!extend_hash(&p->value, hash, alg)) {
 +		error_msg("failed to extend PCR%d with hash\n", p->num);
@@ -1944,7 +2003,7 @@ Signed-off-by: Daniel P. Smith <dpsmith@apertussolutions.com>
 +
 +	evt = &p->log[p->log_idx];
 +	evt->type = type;
-+	memcpy(&evt->digest, hash, sizeof(tb_hash_t));
++	memcpy_s(&evt->digest, sizeof(tb_hash_t), hash, sizeof(tb_hash_t));
 +	p->log_idx++;
 +
 +	return true;
@@ -2141,7 +2200,7 @@ Signed-off-by: Daniel P. Smith <dpsmith@apertussolutions.com>
 +
 +		for (j = 0; j < p->log_idx; j++) {
 +			if (p->log[j].type == evt_type)
-+				memset(&p->log[j], 0, sizeof(struct pcr_event));
++				memset_s(&p->log[j], sizeof(struct pcr_event), 0);
 +		}
 +	}
 +
@@ -2178,17 +2237,24 @@ Signed-off-by: Daniel P. Smith <dpsmith@apertussolutions.com>
 +	struct pcr_bank *bank;
 +	tb_hash_t null_hash;
 +
-+	if (!t) {
++	if (!t)
 +		return;
-+	}
 +
 +	bank = &(t->banks[bnum]);
 +
-+	memset(&null_hash, 0, sizeof(tb_hash_t));
++	memset_s(&null_hash, sizeof(tb_hash_t), 0);
 +
 +	for (i = 0; i < MAX_PCR; i++) {
-+		if (memcmp(&(bank->pcrs[i].value),
-+		    &null_hash, sizeof(tb_hash_t)) == 0)
++		int diff;
++		errno_t err;
++
++		err = memcmp_s(&(bank->pcrs[i].value), sizeof(tb_hash_t),
++				&null_hash, sizeof(tb_hash_t), &diff);
++		if (err) {
++			error_msg("Invalid value in PCR%d.", i);
++			break;
++		}
++		if (!diff)
 +			continue;
 +
 +		printf("%02d:",bank->pcrs[i].num);
@@ -2202,22 +2268,32 @@ Signed-off-by: Daniel P. Smith <dpsmith@apertussolutions.com>
 +	struct pcr_bank *bank;
 +	tb_hash_t null_hash;
 +
-+	if (!t) {
++	if (!t)
 +		return;
-+	}
 +
 +	bank = &(t->banks[bnum]);
 +
-+	memset(&null_hash, 0, sizeof(tb_hash_t));
++	memset_s(&null_hash, sizeof(tb_hash_t), 0);
 +
 +	for (i = 0; i < MAX_PCR; i++) {
-+		if (memcmp(&bank->pcrs[i].value,
-+		    &null_hash, sizeof(tb_hash_t)) == 0)
++		int diff;
++		errno_t err;
++
++		err = memcmp_s(&(bank->pcrs[i].value), sizeof(tb_hash_t),
++				&null_hash, sizeof(tb_hash_t), &diff);
++		if (err) {
++			error_msg("Invalid value in PCR%d.", i);
++			break;
++		}
++		if (!diff)
 +			continue;
 +
 +		pcr_print(&bank->pcrs[i], alg);
 +	}
 +}
+diff --git a/pcr-calc/tpm.h b/pcr-calc/tpm.h
+new file mode 100644
+index 0000000..c482f3f
 --- /dev/null
 +++ b/pcr-calc/tpm.h
 @@ -0,0 +1,186 @@
@@ -2407,6 +2483,9 @@ Signed-off-by: Daniel P. Smith <dpsmith@apertussolutions.com>
 +bool pcr_record_event(struct pcr *p, uint16_t alg, uint32_t type, tb_hash_t *hash);
 +
 +#endif
+diff --git a/pcr-calc/util.c b/pcr-calc/util.c
+new file mode 100644
+index 0000000..5d79ffb
 --- /dev/null
 +++ b/pcr-calc/util.c
 @@ -0,0 +1,167 @@
@@ -2577,6 +2656,9 @@ Signed-off-by: Daniel P. Smith <dpsmith@apertussolutions.com>
 +	evt->digest = digest;
 +	return len;
 +}
+diff --git a/pcr-calc/util.h b/pcr-calc/util.h
+new file mode 100644
+index 0000000..41eaf18
 --- /dev/null
 +++ b/pcr-calc/util.h
 @@ -0,0 +1,46 @@
@@ -2626,6 +2708,9 @@ Signed-off-by: Daniel P. Smith <dpsmith@apertussolutions.com>
 +int read_pcr_event(const char *s, struct pcr_event *evt);
 +
 +#endif
+diff --git a/pcr-calc/uuid.h b/pcr-calc/uuid.h
+new file mode 100644
+index 0000000..7cd7e28
 --- /dev/null
 +++ b/pcr-calc/uuid.h
 @@ -0,0 +1,53 @@
@@ -2682,3 +2767,6 @@ Signed-off-by: Daniel P. Smith <dpsmith@apertussolutions.com>
 +} uuid_t;
 +
 +#endif
+-- 
+2.20.1
+

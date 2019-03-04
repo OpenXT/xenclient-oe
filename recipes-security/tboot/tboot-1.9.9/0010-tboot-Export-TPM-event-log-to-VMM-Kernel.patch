@@ -1,7 +1,7 @@
-From c973c6e07a3b661b219906b3dc5be6ae394f18a4 Mon Sep 17 00:00:00 2001
+From ed59e49b48ff88dee26beb10b932cd6bc4650792 Mon Sep 17 00:00:00 2001
 From: Eric Chanudet <chanudete@ainfosec.com>
 Date: Mon, 13 Aug 2018 14:02:07 -0400
-Subject: [PATCH 19/22] tboot: Export TPM event log to VMM/Kernel.
+Subject: [PATCH 10/14] tboot: Export TPM event log to VMM/Kernel.
 
 Create a copy of the TPM event log outside of the TXT heap for the Xen
 use case to safe past the log down to a VM (see relevant Xen patch
@@ -10,10 +10,10 @@ introducing the hypercall to access the log).
 Signed-off-by: Daniel P. Smith <dpsmith@apertussolutions.com>
 ---
  include/tboot.h         |   4 ++
- tboot/common/tboot.c    |  17 ++++---
+ tboot/common/tboot.c    |  20 +++++++
  tboot/include/txt/txt.h |   1 +
- tboot/txt/txt.c         | 129 ++++++++++++++++++++++++++++++++++++++++++++++++
- 4 files changed, 145 insertions(+), 6 deletions(-)
+ tboot/txt/txt.c         | 129 ++++++++++++++++++++++++++++++++++++++++
+ 4 files changed, 154 insertions(+)
 
 diff --git a/include/tboot.h b/include/tboot.h
 index abb1ca4..4e7c7be 100644
@@ -38,23 +38,26 @@ index abb1ca4..4e7c7be 100644
  
  #endif    /* __TBOOT_H__ */
 diff --git a/tboot/common/tboot.c b/tboot/common/tboot.c
-index 432f522..a8a9b33 100644
+index ed7397f..1514e8a 100644
 --- a/tboot/common/tboot.c
 +++ b/tboot/common/tboot.c
-@@ -223,12 +223,6 @@ static void post_launch(void)
-             apply_policy(TB_ERR_FATAL);
-     }
+@@ -215,6 +215,15 @@ static void post_launch(void)
+     if ( !e820_protect_region(base, size, mem_type) )      
+         apply_policy(TB_ERR_FATAL);
  
--    /* replace map in loader context with copy */
--    replace_e820_map(g_ldr_ctx);
--
--    printk(TBOOT_DETA"adjusted e820 map:\n");
--    print_e820_map();
--
++    /* if using memory logging, reserve log area */
++    if ( g_log_targets & TBOOT_LOG_TARGET_MEMORY ) {
++        base = TBOOT_SERIAL_LOG_ADDR;
++        size = TBOOT_SERIAL_LOG_SIZE;
++        printk(TBOOT_INFO"reserving tboot memory log (%Lx - %Lx) in e820 table\n", base, (base + size - 1));
++        if ( !e820_protect_region(base, size, E820_RESERVED) )         
++            apply_policy(TB_ERR_FATAL);
++    }
++
      /*
       * verify modules against policy
       */
-@@ -273,6 +267,17 @@ static void post_launch(void)
+@@ -259,6 +268,17 @@ static void post_launch(void)
          printk(TBOOT_ERR"ap_wake_mwait specified but the CPU doesn't support it.\n");
      }
  
@@ -73,22 +76,22 @@ index 432f522..a8a9b33 100644
  
      launch_kernel(true);
 diff --git a/tboot/include/txt/txt.h b/tboot/include/txt/txt.h
-index 1c12d40..55c1ec0 100644
+index 28eb6e3..ff29cbf 100644
 --- a/tboot/include/txt/txt.h
 +++ b/tboot/include/txt/txt.h
-@@ -55,6 +55,7 @@ extern void display_last_boot_error(void);
- extern void txt_shutdown(void);
+@@ -62,6 +62,7 @@ extern void txt_shutdown(void);
  extern bool txt_is_powercycle_required(void);
  extern void ap_wait(unsigned int cpuid);
+ extern int get_evtlog_type(void);
 +void export_evtlog(uint64_t *log, uint64_t *size);
  
  extern uint32_t g_using_da;
  #endif      /* __TXT_TXT_H__ */
 diff --git a/tboot/txt/txt.c b/tboot/txt/txt.c
-index 37d43bc..031c15c 100644
+index 037609b..79dc733 100644
 --- a/tboot/txt/txt.c
 +++ b/tboot/txt/txt.c
-@@ -355,6 +355,43 @@ bool evtlog_append_tpm12(uint8_t pcr, tb_hash_t *hash, uint32_t type)
+@@ -372,6 +372,43 @@ bool evtlog_append_tpm12(uint8_t pcr, tb_hash_t *hash, uint32_t type)
      return true;
  }
  
@@ -116,7 +119,7 @@ index 37d43bc..031c15c 100644
 +    *log = (ram_start + ram_size) - reserve;
 +    dst = (void *)(uint32_t) *log;
 +
-+    memcpy(dst, src, *size);
++    tb_memcpy(dst, src, *size);
 +
 +    if (! e820_reserve_ram(*log, reserve))
 +        goto fail;
@@ -132,7 +135,7 @@ index 37d43bc..031c15c 100644
  void dump_event_2(void)
  {
      heap_event_log_descr_t *log_descr;
-@@ -429,6 +466,81 @@ bool evtlog_append_tpm20(uint8_t pcr, uint16_t alg, tb_hash_t *hash, uint32_t ty
+@@ -499,6 +536,81 @@ bool evtlog_append_tpm2_tcg(uint8_t pcr, uint32_t type, hash_list_t *hl)
      return true;
  }
  
@@ -178,7 +181,7 @@ index 37d43bc..031c15c 100644
 +        count = sizeof(heap_event_log_descr_t);
 +        if ( *size < (copied + count) )
 +            goto fail;
-+        memcpy(curr, log_desc, count);
++        tb_memcpy(curr, log_desc, count);
 +
 +        curr += count;
 +        copied += count;
@@ -190,7 +193,7 @@ index 37d43bc..031c15c 100644
 +        src = (void *)(uint32_t)(log_desc->phys_addr +
 +                log_desc->pcr_events_offset);
 +        if ( count > 0 ) {
-+            memcpy(curr, src, count);
++            tb_memcpy(curr, src, count);
 +            curr += count;
 +            copied += count;
 +        }
@@ -213,8 +216,8 @@ index 37d43bc..031c15c 100644
 +
  bool evtlog_append(uint8_t pcr, hash_list_t *hl, uint32_t type)
  {
-     struct tpm_if *tpm = get_tpm();
-@@ -451,6 +563,23 @@ bool evtlog_append(uint8_t pcr, hash_list_t *hl, uint32_t type)
+     int log_type = get_evtlog_type();
+@@ -525,6 +637,23 @@ bool evtlog_append(uint8_t pcr, hash_list_t *hl, uint32_t type)
      return true;
  }
  
@@ -239,5 +242,5 @@ index 37d43bc..031c15c 100644
  __data acm_hdr_t *g_sinit = 0;
  
 -- 
-2.16.1
+2.20.1
 
