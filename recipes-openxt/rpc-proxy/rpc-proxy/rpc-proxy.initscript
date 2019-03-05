@@ -24,14 +24,23 @@ PIDFILE=/var/run/rpc-proxy.pid
 PIDFILE_GUEST=/var/run/rpc-proxy-guest.pid
 PIDFILE_WEBSOCKETS=/var/run/rpc-proxy-websockets.pid
 
+OPTIONS="-s"
+OPTIONS_GUEST="-i v4v:5556 -n com.citrix.xenclient.guest.uuid_\$UUID --translate-anonymous-dests"
+OPTIONS_WEBSOCKETS="-i v4v:8080 --json-in --websockets-in -n com.citrix.xenclient.guest.uuid_\$UUID --auto-auth"
+
 # Make sure the progam exists
 [ -f /usr/bin/rpc-proxy ] || exit 0
 
 start() {
-	echo "Starting rpc-proxy"    
-	start-stop-daemon --start --quiet --oknodo --background --make-pidfile --pidfile $PIDFILE --exec /usr/bin/rpc-proxy -- -s
-	start-stop-daemon --start --quiet --oknodo --background --make-pidfile --pidfile $PIDFILE_GUEST --exec /usr/bin/runcon -- -t rpcproxy_guest_t /usr/bin/rpc-proxy -i v4v:5556 -n com.citrix.xenclient.guest.uuid_\$UUID --translate-anonymous-dests
-	start-stop-daemon --start --quiet --oknodo --background --make-pidfile --pidfile $PIDFILE_WEBSOCKETS --exec /usr/bin/runcon -- -t rpcproxy_websockets_t /usr/bin/rpc-proxy -i v4v:8080 --json-in --websockets-in -n com.citrix.xenclient.guest.uuid_\$UUID --auto-auth
+	echo "Starting rpc-proxy"
+	start-stop-daemon --start --quiet --oknodo --background --make-pidfile --pidfile $PIDFILE --exec /usr/bin/rpc-proxy -- $OPTIONS
+	if [ -x /usr/sbin/selinuxenabled ] && /usr/sbin/selinuxenabled; then
+	    start-stop-daemon --start --quiet --oknodo --background --make-pidfile --pidfile $PIDFILE_GUEST --exec /usr/bin/runcon -- -t rpcproxy_guest_t /usr/bin/rpc-proxy $OPTIONS_GUEST
+	    start-stop-daemon --start --quiet --oknodo --background --make-pidfile --pidfile $PIDFILE_WEBSOCKETS --exec /usr/bin/runcon -- -t rpcproxy_websockets_t /usr/bin/rpc-proxy $OPTIONS_WEBSOCKETS
+	else
+	    start-stop-daemon --start --quiet --oknodo --background --make-pidfile --pidfile $PIDFILE_GUEST --exec /usr/bin/rpc-proxy -- $OPTIONS_GUEST
+	    start-stop-daemon --start --quiet --oknodo --background --make-pidfile --pidfile $PIDFILE_WEBSOCKETS --exec /usr/bin/rpc-proxy -- $OPTIONS_WEBSOCKETS
+	fi
 }
 stop() {
 	echo "Stopping rpc-proxy"
