@@ -25,9 +25,9 @@ config_pcrs="${root}/config/config.pcrs"
     exit 1
 }
 
-grep '\-p 1' "${config_pcrs}"
+grep '\-[rp] 1' "${config_pcrs}"
 case $? in
-    0)  sed -i -e 's&-p 1 &&' "${config_pcrs}"
+    0)  sed -i -e 's&-p 1&&' -e 's&-r 1&&' "${config_pcrs}"
         if [ $? -gt 0 ]; then
             echo "Unable to remove PCR[1] from measurement list." >&2
             exit 1

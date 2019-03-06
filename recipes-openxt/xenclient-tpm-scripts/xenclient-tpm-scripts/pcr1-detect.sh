@@ -25,5 +25,18 @@ if [ "${VENDOR_ID}" = "8086" ]; then
             MANUFACTURER=$(dmidecode --type 1 | sed -n -re 's/.*Manufacturer: (.*)$/\1/p' | cut -d ' ' -f 1)
             VERSION=$(dmidecode --type 1 | sed -n -re 's/.*Version: (.*)$/\1/p')
             ;;
+        5910)
+            MANUFACTURER=$(dmidecode --type 1 | \
+                           sed -n -re 's/.*Manufacturer: (.*)$/\1/p' | \
+                           cut -d ' ' -f 1)
+            PRODUCT=$(dmidecode --type 1 | \
+                      sed -n -re 's/.*Product Name: (.*)$/\1/p')
+            if [ "$MANUFACTURER" = "Dell" ] && \
+               [ "$PRODUCT" = "Latitude 5580" ] ; then
+                exit 1
+            fi
+            ;;
     esac
 fi
+
+exit 0
