@@ -26,59 +26,75 @@ Mahantesh Salimath<salimathm@ainfosec.com>
      /* convenience aliases */
      const uint32_t domid = dcs->guest_domid;
 -    libxl_domain_config *const d_config = dcs->guest_config;
-+    libxl_domain_config *d_config = dcs->guest_config;
++    libxl_domain_type type = dcs->guest_config->c_info.type;
  
      if (ret) {
          LOGD(ERROR, domid, "cannot (re-)build domain: %d", ret);
-@@ -1325,11 +1325,51 @@ static void domcreate_rebuild_done(libxl
+@@ -1320,12 +1320,62 @@ static void domcreate_rebuild_done(libxl
+         goto error_out;
+     }
  
-     store_libxl_entry(gc, domid, &d_config->b_info);
+-    store_libxl_entry(gc, domid, &d_config->b_info);
++    store_libxl_entry(gc, domid, &dcs->guest_config->b_info);
  
-+    /* Below quirk is to prevent the creation of useless vbd nodes
-+     * in xenstore.
-+     */
-+    if(d_config->c_info.type == LIBXL_DOMAIN_TYPE_HVM) {
-+        libxl_domain_config domain_config;
-+        int i = 0;
-+        int j = 0;
-+        bool has_stub;
+-    libxl__multidev_begin(ao, &dcs->multidev);
+-    dcs->multidev.callback = domcreate_launch_dm;
+-    libxl__add_disks(egc, ao, domid, d_config, &dcs->multidev);
+-    libxl__multidev_prepared(egc, &dcs->multidev, 0);
++    /* Work-around to avoid exposing broken vbd in Xenstore. */
++    switch (type) {
++        case LIBXL_DOMAIN_TYPE_HVM: {
++            libxl_domain_config d_config;
++            bool stubdomain;
++            unsigned int i = 0;
 +
-+        has_stub = libxl_defbool_val(d_config->b_info.device_model_stubdomain);
-+        libxl_domain_config_copy(CTX, &domain_config, dcs->guest_config);
-+        d_config = &domain_config;
++            libxl_domain_config_copy(CTX, &d_config, dcs->guest_config);
++            stubdomain = libxl_defbool_val(d_config.b_info.device_model_stubdomain);
 +
-+        for( ; i < d_config->num_disks; i++) {
-+            if(d_config->disks[i].is_cdrom) {
++            /*
++             * Cache the domain configuration for disk creation, then look for
++             * ATAPI-PT or cdrom, for guests with stubdomain, devices and
++             * remove them to hide them from libxl__add_disks().
++             *
++             * If it seems like this should be done in device_disk_add() (and
++             * it does), try answering "is this domid we want to add a disk to
++             * a stubdom?" over there.
++             */
++            while (i < d_config.num_disks)
++                if (d_config.disks[i].is_cdrom &&
++                    (stubdomain ||
++                     !strcmp(d_config.disks[i].vdev, "atapi-pt"))) {
 +
-+                /* No atapi-pt vbd nodes */
-+                if(!strncmp(d_config->disks[i].vdev, "atapi-pt", 9))
-+                    continue;
++                    libxl_device_disk_dispose(&d_config.disks[i]);
++                    if (i != d_config.num_disks - 1)
++                        libxl_device_disk_copy(CTX,
++                            &d_config.disks[i],
++                            &d_config.disks[d_config.num_disks - 1]);
++                    --d_config.num_disks;
++                } else ++i;
 +
-+                /* No emulated cdroms for guests that have stubdom */
-+                if(has_stub)
-+                    continue;
++            d_config.disks =
++                libxl__realloc(
++                    NOGC, d_config.disks,
++                    d_config.num_disks * sizeof (d_config.disks[0]));
 +
-+            }
-+            if(j != i)
-+                    libxl_device_disk_copy(CTX,
-+                                           &d_config->disks[j],
-+                                           &d_config->disks[i]);
-+            j++;
++            libxl__multidev_begin(ao, &dcs->multidev);
++            dcs->multidev.callback = domcreate_launch_dm;
++            libxl__add_disks(egc, ao, domid, &d_config, &dcs->multidev);
++            libxl__multidev_prepared(egc, &dcs->multidev, 0);
++
++            libxl_domain_config_dispose(&d_config);
++
++            break;
 +        }
-+        d_config->num_disks = j;
-+        d_config->disks = libxl__realloc(NOGC,
-+                                         d_config->disks,
-+                                         sizeof(*(d_config->disks)) * j);
++
++        default:
++            libxl__multidev_begin(ao, &dcs->multidev);
++            dcs->multidev.callback = domcreate_launch_dm;
++            libxl__add_disks(egc, ao, domid, dcs->guest_config, &dcs->multidev);
++            libxl__multidev_prepared(egc, &dcs->multidev, 0);
++            break;
 +    }
-+
-     libxl__multidev_begin(ao, &dcs->multidev);
-     dcs->multidev.callback = domcreate_launch_dm;
-     libxl__add_disks(egc, ao, domid, d_config, &dcs->multidev);
-     libxl__multidev_prepared(egc, &dcs->multidev, 0);
  
-+    if(d_config != dcs->guest_config)
-+        libxl_domain_config_dispose(d_config);
-+
      return;
  
-  error_out:

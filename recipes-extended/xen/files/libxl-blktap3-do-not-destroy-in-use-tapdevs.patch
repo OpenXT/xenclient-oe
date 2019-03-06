@@ -1,6 +1,6 @@
 --- a/tools/libxl/libxl_blktap3.c
 +++ b/tools/libxl/libxl_blktap3.c
-@@ -105,7 +105,33 @@ char *libxl__blktap_devpath(libxl__gc *g
+@@ -105,12 +105,44 @@ char *libxl__blktap_devpath(libxl__gc *g
      return NULL;
  }
  
@@ -35,15 +35,14 @@
  {
      char *type, *disk;
      int err;
-@@ -126,6 +152,11 @@ int libxl__device_destroy_tapdisk(libxl_
-         LOGEV(ERROR, -err, "Unable to find type %s disk %s", type, disk);
-         return ERROR_FAIL;
-     }
+     struct tap_list tap;
+ 
 +    /* We're using the tapdev. If anybody else also is, we can't destroy it! */
 +    if (tapdev_is_shared(gc, params)) {
 +        LOG(DEBUG, "Not destroying tapdev%d, another VM uses it", tap.minor);
 +        return 0;
 +    }
- 
-     err = tap_ctl_destroy(tap.pid, tap.minor, 0, NULL);
-     if (err < 0) {
++
+     type = libxl__strdup(gc, params);
+     disk = strchr(type, ':');
+     if (!disk) {
