@@ -25,9 +25,6 @@ RDEPENDS_${PN} = " \
     grub-efi \
     intel-microcode \
     kernel-modules \
-    libtctidevice \
-    libtctisocket \
-    libtss2 \
     lvm2 \
     ncurses \
     netcat \
@@ -50,6 +47,7 @@ RDEPENDS_${PN} = " \
     syslinux-pxelinux \
     tboot \
     tboot-utils \
+    tpm2-tss \
     tpm2-tools \
     tpm-tools \
     trousers \

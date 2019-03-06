@@ -11,76 +11,23 @@ SRCREV = "ced20c209397f58d81da79810f49976ba2d36566"
 
 SRC_URI = " \
     git://github.com/01org/tpm2-tss.git;protocol=git;branch=master \
-    "
+"
 
 S = "${WORKDIR}/git"
 
-# https://lists.yoctoproject.org/pipermail/yocto/2013-November/017042.html
-
-PROVIDES = "${PACKAGES}"
-PACKAGES = " \
-    ${PN}-dbg \
-    libtss2 \
-    libtss2-dev \
-    libtss2-staticdev \
-    libtctidevice \
-    libtctidevice-dev \
-    libtctidevice-staticdev \
-    libtctisocket \
-    libtctisocket-dev \
-    libtctisocket-staticdev \
-    resourcemgr \
-"
-
-FILES_libtss2 = " \
-    ${libdir}/libtss2.so.0.0.0 \
-    ${libdir}/libtss2-sys.so.0.0.0 \
-    ${libdir}/libtss2-esys.so.0.0.0 \
-    ${libdir}/libtss2-mu.so.0.0.0 \
-"
-FILES_libtss2-dev = " \
-    ${includedir}/tss2 \
-    #${libdir}/libmarshal.so* \
-    ${libdir}/libtss2.so* \
-    ${libdir}/libtss2-sys.so* \
-    ${libdir}/libtss2-esys.so* \
-    ${libdir}/libtss2-mu.so* \
-    ${libdir}/pkgconfig/tss2.pc \
-    ${libdir}/pkgconfig/tss2-sys.pc \
-    ${libdir}/pkgconfig/tss2-esys.pc \
-    ${libdir}/pkgconfig/tss2-mu.pc \
-"
-FILES_libtss2-staticdev = " \
-    #${libdir}/libmarshal.a \
-    #${libdir}/libmarshal.la \
-    ${libdir}/libtss2.a \
-    ${libdir}/libtss2.la \
-    ${libdir}/libtss2-sys.a \
-    ${libdir}/libtss2-esys.a \
-    ${libdir}/libtss2-mu.a \
-"
-FILES_libtctidevice = "${libdir}/libtss2-tcti-device.so.0.0.0"
-FILES_libtctidevice-dev = " \
-    ${includedir}/tss2/tss2_tcti_device.h \
-    ${libdir}/libtss2-tcti-device.so* \
-    ${libdir}/pkgconfig/tss2-tcti-device.pc \
-"
-FILES_libtctidevice-staticdev = "${libdir}/libtss2-tcti-device.*a"
-FILES_libtctisocket = "${libdir}/libtss2-tcti-mssim.so.0.0.0"
-FILES_libtctisocket-dev = " \
-    ${includedir}/tss2/tss2_tcti_mssim.h \
-    ${libdir}/libtss2-tcti-mssim.so* \
-    ${libdir}/pkgconfig/tss2-tcti-mssim.pc \
-"
-FILES_libtctisocket-staticdev = "${libdir}/libtss2-tcti-mssim.*a"
-FILES_resourcemgr = "${sbindir}/resourcemgr"
-
 inherit autotools pkgconfig
 
+PACKAGES =+ " \
+    resourcemgr \
+"
+FILES_resourcemgr = " \
+    ${sbindir}/resourcemgr \
+"
+
 do_configure_prepend () {
-	# execute the bootstrap script
-	currentdir=$(pwd)
-	cd ${S}
-	ACLOCAL="aclocal --system-acdir=${STAGING_DATADIR}/aclocal" ./bootstrap
-	cd ${currentdir}
+    # Creates the src_vars.mk file used by automake to handle source-files for
+    # each component. Modified to not call autotools and let OE handle that.
+    pushd ${S}
+    AUTORECONF=true ./bootstrap
+    popd
 }

@@ -115,9 +115,7 @@ RDEPENDS_${PN} = " \
     linuxfb-surfman-plugin \
     xenmgr \
     xen-xenstore \
-    libtss2 \
-    libtctidevice \
-    libtctisocket \
+    tpm2-tss \
     tpm2-tools \
     ${@bb.utils.contains('DISTRO_FEATURES', 'blktap2', 'xen-blktap xen-libblktapctl xen-libvhd', 'blktap3', d)} \
     pesign \

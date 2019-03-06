@@ -15,14 +15,5 @@ SRC_URI = "git://github.com/01org/tpm2-tools.git;protocol=git;branch=3.X \
 "
 
 S = "${WORKDIR}/git"
-# https://lists.yoctoproject.org/pipermail/yocto/2013-November/017042.html
 
 inherit autotools pkgconfig
-
-do_configure_prepend () {
-	# execute the bootstrap script
-	cd ${S}
-	ACLOCAL="aclocal --system-acdir=${STAGING_DATADIR}/aclocal" ./bootstrap
-	cd -
-	oe_runconf
-}
