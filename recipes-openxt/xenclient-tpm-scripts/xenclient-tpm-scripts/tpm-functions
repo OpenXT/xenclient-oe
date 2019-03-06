@@ -25,6 +25,7 @@
 
 clean_old_tpm_files () {
     [ -e /boot/system/tpm/config.tss ] && rm /boot/system/tpm/config.tss
+    [ -e /boot/system/tpm/config.tss.pcrs ] && rm /boot/system/tpm/config.tss.pcrs
     [ -e /boot/system/tpm/config.tss.sha256 ] && rm /boot/system/tpm/config.tss.sha256
     [ -e /boot/system/tpm/config.tss.pub.sha256 ] && rm /boot/system/tpm/config.tss.pub.sha256
 }
@@ -674,6 +675,10 @@ tpm_seal() {
         pcr_bank_exists "${hashalg}"
         [ $? -eq 0 ] || return 1
 
+        # pcr_params starts with -p or -r, but that's okay because
+        # echo only honors flags -n -e & -E
+        echo "${pcr_params}" > ${tss}.pcrs
+
         case $hashalg in
         sha1)
             sealout=$(tpm2_sealdata -H ${OXT_HANDLE_SHA1} -I ${secret} \
@@ -741,6 +746,9 @@ tpm_forward_seal() {
         seal_file=${key}
         clean_old_tpm_files
         if pcr_bank_exists "sha256"; then
+            # We only want the PCRs numbers and not the forward seal values
+            echo "${pcr_params}" | \
+                sed -e 's/:[0-9a-zA-Z]\{64\}//g' > ${tss}.pcrs
             tpm2_sealdata -H ${OXT_HANDLE_SHA256} -I ${seal_file} \
                           -O ${tss}.sha256 -o ${tss}.pub.sha256 \
                           -g ${TPM_ALG_SHA256} -G ${TPM_ALG_KEYEDHASH} \
@@ -800,13 +808,13 @@ tpm_unseal() {
         sha1)
             tpm2_unsealdata -H ${OXT_HANDLE_SHA1} -n "${tss}.sha1" \
                             -u "${tss}.pub.sha1" -g ${TPM_ALG_SHA1} \
-                            ${pcr_params} 2>/dev/null
+                            $( < ${tss}.pcrs ) 2>/dev/null
             return $?
         ;;
         sha256)
             tpm2_unsealdata -H ${OXT_HANDLE_SHA256} -n "${tss}.sha256" \
                             -u "${tss}.pub.sha256" -g ${TPM_ALG_SHA256} \
-                            ${pcr_params} 2>/dev/null
+                            $( < ${tss}.pcrs ) 2>/dev/null
             return $?
         ;;
         *)
