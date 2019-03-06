@@ -33,8 +33,9 @@ do_sign_modules() {
         [ -x "$SIGN_FILE" ] || bbfatal "Cannot find scripts/sign-file"
 
         find ${D} -name "*.ko" -print0 | \
-          xargs -0 -n 1 $SIGN_FILE $SIG_HASH ${KERNEL_MODULE_SIG_KEY} \
-              ${KERNEL_MODULE_SIG_CERT}
+          xargs --no-run-if-empty -0 -n 1 \
+              $SIGN_FILE $SIG_HASH ${KERNEL_MODULE_SIG_KEY} \
+                  ${KERNEL_MODULE_SIG_CERT}
     fi
 }
 
