@@ -75,4 +75,5 @@ FILES_${PN}-utils = " \
 FILES_${PN}-pcr-calc = " \
     ${sbindir}/module_hash \
     ${sbindir}/pcr-calc \
+    ${sbindir}/acmmatch \
 "

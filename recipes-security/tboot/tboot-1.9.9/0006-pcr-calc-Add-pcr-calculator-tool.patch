@@ -64,7 +64,7 @@ new file mode 100644
 index 0000000..e49102d
 --- /dev/null
 +++ b/pcr-calc/Makefile
-@@ -0,0 +1,70 @@
+@@ -0,0 +1,73 @@
 +# Copyright (c) 2006-2010, Intel Corporation
 +# All rights reserved.
 +
@@ -78,7 +78,7 @@ index 0000000..e49102d
 +
 +include $(ROOTDIR)/Config.mk
 +
-+TARGETS := pcr-calc module_hash
++TARGETS := pcr-calc module_hash acmmatch
 +
 +CFLAGS += -D_LARGEFILE64_SOURCE
 +
@@ -132,6 +132,9 @@ index 0000000..e49102d
 +
 +module_hash : module_hash.o hash.o
 +	$(CC) $(CFLAGS) $(LDFLAGS) $^ $(LIBS) $(BZIP_LIB) -o $@
++
++acmmatch : acm.o acmmatch.o platform.o
++	$(CC) $(CFLAGS) $(LDFLAGS) $^ $(LIBS) -o $@
 +
 +%.o : %.c $(BUILD_DEPS)
 +	$(CC) $(CFLAGS) -DNO_TBOOT_LOGLVL -c $< -o $@
@@ -3478,6 +3481,459 @@ index 0000000..7cd7e28
 +void acm_unload(struct acm *acm);
 +
 +#endif /* _ACM_H_ */
+--- /dev/null
++++ b/pcr-calc/acmmatch.c
+@@ -0,0 +1,216 @@
++#include <errno.h>
++#include <assert.h>
++#include <string.h>
++#include <getopt.h>
++#include <stdio.h>
++
++#include "platform.h"
++#include "uuid.h"
++#include "acm.h"
++#include "txt.h"
++
++#define printe(fmt, ...)         fprintf(stderr, fmt "\n", ##__VA_ARGS__)
++
++static int acm_is_debug(const struct acm *acm,
++		const txt_cr_ver_fsbif_t *fsbif,
++		const txt_cr_ver_qpiif_t *qpiif)
++{
++	acm_hdr_t *header = acm->header;
++
++	switch (fsbif->raw) {
++		case 0xffffffff:
++		case 0x00000000:
++			return header->flags.debug_signed == qpiif->debug;
++		default:
++			return header->flags.debug_signed == fsbif->debug;
++	}
++}
++
++static int acm_is_sinit(const struct acm *acm)
++{
++	acm_hdr_t *header = acm->header;
++	acm_info_table_t *infotable = acm->infotable;
++
++	return header->module_type == MODULE_TYPE_CHIPSET &&
++		!(infotable->chipset_acm_type & ACM_TYPE_REVOCATION_MASK) &&
++		infotable->chipset_acm_type == ACM_TYPE_SINIT;
++}
++
++static int acm_match_chipset(const struct acm *acm,
++		const txt_cr_didvid_t *didvid)
++{
++	acm_chipset_id_list_t *chiplist = acm->chiplist;
++	unsigned int i;
++	int match = 0;
++
++	for (i = 0; !match && i < chiplist->count; ++i) {
++		acm_chipset_id_t *chipset = &chiplist->chipset_ids[i];
++
++		if (chipset->vendor_id == didvid->vid &&
++		    chipset->device_id == didvid->did) {
++			if (chipset->flags & CHIPSET_FLAGS_REVISION_MASK)
++				match = !!(chipset->revision_id & didvid->rid);
++			else
++				match = chipset->revision_id == didvid->rid;
++		}
++	}
++
++	return match;
++}
++
++static int acm_match_cpu(struct acm *acm,
++		const cpuid_proc_sig_eax_t *sig,
++		const msr_ia32_platform_id_t *msr)
++{
++	acm_processor_id_list_t *cpulist = acm->cpulist;
++	unsigned int i;
++	int match = 0;
++
++	for (i = 0; !match && i < cpulist->count; ++i) {
++		acm_processor_id_t *cpu = &cpulist->processor_ids[i];
++
++		if (cpu->fms == (sig->raw & cpu->fms_mask) &&
++		    cpu->platform_id == (msr->raw & cpu->platform_mask))
++			match = 1;
++	}
++
++	return match;
++}
++
++/*
++ * Attempts to load the file at path as an ACM.
++ * Return -EINVAL, if the ACM is invalid
++ *        -ENOSYS, if the platform does not provide the necessary information,
++ * 0 if the ACM matches the current platform,
++ * 1 if the ACM _does not_ match the current platform.
++ */
++int platform_match_acm(const char *path,
++	const txt_cr_didvid_t *didvid,
++	const txt_cr_ver_fsbif_t *fsbif,
++	const txt_cr_ver_qpiif_t *qpiif,
++	const cpuid_proc_sig_eax_t *sig,
++	const msr_ia32_platform_id_t *msr)
++{
++	struct acm *acm;
++	int rc;
++
++	assert(path != NULL);
++
++	acm = acm_load(path);
++	if (acm == NULL)
++		return -EINVAL;
++
++	if (acm_is_debug(acm, fsbif, qpiif)) {
++		rc = 1;
++		goto out;
++	}
++
++	if (!acm_is_sinit(acm)) {
++		rc = 1;
++		goto out;
++	}
++
++	if (!acm_match_chipset(acm, didvid)) {
++		rc = 1;
++		goto out;
++	}
++
++	if (acm->cpulist != NULL)
++		/* Only infotables version 4 and above include a cpulist. */
++		if (!acm_match_cpu(acm, sig, msr)) {
++			rc = 1;
++			goto out;
++		}
++
++	rc = 0;
++
++out:
++	acm_unload(acm);
++	return rc;
++}
++
++static void usage(const char *name)
++{
++	assert(name != NULL);
++	printf("Usage: %s [-h] ACM [ACMs]\n", name);
++	printf("Parse the given ACMs and display which match the current"
++		" platform on stdout.\n");
++	printf("    -h  Display this help.\n");
++}
++
++int main(int argc, char *argv[])
++{
++	int rc, opt, i, match = 0;
++	txt_cr_didvid_t didvid = { 0 };
++	txt_cr_ver_fsbif_t fsbif = { 0 };
++	txt_cr_ver_qpiif_t qpiif = { 0 };
++	cpuid_proc_sig_eax_t sig;
++	msr_ia32_platform_id_t msr;
++
++	do {
++		opt = getopt(argc, argv, "Dh");
++		switch (opt) {
++			case 'h':
++				usage(argv[0]);
++				return 0;
++			case -1:
++				continue;
++			default:
++				usage(argv[0]);
++				return EINVAL;
++		}
++	} while (opt != -1);
++
++	if (optind >= argc) {
++		printe("Missing path(s) to ACM file(s).");
++		usage(argv[0]);
++		return EINVAL;
++	}
++
++	if (!access_txt_crs()) {
++		printe("Cannot access TXT control registers."
++			" Is module txt loaded?");
++		return ENOENT;
++	}
++
++	if (!access_msr_devnode()) {
++		printe("Cannot access MSRs. Is module msr loaded?");
++		return ENOENT;
++	}
++
++	if (read_txt_cr_didvid(&didvid) < 0)
++		return ENOSYS;
++	if (read_txt_cr_ver_fsbif(&fsbif) < 0)
++		return ENOSYS;
++	if (read_txt_cr_ver_qpiif(&qpiif) < 0)
++		return ENOSYS;
++
++	sig.raw = cpuid_eax(0x1);
++	msr.raw = rdmsr(MSR_IA32_PLATFORM_ID);
++
++	for (i = optind; i < argc; ++i) {
++		rc = platform_match_acm(argv[i],
++					&didvid, &fsbif, &qpiif, &sig, &msr);
++		if (rc < 0) {
++			switch (rc) {
++				case -EINVAL:
++					printe("Invalid ACM: %s.", argv[i]);
++					break;
++				case -ENOSYS:
++					printe("Could not read platform data."
++						"You may need to load modules:"
++						" msr, txt_info.");
++					return rc;
++				default:
++					printe("Error while loading ACM: %s.",
++						strerror(-rc));
++					return rc;
++			}
++		} else if (!rc) {
++			match = 1;
++			printf("Platform matches ACM %s.\n", argv[i]);
++		}
++	}
++
++	return match ? 0 : 1;
++}
+--- /dev/null
++++ b/pcr-calc/platform.c
+@@ -0,0 +1,106 @@
++#include <errno.h>
++#include <string.h>
++#include <fcntl.h>
++#include <unistd.h>
++#include <sys/types.h>
++#include <stdio.h>
++#include <stdlib.h>
++
++#include "platform.h"
++
++#define printe(fmt, ...)         fprintf(stderr, fmt "\n", ##__VA_ARGS__)
++
++int read_u32(const char *path, uint32_t *v)
++{
++	int fd;
++	ssize_t rc = 0;
++	char buf[12] = { 0 };   /* "0xVVVVVVVV\n\0" */
++	char *end;
++	unsigned long a;
++
++	fd = open(path, O_RDONLY);
++	if (fd < 0)
++		return -errno;
++
++	rc = read(fd, buf, sizeof (buf));
++	if (rc < 0) {
++		rc = -errno;
++		goto out;
++	}
++
++	a = strtoul(buf, &end, 0);
++	if (end != (buf + rc - 1)) {
++		rc = -EINVAL;
++		goto out;
++	}
++
++	*v = a;
++
++out:
++	close(fd);
++	return rc;
++}
++
++int read_u64(const char *path, uint64_t *v)
++{
++	int fd;
++	ssize_t rc = 0;
++	char buf[19] = { 0 };   /* "0xVVVVVVVVVVVVVVVV\n\0" */
++	char *end;
++	unsigned long long a;
++
++	fd = open(path, O_RDONLY);
++	if (fd < 0)
++		return -errno;
++
++	rc = read(fd, buf, sizeof (buf));
++	if (rc < 0) {
++		rc = -errno;
++		goto out;
++	}
++
++	a = strtoull(buf, &end, 0);
++	if (end != (buf + rc - 1)) {
++		rc = -EINVAL;
++		goto out;
++	}
++
++	*v = a;
++
++out:
++	close(fd);
++	return rc;
++}
++
++uint64_t rdmsr(int msr)
++{
++	int fd, rc;
++	uint64_t val;
++
++	fd = open(MSR_DEVNODE, O_RDONLY);
++	if (fd < 0) {
++		printe("open failed: %s. Is module `msr' loaded?",
++			strerror(errno));
++		return -1ULL;
++	}
++
++	rc = lseek(fd, msr, SEEK_SET);
++	if (rc < 0) {
++		printe("lseek failed: %s.", strerror(errno));
++		return -1ULL;
++	} else if (rc != msr) {
++		printe("failed to seek msr value in " MSR_DEVNODE ".");
++		return -1ULL;
++	}
++
++	rc = read(fd, &val, sizeof (val));
++	if (rc < 0) {
++		printe("read failed: %s.", strerror(errno));
++		return -1ULL;
++	} else if (rc != sizeof (val)) {
++		printe("failed to read msr value in " MSR_DEVNODE ".");
++		return -1ULL;
++	}
++
++	return val;
++}
+--- /dev/null
++++ b/pcr-calc/platform.h
+@@ -0,0 +1,68 @@
++#ifndef _PLATFORM_H_
++# define _PLATFORM_H_
++
++# include <inttypes.h>
++# include <unistd.h>
++
++/*
++ * Low-level helpers.
++ */
++/* MSR devnode exposed by the Linux msr module. */
++# define MSR_DEVNODE "/dev/cpu/0/msr"
++/* See Intel SDM Vol3A 9.11.4. */
++# define MSR_IA32_PLATFORM_ID    0x17U
++
++static inline void __cpuid(unsigned int ax, uint32_t *p)
++{
++	asm volatile (
++		"cpuid"
++		: "=a" (p[0]), "=b" (p[1]), "=c" (p[2]), "=d" (p[3]) /* outputs */
++		: "0" (ax)                                           /* inputs */
++	);
++}
++
++/* Output in EAX of CPUID EAX=1. */
++typedef union {
++	uint32_t raw;
++	struct {
++		uint32_t step:4;
++		uint32_t model:4;
++		uint32_t family:4;
++		uint32_t type:2;
++		uint32_t _res0:2;
++		uint32_t model_ext:4;
++		uint32_t family_ext:8;
++		uint32_t _res1:4;
++	};
++} cpuid_proc_sig_eax_t;
++
++/* RDMDR 0x17: IA32_PLATFORM_ID. */
++typedef union {
++	uint64_t raw;
++	struct {
++		uint64_t _res0:50;
++		uint32_t id:3;
++		uint32_t _res1:11;
++	};
++} msr_ia32_platform_id_t;
++
++static inline uint32_t cpuid_eax(unsigned int op)
++{
++	uint32_t regs[4] = { 0 };
++
++	__cpuid(op, regs);
++
++	return regs[0];
++}
++
++static inline int access_msr_devnode(void)
++{
++	return !access(MSR_DEVNODE, R_OK);
++}
++
++int read_u32(const char *path, uint32_t *v);
++int read_u64(const char *path, uint64_t *v);
++uint64_t rdmsr(int msr);
++
++#endif /* !_PLATFORM_H_ */
++
+--- /dev/null
++++ b/pcr-calc/txt.h
+@@ -0,0 +1,51 @@
++#ifndef _TXT_H_
++# define _TXT_H_
++
++# include <inttypes.h>
++# include <unistd.h>
++
++# define TXT_INFO_SYSFS "/sys/devices/platform/txt/"
++
++typedef union {
++	uint64_t raw;
++	struct {
++		uint16_t vid    : 16;
++		uint16_t did    : 16;
++		uint16_t rid    : 16;
++		uint16_t ext    : 16;
++	};
++} txt_cr_didvid_t;
++
++typedef union {
++	uint32_t raw;
++	struct {
++		uint32_t _res   : 31;
++		uint8_t debug   : 1;
++	};
++} txt_cr_ver_fsbif_t;
++
++typedef union {
++	uint32_t raw;
++	struct {
++		uint32_t _res   : 31;
++		uint8_t debug   : 1;
++	};
++} txt_cr_ver_qpiif_t;
++
++# define DECLARE_READ_TXT(entry, size)                          \
++	static inline int read_txt_cr_##entry(txt_cr_##entry##_t *e)    \
++{                                                               \
++	return read_##size(TXT_INFO_SYSFS #entry, &e->raw);         \
++}
++DECLARE_READ_TXT(didvid, u64);
++DECLARE_READ_TXT(ver_fsbif, u32);
++DECLARE_READ_TXT(ver_qpiif, u32);
++
++static inline int access_txt_crs(void)
++{
++	return !access(TXT_INFO_SYSFS "didvid", R_OK) &&
++		!access(TXT_INFO_SYSFS "ver_fsbif", R_OK) &&
++		!access(TXT_INFO_SYSFS "ver_qpiif", R_OK);
++}
++
++#endif /* _TXT_H_ */
 -- 
 2.20.1
 
