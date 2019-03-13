@@ -1357,7 +1357,7 @@ new file mode 100644
 index 0000000..5e638a0
 --- /dev/null
 +++ b/pcr-calc/pcr-calc.c
-@@ -0,0 +1,375 @@
+@@ -0,0 +1,379 @@
 +/*
 + *
 + * Copyright (c) 2017 Daniel P. Smith
@@ -1438,12 +1438,12 @@ index 0000000..5e638a0
 +		"\t-a alg Alogrithm: select what hash alogrithm to use.\n"
 +		"\t-p policy_file Tboot Policy: the policy that was/will be used.\n"
 +		"\t-m hash_str Multiboot Module: include module hash (MLE first).\n"
-+		"\t-e evt_type:hash_str Override PCR events type found in the logs with the provided value.\n");
++		"\t-e evt_type:hash_str Override PCR events type found in the logs with the provided value.\n"
++		"\t-F file Use the given file as tpm event log (replace /sys/kernel/security/txt/*_binary_evtlog).\n");
 +}
 +
 +static bool apply_lg_policy(struct tpm *t, tb_policy_t *policy, size_t pol_size,
-+			    tb_hash_t *mb, int mb_count,
-+			    const struct pcr_event *evt, int evt_count) {
++			    tb_hash_t *mb, int mb_count) {
 +	tb_hash_t *pol_hash;
 +	struct pcr *p;
 +	struct pcr_event *pe;
@@ -1454,10 +1454,6 @@ index 0000000..5e638a0
 +
 +	pe = tpm_find_event(t, policy->hash_alg, TPM_EVT_MLE_HASH, 1);
 +	pe->digest = mb[0];
-+
-+	for (i = 0; i < evt_count; ++i)
-+		if (!tpm_substitute_event(t, policy->hash_alg, &evt[i]))
-+			goto out;
 +
 +	if (!tpm_recalculate(t))
 +		goto out;
@@ -1499,8 +1495,7 @@ index 0000000..5e638a0
 +}
 +
 +static bool apply_da_policy(struct tpm *t, tb_policy_t *policy, size_t pol_size,
-+			    tb_hash_t *mb, int mb_count,
-+			    const struct pcr_event *evt, int evt_count) {
++			    tb_hash_t *mb, int mb_count) {
 +	tb_hash_t *pol_hash;
 +	struct pcr *p;
 +	struct pcr_event *pe;
@@ -1514,10 +1509,6 @@ index 0000000..5e638a0
 +
 +	pe = tpm_find_event(t, hash_alg, TPM_EVT_MLE_HASH, 1);
 +	pe->digest = mb[0];
-+
-+	for (i = 0; i < evt_count; ++i)
-+		if (!tpm_substitute_event(t, hash_alg, &evt[i]))
-+			goto out;
 +
 +	if (!tpm_recalculate(t))
 +		goto out;
@@ -1571,10 +1562,11 @@ index 0000000..5e638a0
 +	uint16_t alg_override = 0;
 +	size_t pol_size = 0;
 +	tb_policy_t *policy_file = NULL;
++	char *eventlog = NULL;
 +
 +	flags = FLAG_TPM12;
 +
-+	while ((opt = getopt(argc, (char ** const)argv, "h2dclvqa:p:m:e:")) != -1) {
++	while ((opt = getopt(argc, (char ** const)argv, "h2dclvqa:p:m:e:F:")) != -1) {
 +		switch (opt) {
 +			case 'm':
 +				if (mb_count >= 20) {
@@ -1643,6 +1635,9 @@ index 0000000..5e638a0
 +				}
 +				++evt_count;
 +			break;
++			case 'F':
++				eventlog = optarg;
++			break;
 +			case 'h':
 +				print_help();
 +				ret = 1;
@@ -1665,8 +1660,9 @@ index 0000000..5e638a0
 +
 +	if (flags & FLAG_TPM12) {
 +		char *buffer;
-+		size_t size = read_file(TPM12_LOG, &buffer);
++		size_t size;
 +
++		size = read_file(eventlog ? eventlog : TPM12_LOG, &buffer);
 +		if (size > 0) {
 +			t = parse_tpm12_log(buffer, size);
 +			free(buffer);
@@ -1681,8 +1677,9 @@ index 0000000..5e638a0
 +		t->alg = TB_HALG_SHA1;
 +	} else {
 +		char *buffer;
-+		size_t size = read_file(TPM20_LOG, &buffer);
++		size_t size;
 +
++		size = read_file(eventlog ? eventlog : TPM20_LOG, &buffer);
 +		if (size > 0) {
 +			t = parse_tpm20_log(buffer, size);
 +			free(buffer);
@@ -1693,10 +1690,10 @@ index 0000000..5e638a0
 +			ret = 1;
 +			goto out;
 +		}
-+
-+// broken as you need to override if there is no policy file, fix!!!
 +		t->alg = alg_override != 0 ? alg_override : policy_file->hash_alg;
 +	}
++	/* t->alg is set from here, since alg_override == 0 && policy_file ==
++	 * NULL cannot pass the previous sanity check. */
 +
 +	if (flags & FLAG_CURRENT) {
 +		tpm_print(t, t->alg);
@@ -1708,14 +1705,21 @@ index 0000000..5e638a0
 +		goto out;
 +	}
 +
++	/* Change/Emulate events in the log according the cmdline. */
++	if (!tpm_substitute_all_events(t, t->alg, evt, evt_count)) {
++		error_msg("failed to apply event substitutions to the event log.\n");
++		ret = 1;
++		goto out;
++	}
++
 +	if (flags & FLAG_DA) {
-+		if (!apply_da_policy(t, policy_file, pol_size, mb, mb_count, evt, evt_count)) {
++		if (!apply_da_policy(t, policy_file, pol_size, mb, mb_count)) {
 +			error_msg("failed applying DA policy.\n");
 +			ret = 1;
 +			goto out;
 +		}
 +	} else {
-+		if (!apply_lg_policy(t, policy_file, pol_size, mb, mb_count, evt, evt_count)) {
++		if (!apply_lg_policy(t, policy_file, pol_size, mb, mb_count)) {
 +			error_msg("failed applying LG policy.\n");
 +			ret = 1;
 +			goto out;
@@ -1876,7 +1880,7 @@ new file mode 100644
 index 0000000..fb7d501
 --- /dev/null
 +++ b/pcr-calc/tpm.c
-@@ -0,0 +1,432 @@
+@@ -0,0 +1,445 @@
 +/*
 + *
 + * Copyright (c) 2017 Daniel P. Smith
@@ -2199,6 +2203,19 @@ index 0000000..fb7d501
 +	return true;
 +}
 +
++bool tpm_substitute_all_events(struct tpm *t, uint16_t alg,
++				const struct pcr_event *evt,
++				unsigned int evt_count)
++{
++	unsigned int i;
++
++	for (i = 0; i < evt_count; ++i)
++		if (!tpm_substitute_event(t, alg, &evt[i]))
++			return false;
++
++	return true;
++}
++
 +bool tpm_clear_all_event(struct tpm *t, uint16_t alg, uint32_t evt_type)
 +{
 +	int i, j;
@@ -2314,7 +2331,7 @@ new file mode 100644
 index 0000000..c482f3f
 --- /dev/null
 +++ b/pcr-calc/tpm.h
-@@ -0,0 +1,185 @@
+@@ -0,0 +1,188 @@
 +/*
 + * pcr.h: pcr definitions
 + *
@@ -2493,6 +2510,9 @@ index 0000000..c482f3f
 +				uint32_t evt_type, int n);
 +bool tpm_substitute_event(struct tpm *t, uint16_t alg,
 +			  const struct pcr_event *evt);
++bool tpm_substitute_all_events(struct tpm *t, uint16_t alg,
++				const struct pcr_event *evt,
++				unsigned int evt_count);
 +bool tpm_clear_all_event(struct tpm *t, uint16_t alg, uint32_t evt_type);
 +bool tpm_recalculate(struct tpm *t);
 +void tpm_print(struct tpm *t, uint16_t alg);
