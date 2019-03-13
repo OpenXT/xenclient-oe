@@ -1,0 +1,243 @@
+################################################################################
+SHORT DESCRIPTION: 
+################################################################################
+Resolve run-time errors and memory leaks.
+
+################################################################################
+LONG DESCRIPTION: 
+################################################################################
+Resolve run-time errors and memory leaks.
+
+################################################################################
+CHANGELOG 
+################################################################################
+Author(s):
+Mahantesh Salimath <salimathm@ainfosec.com>
+
+################################################################################
+REMOVAL 
+################################################################################
+
+################################################################################
+UPSTREAM PLAN
+################################################################################
+Yes, should be upstreamed.
+
+################################################################################
+INTERNAL DEPENDENCIES 
+################################################################################
+
+################################################################################
+PATCHES 
+################################################################################
+--- a/control/tap-ctl-free.c
++++ b/control/tap-ctl-free.c
+@@ -33,6 +33,7 @@
+ #endif
+ 
+ #include <stdio.h>
++#include <string.h>
+ #include <errno.h>
+ #include <fcntl.h>
+ #include <stdlib.h>
+@@ -48,6 +49,20 @@ tap_ctl_free(const int minor)
+ {
+ 	int fd, err;
+ 
++	char *tapdev_name, *ring_name;
++	err = asprintf(&tapdev_name, "%s%d",
++		       BLKTAP2_IO_DEVICE, minor);
++	if(err == -1){
++		err = ENOMEM;
++		return err;
++	}
++	err = asprintf(&ring_name, "%s%d",
++		       BLKTAP2_RING_DEVICE, minor);
++	if(err == -1){
++		err = ENOMEM;
++		return err;
++	}
++
+ 	fd = open(BLKTAP2_CONTROL_DEVICE, O_RDONLY);
+ 	if (fd == -1) {
+ 		EPRINTF("failed to open control device: %d\n", errno);
+@@ -57,5 +72,10 @@ tap_ctl_free(const int minor)
+ 	err = ioctl(fd, BLKTAP2_IOCTL_FREE_TAP, minor);
+ 	close(fd);
+ 
++	unlink(tapdev_name);
++	unlink(ring_name);
++	free(tapdev_name);
++	free(ring_name);
++
+ 	return err ? -errno : 0;
+ }
+--- a/control/tap-ctl-ipc.c
++++ b/control/tap-ctl-ipc.c
+@@ -64,7 +64,7 @@ tap_ctl_read_raw(int fd, void *buf, size
+ 		if (ret == -1)
+ 			break;
+ 		else if (FD_ISSET(fd, &readfds)) {
+-			ret = read(fd, buf + offset, size - offset);
++			ret = read(fd, (char*)buf + offset, size - offset);
+ 			if (ret <= 0)
+ 				break;
+ 			offset += ret;
+@@ -120,7 +120,7 @@ tap_ctl_write_message(int fd, tapdisk_me
+ 		if (ret == -1)
+ 			break;
+ 		else if (FD_ISSET(fd, &writefds)) {
+-			ret = write(fd, message + offset, len - offset);
++			ret = write(fd, (char*)message + offset, len - offset);
+ 			if (ret <= 0)
+ 				break;
+ 			offset += ret;
+--- a/include/blktap.h
++++ b/include/blktap.h
+@@ -32,7 +32,7 @@
+ #define _TD_BLKTAP_H_
+ 
+ #define BLKTAP2_SYSFS_DIR              "/sys/class/blktap2"
+-#define BLKTAP2_CONTROL_NAME           "blktap/control"
++#define BLKTAP2_CONTROL_NAME           "blktap-control"
+ #define BLKTAP2_CONTROL_DIR            "/var/run/blktap-control"
+ #define BLKTAP2_CONTROL_SOCKET         "ctl"
+ #define BLKTAP2_DIRECTORY              "/dev/xen/blktap-2"
+--- a/include/blktap2.h
++++ b/include/blktap2.h
+@@ -50,7 +50,7 @@
+ #define BLKTAP2_IOCTL_REMOVE_DEVICE    207
+ 
+ #define BLKTAP2_SYSFS_DIR              "/sys/class/blktap2"
+-#define BLKTAP2_CONTROL_NAME           "blktap/control"
++#define BLKTAP2_CONTROL_NAME           "blktap-control"
+ #define BLKTAP2_CONTROL_DIR            "/var/run/blktap-control"
+ #define BLKTAP2_CONTROL_SOCKET         "ctl"
+ #define BLKTAP2_DIRECTORY              "/dev/xen/blktap-2"
+--- a/tapback/frontend.c
++++ b/tapback/frontend.c
+@@ -478,7 +478,7 @@ tapback_backend_handle_otherend_watch(ba
+ {
+     vbd_t *device = NULL;
+     int err = 0, state = 0;
+-    char *s = NULL, *end = NULL, *_path = NULL;
++    char *s = NULL, *end = NULL;
+ 
+ 	ASSERT(backend);
+     ASSERT(path);
+@@ -509,30 +509,7 @@ tapback_backend_handle_otherend_watch(ba
+      */
+ 	s = tapback_xs_read(device->backend->xs, XBT_NULL, "%s",
+ 			device->frontend_state_path);
+-    if (!s) {
+-        err = errno;
+-		/*
+-         * If the front-end XenBus node is missing, the XenBus device has been
+-         * removed: remove the XenBus back-end node.
+-		 */
+-		if (err == ENOENT) {
+-            err = asprintf(&_path, "%s/%s/%d/%d", XENSTORE_BACKEND,
+-                    device->backend->name, device->domid, device->devid);
+-            if (err == -1) {
+-                err = errno;
+-                WARN(device, "failed to asprintf: %s\n", strerror(err));
+-                goto out;
+-            }
+-            err = 0;
+-            if (!xs_rm(device->backend->xs, XBT_NULL, _path)) {
+-                if (errno != ENOENT) {
+-                    err = errno;
+-                    WARN(device, "failed to remove %s: %s\n", path,
+-                            strerror(err));
+-                }
+-            }
+-		}
+-    } else {
++    if(s) {
+         state = strtol(s, &end, 0);
+         if (*end != 0 || end == s) {
+             WARN(device, "invalid XenBus state '%s'\n", s);
+@@ -541,9 +518,7 @@ tapback_backend_handle_otherend_watch(ba
+             err = frontend_changed(device, state);
+     }
+ 
+-out:
+     free(s);
+-    free(_path);
+     return err;
+ }
+ 
+--- a/tapback/tapback.c
++++ b/tapback/tapback.c
+@@ -171,6 +171,7 @@ tapback_backend_destroy(backend_t *backe
+         backend->xs = NULL;
+     }
+ 
++    close(backend->ctrl_sock);
+     unlink(backend->local.sun_path);
+ 
+ 	list_del(&backend->entry);
+--- a/vhd/lib/libvhd.c
++++ b/vhd/lib/libvhd.c
+@@ -1333,7 +1333,7 @@ vhd_find_parent(vhd_context_t *ctx, cons
+ 	location   = NULL;
+ 	*_location = NULL;
+ 
+-	if (!parent)
++	if (!parent || !strcmp(parent, ""))
+ 		return -EINVAL;
+ 
+ 	if (parent[0] == '/') {
+@@ -1868,7 +1868,7 @@ vhd_footer_offset_at_eof(vhd_context_t *
+ {
+ 	int err;
+ 	if ((err = vhd_seek(ctx, 0, SEEK_END)))
+-		return errno;
++		return err;
+ 	*off = vhd_position(ctx) - sizeof(vhd_footer_t);
+ 	return 0;
+ }
+--- a/vhd/lib/vhd-util-read.c
++++ b/vhd/lib/vhd-util-read.c
+@@ -216,6 +216,7 @@ vhd_print_parent(vhd_context_t *vhd, vhd
+ 	}
+ 
+ 	printf("       decoded name : %s\n", buf);
++	free(buf);
+ }
+ 
+ static void
+@@ -524,8 +525,10 @@ vhd_test_bitmap(vhd_context_t *vhd, uint
+ 
+ 		if (vhd->bat.bat[blk] == DD_BLK_UNUSED)
+ 			bit = 0;
+-		else
++		else {
++			/* Switch to sector, seems more in line with what -i does */
+ 			bit = vhd_bitmap_test(vhd, buf, sec);
++		}
+ 
+ 		printf("block %s: ", conv(hex, blk));
+ 		printf("sec: %s: %d\n", conv(hex, sec), bit);
+@@ -639,8 +642,8 @@ vhd_test_batmap(vhd_context_t *vhd, uint
+ 
+ 	for (i = 0; i < count; i++) {
+ 		cur = block + i;
+-		fprintf(stderr, "batmap for block %s: %d\n", conv(hex, cur),
+-			vhd_batmap_test(vhd, &vhd->batmap, cur));
++		printf("batmap for block %s: %d\n", conv(hex, cur),
++		       vhd_batmap_test(vhd, &vhd->batmap, cur));
+ 	}
+ 
+ 	return 0;
+--- a/vhd/lib/vhd-util-key.c
++++ b/vhd/lib/vhd-util-key.c
+@@ -39,7 +39,7 @@
+ 
+ #include "libvhd.h"
+ 
+-#define LIBBLOCKCRYPTO_NAME "libblockcrypto.so"
++#define LIBBLOCKCRYPTO_NAME "libblockcrypto.so.0"
+ 
+ #define MAX_KEY_SIZE 512
+ int CRYPTO_SUPPORTED_KEYSIZE[] = { 512, 256, -1};

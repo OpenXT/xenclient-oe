@@ -1,45 +1,51 @@
-From a10a505c36595df30465d82254127b61951ae582 Mon Sep 17 00:00:00 2001
-From: Mahantesh Salimath <mahantesh.openxt@gmail.com>
-Date: Wed, 14 Mar 2018 17:17:39 -0400
-Subject: [PATCH] icbinn support for blktap3
+################################################################################
+SHORT DESCRIPTION: 
+################################################################################
+Add vhd icbinn support.
 
-OXT-1282
+################################################################################
+LONG DESCRIPTION: 
+################################################################################
+Add vhd icbinn support.
 
-Signed-off-by: Mahantesh Salimath <mahantesh.openxt@gmail.com>
----
- drivers/Makefile.am         |   7 +-
- include/libvhd.h            |  18 +++
- vhd/Makefile.am             |   2 +-
- vhd/lib/Makefile.am         |   2 +-
- vhd/lib/icbinn.c            | 334 ++++++++++++++++++++++++++++++++++++++++++++
- vhd/lib/libvhd.c            | 266 ++++++++++++++++++++++++++---------
- vhd/lib/relative-path.c     |   6 +-
- vhd/lib/vhd-util-key.c      |  61 +++++++-
- vhd/lib/vhd-util-scan.c     |   2 +-
- vhd/lib/vhd-util-snapshot.c |   2 +-
- 10 files changed, 624 insertions(+), 76 deletions(-)
- create mode 100644 vhd/lib/icbinn.c
+################################################################################
+CHANGELOG 
+################################################################################
 
-Index: git/drivers/Makefile.am
-===================================================================
---- git.orig/drivers/Makefile.am
-+++ git/drivers/Makefile.am
-@@ -7,21 +7,22 @@ AM_CFLAGS += -DXC_WANT_COMPAT_EVTCHN_API
+################################################################################
+REMOVAL 
+################################################################################
+
+################################################################################
+UPSTREAM PLAN
+################################################################################
+Not sure.
+
+################################################################################
+INTERNAL DEPENDENCIES 
+################################################################################
+
+################################################################################
+PATCHES 
+################################################################################
+--- a/drivers/Makefile.am
++++ b/drivers/Makefile.am
+@@ -7,21 +7,22 @@ AM_CFLAGS += $(if $(GCOV),-fprofile-dir=
+ 
  AM_CPPFLAGS  = -D_GNU_SOURCE
  AM_CPPFLAGS += -I$(top_srcdir)/include
- CRYPTLIBS = -lcrypto -Lcrypto -lxts-aes
 +ICBLIBS = -licbinn -lpthread -ldl
  
  libexec_PROGRAMS = tapdisk
  
  tapdisk_SOURCES = tapdisk2.c
--tapdisk_LDADD = libtapdisk.la crypto/libxts-aes.la $(CRYPTLIBS)
-+tapdisk_LDADD = libtapdisk.la crypto/libxts-aes.la $(CRYPTLIBS) $(ICBLIBS)
+-tapdisk_LDADD = libtapdisk.la
++tapdisk_LDADD = libtapdisk.la $(ICBLIBS)
  
  noinst_PROGRAMS = tapdisk-stream
  
--tapdisk_stream_LDADD = libtapdisk.la crypto/libxts-aes.la $(CRYPTLIBS)
-+tapdisk_stream_LDADD = libtapdisk.la crypto/libxts-aes.la $(CRYPTLIBS) $(ICBLIBS)
+-tapdisk_stream_LDADD = libtapdisk.la
++tapdisk_stream_LDADD = libtapdisk.la $(ICBLIBS)
  
  sbin_PROGRAMS  = td-util
  sbin_PROGRAMS += td-rated
@@ -50,11 +56,9 @@ Index: git/drivers/Makefile.am
  
  noinst_LTLIBRARIES = libtapdisk.la
  
-Index: git/include/libvhd.h
-===================================================================
---- git.orig/include/libvhd.h
-+++ git/include/libvhd.h
-@@ -118,9 +118,20 @@ typedef struct vhd_bat             vhd_b
+--- a/include/libvhd.h
++++ b/include/libvhd.h
+@@ -121,9 +121,20 @@ typedef struct vhd_bat             vhd_b
  typedef struct vhd_batmap          vhd_batmap_t;
  typedef struct dd_batmap_hdr       vhd_batmap_header_t;
  typedef struct prt_loc             vhd_parent_locator_t;
@@ -75,7 +79,7 @@ Index: git/include/libvhd.h
  struct vhd_bat {
  	uint32_t                   spb;
  	uint32_t                   entries;
-@@ -140,6 +151,8 @@ struct vhd_context {
+@@ -143,6 +154,8 @@ struct vhd_context {
  	int                        oflags;
  	int                        is_block;
  
@@ -84,7 +88,7 @@ Index: git/include/libvhd.h
  	uint32_t                   spb;
  	uint32_t                   bm_secs;
  
-@@ -147,6 +160,7 @@ struct vhd_context {
+@@ -150,6 +163,7 @@ struct vhd_context {
  	vhd_footer_t               footer;
  	vhd_bat_t                  bat;
  	vhd_batmap_t               batmap;
@@ -92,7 +96,7 @@ Index: git/include/libvhd.h
  
  	struct crypto_blkcipher   *xts_tfm;
  	struct list_head           next;
-@@ -360,4 +374,8 @@ int vhd_io_write(vhd_context_t *, char *
+@@ -365,4 +379,8 @@ int vhd_io_write(vhd_context_t *, char *
  int vhd_io_read_bytes(vhd_context_t *, void *, size_t, uint64_t);
  int vhd_io_write_bytes(vhd_context_t *, void *, size_t, uint64_t);
  
@@ -101,35 +105,29 @@ Index: git/include/libvhd.h
 +struct ICBINN_struct * vhd_icbinn_vhd(void);
 +
  #endif
-Index: git/vhd/Makefile.am
-===================================================================
---- git.orig/vhd/Makefile.am
-+++ git/vhd/Makefile.am
-@@ -11,6 +11,6 @@ bin_PROGRAMS  = vhd-util
+--- a/vhd/Makefile.am
++++ b/vhd/Makefile.am
+@@ -12,6 +12,6 @@ bin_PROGRAMS  = vhd-util
  bin_PROGRAMS += vhd-index
  bin_PROGRAMS += vhd-update
  
--LDADD = lib/libvhd.la -luuid -lcrypto
-+LDADD = lib/libvhd.la -luuid -lcrypto -Llib -licbinn -ldl -lpthread
+-LDADD = lib/libvhd.la -luuid
++LDADD = lib/libvhd.la -luuid -Llib -licbinn -ldl -lpthread
  
- vhd_index_LDADD = lib/libvhd.la -luuid -lcrypto
-Index: git/vhd/lib/Makefile.am
-===================================================================
---- git.orig/vhd/lib/Makefile.am
-+++ git/vhd/lib/Makefile.am
-@@ -41,7 +41,7 @@ libvhd_la_SOURCES += ../../lvm/lvm-util.
+ vhd_index_LDADD = lib/libvhd.la -luuid
+--- a/vhd/lib/Makefile.am
++++ b/vhd/lib/Makefile.am
+@@ -42,7 +42,7 @@ libvhd_la_SOURCES += xattr.h
  
  libvhd_la_LDFLAGS = -version-info 1:1:1
  
--libvhd_la_LIBADD = -luuid -lcrypto $(LIBICONV)
-+libvhd_la_LIBADD = -luuid -lcrypto -lpthread -licbinn -ldl $(LIBICONV)
+-libvhd_la_LIBADD = -luuid -ldl $(LIBICONV)  $(top_srcdir)/lvm/liblvmutil.la
++libvhd_la_LIBADD = -luuid -lpthread -licbinn -ldl $(LIBICONV) $(top_srcdir)/lvm/liblvmutil.la
  
  libvhdio_la_SOURCES  = libvhdio.c
  libvhdio_la_SOURCES += ../../part/partition.c
-Index: git/vhd/lib/icbinn.c
-===================================================================
 --- /dev/null
-+++ git/vhd/lib/icbinn.c
++++ b/vhd/lib/icbinn.c
 @@ -0,0 +1,334 @@
 +/*
 + * Copyright (c) 2012 Citrix Systems, Inc.
@@ -465,11 +463,9 @@ Index: git/vhd/lib/icbinn.c
 +    free (rpath);
 +  return NULL;
 +}
-Index: git/vhd/lib/libvhd.c
-===================================================================
---- git.orig/vhd/lib/libvhd.c
-+++ git/vhd/lib/libvhd.c
-@@ -47,6 +47,7 @@
+--- a/vhd/lib/libvhd.c
++++ b/vhd/lib/libvhd.c
+@@ -48,6 +48,7 @@
  #include <sys/mman.h>
  #include <sys/stat.h>
  #include <sys/types.h>
@@ -477,7 +473,7 @@ Index: git/vhd/lib/libvhd.c
  
  #include "debug.h"
  #include "xattr.h"
-@@ -99,6 +100,9 @@ static int vhd_cache_enabled(vhd_context
+@@ -100,6 +101,9 @@ static int vhd_cache_enabled(vhd_context
  static int vhd_cache_load(vhd_context_t *);
  static int vhd_cache_unload(vhd_context_t *);
  static vhd_context_t * vhd_cache_get_parent(vhd_context_t *);
@@ -487,7 +483,7 @@ Index: git/vhd/lib/libvhd.c
  
  static inline int
  old_test_bit(volatile char *addr, int nr)
-@@ -1326,7 +1330,7 @@ vhd_find_parent(vhd_context_t *ctx, cons
+@@ -1346,7 +1350,7 @@ vhd_find_parent(vhd_context_t *ctx, cons
  	}
  
  	/* check parent path relative to child's directory */
@@ -496,7 +492,7 @@ Index: git/vhd/lib/libvhd.c
  	if (!cpath) {
  		err = -errno;
  		goto out;
-@@ -1340,7 +1344,7 @@ vhd_find_parent(vhd_context_t *ctx, cons
+@@ -1360,7 +1364,7 @@ vhd_find_parent(vhd_context_t *ctx, cons
  	}
  
  	if (!access(location, R_OK)) {
@@ -505,7 +501,7 @@ Index: git/vhd/lib/libvhd.c
  		if (path) {
  			*_location = strdup(path);
  			if (*_location)
-@@ -1723,11 +1727,11 @@ vhd_parent_locator_write_at(vhd_context_
+@@ -1750,11 +1754,11 @@ vhd_parent_locator_write_at(vhd_context_
  			    const char *parent, off64_t off, uint32_t code,
  			    size_t max_bytes, vhd_parent_locator_t *loc)
  {
@@ -518,7 +514,7 @@ Index: git/vhd/lib/libvhd.c
  
  	memset(loc, 0, sizeof(vhd_parent_locator_t));
  
-@@ -1750,22 +1754,36 @@ vhd_parent_locator_write_at(vhd_context_
+@@ -1777,22 +1781,36 @@ vhd_parent_locator_write_at(vhd_context_
  		return -EINVAL;
  	}
  
@@ -565,7 +561,7 @@ Index: git/vhd/lib/libvhd.c
  
  	relative_path = relative_path_to(ctx->file, absolute_path, &err);
  	if (!relative_path || err) {
-@@ -2397,8 +2415,8 @@ vhd_atomic_io(ssize_t (*f) (int, void *,
+@@ -2424,8 +2442,8 @@ vhd_atomic_io(ssize_t (*f) (int, void *,
  	return res;
  }
  
@@ -576,7 +572,7 @@ Index: git/vhd/lib/libvhd.c
  {
  	off64_t off;
  
-@@ -2412,14 +2430,14 @@ vhd_seek(vhd_context_t *ctx, off64_t off
+@@ -2439,14 +2457,14 @@ vhd_seek(vhd_context_t *ctx, off64_t off
  	return 0;
  }
  
@@ -595,7 +591,7 @@ Index: git/vhd/lib/libvhd.c
  {
  	size_t ret;
  
-@@ -2435,8 +2453,8 @@ vhd_read(vhd_context_t *ctx, void *buf,
+@@ -2462,8 +2480,8 @@ vhd_read(vhd_context_t *ctx, void *buf,
  	return (errno ? -errno : -EIO);
  }
  
@@ -606,7 +602,7 @@ Index: git/vhd/lib/libvhd.c
  {
  	size_t ret;
  
-@@ -2453,7 +2471,7 @@ vhd_write(vhd_context_t *ctx, void *buf,
+@@ -2480,7 +2498,7 @@ vhd_write(vhd_context_t *ctx, void *buf,
  }
  
  static int
@@ -615,7 +611,7 @@ Index: git/vhd/lib/libvhd.c
  {
  	ssize_t ret;
  
-@@ -2470,7 +2488,7 @@ vhd_pread(vhd_context_t *ctx, void *buf,
+@@ -2497,7 +2515,7 @@ vhd_pread(vhd_context_t *ctx, void *buf,
  }
  
  static int
@@ -624,7 +620,7 @@ Index: git/vhd/lib/libvhd.c
  {
  	ssize_t ret;
  
-@@ -2487,6 +2505,54 @@ vhd_pwrite(vhd_context_t *ctx, void *buf
+@@ -2514,6 +2532,54 @@ vhd_pwrite(vhd_context_t *ctx, void *buf
  }
  
  int
@@ -679,7 +675,7 @@ Index: git/vhd/lib/libvhd.c
  vhd_offset(vhd_context_t *ctx, uint32_t sector, uint32_t *offset)
  {
  	int err;
-@@ -2562,6 +2628,7 @@ int
+@@ -2589,6 +2655,7 @@ int
  vhd_open(vhd_context_t *ctx, const char *file, int flags)
  {
  	int i, err, oflags;
@@ -687,7 +683,7 @@ Index: git/vhd/lib/libvhd.c
  
  	if (flags & VHD_OPEN_STRICT)
  		vhd_flag_clear(flags, VHD_OPEN_FAST);
-@@ -2572,19 +2639,34 @@ vhd_open(vhd_context_t *ctx, const char
+@@ -2599,28 +2666,43 @@ vhd_open(vhd_context_t *ctx, const char
  	ctx->fd     = -1;
  	ctx->oflags = flags;
  
@@ -698,12 +694,16 @@ Index: git/vhd/lib/libvhd.c
  		return err;
  
 -	oflags = O_LARGEFILE;
--	if (!(flags & VHD_OPEN_CACHED))
+-	if (!(flags & VHD_OPEN_CACHED)) {
 -		oflags |= O_DIRECT;
--	if (flags & VHD_OPEN_RDONLY)
--		oflags |= O_RDONLY;
--	if (flags & VHD_OPEN_RDWR)
--		oflags |= O_RDWR;
+-		if (access("/etc/tapdisk_use_dsync", F_OK) != -1) {
+-		/* tapdisk_use_dsync exists, it means we need to open
+-		 * the leaf with O_DSYNC as well.
+-		 * This is not a public tapdisk interface
+-		 */
+-			if (!(flags & VHD_OPEN_RDONLY))
+-				oflags |= O_DSYNC;
+-		}
 +	if (icb) {
 +		oflags = 0;
 +		if (flags & VHD_OPEN_RDONLY)
@@ -716,21 +716,34 @@ Index: git/vhd/lib/libvhd.c
 +	}
 +	else{
 +		oflags = O_LARGEFILE;
-+		if (!(flags & VHD_OPEN_CACHED))
++		if (!(flags & VHD_OPEN_CACHED)) {
 +			oflags |= O_DIRECT;
++			if (access("/etc/tapdisk_use_dsync", F_OK) != -1) {
++			/* tapdisk_use_dsync exists, it means we need to open
++			 * the leaf with O_DSYNC as well.
++			 * This is not a public tapdisk interface
++			 */
++				if (!(flags & VHD_OPEN_RDONLY))
++					oflags |= O_DSYNC;
++			}
++		}
 +		if (flags & VHD_OPEN_RDONLY)
 +			oflags |= O_RDONLY;
 +		if (flags & VHD_OPEN_RDWR)
 +			oflags |= O_RDWR;
 +
-+		ctx->fd = open(ctx->file, oflags, 0644);
-+	}
++		ctx->fd = open_optional_odirect(ctx->file, oflags, 0644);
+ 	}
+-	if (flags & VHD_OPEN_RDONLY)
+-		oflags |= O_RDONLY;
+-	if (flags & VHD_OPEN_RDWR)
+-		oflags |= O_RDWR;
  
--	ctx->fd = open(ctx->file, oflags, 0644);
+-	ctx->fd = open_optional_odirect(ctx->file, oflags, 0644);
  	if (ctx->fd == -1) {
  		err = -errno;
  		VHDLOG("failed to open %s: %d\n", ctx->file, err);
-@@ -2609,11 +2691,17 @@ vhd_open(vhd_context_t *ctx, const char
+@@ -2645,11 +2727,17 @@ vhd_open(vhd_context_t *ctx, const char
  		posix_fadvise(ctx->fd, 0, 0, POSIX_FADV_RANDOM);
  	}
  
@@ -751,7 +764,7 @@ Index: git/vhd/lib/libvhd.c
  		err = vhd_open_fast(ctx);
  		if (err)
  			goto fail;
-@@ -2655,19 +2743,23 @@ vhd_open(vhd_context_t *ctx, const char
+@@ -2691,19 +2779,23 @@ vhd_open(vhd_context_t *ctx, const char
  	return 0;
  
  fail:
@@ -780,7 +793,7 @@ Index: git/vhd/lib/libvhd.c
  		fsync(ctx->fd);
  		close(ctx->fd);
  	}
-@@ -2679,6 +2771,14 @@ vhd_close(vhd_context_t *ctx)
+@@ -2715,6 +2807,14 @@ vhd_close(vhd_context_t *ctx)
  	memset(ctx, 0, sizeof(vhd_context_t));
  }
  
@@ -795,7 +808,7 @@ Index: git/vhd/lib/libvhd.c
  static inline void
  vhd_initialize_footer(vhd_context_t *ctx, int type, uint64_t size)
  {
-@@ -2753,20 +2853,35 @@ get_file_size(const char *name)
+@@ -2789,20 +2889,35 @@ get_file_size(const char *name)
  {
  	int fd;
  	off64_t end;
@@ -839,7 +852,7 @@ Index: git/vhd/lib/libvhd.c
  {
  	int err;
  	struct stat stats;
-@@ -2796,15 +2911,21 @@ vhd_initialize_header(vhd_context_t *ctx
+@@ -2832,15 +2947,21 @@ vhd_initialize_header(vhd_context_t *ctx
  	if (ctx->footer.type == HD_TYPE_DYNAMIC)
  		return 0;
  
@@ -864,7 +877,7 @@ Index: git/vhd/lib/libvhd.c
  	}
  	else {
  		err = vhd_open(&parent, parent_path, VHD_OPEN_RDONLY);
-@@ -2817,16 +2938,10 @@ vhd_initialize_header(vhd_context_t *ctx
+@@ -2853,16 +2974,10 @@ vhd_initialize_header(vhd_context_t *ctx
  			vhd_close(&parent);
  			return -EINVAL;
  		}
@@ -882,7 +895,7 @@ Index: git/vhd/lib/libvhd.c
  	ctx->footer.orig_size    = size;
  	ctx->footer.curr_size    = size;
  	ctx->footer.geometry     = vhd_chs(size);
-@@ -2891,7 +3006,7 @@ vhd_change_parent(vhd_context_t *child,
+@@ -2927,7 +3042,7 @@ vhd_change_parent(vhd_context_t *child,
  		return -EINVAL;
  	}
  
@@ -891,7 +904,7 @@ Index: git/vhd/lib/libvhd.c
  	if (!ppath) {
  		VHDLOG("error resolving parent path %s for %s: %d\n",
  		       parent_path, child->file, errno);
-@@ -3129,6 +3244,7 @@ __vhd_create(const char *name, const cha
+@@ -3165,6 +3280,7 @@ __vhd_create(const char *name, const cha
  	off64_t off;
  	vhd_context_t ctx;
  	uint64_t size, psize, blks;
@@ -899,16 +912,17 @@ Index: git/vhd/lib/libvhd.c
  
  	switch (type) {
  	case HD_TYPE_DIFF:
-@@ -3159,8 +3275,17 @@ __vhd_create(const char *name, const cha
+@@ -3195,8 +3311,18 @@ __vhd_create(const char *name, const cha
  		blks = (mbytes + VHD_BLOCK_SIZE - 1) >> VHD_BLOCK_SHIFT;
  	size = blks << VHD_BLOCK_SHIFT;
  
--	ctx.fd = open(name, O_WRONLY | O_CREAT |
+-	ctx.fd = open_optional_odirect(name, O_WRONLY | O_CREAT |
 -		      O_TRUNC | O_LARGEFILE | O_DIRECT, 0644);
 +	icb = vhd_icbinn_vhd();
 +
 +	if (icb) {
-+		ctx.fd = icbinn_open(icb, (char *) name, ICBINN_WRONLY | ICBINN_CREAT | ICBINN_TRUNC);
++		ctx.fd = icbinn_open(icb, (char *) name, ICBINN_WRONLY |
++				     ICBINN_CREAT | ICBINN_TRUNC);
 +		ctx.devops = &vhd_icbinn_devops;
 +	}
 +	else {
@@ -916,10 +930,10 @@ Index: git/vhd/lib/libvhd.c
 +			      O_TRUNC | O_LARGEFILE | O_DIRECT, 0644);
 +	}
 +
- 	if (ctx.fd == -1)
- 		return -errno;
- 
-@@ -3170,9 +3295,14 @@ __vhd_create(const char *name, const cha
+ 	if (ctx.fd == -1) {
+         fprintf(stderr, "%s: failed to create: %d\n", name, -errno);
+         return -errno;
+@@ -3208,9 +3334,14 @@ __vhd_create(const char *name, const cha
  		goto out;
  	}
  
@@ -937,7 +951,7 @@ Index: git/vhd/lib/libvhd.c
  
  	vhd_initialize_footer(&ctx, type, size);
  
-@@ -3182,7 +3312,7 @@ __vhd_create(const char *name, const cha
+@@ -3220,7 +3351,7 @@ __vhd_create(const char *name, const cha
  			goto out;
  	} else {
  		int raw = vhd_flag_test(flags, VHD_FLAG_CREAT_PARENT_RAW);
@@ -946,7 +960,7 @@ Index: git/vhd/lib/libvhd.c
  		if (err)
  			goto out;
  
-@@ -3248,8 +3378,12 @@ __vhd_create(const char *name, const cha
+@@ -3286,8 +3417,12 @@ __vhd_create(const char *name, const cha
  
  out:
  	vhd_close(&ctx);
@@ -961,10 +975,8 @@ Index: git/vhd/lib/libvhd.c
  	return err;
  }
  
-Index: git/vhd/lib/relative-path.c
-===================================================================
---- git.orig/vhd/lib/relative-path.c
-+++ git/vhd/lib/relative-path.c
+--- a/vhd/lib/relative-path.c
++++ b/vhd/lib/relative-path.c
 @@ -38,6 +38,8 @@
  #include <string.h>
  #include <limits.h>
@@ -991,23 +1003,20 @@ Index: git/vhd/lib/relative-path.c
  	if (!from_absolute) {
  		EPRINTF("failed to get absolute path of %s\n", from);
  		*err = -errno;
-Index: git/vhd/lib/vhd-util-key.c
-===================================================================
---- git.orig/vhd/lib/vhd-util-key.c
-+++ git/vhd/lib/vhd-util-key.c
-@@ -38,6 +38,7 @@
- 
- #include <openssl/evp.h>
+--- a/vhd/lib/vhd-util-key.c
++++ b/vhd/lib/vhd-util-key.c
+@@ -37,6 +37,7 @@
+ #include <sys/stat.h>
+ #include <dlfcn.h>
  
 +#include "icbinn.h"
  #include "libvhd.h"
  
- #define MAX_KEY_SIZE 512
-@@ -92,6 +93,58 @@ out:
- 	return err;
+ #define LIBBLOCKCRYPTO_NAME "libblockcrypto.so.0"
+@@ -176,18 +177,76 @@ out:
  }
  
-+static int
+ static int
 +vhd_util_read_key_icbinn(ICBINN *icb, const char *keypath, uint8_t *key,
 +		  size_t max_size, size_t *out_size)
 +{
@@ -1059,30 +1068,31 @@ Index: git/vhd/lib/vhd-util-key.c
 +	return err;
 +}
 +
- /*
-  * calculates keyhash by taking a SHA256 hash of @keyhash->nonce + key
-  */
-@@ -138,9 +191,15 @@ vhd_util_calculate_keyhash(struct vhd_ke
++static int
+ vhd_util_calculate_keyhash(struct vhd_keyhash *keyhash, const char *keypath, size_t key_bytes)
+ {
  	int err;
- 	size_t size;
- 	uint8_t key[MAX_KEY_SIZE];
+ 	size_t read_bytes;
+ 	uint8_t key[MAX_KEY_SIZE/8];
 +	ICBINN *icb = vhd_icbinn_key();
  
- 	size = 0;
--	err = vhd_util_read_key(keypath, key, sizeof(key), &size);
+ 	if (key_bytes == 0)
+ 		read_bytes = MAX_KEY_SIZE/8;
+ 	else
+ 		read_bytes = key_bytes;
+ 
+-	err = vhd_util_read_key(keypath, key, &read_bytes);
 +	if (icb) {
-+		err = vhd_util_read_key_icbinn(icb, keypath, key, sizeof(key), &size);
++		err = vhd_util_read_key_icbinn(icb, keypath, key, read_bytes, &read_bytes);
 +	}
 +	else {
-+		err = vhd_util_read_key(keypath, key, sizeof(key), &size);
++		err = vhd_util_read_key(keypath, key, &read_bytes);
 +	}
  	if (err) {
  		ERR("failed to read key: %d\n", err);
  		goto out;
-Index: git/vhd/lib/vhd-util-scan.c
-===================================================================
---- git.orig/vhd/lib/vhd-util-scan.c
-+++ git/vhd/lib/vhd-util-scan.c
+--- a/vhd/lib/vhd-util-scan.c
++++ b/vhd/lib/vhd-util-scan.c
 @@ -786,7 +786,7 @@ vhd_util_scan_open(vhd_context_t *vhd, s
  	else {
  		char __image_name[PATH_MAX];
@@ -1092,10 +1102,8 @@ Index: git/vhd/lib/vhd-util-scan.c
  		if (image->name)
  			image->name = strdup(__image_name);
  		if (!image->name) {
-Index: git/vhd/lib/vhd-util-snapshot.c
-===================================================================
---- git.orig/vhd/lib/vhd-util-snapshot.c
-+++ git/vhd/lib/vhd-util-snapshot.c
+--- a/vhd/lib/vhd-util-snapshot.c
++++ b/vhd/lib/vhd-util-snapshot.c
 @@ -173,7 +173,7 @@ vhd_util_snapshot(int argc, char **argv)
  		goto usage;
  	}
