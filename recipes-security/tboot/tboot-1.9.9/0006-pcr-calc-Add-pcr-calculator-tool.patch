@@ -313,7 +313,7 @@ new file mode 100644
 index 0000000..6369526
 --- /dev/null
 +++ b/pcr-calc/hash.c
-@@ -0,0 +1,234 @@
+@@ -0,0 +1,236 @@
 +/*
 + * hash.c: support functions for tb_hash_t type
 + *
@@ -498,27 +498,29 @@ index 0000000..6369526
 +
 +void print_hash(const tb_hash_t *hash, uint16_t hash_alg)
 +{
++    unsigned int hash_size = get_hash_size(hash_alg);
++    unsigned int i;
++    const uint8_t *b = (const uint8_t *)hash;
++
 +    if ( hash == NULL )
 +        return;
 +
-+    if ( hash_alg == TB_HALG_SHA1 ) {
-+        for ( unsigned int i = 0; i < SHA1_LENGTH; i++ ) {
-+            printf("%02x", hash->sha1[i]);
-+            if ( i < SHA1_LENGTH-1 )
-+                printf(" ");
-+        }
-+        printf("\n");
++    switch (hash_alg) {
++        case TB_HALG_SHA1_LG:
++        case TB_HALG_SHA1:
++        case TB_HALG_SHA256:
++        case TB_HALG_SM3:
++        case TB_HALG_SHA384:
++        case TB_HALG_SHA512:
++            break;
++        default:
++            return;
 +    }
-+    else if ( hash_alg == TB_HALG_SHA256 ) {
-+        for ( unsigned int i = 0; i < SHA256_LENGTH; i++ ) {
-+            printf("%02x", hash->sha256[i]);
-+            if ( i < SHA256_LENGTH-1 )
-+                printf(" ");
-+        }
-+        printf("\n");
-+    }
-+    else
-+        return;
++
++    for (i = 0; i < hash_size - 1; ++i)
++        printf("%02x ", b[i]);
++
++    printf("%02x\n", b[i]);
 +}
 +
 +void copy_hash(tb_hash_t *dest_hash, const tb_hash_t *src_hash,
@@ -913,7 +915,7 @@ new file mode 100644
 index 0000000..4abd6ad
 --- /dev/null
 +++ b/pcr-calc/module_hash.c
-@@ -0,0 +1,428 @@
+@@ -0,0 +1,436 @@
 +/*
 + *
 + * Copyright (c) 2015-2017 Daniel P. Smith
@@ -1237,33 +1239,42 @@ index 0000000..4abd6ad
 +int main(int argc, char *argv[])
 +{
 +	extern int optind;
-+	int opt;
++	int opt, rc;
 +	size_t mod_len;
 +	char *module_path = NULL;
 +	char *cmdline = NULL;
++	size_t cmdline_len;
 +	char *ext_str = NULL;
++	size_t ext_str_len;
 +	char *mod_buf = NULL;
 +	uint16_t hash_alg = TB_HALG_SHA1;
 +	uint8_t flags = NO_COMPRESSION;
 +	tb_hash_t mod_hash, ext_hash;
++	errno_t err;
 +
 +	while ((opt = getopt(argc, (char ** const)argv, "he:c:a:jz")) != -1) {
 +		switch (opt) {
 +			case 'c':
-+				cmdline = malloc(strlen(optarg) + 1);
++				cmdline_len = strlen(optarg);
++				cmdline = calloc(cmdline_len + 1, sizeof (char));
 +				if ( cmdline == NULL ) {
 +					printf("Out of memory\n");
 +					return 1;
 +				}
-+				strcpy(cmdline, optarg);
++				err = strcpy_s(cmdline, cmdline_len + 1, optarg);
++				if (err != EOK)
++					return 1;
 +			break;
 +			case 'e':
-+				ext_str = malloc(strlen(optarg) + 1);
++				ext_str_len = strlen(optarg);
++				ext_str = calloc(ext_str_len + 1, sizeof (char));
 +				if ( ext_str == NULL ) {
 +					printf("Out of memory\n");
 +					return 1;
 +				}
-+				strcpy(ext_str, optarg);
++				err = strcpy_s(ext_str, ext_str_len + 1, optarg);
++				if (err != EOK)
++					return 1;
 +			break;
 +#ifdef HAVE_BZIP
 +			case 'j':
@@ -1294,13 +1305,12 @@ index 0000000..4abd6ad
 +				free(cmdline);
 +				return 1;
 +			case 'a':
-+				if (!strcmp(optarg, "sha1")) {
-+					hash_alg = TB_HALG_SHA1;
-+				} else if(!strcmp(optarg, "sha256")) {
++				hash_alg = TB_HALG_SHA1;
++				err = strcmp_s(optarg, sizeof ("sha256"), "sha256", &rc);
++				if (err != EOK)
++					return 1;
++				if (!rc)
 +					hash_alg = TB_HALG_SHA256;
-+				} else {
-+					hash_alg = TB_HALG_SHA1;
-+				}
 +			break;
 +			default:
 +			break;
@@ -1347,7 +1357,7 @@ new file mode 100644
 index 0000000..5e638a0
 --- /dev/null
 +++ b/pcr-calc/pcr-calc.c
-@@ -0,0 +1,376 @@
+@@ -0,0 +1,375 @@
 +/*
 + *
 + * Copyright (c) 2017 Daniel P. Smith
@@ -1555,7 +1565,7 @@ index 0000000..5e638a0
 +int main(int argc, char *argv[]) {
 +	extern int optind;
 +	int opt, flags, mb_count = 0, evt_count = 0, ret = 0;
-+	tb_hash_t mb[20];
++	tb_hash_t mb[20] = { 0 };
 +	struct pcr_event evt[20];
 +	struct tpm *t = NULL;
 +	uint16_t alg_override = 0;
@@ -1690,25 +1700,25 @@ index 0000000..5e638a0
 +
 +	if (flags & FLAG_CURRENT) {
 +		tpm_print(t, t->alg);
-+		return 0;
++		goto out;
 +	}
 +
 +	if (flags & FLAG_LOG) {
 +		tpm_dump(t, t->alg);
-+		return 0;
++		goto out;
 +	}
 +
 +	if (flags & FLAG_DA) {
 +		if (!apply_da_policy(t, policy_file, pol_size, mb, mb_count, evt, evt_count)) {
 +			error_msg("failed applying DA policy.\n");
 +			ret = 1;
-+			goto out_destroy;
++			goto out;
 +		}
 +	} else {
 +		if (!apply_lg_policy(t, policy_file, pol_size, mb, mb_count, evt, evt_count)) {
 +			error_msg("failed applying LG policy.\n");
 +			ret = 1;
-+			goto out_destroy;
++			goto out;
 +		}
 +	}
 +
@@ -1717,11 +1727,10 @@ index 0000000..5e638a0
 +	else
 +		tpm_print(t, t->alg);
 +
-+	return 0;
-+
-+out_destroy:
-+	destroy_tpm(t);
 +out:
++	if (t != NULL)
++		destroy_tpm(t);
++
 +	return ret;
 +}
 diff --git a/pcr-calc/tb_policy.c b/pcr-calc/tb_policy.c
@@ -1867,7 +1876,7 @@ new file mode 100644
 index 0000000..fb7d501
 --- /dev/null
 +++ b/pcr-calc/tpm.c
-@@ -0,0 +1,423 @@
+@@ -0,0 +1,432 @@
 +/*
 + *
 + * Copyright (c) 2017 Daniel P. Smith
@@ -2023,13 +2032,13 @@ index 0000000..fb7d501
 +			    return NULL;
 +	}
 +
-+	t = malloc(sizeof(*t));
++	t = calloc(1, sizeof(*t));
 +	if (!t) {
 +		return NULL;
 +	}
 +
 +	t->version = version;
-+	t->banks = malloc(banks * sizeof(struct pcr_bank));
++	t->banks = calloc(banks, sizeof(struct pcr_bank));
 +	if (!t->banks) {
 +		free(t);
 +		return NULL;
@@ -2063,37 +2072,44 @@ index 0000000..fb7d501
 +
 +	bank = &t->banks[bnum];
 +
-+	if (t->version == TPM12) {
-+		tpm12_pcr_event_t *event = e;
++	switch (t->version) {
++		case TPM12: {
++			tpm12_pcr_event_t *event = e;
 +
-+		if (event->pcr_index == 255)
-+			return true;
-+
-+		if (event->pcr_index > 23)
-+			return false;
-+
-+		p = &bank->pcrs[event->pcr_index];
-+
-+		type = event->type;
-+		evt_hash = (tb_hash_t *) event->digest;
-+	} else {
-+		uint32_t pcr_num;
-+
-+		pcr_num = *((uint32_t *) e);
-+		if (pcr_num > 23) {
-+			if (pcr_num == 255)
++			if (event->pcr_index == 255)
 +				return true;
-+			else
++
++			if (event->pcr_index >= MAX_PCR)
 +				return false;
++
++			p = &bank->pcrs[event->pcr_index];
++
++			type = event->type;
++			evt_hash = (tb_hash_t *) event->digest;
++			break;
 +		}
++		case TPM20: {
++			uint32_t pcr_num;
 +
-+		p = &bank->pcrs[pcr_num];
++			pcr_num = *((uint32_t *) e);
++			if (pcr_num >= MAX_PCR) {
++				if (pcr_num == 255)
++					return true;
++				else
++					return false;
++			}
 +
-+		e += sizeof(uint32_t);
-+		type = *((uint32_t *) e);
++			p = &bank->pcrs[pcr_num];
 +
-+		e += sizeof(uint32_t);
-+		evt_hash = (tb_hash_t *) e;
++			e += sizeof(uint32_t);
++			type = *((uint32_t *) e);
++
++			e += sizeof(uint32_t);
++			evt_hash = (tb_hash_t *) e;
++			break;
++		}
++		default:
++			return false;
 +	}
 +
 +	if (!pcr_record_event(p, alg, type, evt_hash))
@@ -2234,6 +2250,7 @@ index 0000000..fb7d501
 +void tpm_print(struct tpm *t, uint16_t alg)
 +{
 +	int i,bnum = alg_to_bank(alg);
++	unsigned int hash_size = get_hash_size(alg);
 +	struct pcr_bank *bank;
 +	tb_hash_t null_hash;
 +
@@ -2248,8 +2265,8 @@ index 0000000..fb7d501
 +		int diff;
 +		errno_t err;
 +
-+		err = memcmp_s(&(bank->pcrs[i].value), sizeof(tb_hash_t),
-+				&null_hash, sizeof(tb_hash_t), &diff);
++		err = memcmp_s(&(bank->pcrs[i].value), hash_size,
++				&null_hash, hash_size, &diff);
 +		if (err) {
 +			error_msg("Invalid value in PCR%d.", i);
 +			break;
@@ -2265,6 +2282,7 @@ index 0000000..fb7d501
 +void tpm_dump(struct tpm *t, uint16_t alg)
 +{
 +	int i,bnum = alg_to_bank(alg);
++	unsigned int hash_size = get_hash_size(alg);
 +	struct pcr_bank *bank;
 +	tb_hash_t null_hash;
 +
@@ -2279,8 +2297,8 @@ index 0000000..fb7d501
 +		int diff;
 +		errno_t err;
 +
-+		err = memcmp_s(&(bank->pcrs[i].value), sizeof(tb_hash_t),
-+				&null_hash, sizeof(tb_hash_t), &diff);
++		err = memcmp_s(&(bank->pcrs[i].value), hash_size,
++				&null_hash, hash_size, &diff);
 +		if (err) {
 +			error_msg("Invalid value in PCR%d.", i);
 +			break;
@@ -2296,7 +2314,7 @@ new file mode 100644
 index 0000000..c482f3f
 --- /dev/null
 +++ b/pcr-calc/tpm.h
-@@ -0,0 +1,186 @@
+@@ -0,0 +1,185 @@
 +/*
 + * pcr.h: pcr definitions
 + *
@@ -2380,7 +2398,6 @@ index 0000000..c482f3f
 +struct tpm {
 +	uint8_t version;
 +	uint16_t alg;
-+	uint8_t num_banks;
 +	uint8_t active_banks;
 +	struct pcr_bank *banks;
 +};
@@ -2488,7 +2505,7 @@ new file mode 100644
 index 0000000..5d79ffb
 --- /dev/null
 +++ b/pcr-calc/util.c
-@@ -0,0 +1,167 @@
+@@ -0,0 +1,170 @@
 +/*
 + *
 + * Copyright (c) 2017 Daniel P. Smith
@@ -2533,6 +2550,7 @@ index 0000000..5d79ffb
 +#include <fcntl.h>
 +#include <unistd.h>
 +#include <limits.h>
++#include <safe_lib.h>
 +
 +#include "../include/hash.h"
 +#include "uuid.h"
@@ -2547,7 +2565,7 @@ index 0000000..5d79ffb
 +	unsigned char *buf = (unsigned char *)hash;
 +
 +	if (len == 1 && hexstr[0] == '0') {
-+		memset(hash, 0, sizeof(tb_hash_t));
++		memset_s(hash, sizeof(tb_hash_t), 0);
 +		return true;
 +	}
 +
@@ -2642,6 +2660,8 @@ index 0000000..5d79ffb
 +
 +	if (len >= PCREVT_BUF_LEN)
 +		return -1;
++
++	memset_s(&digest, sizeof (tb_hash_t), 0);
 +
 +	type = strtoul(s, &end, 0);
 +	if (type == ULONG_MAX)
