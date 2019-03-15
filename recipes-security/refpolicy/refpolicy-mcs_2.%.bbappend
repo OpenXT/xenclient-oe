@@ -55,15 +55,15 @@ SRC_URI += " \
     file://policy/modules/services/network-daemon.fc \
     file://policy/modules/services/network-daemon.if \
     file://policy/modules/services/network-daemon.te \
+    file://policy/modules/services/quark.fc \
+    file://policy/modules/services/quark.if \
+    file://policy/modules/services/quark.te \
     file://policy/modules/services/rpcproxy.fc \
     file://policy/modules/services/rpcproxy.if \
     file://policy/modules/services/rpcproxy.te \
     file://policy/modules/services/surfman.fc \
     file://policy/modules/services/surfman.if \
     file://policy/modules/services/surfman.te \
-    file://policy/modules/services/uid.fc \
-    file://policy/modules/services/uid.if \
-    file://policy/modules/services/uid.te \
     file://policy/modules/services/updatemgr.fc \
     file://policy/modules/services/updatemgr.if \
     file://policy/modules/services/updatemgr.te \
@@ -145,7 +145,6 @@ SRC_URI += " \
     file://patches/sysutils-interfaces.diff \
     file://patches/tcs-interfaces.diff \
     file://patches/tpmsetup-interfaces.diff \
-    file://patches/uid-interfaces.diff \
     file://patches/updatemgr-interfaces.diff \
     file://patches/vhdutils-interfaces.diff \
     file://patches/xc-files-interfaces.patch \
