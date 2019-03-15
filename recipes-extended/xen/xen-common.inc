@@ -1,5 +1,4 @@
 LIC_FILES_CHKSUM := "file://COPYING;md5=bbb4b1bdc2c3b6743da3c39d03249095"
-
 require xen-version.inc
 
 PV = "${XEN_PV}"
@@ -51,6 +50,7 @@ SRC_URI_append = " \
     file://tboot-xen-evtlog-support.patch \
     file://disable-cpuid-hle-rtm.patch \
     file://allow-stubdoms-cacheattr-control.patch \
+    file://add-xc-hypercall-page.patch \
     file://libxl-do-not-destroy-in-use-tapdevs.patch \
     file://libxl-syslog.patch \
     file://libxl-RFC-4of7-Add-stubdomain-version-tools-domain-build-info.patch \
@@ -104,6 +104,8 @@ PACKAGECONFIG =+ "hvm"
 
 S = "${WORKDIR}/git"
 
+TUNE_CCARGS := "${@oe.utils.str_filter_out('-msse3', '${TUNE_CCARGS}', d)}"
+
 #--
 # Override meta-virtualization's path to seabios and add ovmf:
 PACKAGECONFIG[hvm] = "--with-system-seabios="/usr/share/firmware/bios.bin" --with-system-ovmf="/usr/share/firmware/ovmf.bin",--disable-seabios,seabios ipxe vgabios ovmf,"
@@ -116,4 +118,11 @@ PACKAGECONFIG[hvm] = "--with-system-seabios="/usr/share/firmware/bios.bin" --wit
 
 deltask stubs
 deltask deploy
+
+do_configure_append() {
+    if [ ! -e ${STAGING_INCDIR}/bits/long-double-32.h ]; then
+        cp ${STAGING_INCDIR}/bits/long-double-64.h ${STAGING_INCDIR}/bits/long-double-32.h
+        cp ${STAGING_INCDIR}/gnu/stubs-64.h ${STAGING_INCDIR}/gnu/stubs-32.h
+    fi
+}
 #--
