@@ -27,6 +27,7 @@ SRC_URI += " \
     file://default-certs-dir.patch \
     file://always-use-psk-hash.patch \
     file://disable-show-password.patch \
+    file://remove-extra-const.patch \
 "
 SRC_URI[archive.md5sum] = "feaf2c8427d23924dde7de52ff4c5078"
 SRC_URI[archive.sha256sum] = "287301692224cc1bb20abe8bc52140461f565e58898a99daef11a188bb29b362"
