@@ -17,8 +17,6 @@ do_install_append() {
 PACKAGES =+ "${PN}-conf"
 RRECOMMENDS_${PN} += "${PN}-conf"
 
-# Only ${PN} expands in ${CONFFILES}_${PN}, so we have to hard code
-#CONFFILES_${PN}-conf += "${CONFFILES}_${PN}"
-CONFFILES_${PN}-conf += "$(sysconfdir}/rsyslog.conf"
-
-FILES_${PN}-conf = "${CONFFILES}_${PN}-conf"
+RSYSLOG_CONF = "${sysconfdir}/rsyslog.conf"
+CONFFILES_${PN}-conf += "${RSYSLOG_CONF}"
+FILES_${PN}-conf = "${RSYSLOG_CONF}"
