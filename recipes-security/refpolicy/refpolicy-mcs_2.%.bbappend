@@ -97,6 +97,7 @@ SRC_URI += " \
 "
 # Patches.
 SRC_URI += " \
+    file://patches/policy.booleans.diff \
     file://patches/remove-xml-doc-gen.patch \
     file://patches/Makefile.diff \
     file://patches/build.conf.diff \
