@@ -6,7 +6,8 @@ inherit allarch
 
 SRC_URI = "file://rsyslog.conf"
 
-RPROVIDES_$PN = "rsyslog-conf"
+RPROVIDES_${PN} = "rsyslog-conf"
+RCONFLICTS_${PN} = "rsyslog-conf"
 
 CONFFILES_${PN} = "${sysconfdir}/rsyslog.conf"
 
