@@ -1,6 +1,6 @@
 PR .= ".2"
 
-DEPENDS = "zlib enchant libsoup-2.4 curl libxml2 cairo libxslt libxt libidn gnutls \
+DEPENDS = "zlib libsoup-2.4 curl libxml2 cairo libxslt libxt libidn gnutls \
            gtk+ gstreamer1.0 gstreamer1.0-plugins-base flex-native gperf-native perl-native sqlite3 ${ICU_LIB}"
 DEPENDS += " ${@bb.utils.contains('DISTRO_FEATURES', 'opengl', 'virtual/libgl', '', d)}"
 

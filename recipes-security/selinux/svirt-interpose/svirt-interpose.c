@@ -16,6 +16,8 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
+#define _GNU_SOURCE
+
 #include <fcntl.h>
 #include <selinux/context.h>
 #include <selinux/selinux.h>
@@ -26,7 +28,7 @@
 #include <string.h>
 #include <syslog.h>
 #include <unistd.h>
-#include <xs.h>
+#include <xenstore.h>
 
 #define BUF_SIZE      256
 #define LOCAL_DOMAINS "/local/domain"

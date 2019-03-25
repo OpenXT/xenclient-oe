@@ -3,6 +3,8 @@ require xen-common.inc
 
 FILESEXTRAPATHS_prepend := "${THISDIR}/files:"
 
+XEN_TARGET_ARCH = "x86_64"
+
 SRC_URI_append = "\
     file://xenconsoled.initscript \
     file://xenstored.initscript \
@@ -13,6 +15,7 @@ PACKAGES += " \
     ${PN}-xenstored-c \
     ${PN}-libxentoolcore \
     ${PN}-libxentoolcore-dev \
+    ${PN}-xen-shim \
     "
 
 PACKAGES_remove = " \
@@ -38,6 +41,11 @@ PACKAGES_remove = " \
 
 PROVIDES =+ "${PN}-toolstack-headers"
 PROVIDES_${PN}-toolstack-headers = "${PN}-toolstack-headers"
+
+PROVIDES =+ "${PN}-xen-shim"
+PROVIDES_${PN}-xen-shim = "${PN}-xen-shim"
+
+INSANE_SKIP_${PN}-xen-shim = "arch"
 
 # OpenXT packages both the C and OCaml versions of XenStored.
 # This recipe packages the C daemon; xen-libxl packages the Ocaml one.
@@ -72,6 +80,11 @@ FILES_${PN}-libxentoolcore-dev = " \
     ${libdir}/libxentoolcore.so \
     ${datadir}/pkgconfig/xentoolcore.pc \
     "
+
+FILES_${PN}-xen-shim = "\
+    ${libdir}/xen/boot/xen-shim \
+    "
+
 INITSCRIPT_PACKAGES =+ "${PN}-console ${PN}-xenstored-c"
 INITSCRIPT_NAME_${PN}-console = "xenconsoled"
 INITSCRIPT_PARAMS_${PN}-console = "defaults 20"
@@ -94,22 +107,24 @@ pkg_prerm_${PN}-xenstored-c () {
 }
 
 do_compile() {
-    oe_runmake -C tools subdir-all-include
-    oe_runmake -C tools subdir-all-libs
-    oe_runmake -C tools subdir-all-libxc
-    oe_runmake -C tools subdir-all-flask
-    oe_runmake -C tools subdir-all-xenstore
-    oe_runmake -C tools subdir-all-misc
-    oe_runmake -C tools subdir-all-hotplug
-    oe_runmake -C tools subdir-all-xentrace
-    oe_runmake -C tools subdir-all-xenmon
-    oe_runmake -C tools subdir-all-console
-    oe_runmake -C tools subdir-all-xenstat
+    unset CFLAGS
+
+    oe_runmake CXX=/bin/false -C tools subdir-all-include
+    oe_runmake CXX=/bin/false -C tools subdir-all-libs
+    oe_runmake CXX=/bin/false -C tools subdir-all-libxc
+    oe_runmake CXX=/bin/false -C tools subdir-all-flask
+    oe_runmake CXX=/bin/false -C tools subdir-all-xenstore
+    oe_runmake CXX=/bin/false -C tools subdir-all-misc
+    oe_runmake CXX=/bin/false -C tools subdir-all-hotplug
+    oe_runmake CXX=/bin/false -C tools subdir-all-xentrace
+    oe_runmake CXX=/bin/false -C tools subdir-all-xenmon
+    oe_runmake CXX=/bin/false -C tools subdir-all-console
+    oe_runmake CXX=/bin/false -C tools subdir-all-xenstat
     # tools/firmware/Rules.mk: override XEN_TARGET_ARCH = x86_32
     # With a 32bit host targeting a 64bit machine, this will break passing -m32
     # -m64 and using the 64bit sysroot.
     if [ "${XEN_TARGET_ARCH}" = "${XEN_COMPILE_ARCH}" ]; then
-        oe_runmake -C tools subdir-all-firmware
+        oe_runmake CXX=/bin/false -C tools subdir-all-firmware
     fi
 }
 

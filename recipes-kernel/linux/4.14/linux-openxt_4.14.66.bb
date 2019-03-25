@@ -48,8 +48,6 @@ SRC_URI += "${KERNELORG_MIRROR}/linux/kernel/v${PV_MAJOR}.x/linux-${PV}.tar.xz;n
     file://xsa270.patch \
     file://defconfig \
     "
-SRC_URI_append_xenclient-dom0 = "file://efi-tables-for-dom0.patch;patch=1 \
-	"
 
 LIC_FILES_CHKSUM = "file://COPYING;md5=d7810fab7487fb0aad327b76f1be7cd7"
 SRC_URI[kernel.md5sum] = "2be54b83c5017a18179593048b47e9cb"

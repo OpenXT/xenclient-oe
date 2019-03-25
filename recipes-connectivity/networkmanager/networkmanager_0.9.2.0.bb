@@ -34,6 +34,7 @@ SRC_URI += " \
     file://auto-activate-connections.patch \
     file://linux3-compile.patch \
     file://remove-libgcrypt.patch \
+    file://use-correct-data-in-nl-cb.patch \
     file://gtk-doc.make \
     file://NetworkManager.conf \
     file://ac-wireless \

@@ -72,6 +72,10 @@ do_configure() {
     echo "FLASK_ENABLE := y" >> .config
 
     cp "${WORKDIR}/defconfig" "${B}/xen/.config"
+    #Define CONFIG_TXT_OP in the hypervisor build to export tboot evtlog data
+    #It's stubbed out for the pv-shim since it's not supported, but uses the
+    #same hypercall headers
+    echo "CONFIG_TXT_OP=y" >> "${B}/xen/.config"
 
     # do configure
     oe_runconf

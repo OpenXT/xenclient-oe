@@ -50,7 +50,7 @@ XSERVER = " \
 
 IMAGE_INSTALL = "\
     ${ROOTFS_PKGMANAGE} \
-    packagegroup-core-x11-xserver \
+    ${XSERVER} \
     modules \
     packagegroup-xenclient-common \
     packagegroup-xenclient-xfce-minimal \
