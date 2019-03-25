@@ -1,0 +1,70 @@
+################################################################################
+SHORT DESCRIPTION: 
+################################################################################
+Treat a vanishing backend as a request to close the front-end.
+
+################################################################################
+LONG DESCRIPTION: 
+################################################################################
+Usual scenario would be dom0 releaving netback responsibility to NDVM ending up
+to rmmod its backend module. Xenstore node would disapear and Xenbus switch to
+unknown state. We might as well consider it, on the frontend side (e.g, in
+UIVM) to be a close request, so the guest will be able to reconnect with the
+new backend in the service VM.
+
+################################################################################
+CHANGELOG 
+################################################################################
+Original author: Steve Meisner <steve.meisner@citrix.com>
+Port to 3.18: Eric Chanudet <chanudete@ainfosec.com>
+Modified by: Troy Crosley <crosleyt@ainfosec.com>
+Port to 4.14: Richard Turner <turnerr@ainfosec.com>
+Port to 4.19: Richard Turner <turnerr@ainfosec.com>
+
+################################################################################
+REMOVAL 
+################################################################################
+Supporting backend relocation would require some work in the current protocol
+without this patch.
+
+################################################################################
+UPSTREAM PLAN
+################################################################################
+None, this is an OpenXT work-around.
+
+################################################################################
+INTERNAL DEPENDENCIES 
+################################################################################
+Service VM PV backend.
+
+################################################################################
+PATCHES 
+################################################################################
+--- a/drivers/net/xen-netfront.c
++++ b/drivers/net/xen-netfront.c
+@@ -2019,11 +2019,24 @@ static void netback_changed(struct xenbu
+ 	case XenbusStateInitialised:
+ 	case XenbusStateReconfiguring:
+ 	case XenbusStateReconfigured:
++		break;
++
+ 	case XenbusStateUnknown:
++		/* if the backend vanishes from xenstore, close frontend */
++		if (!xenbus_exists(XBT_NIL, dev->otherend, "") &&
++		    (dev->state != XenbusStateUnknown)) {
++			dev_warn(&dev->dev,
++				"backend vanished, closing frontend\n");
++			if (dev->state != XenbusStateClosed)
++				xenbus_frontend_closed(dev);
++			netif_carrier_off(np->netdev);
++		}
+ 		break;
+ 
+ 	case XenbusStateInitWait:
+-		if (dev->state != XenbusStateInitialising)
++		/* allow reconnect if our state is either initialising, or closed */
++		if (dev->state != XenbusStateInitialising &&
++		    dev->state != XenbusStateClosed)
+ 			break;
+ 		if (xennet_connect(netdev) != 0)
+ 			break;

@@ -1,0 +1,116 @@
+################################################################################
+SHORT DESCRIPTION:
+################################################################################
+Force enable the Xen EFI init path for dom0.
+
+################################################################################
+LONG DESCRIPTION:
+################################################################################
+With our 32-bit dom0, it is difficult to get access to the EFI tables from
+OEM's like HP and Intel natively.  Xen already exposes a hypercall to present
+the EFI tables to a PV linux guest (ie. dom0).  This patch enables
+CONFIG_XEN_EFI (which normally requires CONFIG_X86_64) for our 32-bit dom0.
+
+The Xen EFI data is 64bit, so we need to switch efi_systab_xen to an explicit
+64bit efi_system_table_64_t for the 32bit Dom0.  The data returned from the
+hypercall is 32-bit addressable, the only unknown is whether the EFI tables
+themselves are 32-bit addressable. The EFI initialization code protects against
+this case by checking to see if each table is below 4GB in memory, and if not,
+it disables EFI.
+
+With the 64bit conversion, the casts make the runtime and boottime pointers
+into 64bit ~0 values.  This trips the "EFI data located above 4GB, disabling
+EFI." error in efi_systab_init.  Dropping the cast leaves them as 32bit which
+passes the check.
+
+While setup succeeds, EFI is disabled with:
+"efi: Setup done, disabling due to 32/64-bit mismatch"
+
+This allows the sysfs DMI and ACPI entries to be populated, which dmidecode,
+xcpmd, and get-config-key rely upon.
+
+################################################################################
+CHANGELOG
+################################################################################
+Original author: Chris Rogers <rogersc@ainfosec.com>
+Modified by:     Jason Andryuk <jandryuk@gmail.com>
+Port to 4.19: Richard Turner <turnerr@ainfosec.com>
+
+################################################################################
+REMOVAL
+################################################################################
+Once dom0 is 64-bit this patch can be removed.
+
+################################################################################
+UPSTREAM PLAN
+################################################################################
+None.
+
+################################################################################
+INTERNAL DEPENDENCIES
+################################################################################
+None.
+
+################################################################################
+PATCHES
+################################################################################
+
+--- a/drivers/xen/Kconfig
++++ b/drivers/xen/Kconfig
+@@ -334,7 +334,7 @@ config XEN_HAVE_PVMMU
+ 
+ config XEN_EFI
+ 	def_bool y
+-	depends on (ARM || ARM64 || X86_64) && EFI
++	depends on (ARM || ARM64 || X86) && EFI
+ 
+ config XEN_AUTO_XLATE
+ 	def_bool y
+--- a/arch/x86/xen/efi.c
++++ b/arch/x86/xen/efi.c
+@@ -30,7 +30,7 @@
+ 
+ static efi_char16_t vendor[100] __initdata;
+ 
+-static efi_system_table_t efi_systab_xen __initdata = {
++static efi_system_table_64_t efi_systab_xen __initdata = {
+ 	.hdr = {
+ 		.signature	= EFI_SYSTEM_TABLE_SIGNATURE,
+ 		.revision	= 0, /* Initialized later. */
+@@ -46,15 +46,15 @@ static efi_system_table_t efi_systab_xen
+ 	.con_out	= EFI_INVALID_TABLE_ADDR, /* Not used under Xen. */
+ 	.stderr_handle	= EFI_INVALID_TABLE_ADDR, /* Not used under Xen. */
+ 	.stderr		= EFI_INVALID_TABLE_ADDR, /* Not used under Xen. */
+-	.runtime	= (efi_runtime_services_t *)EFI_INVALID_TABLE_ADDR,
++	.runtime	= EFI_INVALID_TABLE_ADDR,
+ 						  /* Not used under Xen. */
+-	.boottime	= (efi_boot_services_t *)EFI_INVALID_TABLE_ADDR,
++	.boottime	= EFI_INVALID_TABLE_ADDR,
+ 						  /* Not used under Xen. */
+ 	.nr_tables	= 0,			  /* Initialized later. */
+ 	.tables		= EFI_INVALID_TABLE_ADDR  /* Initialized later. */
+ };
+ 
+-static efi_system_table_t __init *xen_efi_probe(void)
++static efi_system_table_64_t __init *xen_efi_probe(void)
+ {
+ 	struct xen_platform_op op = {
+ 		.cmd = XENPF_firmware_info,
+@@ -172,7 +172,7 @@ static enum efi_secureboot_mode xen_efi_
+ 
+ void __init xen_efi_init(void)
+ {
+-	efi_system_table_t *efi_systab_xen;
++	efi_system_table_64_t *efi_systab_xen;
+ 
+ 	efi_systab_xen = xen_efi_probe();
+ 
+@@ -182,7 +182,7 @@ void __init xen_efi_init(void)
+ 	strncpy((char *)&boot_params.efi_info.efi_loader_signature, "Xen",
+ 			sizeof(boot_params.efi_info.efi_loader_signature));
+ 	boot_params.efi_info.efi_systab = (__u32)__pa(efi_systab_xen);
+-	boot_params.efi_info.efi_systab_hi = (__u32)(__pa(efi_systab_xen) >> 32);
++	boot_params.efi_info.efi_systab_hi = (__u32)((__u64)__pa(efi_systab_xen) >> 32);
+ 
+ 	boot_params.secure_boot = xen_efi_get_secureboot();
+ 

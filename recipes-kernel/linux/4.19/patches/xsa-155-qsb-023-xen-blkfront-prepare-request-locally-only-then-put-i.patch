@@ -1,0 +1,136 @@
+################################################################################
+SHORT DESCRIPTION: 
+################################################################################
+QSB-023 (https://github.com/QubesOS/qubes-secpack/blob/master/QSBs/qsb-023-2015)
+XSA-155 additional patches for the Xen network and block frontends from Qubes
+OS Project.
+
+################################################################################
+LONG DESCRIPTION: 
+################################################################################
+Source: https://github.com/QubesOS/qubes-linux-kernel/tree/stable-3.18/patches.xen
+Patch: xsa155-linux318-0013-xen-blkfront-prepare-request-locally-only-then-put-i.patch 
+
+Do not reuse data which theoretically might be already modified by the
+backend. This is mostly about private copy of the request
+(info->shadow[id].req) - make sure the request saved there is really the
+one just filled.
+
+################################################################################
+PATCHES 
+################################################################################
+--- a/drivers/block/xen-blkfront.c
++++ b/drivers/block/xen-blkfront.c
+@@ -691,7 +691,8 @@ static void blkif_setup_extra_req(struct
+ static int blkif_queue_rw_req(struct request *req, struct blkfront_ring_info *rinfo)
+ {
+ 	struct blkfront_info *info = rinfo->dev_info;
+-	struct blkif_request *ring_req, *extra_ring_req = NULL;
++	struct blkif_request ring_req, extra_ring_req;
++	struct blkif_request *__ring_req, *__extra_ring_req = NULL;
+ 	unsigned long id, extra_id = NO_ASSOCIATED_ID;
+ 	bool require_extra_req = false;
+ 	int i;
+@@ -736,7 +737,8 @@ static int blkif_queue_rw_req(struct req
+ 	}
+ 
+ 	/* Fill out a communications ring structure. */
+-	id = blkif_ring_get_request(rinfo, req, &ring_req);
++	id = blkif_ring_get_request(rinfo, req, &__ring_req);
++	ring_req = *__ring_req;
+ 
+ 	num_sg = blk_rq_map_sg(req->q, req, rinfo->shadow[id].sg);
+ 	num_grant = 0;
+@@ -756,16 +758,16 @@ static int blkif_queue_rw_req(struct req
+ 		 * BLKIF_OP_WRITE
+ 		 */
+ 		BUG_ON(req_op(req) == REQ_OP_FLUSH || req->cmd_flags & REQ_FUA);
+-		ring_req->operation = BLKIF_OP_INDIRECT;
+-		ring_req->u.indirect.indirect_op = rq_data_dir(req) ?
++		ring_req.operation = BLKIF_OP_INDIRECT;
++		ring_req.u.indirect.indirect_op = rq_data_dir(req) ?
+ 			BLKIF_OP_WRITE : BLKIF_OP_READ;
+-		ring_req->u.indirect.sector_number = (blkif_sector_t)blk_rq_pos(req);
+-		ring_req->u.indirect.handle = info->handle;
+-		ring_req->u.indirect.nr_segments = num_grant;
++		ring_req.u.indirect.sector_number = (blkif_sector_t)blk_rq_pos(req);
++		ring_req.u.indirect.handle = info->handle;
++		ring_req.u.indirect.nr_segments = num_grant;
+ 	} else {
+-		ring_req->u.rw.sector_number = (blkif_sector_t)blk_rq_pos(req);
+-		ring_req->u.rw.handle = info->handle;
+-		ring_req->operation = rq_data_dir(req) ?
++		ring_req.u.rw.sector_number = (blkif_sector_t)blk_rq_pos(req);
++		ring_req.u.rw.handle = info->handle;
++		ring_req.operation = rq_data_dir(req) ?
+ 			BLKIF_OP_WRITE : BLKIF_OP_READ;
+ 		if (req_op(req) == REQ_OP_FLUSH || req->cmd_flags & REQ_FUA) {
+ 			/*
+@@ -776,25 +778,25 @@ static int blkif_queue_rw_req(struct req
+ 			 * since it is guaranteed ordered WRT previous writes.)
+ 			 */
+ 			if (info->feature_flush && info->feature_fua)
+-				ring_req->operation =
++				ring_req.operation =
+ 					BLKIF_OP_WRITE_BARRIER;
+ 			else if (info->feature_flush)
+-				ring_req->operation =
++				ring_req.operation =
+ 					BLKIF_OP_FLUSH_DISKCACHE;
+ 			else
+-				ring_req->operation = 0;
++				ring_req.operation = 0;
+ 		}
+-		ring_req->u.rw.nr_segments = num_grant;
++		ring_req.u.rw.nr_segments = num_grant;
+ 		if (unlikely(require_extra_req)) {
+-			extra_id = blkif_ring_get_request(rinfo, req,
+-							  &extra_ring_req);
++			extra_id = blkif_ring_get_request(rinfo, req, &__extra_ring_req);
++			extra_ring_req = *__extra_ring_req;
+ 			/*
+ 			 * Only the first request contains the scatter-gather
+ 			 * list.
+ 			 */
+ 			rinfo->shadow[extra_id].num_sg = 0;
+ 
+-			blkif_setup_extra_req(ring_req, extra_ring_req);
++			blkif_setup_extra_req(&ring_req, &extra_ring_req);
+ 
+ 			/* Link the 2 requests together */
+ 			rinfo->shadow[extra_id].associated_id = id;
+@@ -802,12 +804,12 @@ static int blkif_queue_rw_req(struct req
+ 		}
+ 	}
+ 
+-	setup.ring_req = ring_req;
++	setup.ring_req = &ring_req;
+ 	setup.id = id;
+ 
+ 	setup.require_extra_req = require_extra_req;
+ 	if (unlikely(require_extra_req))
+-		setup.extra_ring_req = extra_ring_req;
++		setup.extra_ring_req = &extra_ring_req;
+ 
+ 	for_each_sg(rinfo->shadow[id].sg, sg, num_sg, i) {
+ 		BUG_ON(sg->offset + sg->length > PAGE_SIZE);
+@@ -829,10 +831,16 @@ static int blkif_queue_rw_req(struct req
+ 	if (setup.segments)
+ 		kunmap_atomic(setup.segments);
+ 
++	/* make the request available to the backend */
++	*__ring_req = ring_req;
++
+ 	/* Keep a private copy so we can reissue requests when recovering. */
+-	rinfo->shadow[id].req = *ring_req;
+-	if (unlikely(require_extra_req))
+-		rinfo->shadow[extra_id].req = *extra_ring_req;
++	rinfo->shadow[id].req = ring_req;
++
++	if (unlikely(require_extra_req)) {
++		rinfo->shadow[extra_id].req = extra_ring_req;
++		*__extra_ring_req = extra_ring_req;
++	}
+ 
+ 	if (new_persistent_gnts)
+ 		gnttab_free_grant_references(setup.gref_head);

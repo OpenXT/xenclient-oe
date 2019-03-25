@@ -1,0 +1,25 @@
+--- a/drivers/char/tpm/tpm_tis.c
++++ b/drivers/char/tpm/tpm_tis.c
+@@ -205,8 +205,20 @@ static int tpm_tis_init(struct device *d
+ 		return -ENOMEM;
+ 
+ 	phy->iobase = devm_ioremap_resource(dev, &tpm_info->res);
+-	if (IS_ERR(phy->iobase))
+-		return PTR_ERR(phy->iobase);
++	if (IS_ERR(phy->iobase)) {
++		/* This region is only reported in one of the SSDT, not the
++		 * e820. On a system using a 32bit kernel and enough memory,
++		 * the kernel might end up making this region a RAM buffer,
++		 * disabling the TPM.
++		 * devm_ioremap() was used (prior 4.6?), avoiding the
++		 * devm_request_mem_region() that currently fails under the
++		 * mentioned circumstances. Fallback to that until a better fix
++		 * is found.
++		 */
++		phy->iobase = devm_ioremap(dev, tpm_info->res.start, resource_size(&tpm_info->res));
++		if (IS_ERR(phy->iobase))
++			return PTR_ERR(phy->iobase);
++	}
+ 
+ 	if (interrupts)
+ 		irq = tpm_info->irq;
