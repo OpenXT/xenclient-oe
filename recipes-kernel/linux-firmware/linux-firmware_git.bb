@@ -64,7 +64,7 @@ LIC_FILES_CHKSUM = "\
     file://LICENCE.OLPC;md5=5b917f9d8c061991be4f6f5f108719cd \
     file://LICENCE.phanfw;md5=954dcec0e051f9409812b561ea743bfa \
     file://LICENCE.qat_firmware;md5=9e7d8bea77612d7cc7d9e9b54b623062 \
-    file://LICENCE.qla2xxx;md5=f5ce8529ec5c17cb7f911d2721d90e91 \
+    file://LICENCE.qla2xxx;md5=505855e921b75f1be4a437ad9b79dff0 \
     file://LICENCE.r8a779x_usb3;md5=4c1671656153025d7076105a5da7e498 \
     file://LICENCE.ralink_a_mediatek_company_firmware;md5=728f1a85fd53fd67fa8d7afb080bc435 \
     file://LICENCE.ralink-firmware.txt;md5=ab2c269277c45476fb449673911a2dfd \
@@ -77,12 +77,12 @@ LIC_FILES_CHKSUM = "\
     file://LICENCE.xc4000;md5=0ff51d2dc49fce04814c9155081092f0 \
     file://LICENCE.xc5000;md5=1e170c13175323c32c7f4d0998d53f66 \
     file://LICENCE.xc5000c;md5=12b02efa3049db65d524aeb418dd87ca \
-    file://LICENSE.amd-ucode;md5=3a0de451253cc1edbf30a3c621effee3 \
+    file://LICENSE.amd-ucode;md5=3c5399dc9148d7f0e1f41e34b69cf14f \
     file://LICENSE.dib0700;md5=f7411825c8a555a1a3e5eab9ca773431 \
-    file://LICENSE.radeon;md5=69612f4f7b141a97659cb1d609a1bde2 \
+    file://LICENSE.radeon;md5=68ec28bacb3613200bca44f404c69b16 \
     file://LICENCE.siano;md5=4556c1bf830067f12ca151ad953ec2a5 \
     file://LICENSE.i915;md5=2b0b2e0d20984affd4490ba2cba02570 \
-    file://WHENCE;beginline=1316;endline=1325;md5=6b6994826e3a4a9c194af28d3b06ed87 \
+    file://WHENCE;beginline=1416;endline=1425;md5=6b6994826e3a4a9c194af28d3b06ed87 \
 "
 
 # These are not common licenses, set NO_GENERIC_LICENSE for them
@@ -127,7 +127,7 @@ NO_GENERIC_LICENSE[Firmware-siano] = "LICENCE.siano"
 NO_GENERIC_LICENSE[Firmware-i915] = "LICENSE.i915"
 NO_GENERIC_LICENSE[WHENCE] = "WHENCE"
 
-SRCREV = "6f5257c6299414b89d84145eedd37a6ead47b25b"
+SRCREV = "7bc246451318b3536d9bfd3c4e46d541a9831b33"
 
 PE = "1"
 PV = "0.0+git${SRCPV}"
@@ -137,6 +137,9 @@ SRC_URI = "git://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware
 S = "${WORKDIR}/git"
 
 inherit allarch update-alternatives
+
+# OE started complaining about the architecture of the binaries for some reason
+INSANE_SKIP = "arch"
 
 CLEANBROKEN = "1"
 
