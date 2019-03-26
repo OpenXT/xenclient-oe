@@ -1,13 +1,13 @@
-SRC_URI[md5sum] = "a29ea5b5f0b9fa7ea64ec99c06266f47"
-SRC_URI[sha256sum] = "6949de179a44ed99f57649181e7ddd0349f464fd488e0d4293953931355ef296"
+SRC_URI[md5sum] = "ac695c7cd7b615ce069e6623b55f07db"
+SRC_URI[sha256sum] = "5798b1f39267f54aacbb374a826984ea6b3bf08b0ffedfc1e71516dfedcd5bf6"
 DESCRIPTION = "Convert XKB keymap to console keymap"
 LICENSE = "GPLv2"
-LIC_FILES_CHKSUM="file://COPYRIGHT;md5=e79b11599ed4d3eec05286ba3eaedd62"
+LIC_FILES_CHKSUM="file://COPYRIGHT;md5=49cab1cfd397b014807c5b2bcc63e04f"
 RDEPENDS_${PN} = "perl-native"
 
 # Don't bother building the whole package. We only want the ckbcomp script.
 
-SRC_URI = "${DEBIAN_MIRROR}/main/c/console-setup/console-setup_${PV}.tar.gz"
+SRC_URI = "${DEBIAN_MIRROR}/main/c/console-setup/console-setup_${PV}.tar.xz"
 
 S = "${WORKDIR}/console-setup-${PV}"
 
