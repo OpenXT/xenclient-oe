@@ -3,9 +3,12 @@ FILESEXTRAPATHS_prepend := "${THISDIR}/ovmf:"
 SRC_URI = "git://github.com/tianocore/edk2.git;branch=master \
     file://0002-ovmf-update-path-to-native-BaseTools.patch \
     file://0003-BaseTools-makefile-adjust-to-build-in-under-bitbake.patch \
+    http://downloadmirror.intel.com/19186/eng/PREBOOT.EXE;unpack=0;name=PREBOOT \
     "
 
 SRCREV="dd4cae4d82c7477273f3da455084844db5cca0c0"
+
+SRC_URI[PREBOOT.sha256sum] = "022c40b2420d275702f82b61390b4d49763e885a87c789b5bdef5dc3d135a39d"
 
 FILES_${PN} += "\
     /usr/share/firmware/ovmf.bin \
@@ -17,6 +20,9 @@ FILES_${PN} += "\
 do_compile_class-target() {
     export LFLAGS="${LDFLAGS}"
     OVMF_ARCH="X64"
+
+    mkdir -p ${S}/Intel3.5/EFIX64/
+    /usr/bin/unzip -p ${WORKDIR}/PREBOOT.EXE APPS/EFI/EFIx64/E3522X2.EFI > ${S}/Intel3.5/EFIX64/E3522X2.EFI
 
     # The build for the target uses BaseTools/Conf/tools_def.template
     # from ovmf-native to find the compiler, which depends on
@@ -39,7 +45,7 @@ do_compile_class-target() {
 
     bbnote "Building without Secure Boot."
     rm -rf ${S}/Build/Ovmf$OVMF_DIR_SUFFIX
-    ${S}/OvmfPkg/build.sh $PARALLEL_JOBS -a $OVMF_ARCH -b RELEASE -t ${FIXED_GCCVER}
+    ${S}/OvmfPkg/build.sh $PARALLEL_JOBS -a $OVMF_ARCH -b RELEASE -t ${FIXED_GCCVER} -D E1000_ENABLE
     ln ${build_dir}/FV/OVMF.fd ${WORKDIR}/ovmf/ovmf.fd
 }
 
