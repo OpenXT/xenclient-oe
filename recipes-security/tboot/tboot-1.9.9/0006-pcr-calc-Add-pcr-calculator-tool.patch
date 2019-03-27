@@ -64,7 +64,7 @@ new file mode 100644
 index 0000000..e49102d
 --- /dev/null
 +++ b/pcr-calc/Makefile
-@@ -0,0 +1,70 @@
+@@ -0,0 +1,73 @@
 +# Copyright (c) 2006-2010, Intel Corporation
 +# All rights reserved.
 +
@@ -78,7 +78,7 @@ index 0000000..e49102d
 +
 +include $(ROOTDIR)/Config.mk
 +
-+TARGETS := pcr-calc module_hash
++TARGETS := pcr-calc module_hash acmmatch
 +
 +CFLAGS += -D_LARGEFILE64_SOURCE
 +
@@ -127,11 +127,14 @@ index 0000000..e49102d
 +BUILD_DEPS := $(ROOTDIR)/Config.mk $(CURDIR)/Makefile
 +
 +
-+pcr-calc : eventlog.o pcr-calc.o tpm.o util.o hash.o tb_policy.o
++pcr-calc : acm.o eventlog.o pcr-calc.o tpm.o util.o hash.o tb_policy.o
 +	$(CC) $(CFLAGS) $(LDFLAGS) $^ $(LIBS) -o $@
 +
 +module_hash : module_hash.o hash.o
 +	$(CC) $(CFLAGS) $(LDFLAGS) $^ $(LIBS) $(BZIP_LIB) -o $@
++
++acmmatch : acm.o acmmatch.o platform.o
++	$(CC) $(CFLAGS) $(LDFLAGS) $^ $(LIBS) -o $@
 +
 +%.o : %.c $(BUILD_DEPS)
 +	$(CC) $(CFLAGS) -DNO_TBOOT_LOGLVL -c $< -o $@
@@ -140,7 +143,7 @@ new file mode 100644
 index 0000000..b232449
 --- /dev/null
 +++ b/pcr-calc/eventlog.c
-@@ -0,0 +1,119 @@
+@@ -0,0 +1,292 @@
 +/*
 + *
 + * Copyright (c) 2017 Daniel P. Smith
@@ -178,13 +181,186 @@ index 0000000..b232449
 +#include <stdio.h>
 +#include <stdint.h>
 +#include <stdbool.h>
++#include <openssl/evp.h>
 +
 +#include "uuid.h"
 +#include "heap.h"
++#include "acm.h"
 +#include "tpm.h"
-+
++#include "eventlog.h"
 +
 +#define error_msg(fmt, ...)         fprintf(stderr, fmt, ##__VA_ARGS__)
++
++static int get_ossinit_caps_tboot_common(const txt_caps_t *acm_caps,
++		const txt_caps_t *mle_hdr, const txt_caps_t *mask,
++		uint8_t tpmver, txt_caps_t *caps)
++{
++	txt_caps_t ossinit_data_caps;
++
++	ossinit_data_caps._raw = mle_hdr->_raw & ~mask->_raw;
++
++	if (acm_caps->rlp_wake_monitor)
++		ossinit_data_caps.rlp_wake_monitor = 1;
++	else if (acm_caps->rlp_wake_getsec)
++		ossinit_data_caps.rlp_wake_getsec = 1;
++	else
++		return -1;
++
++	/* TODO: Can be forced on cmdline too. */
++	switch (tpmver) {
++		case TPM12:
++			ossinit_data_caps.tcg_event_log_format = 0;
++			break;
++		case TPM20:
++			/* TODO: Can be forced to legacy on cmdline. */
++			if (acm_caps->tcg_event_log_format)
++				ossinit_data_caps.tcg_event_log_format = 1;
++			break;
++		default:
++			return -1;
++	}
++
++	/* XXX: Forced to 0 for now (and masked anyway). May change? */
++	ossinit_data_caps.ecx_pgtbl = 0;
++
++	switch (tpmver) {
++		case TPM12:
++			ossinit_data_caps.pcr_map_no_legacy = 1;
++			ossinit_data_caps.pcr_map_da = 0;
++			/* TODO: Has to be enabled on cmdline (pcr_map). */
++			if (acm_caps->pcr_map_da && 0)
++				ossinit_data_caps.pcr_map_da = 1;
++			else if (!acm_caps->pcr_map_no_legacy)
++				ossinit_data_caps.pcr_map_no_legacy = 0;
++			else if (acm_caps->pcr_map_da)
++				ossinit_data_caps.pcr_map_da = 1;
++			else
++				return -1;
++			break;
++		case TPM20:
++			/* PCR mapping selection MUST be zero in TPM2.0 mode
++			 * since D/A mapping is the only supported by TPM2.0 */
++			ossinit_data_caps.pcr_map_no_legacy = 0;
++			ossinit_data_caps.pcr_map_da = 0;
++			break;
++		default:
++			return -1;
++	}
++
++	caps->_raw = ossinit_data_caps._raw;
++
++	return 0;
++}
++
++/* See tboot/txt/txt.c, include/mle.h */
++static int get_ossinit_caps_tboot196(const struct acm *acm, uint8_t tpmver,
++		txt_caps_t *caps)
++{
++	const txt_caps_t mle_hdr = {
++		.rlp_wake_getsec = 1,
++		.rlp_wake_monitor = 1,
++		.ecx_pgtbl = 1,
++		.stm = 0,
++		.pcr_map_no_legacy = 0,
++		.pcr_map_da = 1,
++		.platform_type = 0,
++		.max_phy_addr = 0,
++		.tcg_event_log_format = 1,
++		.reserved1 = 0,
++	};  /* MLE_HDR_CAPS: 0x227 */
++	const txt_caps_t mask = {
++		.rlp_wake_getsec = 1,
++		.rlp_wake_monitor = 1,
++		.ecx_pgtbl = 0,
++		.stm = 0,
++		.pcr_map_no_legacy = 0,
++		.pcr_map_da = 1,
++		.platform_type = 0,
++		.max_phy_addr = 0,
++		.tcg_event_log_format = 0,
++		.reserved1 = 0,
++	};
++
++	return get_ossinit_caps_tboot_common(&acm->infotable->capabilities,
++			&mle_hdr, &mask, tpmver, caps);
++}
++
++/* See tboot/txt/txt.c, include/mle.h */
++/* Since 1.9.6: tcg_event_log_format is now masked before processing, so the
++ * value from the MLE header defined in TBoot is ignored. */
++static int get_ossinit_caps_tboot199(const struct acm *acm, uint8_t tpmver,
++		txt_caps_t *caps)
++{
++	const txt_caps_t mle_hdr = {
++		.rlp_wake_getsec = 1,
++		.rlp_wake_monitor = 1,
++		.ecx_pgtbl = 1,
++		.stm = 0,
++		.pcr_map_no_legacy = 0,
++		.pcr_map_da = 1,
++		.platform_type = 0,
++		.max_phy_addr = 0,
++		.tcg_event_log_format = 1,
++		.reserved1 = 0,
++	};  /* MLE_HDR_CAPS: 0x227 */
++	const txt_caps_t mask = {
++		.rlp_wake_getsec = 1,
++		.rlp_wake_monitor = 1,
++		.ecx_pgtbl = 0,
++		.stm = 0,
++		.pcr_map_no_legacy = 0,
++		.pcr_map_da = 1,
++		.platform_type = 0,
++		.max_phy_addr = 0,
++		.tcg_event_log_format = 1,
++		.reserved1 = 0,
++	};
++
++	return get_ossinit_caps_tboot_common(&acm->infotable->capabilities,
++			&mle_hdr, &mask, tpmver, caps);
++}
++
++static int event_ossinit_data_cap_hash(const struct acm *acm, uint16_t alg,
++		uint8_t tpmver, tb_version_t tbver, tb_hash_t *hash)
++{
++	txt_caps_t caps;
++	int rc;
++
++	switch (tbver) {
++		case TB_196:
++			rc = get_ossinit_caps_tboot196(acm, tpmver, &caps);
++			break;
++		case TB_199:
++			rc = get_ossinit_caps_tboot199(acm, tpmver, &caps);
++			break;
++		default:
++			rc = -1;
++			break;
++	}
++
++	if (!hash_buffer((unsigned char *)&caps, sizeof (caps), hash, alg))
++		return -1;
++
++	return rc;
++}
++
++int emulate_event(const struct acm *acm, uint16_t alg,
++		uint8_t tpmver, tb_version_t tbver, struct pcr_event *evt)
++{
++	int rc;
++
++	switch (evt->type) {
++		case EVTYPE_OSSINITDATA_CAP_HASH:
++			rc = event_ossinit_data_cap_hash(acm, alg, tpmver, tbver,
++					&evt->digest);
++			break;
++		default:
++			rc = -1;
++			break;
++	}
++
++	return rc;
++}
 +
 +struct tpm *parse_tpm12_log(char *buffer, size_t size)
 +{
@@ -265,7 +441,7 @@ new file mode 100644
 index 0000000..7329125
 --- /dev/null
 +++ b/pcr-calc/eventlog.h
-@@ -0,0 +1,42 @@
+@@ -0,0 +1,60 @@
 +/*
 + * eventlog.h: TXT TPM event log definitions
 + *
@@ -304,6 +480,24 @@ index 0000000..7329125
 +#ifndef __EVENTLOG_H__
 +#define __EVENTLOG_H__
 +
++typedef enum {
++	EVTYPE_BASE                 = 0x400,
++	EVTYPE_PCRMAPPING           = EVTYPE_BASE + 1,
++	EVTYPE_HASH_START           = EVTYPE_BASE + 2,
++	EVTYPE_MLE_HASH             = EVTYPE_BASE + 4,
++	EVTYPE_BIOSAC_REG_DATA      = EVTYPE_BASE + 10,
++	EVTYPE_CPU_SCRTM_STAT       = EVTYPE_BASE + 11,
++	EVTYPE_LCP_CONTROL_HASH     = EVTYPE_BASE + 12,
++	EVTYPE_ELEMENTS_HASH        = EVTYPE_BASE + 13,
++	EVTYPE_STM_HASH             = EVTYPE_BASE + 14,
++	EVTYPE_OSSINITDATA_CAP_HASH = EVTYPE_BASE + 15,
++	EVTYPE_SINIT_PUBKEY_HASH    = EVTYPE_BASE + 16,
++	EVTYPE_LCP_HASH             = EVTYPE_BASE + 17,
++} txt_event_type_t;
++
++int emulate_event(const struct acm *acm, uint16_t alg, uint8_t tpmver,
++	tb_version_t tbver, struct pcr_event *evt);
++
 +struct tpm *parse_tpm12_log(char *buffer, size_t size);
 +struct tpm *parse_tpm20_log(char *buffer, size_t size);
 +
@@ -313,7 +507,7 @@ new file mode 100644
 index 0000000..6369526
 --- /dev/null
 +++ b/pcr-calc/hash.c
-@@ -0,0 +1,234 @@
+@@ -0,0 +1,236 @@
 +/*
 + * hash.c: support functions for tb_hash_t type
 + *
@@ -498,27 +692,29 @@ index 0000000..6369526
 +
 +void print_hash(const tb_hash_t *hash, uint16_t hash_alg)
 +{
++    unsigned int hash_size = get_hash_size(hash_alg);
++    unsigned int i;
++    const uint8_t *b = (const uint8_t *)hash;
++
 +    if ( hash == NULL )
 +        return;
 +
-+    if ( hash_alg == TB_HALG_SHA1 ) {
-+        for ( unsigned int i = 0; i < SHA1_LENGTH; i++ ) {
-+            printf("%02x", hash->sha1[i]);
-+            if ( i < SHA1_LENGTH-1 )
-+                printf(" ");
-+        }
-+        printf("\n");
++    switch (hash_alg) {
++        case TB_HALG_SHA1_LG:
++        case TB_HALG_SHA1:
++        case TB_HALG_SHA256:
++        case TB_HALG_SM3:
++        case TB_HALG_SHA384:
++        case TB_HALG_SHA512:
++            break;
++        default:
++            return;
 +    }
-+    else if ( hash_alg == TB_HALG_SHA256 ) {
-+        for ( unsigned int i = 0; i < SHA256_LENGTH; i++ ) {
-+            printf("%02x", hash->sha256[i]);
-+            if ( i < SHA256_LENGTH-1 )
-+                printf(" ");
-+        }
-+        printf("\n");
-+    }
-+    else
-+        return;
++
++    for (i = 0; i < hash_size - 1; ++i)
++        printf("%02x ", b[i]);
++
++    printf("%02x\n", b[i]);
 +}
 +
 +void copy_hash(tb_hash_t *dest_hash, const tb_hash_t *src_hash,
@@ -913,7 +1109,7 @@ new file mode 100644
 index 0000000..4abd6ad
 --- /dev/null
 +++ b/pcr-calc/module_hash.c
-@@ -0,0 +1,428 @@
+@@ -0,0 +1,436 @@
 +/*
 + *
 + * Copyright (c) 2015-2017 Daniel P. Smith
@@ -1237,33 +1433,42 @@ index 0000000..4abd6ad
 +int main(int argc, char *argv[])
 +{
 +	extern int optind;
-+	int opt;
++	int opt, rc;
 +	size_t mod_len;
 +	char *module_path = NULL;
 +	char *cmdline = NULL;
++	size_t cmdline_len;
 +	char *ext_str = NULL;
++	size_t ext_str_len;
 +	char *mod_buf = NULL;
 +	uint16_t hash_alg = TB_HALG_SHA1;
 +	uint8_t flags = NO_COMPRESSION;
 +	tb_hash_t mod_hash, ext_hash;
++	errno_t err;
 +
 +	while ((opt = getopt(argc, (char ** const)argv, "he:c:a:jz")) != -1) {
 +		switch (opt) {
 +			case 'c':
-+				cmdline = malloc(strlen(optarg) + 1);
++				cmdline_len = strlen(optarg);
++				cmdline = calloc(cmdline_len + 1, sizeof (char));
 +				if ( cmdline == NULL ) {
 +					printf("Out of memory\n");
 +					return 1;
 +				}
-+				strcpy(cmdline, optarg);
++				err = strcpy_s(cmdline, cmdline_len + 1, optarg);
++				if (err != EOK)
++					return 1;
 +			break;
 +			case 'e':
-+				ext_str = malloc(strlen(optarg) + 1);
++				ext_str_len = strlen(optarg);
++				ext_str = calloc(ext_str_len + 1, sizeof (char));
 +				if ( ext_str == NULL ) {
 +					printf("Out of memory\n");
 +					return 1;
 +				}
-+				strcpy(ext_str, optarg);
++				err = strcpy_s(ext_str, ext_str_len + 1, optarg);
++				if (err != EOK)
++					return 1;
 +			break;
 +#ifdef HAVE_BZIP
 +			case 'j':
@@ -1294,13 +1499,12 @@ index 0000000..4abd6ad
 +				free(cmdline);
 +				return 1;
 +			case 'a':
-+				if (!strcmp(optarg, "sha1")) {
-+					hash_alg = TB_HALG_SHA1;
-+				} else if(!strcmp(optarg, "sha256")) {
++				hash_alg = TB_HALG_SHA1;
++				err = strcmp_s(optarg, sizeof ("sha256"), "sha256", &rc);
++				if (err != EOK)
++					return 1;
++				if (!rc)
 +					hash_alg = TB_HALG_SHA256;
-+				} else {
-+					hash_alg = TB_HALG_SHA1;
-+				}
 +			break;
 +			default:
 +			break;
@@ -1347,7 +1551,7 @@ new file mode 100644
 index 0000000..5e638a0
 --- /dev/null
 +++ b/pcr-calc/pcr-calc.c
-@@ -0,0 +1,376 @@
+@@ -0,0 +1,421 @@
 +/*
 + *
 + * Copyright (c) 2017 Daniel P. Smith
@@ -1396,6 +1600,7 @@ index 0000000..5e638a0
 +#include "../include/hash.h"
 +#include "uuid.h"
 +#include "tb_policy.h"
++#include "acm.h"
 +#include "tpm.h"
 +#include "util.h"
 +#include "eventlog.h"
@@ -1428,12 +1633,14 @@ index 0000000..5e638a0
 +		"\t-a alg Alogrithm: select what hash alogrithm to use.\n"
 +		"\t-p policy_file Tboot Policy: the policy that was/will be used.\n"
 +		"\t-m hash_str Multiboot Module: include module hash (MLE first).\n"
-+		"\t-e evt_type:hash_str Override PCR events type found in the logs with the provided value.\n");
++		"\t-e evt_type:<hash_str>|emulate Override PCR events type found in the logs with the provided value or emulate the value entirely (emulation requires TBoot version and ACM to be provided).\n"
++		"\t-F file Use the given file as tpm event log (replace /sys/kernel/security/txt/*_binary_evtlog).\n"
++		"\t-A acm-path Path to the ACM that will be used to emulate events for PCR calculations (see -e).\n"
++		"\t-V tboot-version TBoot version targeted to emulate events for PCR calculations (see -e)\n.");
 +}
 +
 +static bool apply_lg_policy(struct tpm *t, tb_policy_t *policy, size_t pol_size,
-+			    tb_hash_t *mb, int mb_count,
-+			    const struct pcr_event *evt, int evt_count) {
++			    tb_hash_t *mb, int mb_count) {
 +	tb_hash_t *pol_hash;
 +	struct pcr *p;
 +	struct pcr_event *pe;
@@ -1444,10 +1651,6 @@ index 0000000..5e638a0
 +
 +	pe = tpm_find_event(t, policy->hash_alg, TPM_EVT_MLE_HASH, 1);
 +	pe->digest = mb[0];
-+
-+	for (i = 0; i < evt_count; ++i)
-+		if (!tpm_substitute_event(t, policy->hash_alg, &evt[i]))
-+			goto out;
 +
 +	if (!tpm_recalculate(t))
 +		goto out;
@@ -1489,8 +1692,7 @@ index 0000000..5e638a0
 +}
 +
 +static bool apply_da_policy(struct tpm *t, tb_policy_t *policy, size_t pol_size,
-+			    tb_hash_t *mb, int mb_count,
-+			    const struct pcr_event *evt, int evt_count) {
++			    tb_hash_t *mb, int mb_count) {
 +	tb_hash_t *pol_hash;
 +	struct pcr *p;
 +	struct pcr_event *pe;
@@ -1504,10 +1706,6 @@ index 0000000..5e638a0
 +
 +	pe = tpm_find_event(t, hash_alg, TPM_EVT_MLE_HASH, 1);
 +	pe->digest = mb[0];
-+
-+	for (i = 0; i < evt_count; ++i)
-+		if (!tpm_substitute_event(t, hash_alg, &evt[i]))
-+			goto out;
 +
 +	if (!tpm_recalculate(t))
 +		goto out;
@@ -1554,17 +1752,20 @@ index 0000000..5e638a0
 +
 +int main(int argc, char *argv[]) {
 +	extern int optind;
-+	int opt, flags, mb_count = 0, evt_count = 0, ret = 0;
-+	tb_hash_t mb[20];
++	int opt, flags, i, mb_count = 0, evt_count = 0, ret = 0;
++	tb_hash_t mb[20] = { 0 };
 +	struct pcr_event evt[20];
 +	struct tpm *t = NULL;
 +	uint16_t alg_override = 0;
 +	size_t pol_size = 0;
 +	tb_policy_t *policy_file = NULL;
++	struct acm *acm = NULL;
++	tb_version_t tbver = TB_199;
++	char *eventlog = NULL;
 +
 +	flags = FLAG_TPM12;
 +
-+	while ((opt = getopt(argc, (char ** const)argv, "h2dclvqa:p:m:e:")) != -1) {
++	while ((opt = getopt(argc, (char ** const)argv, "h2dclvqa:p:m:e:F:A:V:")) != -1) {
 +		switch (opt) {
 +			case 'm':
 +				if (mb_count >= 20) {
@@ -1633,6 +1834,29 @@ index 0000000..5e638a0
 +				}
 +				++evt_count;
 +			break;
++			case 'F':
++				eventlog = optarg;
++			break;
++			case 'A':
++				if (acm != NULL) {
++					error_msg("ACM path was already set.\n");
++					ret = 1;
++					goto out;
++				}
++				acm = acm_load(optarg);
++				if (!acm) {
++					error_msg("failed to load ACM:%s.\n", optarg);
++					ret = 1;
++					goto out;
++				}
++			break;
++			case 'V':
++				if (read_tboot_version(optarg, &tbver)) {
++					error_msg("invalid tboot version: %s.\n", optarg);
++					ret = 1;
++					goto out;
++				}
++			break;
 +			case 'h':
 +				print_help();
 +				ret = 1;
@@ -1655,8 +1879,9 @@ index 0000000..5e638a0
 +
 +	if (flags & FLAG_TPM12) {
 +		char *buffer;
-+		size_t size = read_file(TPM12_LOG, &buffer);
++		size_t size;
 +
++		size = read_file(eventlog ? eventlog : TPM12_LOG, &buffer);
 +		if (size > 0) {
 +			t = parse_tpm12_log(buffer, size);
 +			free(buffer);
@@ -1671,8 +1896,9 @@ index 0000000..5e638a0
 +		t->alg = TB_HALG_SHA1;
 +	} else {
 +		char *buffer;
-+		size_t size = read_file(TPM20_LOG, &buffer);
++		size_t size;
 +
++		size = read_file(eventlog ? eventlog : TPM20_LOG, &buffer);
 +		if (size > 0) {
 +			t = parse_tpm20_log(buffer, size);
 +			free(buffer);
@@ -1683,32 +1909,53 @@ index 0000000..5e638a0
 +			ret = 1;
 +			goto out;
 +		}
-+
-+// broken as you need to override if there is no policy file, fix!!!
 +		t->alg = alg_override != 0 ? alg_override : policy_file->hash_alg;
 +	}
++	/* t->alg is set from here, since alg_override == 0 && policy_file ==
++	 * NULL cannot pass the previous sanity check. */
 +
 +	if (flags & FLAG_CURRENT) {
 +		tpm_print(t, t->alg);
-+		return 0;
++		goto out;
 +	}
 +
 +	if (flags & FLAG_LOG) {
 +		tpm_dump(t, t->alg);
-+		return 0;
++		goto out;
++	}
++
++	/* Event-type emulation sanity check. */
++	for (i = 0; i < evt_count; ++i)
++		if (evt[i].emulate && acm == NULL) {
++			error_msg("event-type emulation requires valid ACM passed as argument (-A).\n");
++			ret = 1;
++			goto out;
++		}
++
++
++	/* Change/Emulate events in the log according the cmdline. */
++	if (!tpm_substitute_all_events(t, t->alg, evt, evt_count)) {
++		error_msg("failed to apply event substitutions to the event log.\n");
++		ret = 1;
++		goto out;
++	}
++	if (!tpm_emulate_all_events(t, t->alg, evt, evt_count, acm, tbver)) {
++		error_msg("failed to emulate events in the event log.\n");
++		ret = 1;
++		goto out;
 +	}
 +
 +	if (flags & FLAG_DA) {
-+		if (!apply_da_policy(t, policy_file, pol_size, mb, mb_count, evt, evt_count)) {
++		if (!apply_da_policy(t, policy_file, pol_size, mb, mb_count)) {
 +			error_msg("failed applying DA policy.\n");
 +			ret = 1;
-+			goto out_destroy;
++			goto out;
 +		}
 +	} else {
-+		if (!apply_lg_policy(t, policy_file, pol_size, mb, mb_count, evt, evt_count)) {
++		if (!apply_lg_policy(t, policy_file, pol_size, mb, mb_count)) {
 +			error_msg("failed applying LG policy.\n");
 +			ret = 1;
-+			goto out_destroy;
++			goto out;
 +		}
 +	}
 +
@@ -1717,11 +1964,13 @@ index 0000000..5e638a0
 +	else
 +		tpm_print(t, t->alg);
 +
-+	return 0;
-+
-+out_destroy:
-+	destroy_tpm(t);
 +out:
++	if (t != NULL)
++		destroy_tpm(t);
++
++	if (acm != NULL)
++		acm_unload(acm);
++
 +	return ret;
 +}
 diff --git a/pcr-calc/tb_policy.c b/pcr-calc/tb_policy.c
@@ -1867,7 +2116,7 @@ new file mode 100644
 index 0000000..fb7d501
 --- /dev/null
 +++ b/pcr-calc/tpm.c
-@@ -0,0 +1,423 @@
+@@ -0,0 +1,489 @@
 +/*
 + *
 + * Copyright (c) 2017 Daniel P. Smith
@@ -1914,7 +2163,9 @@ index 0000000..fb7d501
 +
 +#include "../include/hash.h"
 +#include "uuid.h"
++#include "acm.h"
 +#include "tpm.h"
++#include "eventlog.h"
 +
 +
 +#define error_msg(fmt, ...)         fprintf(stderr, fmt, ##__VA_ARGS__)
@@ -2023,13 +2274,13 @@ index 0000000..fb7d501
 +			    return NULL;
 +	}
 +
-+	t = malloc(sizeof(*t));
++	t = calloc(1, sizeof(*t));
 +	if (!t) {
 +		return NULL;
 +	}
 +
 +	t->version = version;
-+	t->banks = malloc(banks * sizeof(struct pcr_bank));
++	t->banks = calloc(banks, sizeof(struct pcr_bank));
 +	if (!t->banks) {
 +		free(t);
 +		return NULL;
@@ -2063,37 +2314,44 @@ index 0000000..fb7d501
 +
 +	bank = &t->banks[bnum];
 +
-+	if (t->version == TPM12) {
-+		tpm12_pcr_event_t *event = e;
++	switch (t->version) {
++		case TPM12: {
++			tpm12_pcr_event_t *event = e;
 +
-+		if (event->pcr_index == 255)
-+			return true;
-+
-+		if (event->pcr_index > 23)
-+			return false;
-+
-+		p = &bank->pcrs[event->pcr_index];
-+
-+		type = event->type;
-+		evt_hash = (tb_hash_t *) event->digest;
-+	} else {
-+		uint32_t pcr_num;
-+
-+		pcr_num = *((uint32_t *) e);
-+		if (pcr_num > 23) {
-+			if (pcr_num == 255)
++			if (event->pcr_index == 255)
 +				return true;
-+			else
++
++			if (event->pcr_index >= MAX_PCR)
 +				return false;
++
++			p = &bank->pcrs[event->pcr_index];
++
++			type = event->type;
++			evt_hash = (tb_hash_t *) event->digest;
++			break;
 +		}
++		case TPM20: {
++			uint32_t pcr_num;
 +
-+		p = &bank->pcrs[pcr_num];
++			pcr_num = *((uint32_t *) e);
++			if (pcr_num >= MAX_PCR) {
++				if (pcr_num == 255)
++					return true;
++				else
++					return false;
++			}
 +
-+		e += sizeof(uint32_t);
-+		type = *((uint32_t *) e);
++			p = &bank->pcrs[pcr_num];
 +
-+		e += sizeof(uint32_t);
-+		evt_hash = (tb_hash_t *) e;
++			e += sizeof(uint32_t);
++			type = *((uint32_t *) e);
++
++			e += sizeof(uint32_t);
++			evt_hash = (tb_hash_t *) e;
++			break;
++		}
++		default:
++			return false;
 +	}
 +
 +	if (!pcr_record_event(p, alg, type, evt_hash))
@@ -2183,6 +2441,61 @@ index 0000000..fb7d501
 +	return true;
 +}
 +
++bool tpm_substitute_all_events(struct tpm *t, uint16_t alg,
++				const struct pcr_event *evt,
++				unsigned int evt_count)
++{
++	unsigned int i;
++
++	for (i = 0; i < evt_count; ++i)
++		if (!evt[i].emulate)
++			if (!tpm_substitute_event(t, alg, &evt[i]))
++				return false;
++
++	return true;
++}
++
++bool tpm_emulate_event(struct tpm *t, uint16_t alg,
++		       const struct pcr_event *evt,
++		       const struct acm *acm, tb_version_t tbver)
++{
++	unsigned int i, j;
++	struct pcr_bank *b;
++
++	if (!t || !evt)
++		return false;
++
++	b = tpm_get_bank(t, alg);
++	if (!b)
++		return false;
++
++	for (i = 0; i < MAX_PCR; ++i) {
++		struct pcr *p = &b->pcrs[i];
++
++		for (j = 0; j < p->log_idx; ++j)
++			if (p->log[j].type == evt->type)
++				if (emulate_event(acm, alg, t->version, tbver,
++						  &p->log[j]))
++					return false;
++	}
++
++	return true;
++}
++
++bool tpm_emulate_all_events(struct tpm *t, uint16_t alg,
++			    const struct pcr_event *evt, unsigned int evt_count,
++			    const struct acm *acm, tb_version_t tbver)
++{
++	unsigned int i;
++
++	for (i = 0; i < evt_count; ++i)
++		if (evt[i].emulate)
++			if (!tpm_emulate_event(t, alg, &evt[i], acm, tbver))
++				return false;
++
++	return true;
++}
++
 +bool tpm_clear_all_event(struct tpm *t, uint16_t alg, uint32_t evt_type)
 +{
 +	int i, j;
@@ -2234,6 +2547,7 @@ index 0000000..fb7d501
 +void tpm_print(struct tpm *t, uint16_t alg)
 +{
 +	int i,bnum = alg_to_bank(alg);
++	unsigned int hash_size = get_hash_size(alg);
 +	struct pcr_bank *bank;
 +	tb_hash_t null_hash;
 +
@@ -2248,8 +2562,8 @@ index 0000000..fb7d501
 +		int diff;
 +		errno_t err;
 +
-+		err = memcmp_s(&(bank->pcrs[i].value), sizeof(tb_hash_t),
-+				&null_hash, sizeof(tb_hash_t), &diff);
++		err = memcmp_s(&(bank->pcrs[i].value), hash_size,
++				&null_hash, hash_size, &diff);
 +		if (err) {
 +			error_msg("Invalid value in PCR%d.", i);
 +			break;
@@ -2265,6 +2579,7 @@ index 0000000..fb7d501
 +void tpm_dump(struct tpm *t, uint16_t alg)
 +{
 +	int i,bnum = alg_to_bank(alg);
++	unsigned int hash_size = get_hash_size(alg);
 +	struct pcr_bank *bank;
 +	tb_hash_t null_hash;
 +
@@ -2279,8 +2594,8 @@ index 0000000..fb7d501
 +		int diff;
 +		errno_t err;
 +
-+		err = memcmp_s(&(bank->pcrs[i].value), sizeof(tb_hash_t),
-+				&null_hash, sizeof(tb_hash_t), &diff);
++		err = memcmp_s(&(bank->pcrs[i].value), hash_size,
++				&null_hash, hash_size, &diff);
 +		if (err) {
 +			error_msg("Invalid value in PCR%d.", i);
 +			break;
@@ -2296,7 +2611,7 @@ new file mode 100644
 index 0000000..c482f3f
 --- /dev/null
 +++ b/pcr-calc/tpm.h
-@@ -0,0 +1,186 @@
+@@ -0,0 +1,199 @@
 +/*
 + * pcr.h: pcr definitions
 + *
@@ -2351,6 +2666,7 @@ index 0000000..c482f3f
 +struct pcr_event {
 +	uint32_t type;
 +	tb_hash_t digest;
++	int emulate;
 +};
 +
 +#define MAX_PCR 24
@@ -2380,7 +2696,6 @@ index 0000000..c482f3f
 +struct tpm {
 +	uint8_t version;
 +	uint16_t alg;
-+	uint8_t num_banks;
 +	uint8_t active_banks;
 +	struct pcr_bank *banks;
 +};
@@ -2476,6 +2791,19 @@ index 0000000..c482f3f
 +				uint32_t evt_type, int n);
 +bool tpm_substitute_event(struct tpm *t, uint16_t alg,
 +			  const struct pcr_event *evt);
++bool tpm_substitute_all_events(struct tpm *t, uint16_t alg,
++				const struct pcr_event *evt,
++				unsigned int evt_count);
++typedef enum {
++	TB_196,
++	TB_199,
++} tb_version_t;
++bool tpm_emulate_event(struct tpm *t, uint16_t alg,
++		       const struct pcr_event *evt,
++		       const struct acm *acm, tb_version_t tbver);
++bool tpm_emulate_all_events(struct tpm *t, uint16_t alg,
++			    const struct pcr_event *evt, unsigned int evt_count,
++			    const struct acm *acm, tb_version_t tbver);
 +bool tpm_clear_all_event(struct tpm *t, uint16_t alg, uint32_t evt_type);
 +bool tpm_recalculate(struct tpm *t);
 +void tpm_print(struct tpm *t, uint16_t alg);
@@ -2488,7 +2816,7 @@ new file mode 100644
 index 0000000..5d79ffb
 --- /dev/null
 +++ b/pcr-calc/util.c
-@@ -0,0 +1,167 @@
+@@ -0,0 +1,196 @@
 +/*
 + *
 + * Copyright (c) 2017 Daniel P. Smith
@@ -2533,9 +2861,11 @@ index 0000000..5d79ffb
 +#include <fcntl.h>
 +#include <unistd.h>
 +#include <limits.h>
++#include <safe_lib.h>
 +
 +#include "../include/hash.h"
 +#include "uuid.h"
++#include "acm.h"
 +#include "tpm.h"
 +
 +#define error_msg(fmt, ...)         fprintf(stderr, fmt, ##__VA_ARGS__)
@@ -2547,7 +2877,7 @@ index 0000000..5d79ffb
 +	unsigned char *buf = (unsigned char *)hash;
 +
 +	if (len == 1 && hexstr[0] == '0') {
-+		memset(hash, 0, sizeof(tb_hash_t));
++		memset_s(hash, sizeof(tb_hash_t), 0);
 +		return true;
 +	}
 +
@@ -2628,9 +2958,10 @@ index 0000000..5d79ffb
 +
 +/*
 + * Parse a string representing a pcr event.
-+ * Format: <event-id>:<hash>
++ * Format: <event-id>:<hash>|"emulate"
 + * e.g, for sha256: '0x40f:5a3e80a37915b1601c363acd1601df7ef257d5d32c664004a2ec0484a4f60628'
 + * e.g, for sha512: '0x40f:be688838ca8686e5c90689bf2ab585cef1137c999b48c70b92f67a5c34dc15697b5d11c982ed6d71be1e1e7f7b4e0733884aa97c3f7a339a8ed03577cf74be09
++ * e.g, for emulation: '0x40f:emulate'
 + */
 +#define PCREVT_BUF_LEN 135
 +int read_pcr_event(const char *s, struct pcr_event *evt)
@@ -2639,9 +2970,12 @@ index 0000000..5d79ffb
 +	char *end = NULL;
 +	unsigned long type;
 +	tb_hash_t digest;
++	int rc;
 +
 +	if (len >= PCREVT_BUF_LEN)
 +		return -1;
++
++	memset_s(&digest, sizeof (tb_hash_t), 0);
 +
 +	type = strtoul(s, &end, 0);
 +	if (type == ULONG_MAX)
@@ -2649,19 +2983,42 @@ index 0000000..5d79ffb
 +	if (!end || *end != ':' || s == end)
 +		return -1;
 +
-+	if (!read_hash(&end[1], &digest))
++	if (strcmp_s(&end[1], sizeof ("emulate"), "emulate", &rc) == EOK && !rc)
++		evt->emulate = 1;
++	else if (read_hash(&end[1], &digest))
++		evt->emulate = 0;
++	else
 +		return -1;
 +
 +	evt->type = type;
 +	evt->digest = digest;
 +	return len;
 +}
++
++#define TBVER_BUF_LEN 9
++int read_tboot_version(const char *s, tb_version_t *ver)
++{
++	size_t len = strnlen(s, TBVER_BUF_LEN);
++	int rc;
++
++	if (len >= TBVER_BUF_LEN)
++		return -1;
++
++	if (strcmp_s(s, TBVER_BUF_LEN, "1.9.6", &rc) == EOK && !rc)
++		*ver = TB_196;
++	else if (strcmp_s(s, TBVER_BUF_LEN, "1.9.9", &rc) == EOK && !rc)
++		*ver = TB_199;
++	else
++		return -1;
++
++	return 0;
++}
 diff --git a/pcr-calc/util.h b/pcr-calc/util.h
 new file mode 100644
 index 0000000..41eaf18
 --- /dev/null
 +++ b/pcr-calc/util.h
-@@ -0,0 +1,46 @@
+@@ -0,0 +1,49 @@
 +/*
 + *
 + * Copyright (c) 2017 Daniel P. Smith
@@ -2702,10 +3059,13 @@ index 0000000..41eaf18
 +#include <stdbool.h>
 +#include <sys/types.h>
 +
-+
 +bool read_hash(const char *hexstr, tb_hash_t *hash);
 +size_t read_file(const char *path, char **buffer);
 +int read_pcr_event(const char *s, struct pcr_event *evt);
++
++int read_tboot_version(const char *s, tb_version_t *ver);
++int read_pcr_event_emulate(const char *s,
++	 struct acm **acm, tb_version_t *ver, struct pcr_event *evt);
 +
 +#endif
 diff --git a/pcr-calc/uuid.h b/pcr-calc/uuid.h
@@ -2767,6 +3127,813 @@ index 0000000..7cd7e28
 +} uuid_t;
 +
 +#endif
+--- /dev/null
++++ b/pcr-calc/acm.c
+@@ -0,0 +1,209 @@
++#include <stdio.h>
++#include <stdlib.h>
++#include <errno.h>
++#include <unistd.h>
++#include <fcntl.h>
++#include <string.h>
++#include <inttypes.h>
++#include <sys/mman.h>
++#include <sys/stat.h>
++
++#include "uuid.h"
++#include "acm.h"
++
++#define DEBUG 0
++#define printd(fmt, ...)					\
++	if (DEBUG) {						\
++		fprintf(stdout, fmt "\n", ##__VA_ARGS__);	\
++	}
++
++static acm_hdr_t *get_acm_header(void *p)
++{
++	uint32_t res;
++	acm_hdr_t *hdr = p;
++
++	if (__builtin_umul_overflow(hdr->size, 4, &res))
++		return NULL;
++	if (hdr->module_type != MODULE_TYPE_CHIPSET)
++		return NULL;
++	if (hdr->module_vendor != ACM_VENDOR_INTEL)
++		return NULL;
++
++	return hdr;
++}
++
++static acm_info_table_t *get_acm_info_table(const acm_hdr_t *hdr)
++{
++	uint32_t res;
++	uint32_t offset;
++	acm_info_table_t *infotable;
++
++	/* Check infotable is in ACM. */
++	if (__builtin_uadd_overflow(hdr->header_len, hdr->scratch_size, &res))
++		return NULL;
++	if (__builtin_umul_overflow(res, 4, &res))
++		return NULL;
++	if (res > hdr->size * 4)
++		return NULL;
++
++	offset = (hdr->header_len + hdr->scratch_size) * 4;
++
++	/* Check infotable does not outbound ACM. */
++	if (__builtin_uadd_overflow(res, sizeof (*infotable), &res))
++		return NULL;
++	if (res > hdr->size * 4)
++		return NULL;
++
++	return (acm_info_table_t *)((void *)hdr + offset);
++}
++
++static acm_processor_id_list_t *get_acm_processor_list(const acm_hdr_t *hdr,
++		const acm_info_table_t *infotable)
++{
++	uint32_t res1, res2;
++	uint32_t offset;
++	acm_processor_id_list_t *proclist;
++
++	offset = infotable->processor_id_list;
++	proclist = (acm_processor_id_list_t *)((void *)hdr + offset);
++
++	/* Check proclist is contained in ACM size. */
++	if (__builtin_umul_overflow(
++		proclist->count, sizeof (acm_processor_id_t), &res1))
++		return NULL;
++	if (__builtin_uadd_overflow(offset, sizeof (proclist->count), &res2))
++		return NULL;
++	if (__builtin_uadd_overflow(res1, res2, &res1))
++		return NULL;
++	if (res1 > hdr->size * 4)
++		return NULL;
++
++	return proclist;
++}
++
++static acm_chipset_id_list_t *get_acm_chipset_list(const acm_hdr_t *hdr,
++		const acm_info_table_t *infotable)
++{
++	uint32_t res1, res2;
++	uint32_t offset;
++	acm_chipset_id_list_t *chiplist;
++
++	offset = infotable->chipset_id_list;
++	chiplist = (acm_chipset_id_list_t *)((void *)hdr + offset);
++
++	/* Check chiplist is contained in ACM size. */
++	if (__builtin_umul_overflow(
++		chiplist->count, sizeof (acm_chipset_id_t), &res1))
++		return NULL;
++	if (__builtin_uadd_overflow(offset, sizeof (chiplist->count), &res2))
++		return NULL;
++	if (__builtin_uadd_overflow(res1, res2, &res1))
++		return NULL;
++	if (res1 > hdr->size * 4)
++		return NULL;
++
++	return chiplist;
++}
++
++static int uuids_equal(const uuid_t *u1, const uuid_t *u2)
++{
++	return (u1->data1 == u2->data1 &&
++		u1->data2 == u2->data2 &&
++		u1->data3 == u2->data3 &&
++		u1->data4 == u2->data4 &&
++		u1->data5[0] == u2->data5[0] &&
++		u1->data5[1] == u2->data5[1] &&
++		u1->data5[2] == u2->data5[2] &&
++		u1->data5[3] == u2->data5[3] &&
++		u1->data5[4] == u2->data5[4] &&
++		u1->data5[5] == u2->data5[5]);
++}
++
++struct acm *acm_load(const char *path)
++{
++	int fd;
++	void *p;
++	struct stat sb;
++	struct acm *acm;
++
++	fd = open(path, O_RDONLY);
++	if (fd < 0) {
++		printd("Failed to open file `%s': %s", path, strerror(errno));
++		return NULL;
++	}
++
++	if (fstat(fd, &sb)) {
++		printd("Failed to get file `%s' status: %s", path, strerror(errno));
++		goto fail_stat;
++	}
++
++	acm = malloc(sizeof (*acm));
++	if (!acm) {
++		printd("malloc failed: %s", strerror(errno));
++		goto fail_alloc;
++	}
++
++	acm->size = sb.st_size;
++	if (acm->size < sizeof (acm_hdr_t)) {
++		printd("Invalid ACM %s: Too small.", path);
++		goto fail_sanity;
++	}
++
++	p = mmap(NULL, acm->size, PROT_READ, MAP_PRIVATE, fd, 0);
++	if (p == MAP_FAILED) {
++		printd("mmap failed: %s", strerror(errno));
++		goto fail_map;
++	}
++	close(fd);
++
++	acm->header = get_acm_header(p);
++	if (acm->header == NULL) {
++		printd("Invalid ACM %s: Header cannot be found.", path);
++		goto fail_map;
++	}
++
++	acm->infotable = get_acm_info_table(acm->header);
++	if (acm->infotable == NULL) {
++		printd("Invalid ACM %s: Info table cannot be found.", path);
++		goto fail_map;
++	}
++
++	if (!uuids_equal(&acm->infotable->uuid, &ACM_UUID_V3)) {
++		printd("Invalid ACM %s: UUID mismatch.", path);
++		goto fail_map;
++	}
++
++	acm->chiplist = get_acm_chipset_list(acm->header, acm->infotable);
++	if (acm->chiplist == NULL) {
++		printd("Invalid ACM %s: Chipset list cannot be found.", path);
++		goto fail_map;
++	}
++
++	if (acm->infotable->version < 4)
++		acm->cpulist = NULL;
++	else {
++		acm->cpulist = get_acm_processor_list(acm->header, acm->infotable);
++		if (acm->cpulist == NULL) {
++			printd("Invalid ACM %s: Processor list cannot be found.", path);
++			goto fail_map;
++		}
++	}
++
++	return acm;
++
++fail_map:
++	munmap(acm->header, acm->size);
++fail_sanity:
++	free(acm);
++fail_alloc:
++fail_stat:
++	close(fd);
++
++	return NULL;
++}
++
++void acm_unload(struct acm *acm)
++{
++	munmap(acm->header, acm->size);
++	free(acm);
++}
+--- /dev/null
++++ b/pcr-calc/acm.h
+@@ -0,0 +1,139 @@
++#ifndef _ACM_H_
++# define _ACM_H_
++
++# include <stddef.h>
++# include <inttypes.h>
++
++# include "../include/mle.h"
++
++/*
++ * ACM flags; tboot:acmod.h
++ */
++typedef union {
++	uint16_t raw;
++	struct {
++		uint16_t  reserved       : 14;
++		uint16_t  pre_production : 1;
++		uint16_t  debug_signed   : 1;
++	};
++} acm_flags_t;
++
++/*
++ * ACM header; tboot:acmod.h
++ */
++typedef struct {
++#define MODULE_TYPE_CHIPSET 0x02
++	uint16_t     module_type;
++
++#define ACM_SUBTYPE_RESET   0x01
++	uint16_t     module_subtype;
++
++	uint32_t     header_len;
++	uint32_t     header_ver;    /* currently 0.0 */
++	uint16_t     chipset_id;
++	acm_flags_t  flags;
++
++#define ACM_VENDOR_INTEL    0x8086
++	uint32_t     module_vendor;
++
++	uint32_t     date;
++	uint32_t     size;
++	uint16_t     txt_svn;
++	uint16_t     se_svn;
++	uint32_t     code_control;
++	uint32_t     error_entry_point;
++	uint32_t     gdt_limit;
++	uint32_t     gdt_base;
++	uint32_t     seg_sel;
++	uint32_t     entry_point;
++	uint8_t      reserved2[64];
++	uint32_t     key_size;
++	uint32_t     scratch_size;
++	uint8_t      rsa2048_pubkey[256];
++	uint32_t     pub_exp;
++	uint8_t      rsa2048_sig[256];
++	uint32_t     scratch[143];
++	uint8_t      user_area[];
++}__attribute__((packed)) acm_hdr_t;
++
++/*
++ * ACM Info table; tboot:acmod.h
++ */
++typedef struct {
++#define ACM_UUID_V3	((uuid_t){0x7fc03aaa, 0x46a7, 0x18db, 0xac2e, \
++		{0x69, 0x8f, 0x8d, 0x41, 0x7f, 0x5a}})
++	uuid_t     uuid;
++
++#define ACM_TYPE_BIOS               0x0
++#define ACM_TYPE_SINIT              0x1
++#define ACM_TYPE_MASK               0x7
++#define ACM_TYPE_REVOCATION_MASK    0x8
++	uint8_t    chipset_acm_type;
++	uint8_t    version;             /* currently 4 */
++	uint16_t   length;
++	uint32_t   chipset_id_list;
++	uint32_t   os_sinit_data_ver;
++	uint32_t   min_mle_hdr_ver;
++	txt_caps_t capabilities;
++	uint8_t    acm_ver;
++	uint8_t    reserved[3];
++	/* versions>= 4 */
++	uint32_t   processor_id_list;
++	/* versions>= 5 */
++	uint32_t   tpm_info_list_off;
++}__attribute__((packed)) acm_info_table_t;
++
++/*
++ * ACM Processor IDs; tboot:acmod.h
++ */
++typedef struct {
++	uint32_t fms;
++	uint32_t fms_mask;
++	uint64_t platform_id;
++	uint64_t platform_mask;
++}__attribute__((packed)) acm_processor_id_t;
++
++/*
++ * ACM Processor ID list; tboot:acmod.h
++ */
++typedef struct {
++	uint32_t             count;
++	acm_processor_id_t   processor_ids[];
++}__attribute__((packed)) acm_processor_id_list_t;
++
++/*
++ * ACM Chipset IDs; tboot:acmod.h
++ */
++typedef struct {
++#define CHIPSET_FLAGS_REVISION_MASK 0x1
++	uint32_t flags;
++	uint16_t vendor_id;
++	uint16_t device_id;
++	uint16_t revision_id;
++	uint16_t reserved;
++	uint32_t extended_id;
++}__attribute__((packed)) acm_chipset_id_t;
++
++/*
++ * ACM Chipset IDs list; tboot:acmod.h
++ */
++typedef struct {
++	uint32_t            count;
++	acm_chipset_id_t    chipset_ids[];
++}__attribute__((packed)) acm_chipset_id_list_t;
++
++/*
++ * ACM main abstraction struct.
++ */
++struct acm {
++	acm_hdr_t *header;
++	acm_info_table_t *infotable;
++	acm_processor_id_list_t *cpulist;
++	acm_chipset_id_list_t *chiplist;
++	size_t size;
++};
++
++struct acm *acm_load(const char *path);
++void acm_unload(struct acm *acm);
++
++#endif /* _ACM_H_ */
+--- /dev/null
++++ b/pcr-calc/acmmatch.c
+@@ -0,0 +1,216 @@
++#include <errno.h>
++#include <assert.h>
++#include <string.h>
++#include <getopt.h>
++#include <stdio.h>
++
++#include "platform.h"
++#include "uuid.h"
++#include "acm.h"
++#include "txt.h"
++
++#define printe(fmt, ...)         fprintf(stderr, fmt "\n", ##__VA_ARGS__)
++
++static int acm_is_debug(const struct acm *acm,
++		const txt_cr_ver_fsbif_t *fsbif,
++		const txt_cr_ver_qpiif_t *qpiif)
++{
++	acm_hdr_t *header = acm->header;
++
++	switch (fsbif->raw) {
++		case 0xffffffff:
++		case 0x00000000:
++			return header->flags.debug_signed == qpiif->debug;
++		default:
++			return header->flags.debug_signed == fsbif->debug;
++	}
++}
++
++static int acm_is_sinit(const struct acm *acm)
++{
++	acm_hdr_t *header = acm->header;
++	acm_info_table_t *infotable = acm->infotable;
++
++	return header->module_type == MODULE_TYPE_CHIPSET &&
++		!(infotable->chipset_acm_type & ACM_TYPE_REVOCATION_MASK) &&
++		infotable->chipset_acm_type == ACM_TYPE_SINIT;
++}
++
++static int acm_match_chipset(const struct acm *acm,
++		const txt_cr_didvid_t *didvid)
++{
++	acm_chipset_id_list_t *chiplist = acm->chiplist;
++	unsigned int i;
++	int match = 0;
++
++	for (i = 0; !match && i < chiplist->count; ++i) {
++		acm_chipset_id_t *chipset = &chiplist->chipset_ids[i];
++
++		if (chipset->vendor_id == didvid->vid &&
++		    chipset->device_id == didvid->did) {
++			if (chipset->flags & CHIPSET_FLAGS_REVISION_MASK)
++				match = !!(chipset->revision_id & didvid->rid);
++			else
++				match = chipset->revision_id == didvid->rid;
++		}
++	}
++
++	return match;
++}
++
++static int acm_match_cpu(struct acm *acm,
++		const cpuid_proc_sig_eax_t *sig,
++		const msr_ia32_platform_id_t *msr)
++{
++	acm_processor_id_list_t *cpulist = acm->cpulist;
++	unsigned int i;
++	int match = 0;
++
++	for (i = 0; !match && i < cpulist->count; ++i) {
++		acm_processor_id_t *cpu = &cpulist->processor_ids[i];
++
++		if (cpu->fms == (sig->raw & cpu->fms_mask) &&
++		    cpu->platform_id == (msr->raw & cpu->platform_mask))
++			match = 1;
++	}
++
++	return match;
++}
++
++/*
++ * Attempts to load the file at path as an ACM.
++ * Return -EINVAL, if the ACM is invalid
++ *        -ENOSYS, if the platform does not provide the necessary information,
++ * 0 if the ACM matches the current platform,
++ * 1 if the ACM _does not_ match the current platform.
++ */
++int platform_match_acm(const char *path,
++	const txt_cr_didvid_t *didvid,
++	const txt_cr_ver_fsbif_t *fsbif,
++	const txt_cr_ver_qpiif_t *qpiif,
++	const cpuid_proc_sig_eax_t *sig,
++	const msr_ia32_platform_id_t *msr)
++{
++	struct acm *acm;
++	int rc;
++
++	assert(path != NULL);
++
++	acm = acm_load(path);
++	if (acm == NULL)
++		return -EINVAL;
++
++	if (acm_is_debug(acm, fsbif, qpiif)) {
++		rc = 1;
++		goto out;
++	}
++
++	if (!acm_is_sinit(acm)) {
++		rc = 1;
++		goto out;
++	}
++
++	if (!acm_match_chipset(acm, didvid)) {
++		rc = 1;
++		goto out;
++	}
++
++	if (acm->cpulist != NULL)
++		/* Only infotables version 4 and above include a cpulist. */
++		if (!acm_match_cpu(acm, sig, msr)) {
++			rc = 1;
++			goto out;
++		}
++
++	rc = 0;
++
++out:
++	acm_unload(acm);
++	return rc;
++}
++
++static void usage(const char *name)
++{
++	assert(name != NULL);
++	printf("Usage: %s [-h] ACM [ACMs]\n", name);
++	printf("Parse the given ACMs and display which match the current"
++		" platform on stdout.\n");
++	printf("    -h  Display this help.\n");
++}
++
++int main(int argc, char *argv[])
++{
++	int rc, opt, i, match = 0;
++	txt_cr_didvid_t didvid = { 0 };
++	txt_cr_ver_fsbif_t fsbif = { 0 };
++	txt_cr_ver_qpiif_t qpiif = { 0 };
++	cpuid_proc_sig_eax_t sig;
++	msr_ia32_platform_id_t msr;
++
++	do {
++		opt = getopt(argc, argv, "Dh");
++		switch (opt) {
++			case 'h':
++				usage(argv[0]);
++				return 0;
++			case -1:
++				continue;
++			default:
++				usage(argv[0]);
++				return EINVAL;
++		}
++	} while (opt != -1);
++
++	if (optind >= argc) {
++		printe("Missing path(s) to ACM file(s).");
++		usage(argv[0]);
++		return EINVAL;
++	}
++
++	if (!access_txt_crs()) {
++		printe("Cannot access TXT control registers."
++			" Is module txt loaded?");
++		return ENOENT;
++	}
++
++	if (!access_msr_devnode()) {
++		printe("Cannot access MSRs. Is module msr loaded?");
++		return ENOENT;
++	}
++
++	if (read_txt_cr_didvid(&didvid) < 0)
++		return ENOSYS;
++	if (read_txt_cr_ver_fsbif(&fsbif) < 0)
++		return ENOSYS;
++	if (read_txt_cr_ver_qpiif(&qpiif) < 0)
++		return ENOSYS;
++
++	sig.raw = cpuid_eax(0x1);
++	msr.raw = rdmsr(MSR_IA32_PLATFORM_ID);
++
++	for (i = optind; i < argc; ++i) {
++		rc = platform_match_acm(argv[i],
++					&didvid, &fsbif, &qpiif, &sig, &msr);
++		if (rc < 0) {
++			switch (rc) {
++				case -EINVAL:
++					printe("Invalid ACM: %s.", argv[i]);
++					break;
++				case -ENOSYS:
++					printe("Could not read platform data."
++						"You may need to load modules:"
++						" msr, txt_info.");
++					return rc;
++				default:
++					printe("Error while loading ACM: %s.",
++						strerror(-rc));
++					return rc;
++			}
++		} else if (!rc) {
++			match = 1;
++			printf("Platform matches ACM %s.\n", argv[i]);
++		}
++	}
++
++	return match ? 0 : 1;
++}
+--- /dev/null
++++ b/pcr-calc/platform.c
+@@ -0,0 +1,106 @@
++#include <errno.h>
++#include <string.h>
++#include <fcntl.h>
++#include <unistd.h>
++#include <sys/types.h>
++#include <stdio.h>
++#include <stdlib.h>
++
++#include "platform.h"
++
++#define printe(fmt, ...)         fprintf(stderr, fmt "\n", ##__VA_ARGS__)
++
++int read_u32(const char *path, uint32_t *v)
++{
++	int fd;
++	ssize_t rc = 0;
++	char buf[12] = { 0 };   /* "0xVVVVVVVV\n\0" */
++	char *end;
++	unsigned long a;
++
++	fd = open(path, O_RDONLY);
++	if (fd < 0)
++		return -errno;
++
++	rc = read(fd, buf, sizeof (buf));
++	if (rc < 0) {
++		rc = -errno;
++		goto out;
++	}
++
++	a = strtoul(buf, &end, 0);
++	if (end != (buf + rc - 1)) {
++		rc = -EINVAL;
++		goto out;
++	}
++
++	*v = a;
++
++out:
++	close(fd);
++	return rc;
++}
++
++int read_u64(const char *path, uint64_t *v)
++{
++	int fd;
++	ssize_t rc = 0;
++	char buf[19] = { 0 };   /* "0xVVVVVVVVVVVVVVVV\n\0" */
++	char *end;
++	unsigned long long a;
++
++	fd = open(path, O_RDONLY);
++	if (fd < 0)
++		return -errno;
++
++	rc = read(fd, buf, sizeof (buf));
++	if (rc < 0) {
++		rc = -errno;
++		goto out;
++	}
++
++	a = strtoull(buf, &end, 0);
++	if (end != (buf + rc - 1)) {
++		rc = -EINVAL;
++		goto out;
++	}
++
++	*v = a;
++
++out:
++	close(fd);
++	return rc;
++}
++
++uint64_t rdmsr(int msr)
++{
++	int fd, rc;
++	uint64_t val;
++
++	fd = open(MSR_DEVNODE, O_RDONLY);
++	if (fd < 0) {
++		printe("open failed: %s. Is module `msr' loaded?",
++			strerror(errno));
++		return -1ULL;
++	}
++
++	rc = lseek(fd, msr, SEEK_SET);
++	if (rc < 0) {
++		printe("lseek failed: %s.", strerror(errno));
++		return -1ULL;
++	} else if (rc != msr) {
++		printe("failed to seek msr value in " MSR_DEVNODE ".");
++		return -1ULL;
++	}
++
++	rc = read(fd, &val, sizeof (val));
++	if (rc < 0) {
++		printe("read failed: %s.", strerror(errno));
++		return -1ULL;
++	} else if (rc != sizeof (val)) {
++		printe("failed to read msr value in " MSR_DEVNODE ".");
++		return -1ULL;
++	}
++
++	return val;
++}
+--- /dev/null
++++ b/pcr-calc/platform.h
+@@ -0,0 +1,68 @@
++#ifndef _PLATFORM_H_
++# define _PLATFORM_H_
++
++# include <inttypes.h>
++# include <unistd.h>
++
++/*
++ * Low-level helpers.
++ */
++/* MSR devnode exposed by the Linux msr module. */
++# define MSR_DEVNODE "/dev/cpu/0/msr"
++/* See Intel SDM Vol3A 9.11.4. */
++# define MSR_IA32_PLATFORM_ID    0x17U
++
++static inline void __cpuid(unsigned int ax, uint32_t *p)
++{
++	asm volatile (
++		"cpuid"
++		: "=a" (p[0]), "=b" (p[1]), "=c" (p[2]), "=d" (p[3]) /* outputs */
++		: "0" (ax)                                           /* inputs */
++	);
++}
++
++/* Output in EAX of CPUID EAX=1. */
++typedef union {
++	uint32_t raw;
++	struct {
++		uint32_t step:4;
++		uint32_t model:4;
++		uint32_t family:4;
++		uint32_t type:2;
++		uint32_t _res0:2;
++		uint32_t model_ext:4;
++		uint32_t family_ext:8;
++		uint32_t _res1:4;
++	};
++} cpuid_proc_sig_eax_t;
++
++/* RDMDR 0x17: IA32_PLATFORM_ID. */
++typedef union {
++	uint64_t raw;
++	struct {
++		uint64_t _res0:50;
++		uint32_t id:3;
++		uint32_t _res1:11;
++	};
++} msr_ia32_platform_id_t;
++
++static inline uint32_t cpuid_eax(unsigned int op)
++{
++	uint32_t regs[4] = { 0 };
++
++	__cpuid(op, regs);
++
++	return regs[0];
++}
++
++static inline int access_msr_devnode(void)
++{
++	return !access(MSR_DEVNODE, R_OK);
++}
++
++int read_u32(const char *path, uint32_t *v);
++int read_u64(const char *path, uint64_t *v);
++uint64_t rdmsr(int msr);
++
++#endif /* !_PLATFORM_H_ */
++
+--- /dev/null
++++ b/pcr-calc/txt.h
+@@ -0,0 +1,51 @@
++#ifndef _TXT_H_
++# define _TXT_H_
++
++# include <inttypes.h>
++# include <unistd.h>
++
++# define TXT_INFO_SYSFS "/sys/devices/platform/txt/"
++
++typedef union {
++	uint64_t raw;
++	struct {
++		uint16_t vid    : 16;
++		uint16_t did    : 16;
++		uint16_t rid    : 16;
++		uint16_t ext    : 16;
++	};
++} txt_cr_didvid_t;
++
++typedef union {
++	uint32_t raw;
++	struct {
++		uint32_t _res   : 31;
++		uint8_t debug   : 1;
++	};
++} txt_cr_ver_fsbif_t;
++
++typedef union {
++	uint32_t raw;
++	struct {
++		uint32_t _res   : 31;
++		uint8_t debug   : 1;
++	};
++} txt_cr_ver_qpiif_t;
++
++# define DECLARE_READ_TXT(entry, size)                          \
++	static inline int read_txt_cr_##entry(txt_cr_##entry##_t *e)    \
++{                                                               \
++	return read_##size(TXT_INFO_SYSFS #entry, &e->raw);         \
++}
++DECLARE_READ_TXT(didvid, u64);
++DECLARE_READ_TXT(ver_fsbif, u32);
++DECLARE_READ_TXT(ver_qpiif, u32);
++
++static inline int access_txt_crs(void)
++{
++	return !access(TXT_INFO_SYSFS "didvid", R_OK) &&
++		!access(TXT_INFO_SYSFS "ver_fsbif", R_OK) &&
++		!access(TXT_INFO_SYSFS "ver_qpiif", R_OK);
++}
++
++#endif /* _TXT_H_ */
 -- 
 2.20.1
 
