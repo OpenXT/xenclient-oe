@@ -135,11 +135,21 @@ index 037609b..79dc733 100644
  void dump_event_2(void)
  {
      heap_event_log_descr_t *log_descr;
-@@ -499,6 +536,81 @@ bool evtlog_append_tpm2_tcg(uint8_t pcr, uint32_t type, hash_list_t *hl)
+@@ -477,8 +514,7 @@ bool evtlog_append_tpm2_tcg(uint8_t pcr,
+         return false;
+     }
+ 
+-    event = (tcg_pcr_event2*)(void *)(unsigned long)g_elog_2_1->phys_addr +
+-        g_elog_2_1->next_record_offset;
++    event = (tcg_pcr_event2*)(uintptr_t)(g_elog_2_1->phys_addr + g_elog_2_1->next_record_offset);
+     event->pcr_index = pcr;
+     event->event_type = type;
+     event->event_size = 0;  // No event data passed by tboot.
+@@ -499,6 +535,121 @@ bool evtlog_append_tpm2_tcg(uint8_t pcr,
      return true;
  }
  
-+void export_evtlog_tpm20(uint64_t *log, uint64_t *size)
++static void export_evtlog_tpm20_legacy(uint64_t *log, uint64_t *size)
 +{
 +    size_t copied = 0;
 +    size_t count = 0;
@@ -214,27 +224,71 @@ index 037609b..79dc733 100644
 +    return;
 +}
 +
++static void export_evtlog_tpm20_tcg(uint64_t *log, uint64_t *size)
++{
++    void *elog_record_start;
++    uint64_t ram_start, ram_size, reserve;
++    void *curr;
++
++    if ( g_elog_2_1 == NULL )
++        goto fail;
++
++    if ( g_elog_2_1->first_record_offset == g_elog_2_1->next_record_offset )
++        goto fail;
++
++    /* Get the size needed for allocation. */
++    *size = g_elog_2_1->next_record_offset - g_elog_2_1->first_record_offset;
++    reserve = PAGE_UP(*size);
++
++    /* Find a RAM region below 4G. */
++    get_highest_sized_ram(reserve, 0x100000000ULL, &ram_start, &ram_size);
++    if ( ram_start == 0 )
++        goto fail;
++
++    /* Log in the last n pages of the RAM section. */
++    *log = ram_start + ram_size - reserve;
++
++    curr = (void*)(uintptr_t)(*log);
++    elog_record_start = (void*)(uintptr_t)(g_elog_2_1->phys_addr + g_elog_2_1->first_record_offset);
++    tb_memcpy(curr, elog_record_start, *size);
++
++    /* Mark the eventlog region as reserved. */
++    if ( !e820_reserve_ram(*log, reserve) )
++        goto fail;
++
++    return;
++
++fail:
++    *log = 0;
++    *size = 0;
++    return;
++}
++
  bool evtlog_append(uint8_t pcr, hash_list_t *hl, uint32_t type)
  {
      int log_type = get_evtlog_type();
-@@ -525,6 +637,23 @@ bool evtlog_append(uint8_t pcr, hash_list_t *hl, uint32_t type)
+@@ -525,6 +676,27 @@ bool evtlog_append(uint8_t pcr, hash_lis
      return true;
  }
  
 +void export_evtlog(uint64_t *log, uint64_t *size)
 +{
-+    struct tpm_if *tpm = get_tpm();
-+    switch (tpm->major) {
-+    case TPM12_VER_MAJOR:
-+        export_evtlog_tpm12(log, size);
-+        break;
-+    case TPM20_VER_MAJOR:
-+        export_evtlog_tpm20(log, size);
-+        break;
-+    default:
-+        *log = 0;
-+        *size = 0;
-+        return;
++    int log_type = get_evtlog_type();
++
++    switch (log_type) {
++        case EVTLOG_TPM12:
++            export_evtlog_tpm12(log, size);
++            break;
++        case EVTLOG_TPM2_LEGACY:
++            export_evtlog_tpm20_legacy(log, size);
++            break;
++        case EVTLOG_TPM2_TCG:
++            export_evtlog_tpm20_tcg(log, size);
++            break;
++        default:
++            *log = 0;
++            *size = 0;
++            break;
 +    }
 +}
 +
