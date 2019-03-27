@@ -17,7 +17,6 @@ SRC_URI = " \
     file://0008-tboot-Use-SHA256-by-default-with-TPM2.0.patch \
     file://0009-tpm2.0-Perform-orderly-shutdown.patch \
     file://0010-tboot-Export-TPM-event-log-to-VMM-Kernel.patch \
-    file://0011-tboot-utils-Fix-tools-build-in-64bits-env.patch \
     file://0012-Find-e820-regions-that-include-the-limit.patch \
     file://0013-Add-support-for-launching-64-bit-PE-kernels.patch \
     file://0014-safestringlib-Attend-GCC-warnings.patch \
