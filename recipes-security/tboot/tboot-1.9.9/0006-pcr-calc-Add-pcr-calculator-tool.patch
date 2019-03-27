@@ -143,7 +143,7 @@ new file mode 100644
 index 0000000..b232449
 --- /dev/null
 +++ b/pcr-calc/eventlog.c
-@@ -0,0 +1,292 @@
+@@ -0,0 +1,361 @@
 +/*
 + *
 + * Copyright (c) 2017 Daniel P. Smith
@@ -395,7 +395,7 @@ index 0000000..b232449
 +	return NULL;
 +}
 +
-+struct tpm *parse_tpm20_log(char *buffer, size_t size)
++struct tpm *parse_tpm20_log_legacy(char *buffer, size_t size)
 +{
 +	struct tpm *t;
 +	void *c, *n;
@@ -436,12 +436,81 @@ index 0000000..b232449
 +out:
 +	return NULL;
 +}
++
++/*
++ * Agile log structure helpers.
++ */
++static inline const TCG_EfiSpecIdEventAlgorithmSizes *
++	tcg_header_algorithms(const TCG_EfiSpecIdEventStructHeader *hdr)
++{
++	/* TCG_EfiSpecIdEventAlgorithmSizes follows the static header
++	 * immediately. */
++	return ((void*)hdr) + sizeof (*hdr);
++}
++
++static inline size_t tcg_pcr_event_size(const TCG_PCR_EVENT *h)
++{
++	return sizeof (*h) + h->EventSize;
++}
++
++static size_t parse_tcg_pcr_event2(struct tpm *t, const TCG_PCR_EVENT2_HDR *h,
++	const TCG_EfiSpecIdEventAlgorithmSizes *algs)
++{
++	const TPML_DIGEST_VALUES *digests;
++	const TCG_PCR_EVENT2_EVT *event;
++	unsigned int n, c = sizeof (*h);
++
++	digests = ((void*)h) + c;
++	n = tpm_record_event_tcg(t, h->PCRIndex, h->EventType, digests, algs);
++	if (!n)
++		return 0;
++
++	c += n;
++	event = ((void*)h) + c;
++	/* Skip the Event content for now. */
++	n = sizeof (event->EventSize) +
++		sizeof (event->Event[0]) * event->EventSize;
++	c += n;
++
++	return c;
++}
++
++struct tpm *parse_tpm20_log_tcg(void *buffer, size_t size)
++{
++	struct tpm *t;
++	const TCG_PCR_EVENT *hdr = buffer;
++	const TCG_EfiSpecIdEventAlgorithmSizes *algs;
++	unsigned int n, c;
++
++	t = new_tpm(TPM20);
++	if (!t)
++		return NULL;
++
++	if (hdr->PCRIndex != PCR_INDEX_HEADER ||
++	    hdr->EventType != EV_NO_ACTION)
++		goto out;
++
++	algs = tcg_header_algorithms((void*)hdr->Event);
++	c = tcg_pcr_event_size(hdr);
++
++	for (; c < size; c += n) {
++		n = parse_tcg_pcr_event2(t, buffer + c, algs);
++		if (!n)
++			goto out;
++	}
++
++	return t;
++out:
++	destroy_tpm(t);
++
++	return NULL;
++}
 diff --git a/pcr-calc/eventlog.h b/pcr-calc/eventlog.h
 new file mode 100644
 index 0000000..7329125
 --- /dev/null
 +++ b/pcr-calc/eventlog.h
-@@ -0,0 +1,60 @@
+@@ -0,0 +1,63 @@
 +/*
 + * eventlog.h: TXT TPM event log definitions
 + *
@@ -480,6 +549,8 @@ index 0000000..7329125
 +#ifndef __EVENTLOG_H__
 +#define __EVENTLOG_H__
 +
++#include "tboot.h"
++
 +typedef enum {
 +	EVTYPE_BASE                 = 0x400,
 +	EVTYPE_PCRMAPPING           = EVTYPE_BASE + 1,
@@ -499,7 +570,8 @@ index 0000000..7329125
 +	tb_version_t tbver, struct pcr_event *evt);
 +
 +struct tpm *parse_tpm12_log(char *buffer, size_t size);
-+struct tpm *parse_tpm20_log(char *buffer, size_t size);
++struct tpm *parse_tpm20_log_legacy(char *buffer, size_t size);
++struct tpm *parse_tpm20_log_tcg(void *buffer, size_t size);
 +
 +#endif
 diff --git a/pcr-calc/hash.c b/pcr-calc/hash.c
@@ -1551,7 +1623,7 @@ new file mode 100644
 index 0000000..5e638a0
 --- /dev/null
 +++ b/pcr-calc/pcr-calc.c
-@@ -0,0 +1,421 @@
+@@ -0,0 +1,441 @@
 +/*
 + *
 + * Copyright (c) 2017 Daniel P. Smith
@@ -1613,9 +1685,11 @@ index 0000000..5e638a0
 +#define FLAG_CURRENT	1<<3
 +#define FLAG_LOG	1<<4
 +#define FLAG_VERBOSE	1<<5
++#define FLAG_EVTLOG_OLD 1<<6
 +
 +#define TPM12_LOG "/sys/kernel/security/txt/tpm12_binary_evtlog"
-+#define TPM20_LOG "/sys/kernel/security/txt/tpm20_binary_evtlog"
++#define TPM20_LOG_OLD "/sys/kernel/security/txt/tpm20_binary_evtlog"
++#define TPM20_LOG "/sys/kernel/security/txt/tpm20_binary_evtlog_tcg"
 +
 +#define error_msg(fmt, ...)         fprintf(stderr, fmt, ##__VA_ARGS__)
 +
@@ -1636,7 +1710,8 @@ index 0000000..5e638a0
 +		"\t-e evt_type:<hash_str>|emulate Override PCR events type found in the logs with the provided value or emulate the value entirely (emulation requires TBoot version and ACM to be provided).\n"
 +		"\t-F file Use the given file as tpm event log (replace /sys/kernel/security/txt/*_binary_evtlog).\n"
 +		"\t-A acm-path Path to the ACM that will be used to emulate events for PCR calculations (see -e).\n"
-+		"\t-V tboot-version TBoot version targeted to emulate events for PCR calculations (see -e)\n.");
++		"\t-V tboot-version TBoot version targeted to emulate events for PCR calculations (see -e).\n"
++		"\t-o Assume the event-log to be formated using the legacy format (prior TCG PC Client Platform. EFI Protocol Specification).\n");
 +}
 +
 +static bool apply_lg_policy(struct tpm *t, tb_policy_t *policy, size_t pol_size,
@@ -1761,11 +1836,11 @@ index 0000000..5e638a0
 +	tb_policy_t *policy_file = NULL;
 +	struct acm *acm = NULL;
 +	tb_version_t tbver = TB_199;
-+	char *eventlog = NULL;
++	const char *eventlog = NULL;
 +
 +	flags = FLAG_TPM12;
 +
-+	while ((opt = getopt(argc, (char ** const)argv, "h2dclvqa:p:m:e:F:A:V:")) != -1) {
++	while ((opt = getopt(argc, (char ** const)argv, "h2dclvqa:p:m:e:F:A:V:o")) != -1) {
 +		switch (opt) {
 +			case 'm':
 +				if (mb_count >= 20) {
@@ -1857,6 +1932,9 @@ index 0000000..5e638a0
 +					goto out;
 +				}
 +			break;
++			case 'o':
++				flags |= FLAG_EVTLOG_OLD;
++			break;
 +			case 'h':
 +				print_help();
 +				ret = 1;
@@ -1898,9 +1976,23 @@ index 0000000..5e638a0
 +		char *buffer;
 +		size_t size;
 +
-+		size = read_file(eventlog ? eventlog : TPM20_LOG, &buffer);
++		if (eventlog == NULL) {
++			if (!access(TPM20_LOG, R_OK))
++				eventlog = TPM20_LOG;
++			else if (!access(TPM20_LOG_OLD, R_OK))
++				eventlog = TPM20_LOG_OLD;
++			else {
++				error_msg("failed to find TPM 2.0 event log.\n");
++				goto out;
++			}
++		}
++
++		size = read_file(eventlog, &buffer);
 +		if (size > 0) {
-+			t = parse_tpm20_log(buffer, size);
++			if (flags & FLAG_EVTLOG_OLD)
++				t = parse_tpm20_log_legacy(buffer, size);
++			else
++				t = parse_tpm20_log_tcg(buffer, size);
 +			free(buffer);
 +		}
 +
@@ -2116,7 +2208,7 @@ new file mode 100644
 index 0000000..fb7d501
 --- /dev/null
 +++ b/pcr-calc/tpm.c
-@@ -0,0 +1,489 @@
+@@ -0,0 +1,534 @@
 +/*
 + *
 + * Copyright (c) 2017 Daniel P. Smith
@@ -2359,6 +2451,51 @@ index 0000000..fb7d501
 +
 +	t->active_banks |= alg_to_mask(alg);
 +	return true;
++}
++
++/*
++ * Agile log structure helper.
++ */
++static size_t algorithms_get_digest_size(uint16_t id,
++	const TCG_EfiSpecIdEventAlgorithmSizes *algs)
++{
++	unsigned int i;
++
++	for (i = 0; i < algs->numberOfAlgorithms; ++i)
++		if (algs->digestSizes[i].algorithmId == id)
++			return algs->digestSizes[i].digestSize;
++
++	return 0;
++}
++
++size_t tpm_record_event_tcg(struct tpm *t, uint32_t pcr, uint32_t type,
++	const TPML_DIGEST_VALUES *v,
++	const TCG_EfiSpecIdEventAlgorithmSizes *algs)
++{
++	size_t i, n = sizeof (v->Count);
++
++	for (i = 0; i < v->Count; ++i) {
++		const TPMT_HA *ha = ((void*)v) + n;
++		int bnum = alg_to_bank(ha->AlgorithmId);
++		struct pcr_bank *bank = &t->banks[bnum];
++		size_t size;
++
++		size = algorithms_get_digest_size(ha->AlgorithmId, algs);
++		if (size == 0)
++			return 0;
++
++		if (pcr < MAX_PCR) {
++			if (!pcr_record_event(&bank->pcrs[pcr],
++				ha->AlgorithmId, type, (tb_hash_t*)ha->Digest))
++				return 0;
++
++			t->active_banks |= alg_to_mask(ha->AlgorithmId);
++		}
++
++		n += sizeof (ha->AlgorithmId) + size;
++	}
++
++	return n;
 +}
 +
 +int tpm_count_event(struct tpm *t, uint16_t alg, uint32_t evt_type)
@@ -2611,7 +2748,7 @@ new file mode 100644
 index 0000000..c482f3f
 --- /dev/null
 +++ b/pcr-calc/tpm.h
-@@ -0,0 +1,199 @@
+@@ -0,0 +1,200 @@
 +/*
 + * pcr.h: pcr definitions
 + *
@@ -2657,6 +2794,8 @@ index 0000000..c482f3f
 +#include "../include/config.h"
 +#include "../include/hash.h"
 +#include "heap.h"
++#include "tboot.h"
++#include "eventlog_tcg.h"
 +
 +
 +#define TPM_EVT_HASH_START	0x402
@@ -2786,6 +2925,9 @@ index 0000000..c482f3f
 +struct tpm *new_tpm(uint8_t version);
 +void destroy_tpm(struct tpm *t);
 +bool tpm_record_event(struct tpm *t, uint16_t alg, void *e);
++size_t tpm_record_event_tcg(struct tpm *t, uint32_t pcr, uint32_t type,
++	const TPML_DIGEST_VALUES *v,
++	const TCG_EfiSpecIdEventAlgorithmSizes *algs);
 +int tpm_count_event(struct tpm *t, uint16_t alg, uint32_t evt_type);
 +struct pcr_event *tpm_find_event(struct tpm *t, uint16_t alg,
 +				uint32_t evt_type, int n);
@@ -2794,10 +2936,6 @@ index 0000000..c482f3f
 +bool tpm_substitute_all_events(struct tpm *t, uint16_t alg,
 +				const struct pcr_event *evt,
 +				unsigned int evt_count);
-+typedef enum {
-+	TB_196,
-+	TB_199,
-+} tb_version_t;
 +bool tpm_emulate_event(struct tpm *t, uint16_t alg,
 +		       const struct pcr_event *evt,
 +		       const struct acm *acm, tb_version_t tbver);
@@ -3934,6 +4072,108 @@ index 0000000..7cd7e28
 +}
 +
 +#endif /* _TXT_H_ */
+--- /dev/null
++++ b/pcr-calc/eventlog_tcg.h
+@@ -0,0 +1,86 @@
++#ifndef _EVENTLOG_TCG_H_
++# define _EVENTLOG_TCG_H_
++
++# include <stdint.h>
++
++/*
++ * To match with specification definition:
++ *
++ * struct tdTCG_EfiSpecIDEventStruct {
++ *     TCG_EfiSpecIdEventStructHeader hdr;
++ *     TCG_EfiSpecIdEventAlgorithmSizes algs;
++ *     TCG_EfiSpecIdEventVendorInfo vinfo
++ * } TCG_EfiSpecIDEventStruct;
++ *
++ * This makes it easier to parse/print the different components with dynamic
++ * sizes.
++ */
++
++typedef struct tdTCG_EfiSpecIdEventStructHeader {
++	uint8_t signature[16];
++	uint32_t platformClass;
++	uint8_t specVersionMinor;
++	uint8_t specVersionMajor;
++	uint8_t specErrata;
++	uint8_t uintnSize;
++}__attribute__((packed)) TCG_EfiSpecIdEventStructHeader;
++
++typedef struct tdTCG_EfiSpecIdEventAlgorithmSize {
++	uint16_t algorithmId;
++	uint16_t digestSize;
++}__attribute__((packed)) TCG_EfiSpecIdEventAlgorithmSize;
++
++typedef struct tdTCG_EfiSpecIdEventAlgorithmSizes {
++	uint32_t numberOfAlgorithms;
++	TCG_EfiSpecIdEventAlgorithmSize digestSizes[];
++}__attribute__((packed)) TCG_EfiSpecIdEventAlgorithmSizes;
++
++typedef struct tdTCG_EfiSpecIdEventVendorInfo {
++	uint8_t vendorInfoSize;
++	uint8_t vendorInfo[];
++}__attribute__((packed)) TCG_EfiSpecIdEventVendorInfo;
++
++/*
++ * SHA1 Event Log Entry Format.
++ */
++typedef struct tdTCG_PCR_EVENT {
++#define PCR_INDEX_HEADER    0x0
++	uint32_t PCRIndex;
++#define EV_NO_ACTION    0x3
++	uint32_t EventType;
++	uint8_t Digest[20];
++	uint32_t EventSize;
++	uint8_t Event[];
++}__attribute__((packed)) TCG_PCR_EVENT;
++
++/*
++ * Crypto Agile Log Entry Format.
++ *
++ * typedef struct tdTCG_PCR_EVENT2 {
++ *     TCG_PCR_EVENT2_HDR hdr;
++ *     TPML_DIGEST_VALUES digests;
++ *     TCG_PCR_EVENT2_EVT event;
++ * } TCG_PCR_EVENT2;
++ */
++typedef struct tdTCG_PCR_EVENT2_HDR {
++	uint32_t PCRIndex;
++	uint32_t EventType;
++}__attribute__((packed)) TCG_PCR_EVENT2_HDR;
++
++typedef struct tdTPMT_HA {
++	uint16_t AlgorithmId;
++	uint8_t Digest[];
++}__attribute__((packed)) TPMT_HA;
++
++typedef struct tdTPML_DIGEST_VALUES {
++	uint32_t Count;
++	TPMT_HA Digests[];
++}__attribute__((packed)) TPML_DIGEST_VALUES;
++
++typedef struct tdTCG_PCR_EVENT2_EVT {
++	uint32_t EventSize;
++	uint8_t Event[];
++}__attribute__((packed)) TCG_PCR_EVENT2_EVT;
++
++#endif /* !_EVENTLOG_TCG_H_ */
++
+--- /dev/null
++++ b/pcr-calc/tboot.h
+@@ -0,0 +1,10 @@
++#ifndef _TBOOT_H_
++# define _TBOOT_H_
++
++typedef enum {
++	TB_196,
++	TB_199,
++} tb_version_t;
++
++#endif /* !_TBOOT_H_ */
++
 -- 
 2.20.1
 
