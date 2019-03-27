@@ -42,4 +42,7 @@ do_sign_modules() {
 addtask sign_modules after do_install before do_package
 # lockfiles needs to match module.bbclass make_scripts value
 # Otherwise sign-file could disappear from ${STAGING_KERNEL_BUILDDIR}
+# Build-time auto-generated keys sign modules in do_install
+do_install[lockfiles] = "${TMPDIR}/kernel-scripts.lock"
+# Explicit keys sign modules in do_sign_modules
 do_sign_modules[lockfiles] = "${TMPDIR}/kernel-scripts.lock"
