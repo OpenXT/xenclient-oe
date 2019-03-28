@@ -17,7 +17,7 @@ DEPENDS += " \
 
 PV = "git${SRCPV}"
 
-SRCREV = "${AUTOREV}"
+SRCREV = "be25a1be3d1b71bd747065f2b03c5a97e7a4ba20"
 
 SRC_URI = "git://github.com/rhboot/pesign \
     file://0001-Disable-warning.patch \
