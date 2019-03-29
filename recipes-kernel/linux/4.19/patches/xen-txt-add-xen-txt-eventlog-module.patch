@@ -57,7 +57,7 @@ Subject: [PATCH] xen-txt: add xen txt eventlog module
  obj-$(CONFIG_XEN_PCIDEV_BACKEND)	+= xen-pciback/
 --- /dev/null
 +++ b/drivers/xen/txt.c
-@@ -0,0 +1,200 @@
+@@ -0,0 +1,212 @@
 +/*
 + * Copyright (C) 2017 Apertus Solutions, LLC
 + *
@@ -181,13 +181,21 @@ Subject: [PATCH] xen-txt: add xen txt eventlog module
 +		goto out;
 +	}
 +
-+	if ((ret = tpm_is_tpm2(NULL)) < 0)
-+		goto out_dir;
-+
-+	if (ret == 0)
-+		filename = "tpm12_binary_evtlog";
-+	else
-+		filename = "tpm20_binary_evtlog";
++	switch (txt_log.format) {
++		case TXTOP_EVTLOG_FORMAT_TCG_12:
++			filename = "tpm12_binary_evtlog";
++			break;
++		case TXTOP_EVTLOG_FORMAT_LEGACY_20:
++			filename = "tpm20_binary_evtlog_legacy";
++			break;
++		case TXTOP_EVTLOG_FORMAT_TCG_20:
++			filename = "tpm20_binary_evtlog_tcg";
++			break;
++		default:
++			printk(KERN_ERR "Incompatible event-log format: %x\n", txt_log.format);
++			ret = EINVAL;
++			goto out_dir;
++	}
 +
 +	fs_entries[FS_LOG_ENTRY] =
 +	    securityfs_create_file(filename,
@@ -215,7 +223,6 @@ Subject: [PATCH] xen-txt: add xen txt eventlog module
 +		securityfs_remove(fs_entries[i]);
 +}
 +
-+
 +static int __init txt_init(void)
 +{
 +	int err;
@@ -224,11 +231,16 @@ Subject: [PATCH] xen-txt: add xen txt eventlog module
 +		return -ENODEV;
 +
 +	txt_log.size = 0;
++	txt_log.buffer = NULL;
++	txt_log.format = 0;
 +	if ((err = HYPERVISOR_txt_op(TXTOP_GET, &txt_log)) != 0)
 +		return err;
 +
-+	txt_log.buffer = kmalloc((size_t) txt_log.size, GFP_KERNEL);
-+	if (!txt_log.buffer)
++	if (!txt_log.size)
++		return -ENODEV;
++
++	txt_log.buffer = kmalloc(txt_log.size, GFP_KERNEL);
++	if (txt_log.buffer == NULL)
 +		return -ENOMEM;
 +
 +	if ((err = HYPERVISOR_txt_op(TXTOP_GET, &txt_log)) != 0)
@@ -268,7 +280,7 @@ Subject: [PATCH] xen-txt: add xen txt eventlog module
  
  /* Architecture-specific hypercall definitions. */
  #define __HYPERVISOR_arch_0               48
-@@ -745,6 +746,13 @@ typedef uint64_t cpumap_t;
+@@ -745,6 +746,20 @@ typedef uint64_t cpumap_t;
  
  typedef uint8_t xen_domain_handle_t[16];
  
@@ -276,6 +288,13 @@ Subject: [PATCH] xen-txt: add xen txt eventlog module
 +
 +struct txt_op {
 +	uint64_t  size;
++
++#define TXTOP_EVTLOG_FORMAT_UNKNOWN	0x0
++#define TXTOP_EVTLOG_FORMAT_TCG_12	0x1
++#define TXTOP_EVTLOG_FORMAT_LEGACY_20	0x2
++#define TXTOP_EVTLOG_FORMAT_TCG_20	0x3
++	uint8_t format;
++	uint8_t _pad[7];
 +	void *buffer;
 +};
 +

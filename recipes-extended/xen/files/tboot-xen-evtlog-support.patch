@@ -31,7 +31,7 @@ PATCHES
 ################################################################################
 --- /dev/null
 +++ b/xen/include/public/txt.h
-@@ -0,0 +1,64 @@
+@@ -0,0 +1,67 @@
 +/******************************************************************************
 + * txt.h
 + *
@@ -79,6 +79,9 @@ PATCHES
 +struct xen_txt_evtlog {
 +    /* IN/OUT */
 +    uint64_t  size;
++    /* OUT */
++    uint8_t format;
++    uint8_t _pad[7];
 +    /* OUT */
 +    XEN_GUEST_HANDLE(void) buffer;
 +};
@@ -152,7 +155,21 @@ PATCHES
  
  /* tboot=<physical address of shared page> */
  static unsigned long __initdata opt_tboot_pa;
-@@ -548,6 +552,64 @@ int tboot_wake_ap(int apicid, unsigned l
+@@ -119,8 +123,12 @@ void __init tboot_probe(void)
+     printk("  shutdown_entry: %#x\n", tboot_shared->shutdown_entry);
+     printk("  tboot_base: %#x\n", tboot_shared->tboot_base);
+     printk("  tboot_size: %#x\n", tboot_shared->tboot_size);
+-    if ( tboot_shared->version >= 6 )
++    if ( tboot_shared->version >= 6 ) {
+         printk("  flags: %#x\n", tboot_shared->flags);
++        printk("  tboot_evtlog_size: %#"PRIx64"\n", tboot_shared->evt_log_size);
++        printk("  tboot_evtlog_region: %#"PRIx64"\n", tboot_shared->evt_log_region);
++        printk("  tboot_evtlog_format: %#x\n", tboot_shared->evt_log_format);
++    }
+ 
+     /* these will be needed by tboot_protect_mem_regions() and/or
+        tboot_parse_dmar_table(), so get them now */
+@@ -548,6 +556,73 @@ int tboot_wake_ap(int apicid, unsigned l
      return 1;
  }
  
@@ -170,16 +187,20 @@ PATCHES
 +            return -ENOSYS;
 +
 +        /* TODO Add XSM check here */
-+
-+        if ( copy_from_guest(&evtlog, arg, 1) )
++        if ( copy_from_guest(&evtlog, arg, 1) ) {
++            printk("Failed to copy input evtlog struct (%zu bytes).\n", sizeof (evtlog));
 +            return -EFAULT;
++        }
 +
 +        /* Does the guest need to know the size? */
 +        if ( evtlog.size == 0 ) {
 +            evtlog.size = g_tboot_shared->evt_log_size;
++            evtlog.format = g_tboot_shared->evt_log_format;
 +
-+            if ( copy_to_guest(arg, &evtlog, 1) )
++            if ( copy_to_guest(arg, &evtlog, 1) ) {
++                printk("Failed to copy initial evtlog struct (%zu bytes).\n", sizeof (evtlog));
 +                return -EFAULT;
++            }
 +
 +            break;
 +        }
@@ -194,14 +215,19 @@ PATCHES
 +            return -ENOMEM;
 +
 +        evtlog.size = g_tboot_shared->evt_log_size;
++        evtlog.format = g_tboot_shared->evt_log_format;
++
++        buffer_hnd = guest_handle_cast(evtlog.buffer, void);
++        if ( copy_to_guest(buffer_hnd, va_evtlog, evtlog.size) ) {
++            printk("Failed to copy evtlog buffer (%lu bytes).\n", evtlog.size);
++            ret = -EFAULT;
++        }
++
 +        if ( copy_to_guest(arg, &evtlog, 1) ) {
++            printk("Failed to copy evtlog struct (%zu bytes).\n", sizeof (evtlog));
 +            iounmap(va_evtlog);
 +            return -EFAULT;
 +        }
-+
-+        buffer_hnd = guest_handle_cast(evtlog.buffer, void);
-+        if ( copy_to_guest(buffer_hnd, va_evtlog, evtlog.size) )
-+            ret = -EFAULT;
 +
 +        iounmap(va_evtlog);
 +
@@ -219,13 +245,19 @@ PATCHES
   * mode: C
 --- a/xen/include/asm-x86/tboot.h
 +++ b/xen/include/asm-x86/tboot.h
-@@ -102,6 +102,9 @@ typedef struct __packed {
+@@ -102,6 +102,15 @@ typedef struct __packed {
      uint32_t  flags;
      uint64_t  ap_wake_addr;      /* phys addr of kernel/VMM SIPI vector */
      uint32_t  ap_wake_trigger;   /* kernel/VMM writes APIC ID to wake AP */
 +    /* TPM event log fields: */
 +    uint64_t  evt_log_size;      /* size of e820 TPM event log(s) region */
 +    uint64_t  evt_log_region;    /* e820 region containing TPM event log(s) */
++
++#define TB_EVTLOG_FORMAT_UNKNOWN    0x0
++#define TB_EVTLOG_FORMAT_TCG_12     0x1
++#define TB_EVTLOG_FORMAT_LEGACY_20  0x2
++#define TB_EVTLOG_FORMAT_TCG_20     0x3
++    uint8_t   evt_log_format;    /* TPM event log(s) format. */
  } tboot_shared_t;
  
  #define TB_SHUTDOWN_REBOOT      0

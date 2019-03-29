@@ -19,21 +19,45 @@ diff --git a/include/tboot.h b/include/tboot.h
 index abb1ca4..4e7c7be 100644
 --- a/include/tboot.h
 +++ b/include/tboot.h
-@@ -109,6 +109,8 @@ typedef struct __packed {
+@@ -109,6 +109,14 @@ typedef struct __packed {
      uint32_t  flags;
      uint64_t  ap_wake_addr;      /* phys addr of kernel/VMM SIPI vector */
      uint32_t  ap_wake_trigger;   /* kernel/VMM writes APIC ID to wake AP */
 +    uint64_t  evt_log_size;      /* size of e820 TPM event log(s) region */
 +    uint64_t  evt_log_region;    /* e820 region containing TPM event log(s) */
++
++#define TB_EVTLOG_FORMAT_UNKNOWN    0x0
++#define TB_EVTLOG_FORMAT_TCG_12     0x1
++#define TB_EVTLOG_FORMAT_LEGACY_20  0x2
++#define TB_EVTLOG_FORMAT_TCG_20     0x3
++    uint8_t   evt_log_format;    /* TPM event log(s) format. */
  } tboot_shared_t;
  
  #define TB_SHUTDOWN_REBOOT      0
-@@ -163,6 +165,8 @@ static inline void print_tboot_shared(const tboot_shared_t *tboot_shared)
+@@ -150,6 +158,16 @@ static inline bool tboot_in_measured_env
+     return (g_tboot_shared != NULL);
+ }
+ 
++#if __WORDSIZE == 64
++# define __PRI64_PREFIX	"l"
++# define __PRIPTR_PREFIX	"l"
++#else
++# define __PRI64_PREFIX	"ll"
++# define __PRIPTR_PREFIX
++#endif
++#define PRIu64		__PRI64_PREFIX "u"
++#define PRIx64		__PRI64_PREFIX "x"
++
+ static inline void print_tboot_shared(const tboot_shared_t *tboot_shared)
+ {
+     printk(TBOOT_DETA"tboot_shared data:\n");
+@@ -163,6 +181,9 @@ static inline void print_tboot_shared(co
      printk(TBOOT_DETA"\t flags: 0x%8.8x\n", tboot_shared->flags);
      printk(TBOOT_DETA"\t ap_wake_addr: 0x%08x\n", (uint32_t)tboot_shared->ap_wake_addr);
      printk(TBOOT_DETA"\t ap_wake_trigger: %u\n", tboot_shared->ap_wake_trigger);
-+    printk(TBOOT_DETA"\t evt_log_region: 0x%llx\n", tboot_shared->evt_log_region);
-+    printk(TBOOT_DETA"\t evt_log_size: 0x%llx\n", tboot_shared->evt_log_size);
++    printk(TBOOT_DETA"\t evt_log_region: 0x%"PRIx64"\n", tboot_shared->evt_log_region);
++    printk(TBOOT_DETA"\t evt_log_size: 0x%"PRIx64"\n", tboot_shared->evt_log_size);
++    printk(TBOOT_DETA"\t evt_log_format: 0x%02x\n", tboot_shared->evt_log_format);
  }
  
  #endif    /* __TBOOT_H__ */
@@ -50,21 +74,22 @@ index ed7397f..1514e8a 100644
 +        base = TBOOT_SERIAL_LOG_ADDR;
 +        size = TBOOT_SERIAL_LOG_SIZE;
 +        printk(TBOOT_INFO"reserving tboot memory log (%Lx - %Lx) in e820 table\n", base, (base + size - 1));
-+        if ( !e820_protect_region(base, size, E820_RESERVED) )         
++        if ( !e820_protect_region(base, size, E820_RESERVED) )
 +            apply_policy(TB_ERR_FATAL);
 +    }
 +
      /*
       * verify modules against policy
       */
-@@ -259,6 +268,17 @@ static void post_launch(void)
+@@ -259,6 +268,18 @@ static void post_launch(void)
          printk(TBOOT_ERR"ap_wake_mwait specified but the CPU doesn't support it.\n");
      }
  
 +    /*
 +     * export tpm event log
 +     */
-+    export_evtlog(&_tboot_shared.evt_log_region, &_tboot_shared.evt_log_size);
++    export_evtlog(&_tboot_shared.evt_log_region, &_tboot_shared.evt_log_size,
++                  &_tboot_shared.evt_log_format);
 +
 +    /* replace map in loader context with copy */
 +    replace_e820_map(g_ldr_ctx);
@@ -83,7 +108,7 @@ index 28eb6e3..ff29cbf 100644
  extern bool txt_is_powercycle_required(void);
  extern void ap_wait(unsigned int cpuid);
  extern int get_evtlog_type(void);
-+void export_evtlog(uint64_t *log, uint64_t *size);
++void export_evtlog(uint64_t *log, uint64_t *size, uint8_t *format);
  
  extern uint32_t g_using_da;
  #endif      /* __TXT_TXT_H__ */
@@ -135,11 +160,21 @@ index 037609b..79dc733 100644
  void dump_event_2(void)
  {
      heap_event_log_descr_t *log_descr;
-@@ -499,6 +536,81 @@ bool evtlog_append_tpm2_tcg(uint8_t pcr, uint32_t type, hash_list_t *hl)
+@@ -477,8 +514,7 @@ bool evtlog_append_tpm2_tcg(uint8_t pcr,
+         return false;
+     }
+ 
+-    event = (tcg_pcr_event2*)(void *)(unsigned long)g_elog_2_1->phys_addr +
+-        g_elog_2_1->next_record_offset;
++    event = (tcg_pcr_event2*)(uintptr_t)(g_elog_2_1->phys_addr + g_elog_2_1->next_record_offset);
+     event->pcr_index = pcr;
+     event->event_type = type;
+     event->event_size = 0;  // No event data passed by tboot.
+@@ -499,6 +535,121 @@ bool evtlog_append_tpm2_tcg(uint8_t pcr,
      return true;
  }
  
-+void export_evtlog_tpm20(uint64_t *log, uint64_t *size)
++static void export_evtlog_tpm20_legacy(uint64_t *log, uint64_t *size)
 +{
 +    size_t copied = 0;
 +    size_t count = 0;
@@ -214,27 +249,72 @@ index 037609b..79dc733 100644
 +    return;
 +}
 +
++static void export_evtlog_tpm20_tcg(uint64_t *log, uint64_t *size)
++{
++    void *elog_record_start;
++    uint64_t ram_start, ram_size, reserve;
++    void *curr;
++
++    if ( g_elog_2_1 == NULL )
++        goto fail;
++
++    if ( g_elog_2_1->first_record_offset == g_elog_2_1->next_record_offset )
++        goto fail;
++
++    /* Get the size needed for allocation. */
++    *size = g_elog_2_1->next_record_offset - g_elog_2_1->first_record_offset;
++    reserve = PAGE_UP(*size);
++
++    /* Find a RAM region below 4G. */
++    get_highest_sized_ram(reserve, 0x100000000ULL, &ram_start, &ram_size);
++    if ( ram_start == 0 )
++        goto fail;
++
++    /* Log in the last n pages of the RAM section. */
++    *log = ram_start + ram_size - reserve;
++
++    curr = (void*)(uintptr_t)(*log);
++    elog_record_start = (void*)(uintptr_t)(g_elog_2_1->phys_addr + g_elog_2_1->first_record_offset);
++    tb_memcpy(curr, elog_record_start, *size);
++
++    /* Mark the eventlog region as reserved. */
++    if ( !e820_reserve_ram(*log, reserve) )
++        goto fail;
++
++    return;
++
++fail:
++    *log = 0;
++    *size = 0;
++    return;
++}
++
  bool evtlog_append(uint8_t pcr, hash_list_t *hl, uint32_t type)
  {
      int log_type = get_evtlog_type();
-@@ -525,6 +637,23 @@ bool evtlog_append(uint8_t pcr, hash_list_t *hl, uint32_t type)
+@@ -525,6 +676,28 @@ bool evtlog_append(uint8_t pcr, hash_lis
      return true;
  }
  
-+void export_evtlog(uint64_t *log, uint64_t *size)
++void export_evtlog(uint64_t *log, uint64_t *size, uint8_t *format)
 +{
-+    struct tpm_if *tpm = get_tpm();
-+    switch (tpm->major) {
-+    case TPM12_VER_MAJOR:
-+        export_evtlog_tpm12(log, size);
-+        break;
-+    case TPM20_VER_MAJOR:
-+        export_evtlog_tpm20(log, size);
-+        break;
-+    default:
-+        *log = 0;
-+        *size = 0;
-+        return;
++    *format = get_evtlog_type();
++
++    switch (*format) {
++        case EVTLOG_TPM12:
++            export_evtlog_tpm12(log, size);
++            break;
++        case EVTLOG_TPM2_LEGACY:
++            export_evtlog_tpm20_legacy(log, size);
++            break;
++        case EVTLOG_TPM2_TCG:
++            export_evtlog_tpm20_tcg(log, size);
++            break;
++        default:
++            *log = 0;
++            *size = 0;
++            *format = 0;
++            break;
 +    }
 +}
 +
