@@ -64,10 +64,10 @@ PATCHES
 -    return logfile_w;
 -}
 -
- const char *libxl__domain_device_model(libxl__gc *gc,
-                                        const libxl_domain_build_info *info)
- {
-@@ -2235,11 +2214,10 @@ void libxl__spawn_local_dm(libxl__egc *e
+ /*
+  *  userlookup_helper_getpwnam(libxl__gc*, const char *user,
+  *                             struct passwd **pwd_r);
+@@ -2481,11 +2460,10 @@ void libxl__spawn_local_dm(libxl__egc *e
  
      libxl_ctx *ctx = CTX;
      libxl_domain_config *guest_config = dmss->guest_config;
@@ -80,7 +80,7 @@ PATCHES
      int rc;
      char **args, **arg, **envs;
      xs_transaction_t t;
-@@ -2293,12 +2271,6 @@ void libxl__spawn_local_dm(libxl__egc *e
+@@ -2556,12 +2534,6 @@ void libxl__spawn_local_dm(libxl__egc *e
          libxl__xs_printf(gc, XBT_NULL, GCSPRINTF("%s/disable_pf", path),
                           "%d", !libxl_defbool_val(b_info->u.hvm.xen_platform_pci));
  
@@ -93,10 +93,10 @@ PATCHES
      null = open("/dev/null", O_RDONLY);
      if (null < 0) {
          LOGED(ERROR, domid, "unable to open /dev/null");
-@@ -2352,14 +2324,13 @@ retry_transaction:
-         goto out_close;
-     if (!rc) { /* inner child */
-         setsid();
+@@ -2639,14 +2611,13 @@ retry_transaction:
+             if (rc)
+                 _exit(-1);
+         }
 -        libxl__exec(gc, null, logfile_w, logfile_w, dm, args, envs);
 +        libxl__exec(gc, null, null, null, dm, args, envs);
      }
@@ -109,7 +109,7 @@ PATCHES
  out:
      if (dm_state_fd >= 0) close(dm_state_fd);
      if (rc)
-@@ -2448,7 +2419,7 @@ void libxl__spawn_qdisk_backend(libxl__e
+@@ -2778,7 +2749,7 @@ void libxl__spawn_qdisk_backend(libxl__e
      flexarray_t *dm_args, *dm_envs;
      char **args, **envs;
      const char *dm;
@@ -117,8 +117,8 @@ PATCHES
 +    int null = -1, rc;
      uint32_t domid = dmss->guest_domid;
  
-     /* Always use qemu-xen as device model */
-@@ -2473,11 +2444,6 @@ void libxl__spawn_qdisk_backend(libxl__e
+     dmss_init(dmss);
+@@ -2805,11 +2776,6 @@ void libxl__spawn_qdisk_backend(libxl__e
      libxl__set_qemu_env_for_xsa_180(gc, dm_envs);
      envs = (char **) flexarray_contents(dm_envs);
  
@@ -130,7 +130,7 @@ PATCHES
      null = open("/dev/null", O_RDONLY);
      if (null < 0) {
         rc = ERROR_FAIL;
-@@ -2510,12 +2476,11 @@ void libxl__spawn_qdisk_backend(libxl__e
+@@ -2842,13 +2808,12 @@ void libxl__spawn_qdisk_backend(libxl__e
          goto out;
      if (!rc) { /* inner child */
          setsid();
@@ -140,6 +140,7 @@ PATCHES
  
      rc = 0;
  out:
+     dmss_dispose(gc, dmss);
 -    if (logfile_w >= 0) close(logfile_w);
      if (null >= 0) close(null);
      /* callback on error only, success goes via dmss->spawn.*_cb */
@@ -203,9 +204,9 @@ PATCHES
  }
 --- a/tools/libxl/libxl_internal.h
 +++ b/tools/libxl/libxl_internal.h
-@@ -57,6 +57,9 @@
- #include <xenguest.h>
- #include <xc_dom.h>
+@@ -60,6 +60,9 @@
+ 
+ #include <xen-tools/libs.h>
  
 +/* OpenXT: we use syslog */
 +#include <syslog.h>
@@ -225,7 +226,7 @@ PATCHES
  #include <libxl.h>
  #include <libxl_utils.h>
  #include <libxlutil.h>
-@@ -340,6 +343,8 @@ static void xl_ctx_free(void)
+@@ -343,6 +346,8 @@ static void xl_ctx_free(void)
          free(lockfile);
          lockfile = NULL;
      }
@@ -234,14 +235,14 @@ PATCHES
  }
  
  int main(int argc, char **argv)
-@@ -382,6 +387,8 @@ int main(int argc, char **argv)
+@@ -385,6 +390,8 @@ int main(int argc, char **argv)
      logger = xtl_createlogger_stdiostream(stderr, minmsglevel,
          (progress_use_cr ? XTL_STDIOSTREAM_PROGRESS_USE_CR : 0));
      if (!logger) exit(EXIT_FAILURE);
 +    /* OpenXT: we use syslog, we could probably comment out the above. */
 +    openlog("xl", LOG_CONS, LOG_USER);
  
-     atexit(xl_ctx_free);
+     xl_ctx_alloc();
  
 --- a/tools/xl/xl_utils.c
 +++ b/tools/xl/xl_utils.c
