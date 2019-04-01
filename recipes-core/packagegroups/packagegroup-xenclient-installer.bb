@@ -67,7 +67,6 @@ RDEPENDS_${PN} = " \
     xen-efi \
     xen-flask-tools \
     xen-hypervisor \
-    xen-libxenctrl \
     xen-libxenguest \
     xen-libxenlight \
     xen-libxenstat \
