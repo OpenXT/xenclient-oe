@@ -38,7 +38,7 @@ PATCHES
 ################################################################################
 --- a/xen/common/domain.c
 +++ b/xen/common/domain.c
-@@ -412,6 +412,9 @@ struct domain *domain_create(domid_t dom
+@@ -482,6 +482,9 @@ struct domain *domain_create(domid_t dom
          memcpy(d->handle, config->handle, sizeof(d->handle));
      }
  
@@ -50,7 +50,7 @@ PATCHES
   fail:
 --- a/xen/include/xen/sched.h
 +++ b/xen/include/xen/sched.h
-@@ -483,6 +483,10 @@ struct domain
+@@ -482,6 +482,10 @@ struct domain
      unsigned int last_alloc_node;
      spinlock_t node_affinity_lock;
  
@@ -63,7 +63,15 @@ PATCHES
      struct vnuma_info *vnuma;
 --- a/xen/arch/x86/mm.c
 +++ b/xen/arch/x86/mm.c
-@@ -4279,6 +4279,9 @@ int xenmem_add_to_physmap_one(
+@@ -119,6 +119,7 @@
+ #include <xen/efi.h>
+ #include <xen/grant_table.h>
+ #include <xen/hypercall.h>
++#include <asm/hvm/hvm.h>
+ #include <asm/paging.h>
+ #include <asm/shadow.h>
+ #include <asm/page.h>
+@@ -4469,6 +4470,9 @@ int xenmem_add_to_physmap_one(
      int rc = 0;
      mfn_t mfn = INVALID_MFN;
      p2m_type_t p2mt;
@@ -73,19 +81,21 @@ PATCHES
  
      if ( !paging_mode_translate(d) )
          return -EACCES;
-@@ -4288,6 +4291,11 @@ int xenmem_add_to_physmap_one(
+@@ -4478,6 +4482,13 @@ int xenmem_add_to_physmap_one(
          case XENMAPSPACE_shared_info:
              if ( idx == 0 )
                  mfn = virt_to_mfn(d->shared_info);
++#ifdef CONFIG_HVM
 +            /* unmap shared info page if guest passed INVALID_MFN */
 +            if ( gpfn_new == (hvm_guest_x86_mode(current) == 8
 +                              ? mfn_x(INVALID_MFN)
 +                              : mfn_x(INVALID_MFN) >> 32) )
 +                unmap_shinfo = 1;
++#endif
              break;
          case XENMAPSPACE_grant_table:
              rc = gnttab_map_frame(d, idx, gpfn, &mfn);
-@@ -4317,25 +4325,26 @@ int xenmem_add_to_physmap_one(
+@@ -4507,25 +4518,26 @@ int xenmem_add_to_physmap_one(
              break;
      }
  
@@ -118,7 +128,7 @@ PATCHES
  
      if ( rc )
          goto put_both;
-@@ -4353,13 +4362,28 @@ int xenmem_add_to_physmap_one(
+@@ -4543,13 +4555,28 @@ int xenmem_add_to_physmap_one(
  
      /* Map at new location. */
      if ( !rc )
