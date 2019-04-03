@@ -17,6 +17,9 @@ export KERNEL_MODULE_SIG_KEY
 # build-time keypair will be generated and used for signing and embedding.
 export KERNEL_MODULE_SIG_CERT
 
+# Kernel builds will override this with ${B}/scripts/sign-file
+SIGN_FILE = "${STAGING_KERNEL_BUILDDIR}/scripts/sign-file"
+
 do_sign_modules() {
     if [ -n "${KERNEL_MODULE_SIG_KEY}" ] &&
        grep -q '^CONFIG_MODULE_SIG=y' ${STAGING_KERNEL_BUILDDIR}/.config; then
@@ -25,16 +28,11 @@ do_sign_modules() {
                       cut -d '"' -f 2 )
         [ -z "$SIG_HASH" ] && bbfatal CONFIG_MODULE_SIG_HASH is not set in .config
 
-        # ${B} for kernel, ${STAGING_KERNEL_BUILDDIR} for modules
-        for SIGN_FILE in ${STAGING_KERNEL_BUILDDIR}/scripts/sign-file \
-                         ${B}/scripts/sign-file ; do
-            [ -x "$SIGN_FILE" ] && break
-        done
-        [ -x "$SIGN_FILE" ] || bbfatal "Cannot find scripts/sign-file"
+        [ -x "${SIGN_FILE}" ] || bbfatal "Cannot find scripts/sign-file"
 
         find ${D} -name "*.ko" -print0 | \
           xargs --no-run-if-empty -0 -n 1 \
-              $SIGN_FILE $SIG_HASH ${KERNEL_MODULE_SIG_KEY} \
+              ${SIGN_FILE} $SIG_HASH ${KERNEL_MODULE_SIG_KEY} \
                   ${KERNEL_MODULE_SIG_CERT}
     fi
 }
