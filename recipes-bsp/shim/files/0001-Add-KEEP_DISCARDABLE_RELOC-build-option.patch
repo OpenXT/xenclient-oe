@@ -1,0 +1,65 @@
+From 34290cb8e19e57d3323f29733c5b1d760ff9f983 Mon Sep 17 00:00:00 2001
+From: Tamas K Lengyel <lengyelt@ainfosec.com>
+Date: Tue, 19 Sep 2017 22:52:32 -0400
+Subject: [PATCH 1/6] Add KEEP_DISCARDABLE_RELOC build option
+
+Some efi applications expect the .reloc section to be present even after going
+through the shim (ie. Xen). This option allows building the shim such that it
+keeps it even if it was marked discardable.
+
+Signed-off-by: Tamas K Lengyel <lengyelt@ainfosec.com>
+---
+ BUILDING | 4 ++++
+ Makefile | 4 ++++
+ shim.c   | 6 +++++-
+ 3 files changed, 13 insertions(+), 1 deletion(-)
+
+diff --git a/BUILDING b/BUILDING
+index 461b85c..954fd3f 100644
+--- a/BUILDING
++++ b/BUILDING
+@@ -57,5 +57,9 @@ Variables you could set to customize the build:
+ - OSLABEL
+   This is the label that will be put in BOOT$(EFI_ARCH).CSV for your OS.
+   By default this is the same value as EFIDIR .
++- KEEP_DISCARDABLE_RELOC
++  This allows you to decide whether a .reloc section that was marked
++  discardable gets discarded or not. Some efi applications expect it to be
++  present after the shim (ie. Xen). By default it gets discarded.
+ 
+ # vim:filetype=mail:tw=74
+diff --git a/Makefile b/Makefile
+index 9ab1992..48f4e7c 100644
+--- a/Makefile
++++ b/Makefile
+@@ -73,6 +73,10 @@ ifneq ($(origin REQUIRE_TPM), undefined)
+ 	CFLAGS	+= -DREQUIRE_TPM
+ endif
+ 
++ifneq ($(origin KEEP_DISCARDABLE_RELOC), undefined)
++    CFLAGS  += -DKEEP_DISCARDABLE_RELOC
++endif
++
+ ifeq ($(ARCH),x86_64)
+ 	CFLAGS	+= -mno-mmx -mno-sse -mno-red-zone -nostdinc \
+ 		   -maccumulate-outgoing-args -m64 \
+diff --git a/shim.c b/shim.c
+index 34b819a..94151d5 100644
+--- a/shim.c
++++ b/shim.c
+@@ -1431,7 +1431,11 @@ static EFI_STATUS handle_image (void *data, unsigned int datasize,
+ 			}
+ 		}
+ 
+-		if (Section->Characteristics & EFI_IMAGE_SCN_MEM_DISCARDABLE) {
++		if ( (Section->Characteristics & EFI_IMAGE_SCN_MEM_DISCARDABLE)
++#if defined(KEEP_DISCARDABLE_RELOC)
++            && RelocSection != Section
++#endif
++        ) {
+ 			continue;
+ 		}
+ 
+-- 
+2.1.4
+

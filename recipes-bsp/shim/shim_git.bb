@@ -20,10 +20,16 @@ DEPENDS += "\
 PV = "14+git${SRCPV}"
 
 SRC_URI = " \
-    git://github.com/tklengyel/shim;branch=openxt \
+    git://github.com/rhboot/shim;protocol=https;branch=master \
+    file://0001-Add-KEEP_DISCARDABLE_RELOC-build-option.patch \
+    file://0002-Make-EFI_INCLUDE-path-configurable-during-make.patch \
+    file://0003-Add-Measure-function-to-the-shim-lock-protocol.patch \
+    file://0004-Don-t-overwrite-LoadOptions-if-NULL.patch \
+    file://0005-Allow-32-bit-images-for-measurement-verification-via.patch \
+    file://0006-Don-t-measure-with-Authenticode.patch \
 "
 
-SRCREV = "${AUTOREV}"
+SRCREV = "6c8d08c0af4768c715b79c8ec25141d56e34f8b4"
 
 S = "${WORKDIR}/git"
 
