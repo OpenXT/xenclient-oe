@@ -1,0 +1,78 @@
+From 2ea4a8559ede6c1cb9da94694a91eb142ffd7448 Mon Sep 17 00:00:00 2001
+From: Tamas K Lengyel <tamas@tklengyel.com>
+Date: Fri, 1 Dec 2017 11:10:27 -0500
+Subject: [PATCH 3/6] Add Measure function to the shim lock protocol
+
+---
+ shim.c | 20 ++++++++++++++++++++
+ shim.h |  9 +++++++++
+ 2 files changed, 29 insertions(+)
+
+diff --git a/shim.c b/shim.c
+index 94151d5..ea186ed 100644
+--- a/shim.c
++++ b/shim.c
+@@ -1843,6 +1843,25 @@ done:
+ 	return status;
+ }
+ 
++EFI_STATUS shim_measure (void *buffer, UINT32 size, UINT8 pcr)
++{
++    EFI_STATUS status;
++    PE_COFF_LOADER_IMAGE_CONTEXT context;
++
++    in_protocol = 1;
++
++    status = read_header(buffer, size, &context);
++    if (status == EFI_SUCCESS) {
++        status = tpm_log_pe((EFI_PHYSICAL_ADDRESS)(UINTN)buffer, size, NULL, pcr);
++    } else {
++        status = tpm_log_event((EFI_PHYSICAL_ADDRESS)(UINTN)buffer, (UINTN)size, pcr, (CHAR8 *)"shim_measure");
++    }
++
++    in_protocol = 0;
++
++    return status;
++}
++
+ static EFI_STATUS shim_hash (char *data, int datasize,
+ 			     PE_COFF_LOADER_IMAGE_CONTEXT *context,
+ 			     UINT8 *sha256hash, UINT8 *sha1hash)
+@@ -2943,6 +2962,7 @@ efi_main (EFI_HANDLE passed_image_handle, EFI_SYSTEM_TABLE *passed_systab)
+ 	shim_lock_interface.Verify = shim_verify;
+ 	shim_lock_interface.Hash = shim_hash;
+ 	shim_lock_interface.Context = shim_read_header;
++    shim_lock_interface.Measure = shim_measure;
+ 
+ 	systab = passed_systab;
+ 	image_handle = global_image_handle = passed_image_handle;
+diff --git a/shim.h b/shim.h
+index 9126253..e314853 100644
+--- a/shim.h
++++ b/shim.h
+@@ -19,6 +19,14 @@ EFI_STATUS
+ 
+ typedef
+ EFI_STATUS
++(*EFI_SHIM_LOCK_MEASURE) (
++	IN VOID *buffer,
++	IN UINT32 size,
++    IN UINT8 pcr
++	);
++
++typedef
++EFI_STATUS
+ (*EFI_SHIM_LOCK_HASH) (
+ 	IN char *data,
+ 	IN int datasize,
+@@ -39,6 +47,7 @@ typedef struct _SHIM_LOCK {
+ 	EFI_SHIM_LOCK_VERIFY Verify;
+ 	EFI_SHIM_LOCK_HASH Hash;
+ 	EFI_SHIM_LOCK_CONTEXT Context;
++	EFI_SHIM_LOCK_MEASURE Measure;
+ } SHIM_LOCK;
+ 
+ extern EFI_STATUS shim_init(void);
+-- 
+2.1.4
+
