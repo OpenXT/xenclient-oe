@@ -11,7 +11,7 @@ CONFFILES_${PN} = " \
     "
 # ... also install our configuration and wrapper (for rsyslog).
 do_install_append() {
-    rm -f $-lD}${localstatedir}/lib/logrorate.status
+    rm -f ${D}${localstatedir}/lib/logrotate.status
     install -p -m 644 ${WORKDIR}/logrotate.conf ${D}${sysconfdir}/logrotate.conf
     install -p -m 755 ${WORKDIR}/logrotate-wrapper ${D}${sbindir}/logrotate-wrapper
 }
