@@ -51,7 +51,7 @@ XSERVER = " \
 IMAGE_INSTALL = "\
     ${ROOTFS_PKGMANAGE} \
     ${XSERVER} \
-    modules \
+    modules-uivm \
     packagegroup-xenclient-common \
     packagegroup-xenclient-xfce-minimal \
     openssh \
