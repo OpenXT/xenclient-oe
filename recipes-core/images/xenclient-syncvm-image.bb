@@ -18,7 +18,7 @@ COMPATIBLE_MACHINE = "(xenclient-syncvm)"
 
 IMAGE_INSTALL = "\
     ${ROOTFS_PKGMANAGE} \
-    modules \
+    modules-syncvm \
     packagegroup-core-boot \
     packagegroup-base \
     packagegroup-xenclient-common \
