@@ -381,6 +381,8 @@ hash_modules() {
 }
 
 check_txt_quirk() {
+    local args
+
     modprobe txt > /dev/null 2>&1
     [ -d /sys/kernel/security/txt ] || return 0
 
@@ -408,6 +410,50 @@ check_txt_quirk() {
         return 0
     ;;
     esac
+}
+
+match_acm_legacy() {
+    local root="${1}"
+    local didvid=""
+    local fsbif=""
+    local qpiif=""
+    local acm=""
+
+    eval $(txt-stat |
+        sed -n \
+            -e 's|\s\+FSBIF: \(0x[0-9a-f]\+\)$|fsbif=\1|p' \
+            -e 's|\s\+QPIIF: \(0x[0-9a-f]\+\)$|qpiif=\1|p' \
+            -e 's|\s\+DIDVID: \(0x[0-9a-f]\+\)$|didvid=\1|p')
+
+    if [ -z "${didvid}" -o -z "${fsbif}" -o -z "${qpiif}" ]; then
+        return
+    fi
+
+    fsbif=$((${fsbif} & 0xffffffff))
+    qpiif=$((${qpiif} & 0xffffffff))
+
+    for f in ${root}/boot/*.{bin,BIN}; do
+        if acmmatch -d "${didvid}" -f "${fsbif}" -q "${qpiif}" "${f}" >/dev/null; then
+            acm="${f}"
+            break;
+        fi
+    done
+
+    echo "${acm}"
+}
+
+match_acm() {
+    local root="${1}"
+    local acm=""
+
+    for f in ${root}/boot/*.{bin,BIN}; do
+        if acmmatch "${f}" >/dev/null; then
+            acm="${f}"
+            break;
+        fi
+    done
+
+    echo "${acm}"
 }
 
 calculate_drtm_pcrs() {
@@ -459,12 +505,12 @@ calculate_drtm_pcrs() {
 
         [[ ${quirk} -eq 1 ]] && args="${args} -q"
 
-        for f in ${root}/boot/*.{bin,BIN}; do
-            if acmmatch "${f}" >/dev/null; then
-                acm="${f}"
-                break;
-            fi
-        done
+        # OpenXT 8 to OpenXT 9 forward sealing.
+        if [ -f "/sys/kernel/security/txt/tpm20_binary_evtlog" ]; then
+            acm="$(match_acm_legacy ${root})"
+        else
+            acm="$(match_acm ${root})"
+        fi
         if [ -z "${acm}" ]; then
             return 1
         fi
