@@ -1,3 +1,7 @@
+require classes/module-signing.bbclass
+# override value from module-signing to use the in-tree utility
+SIGN_FILE = "${B}/scripts/sign-file"
+
 # Set KERNEL_MODULE_SIG_CERT in local.conf to the filepath of a public key
 # to embed in the kernel to verify signed modules
 export KERNEL_MODULE_SIG_CERT
