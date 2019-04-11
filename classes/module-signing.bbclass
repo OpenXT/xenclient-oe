@@ -26,7 +26,7 @@ do_sign_modules() {
         SIG_HASH=$( grep CONFIG_MODULE_SIG_HASH= \
                         ${STAGING_KERNEL_BUILDDIR}/.config | \
                       cut -d '"' -f 2 )
-        [ -z "$SIG_HASH" ] && bbfatal CONFIG_MODULE_SIG_HASH is not set in .config
+        [ -z "$SIG_HASH" ] && bbfatal "CONFIG_MODULE_SIG_HASH is not set in .config"
 
         [ -x "${SIGN_FILE}" ] || bbfatal "Cannot find scripts/sign-file"
 
@@ -44,3 +44,6 @@ addtask sign_modules after do_install before do_package
 do_install[lockfiles] = "${TMPDIR}/kernel-scripts.lock"
 # Explicit keys sign modules in do_sign_modules
 do_sign_modules[lockfiles] = "${TMPDIR}/kernel-scripts.lock"
+# If the kernel signed the modules with a new key, out-of-tree ones need to be
+# signed again.
+do_sign_modules[depends] += "virtual/kernel:do_install"
