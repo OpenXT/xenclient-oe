@@ -37,6 +37,7 @@ SRC_URI += "${KERNELORG_MIRROR}/linux/kernel/v${PV_MAJOR}.x/linux-${PV}.tar.xz;n
     file://netback-vwif-support.patch \
     file://gem-foreign.patch \
     file://xen-txt-add-xen-txt-eventlog-module.patch \
+    file://xenpv-no-tty0-as-default-console.patch \
     file://xsa-155-qsb-023-add-RING_COPY_RESPONSE.patch \
     file://xsa-155-qsb-023-xen-blkfront-make-local-copy-of-response-before-usin.patch \
     file://xsa-155-qsb-023-xen-blkfront-prepare-request-locally-only-then-put-i.patch \
