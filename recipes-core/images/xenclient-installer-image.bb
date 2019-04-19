@@ -38,7 +38,6 @@ IMAGE_FEATURES += "empty-root-password"
 
 IMAGE_INSTALL = "\
     initscripts \
-    modules-installer \
     packagegroup-core-boot \
     packagegroup-base \
     packagegroup-xenclient-common \
