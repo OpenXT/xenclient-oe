@@ -27,7 +27,7 @@ BAD_RECOMMENDATIONS += " \
 IMAGE_INSTALL = "\
     ${ROOTFS_PKGMANAGE} \
     initscripts \
-    modules \
+    modules-dom0 \
     packagegroup-core-boot \
     packagegroup-base \
     packagegroup-xenclient-common \

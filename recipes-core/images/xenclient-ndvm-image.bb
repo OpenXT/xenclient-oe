@@ -31,7 +31,7 @@ IMAGE_FEATURES += "empty-root-password"
 
 IMAGE_INSTALL = " \
     ${ROOTFS_PKGMANAGE} \
-    modules \
+    modules-ndvm \
     packagegroup-core-boot \
     packagegroup-base \
     packagegroup-xenclient-common \
