@@ -3,7 +3,6 @@ FILESEXTRAPATHS_prepend := "${THISDIR}/${BPN}:"
 SRC_URI += " \
     file://yocto-initscripts.patch \
     file://0001-lvmetad-fix-segfault-on-i386.patch \
-    file://test-for-blk-file-before-creating-dm-mapper-symlink.patch \
 "
 
 # meta-oe recipe will already _append the autotools do_install(), and
