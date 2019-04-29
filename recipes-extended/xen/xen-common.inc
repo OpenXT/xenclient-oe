@@ -26,7 +26,6 @@ SRC_URI_append = " \
     file://xenconsoled-syslog.patch;patch=1 \
     file://Dell-980-txt-shutdown-acpi-access-width.patch;patch=1 \
     file://parse-video-from-mbi.patch;patch=1 \
-    file://hide-cores-from-cpuid.patch;patch=1 \
     file://openxt-xci-cpuid-signature.patch;patch=1 \
     file://allow-mwait-cstate.patch;patch=1 \
     file://xen-translate.patch;patch=1 \
