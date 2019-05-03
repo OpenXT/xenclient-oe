@@ -11,6 +11,7 @@ IMAGE_FSTYPES = "ext3.gz"
 export IMAGE_BASENAME = "xenclient-upgrade-compat-image"
 IMAGE_INSTALL = " \
     busybox \
+    coreutils \
     lvm2 \
     grub \
     policycoreutils \
