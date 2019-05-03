@@ -251,7 +251,12 @@ forward)
     # During early init, rootfs is hashed and is given to
     # tpm_extend which for tpm1.2 hashes the rootfs hash again and
     # hands that value to the TPM to be extended into PCR 15
-    root_hash=$(${hashalg}sum ${root_dev}|cut -f1 -d' ')
+
+    # Use dd here to perform direct I/O. On some machines in some cases, stale data in
+    # the storage layer, or perhaps the disk cache, causes sha256sum {root_dev} to compute
+    # an incorrect hash, leading to a bad PCR15 value. Direct I/O always computes an accurate hash
+    # so we can correct predict PCR15 during forward seal.
+    root_hash=$(dd status=none if=${root_dev} iflag=direct bs=8M | ${hashalg}sum|cut -f1 -d' ')
     [ "${tpm2}" -ne 0 ] && root_hash=$(echo -n ${root_hash}|${hashalg}sum|cut -f1 -d' ')
     pcr15=$(hash_extend 0 ${root_hash} ${hashalg}) ||
         err "failed to hash root device"
