@@ -10,6 +10,11 @@ SRC_URI = " \
     file://*-fix.sh \
 "
 
+RDEPENDS_${PN} = " \
+    tpm-tools \
+    tpm2-tools \
+"
+
 FILES_${PN} = "${libdir}/tpm-scripts"
 
 do_install() {
