@@ -6,10 +6,9 @@ IMAGE_CMD_raw() {
 # OpenXT ext3 tweaks.
 # - Disable fscheck.
 # - Run fs check after generation.
-IMAGE_CMD_ext3_append() {
-    ;
-    tune2fs -c -1 -i 0 ${IMGDEPLOYDIR}/${IMAGE_NAME}${IMAGE_NAME_SUFFIX}.ext3
-    e2fsck -f -y ${IMGDEPLOYDIR}/${IMAGE_NAME}${IMAGE_NAME_SUFFIX}.ext3
+oe_mkext234fs_append() {
+    tune2fs -c -1 -i 0 ${IMGDEPLOYDIR}/${IMAGE_NAME}${IMAGE_NAME_SUFFIX}.$fstype
+    e2fsck -f -y ${IMGDEPLOYDIR}/${IMAGE_NAME}${IMAGE_NAME_SUFFIX}.$fstype
 }
 
 # OpenXT vhd.
