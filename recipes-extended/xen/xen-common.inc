@@ -88,6 +88,7 @@ SRC_URI_append = " \
     file://xl-shutdown-wait-for-domain-death.patch \
     file://libxl-allow-save-vnuma.patch \
     file://domain-reboot.patch \
+    file://libxl-retry-qmp-pci-add.patch \
     ${BLKTAP_PATCHQUEUE} \
     file://efi-hardcode-openxt-cfg.patch \
     file://0001-EFI-add-EFI_LOAD_OPTION-support.patch \
