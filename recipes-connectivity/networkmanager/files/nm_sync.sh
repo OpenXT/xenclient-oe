@@ -70,13 +70,6 @@ write_db()
 read_db()
 {
     if [ "${DBNODE}" = "nm-connections" ]; then
-        rm -rf $syscon/*
-        if [ `db-exists-dom0 nm-connections/Wired%20Ethernet%20Connection` = false ]; then
-	    cp $nm_scripts/WiredEthernetConnection $syscon/Wired\ Ethernet\ Connection
-            write_db Wired\ Ethernet\ Connection
-            exit 0
-        fi
-
         for i in `db-nodes-dom0 nm-connections`; do
             db-ls-dom0 "/nm-connections/$i" | awk -f $nm_scripts/db_to_nm.awk > "$syscon/`echo "$i" | sed -e 's/%20/ /g'`"
         done
