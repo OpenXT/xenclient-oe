@@ -1,20 +1,8 @@
 #!/bin/bash
 
-. /usr/lib/tpm-scripts/tpm-functions
-[ $? -eq 0 ] || {
-    echo "failed to load tpm-functions"
-    exit 1
-}
-
 . /usr/lib/openxt/ml-functions
 [ $? -eq 0 ] || {
     echo "failed to load ml-functions"
-    exit 1
-}
-
-. /usr/lib/openxt/key-functions
-[ $? -eq 0 ] || {
-    echo "failed to load key-functions"
     exit 1
 }
 
@@ -58,6 +46,23 @@ Usage: seal-system [-h] [-s|-u|-f] [-ctpgbr path] -[48 object[,objects]]"
 EOF
 }
 
+pcr_in_selection() {
+    pcr="$1"
+
+    for p in $pcr_selection ; do
+        if [ $p -eq $pcr ] ; then
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+read_pcr_selection() {
+    # strip out -r/-p to leave just the digits
+    sed -e 's/-[rp]//g' $config_pcrs
+}
+
 # Globals
 TPM_DEV="$(find /sys/class -name tpm0)/device"
 
@@ -68,8 +73,8 @@ tpm2=$?
 operation="seal"
 config_key="/config/keys/config.key"
 sealed_key="/boot/system/tpm/config.tss"
-static_pcrs="0 1 2 3 4 5 7 8"
-dynamic_pcrs="15 17 18 19"
+config_pcrs="/config/config.pcrs"
+pcr_selection="$( read_pcr_selection )"
 hashalg="sha1"
 good_pcrs="/config/good.pcrs"
 bad_pcrs="/boot/system/tpm/bad.pcrs"
@@ -243,25 +248,26 @@ forward)
         pcr_forward[8]=":${pcr8}"
     fi
 
-    for p in ${static_pcrs}; do
-        pcr_params="${pcr_params} -p ${p}${pcr_forward[${p}]}"
-    done
+    if pcr_in_selection 15 ; then
+        [ -r ${root_dev} ] || err "cannot read root_dev ${root_dev}"
+        # During early init, rootfs is hashed and is given to
+        # tpm_extend which for tpm1.2 hashes the rootfs hash again and
+        # hands that value to the TPM to be extended into PCR 15
 
-    [ -r ${root_dev} ] || err "cannot read root_dev ${root_dev}"
-    # During early init, rootfs is hashed and is given to
-    # tpm_extend which for tpm1.2 hashes the rootfs hash again and
-    # hands that value to the TPM to be extended into PCR 15
+        # Use dd here to perform direct I/O. On some machines in some cases,
+        # stale data in the storage layer, or perhaps the disk cache, causes
+        # sha256sum {root_dev} to compute an incorrect hash, leading to a bad
+        # PCR15 value. Direct I/O always computes an accurate hash so we can
+        # correct predict PCR15 during forward seal.
+        root_hash=$(dd status=none if=${root_dev} iflag=direct bs=8M | \
+                        ${hashalg}sum|cut -f1 -d' ')
+        [ "${tpm2}" -ne 0 ] && root_hash=$(echo -n ${root_hash} | \
+                                               ${hashalg}sum|cut -f1 -d' ')
+        pcr15=$(hash_extend 0 ${root_hash} ${hashalg}) ||
+                err "failed to hash root device"
 
-    # Use dd here to perform direct I/O. On some machines in some cases, stale data in
-    # the storage layer, or perhaps the disk cache, causes sha256sum {root_dev} to compute
-    # an incorrect hash, leading to a bad PCR15 value. Direct I/O always computes an accurate hash
-    # so we can correct predict PCR15 during forward seal.
-    root_hash=$(dd status=none if=${root_dev} iflag=direct bs=8M | ${hashalg}sum|cut -f1 -d' ')
-    [ "${tpm2}" -ne 0 ] && root_hash=$(echo -n ${root_hash}|${hashalg}sum|cut -f1 -d' ')
-    pcr15=$(hash_extend 0 ${root_hash} ${hashalg}) ||
-        err "failed to hash root device"
-
-    pcr_params="${pcr_params} -p 15:${pcr15}"
+        pcr_forward[15]=":${pcr15}"
+    fi
 
     # Calculate DRTM PCRs if set (ie. PCR17 is not all f)
     if ! contains_only "${pcr17}" "f"; then
@@ -277,10 +283,14 @@ forward)
         pcr18=$(echo $pcrs | awk '{ print $2 }')
         pcr19=$(echo $pcrs | awk '{ print $3 }')
 
-        pcr_params="${pcr_params} -p 17:${pcr17} -p 18:${pcr18} -p 19:${pcr19}"
-    else
-        pcr_params="${pcr_params} -p 17 -p 18 -p 19"
+        pcr_forward[17]=":${pcr17}"
+        pcr_forward[18]=":${pcr18}"
+        pcr_forward[19]=":${pcr19}"
     fi
+
+    for p in ${pcr_selection}; do
+        pcr_params="${pcr_params} -p ${p}${pcr_forward[${p}]}"
+    done
 
     echo "$pcr_params" > /boot/system/tpm/forward_pcr.lst
 
@@ -300,7 +310,7 @@ forward)
     exit 0
 ;;
 unseal)
-    for p in ${static_pcrs} ${dynamic_pcrs}; do
+    for p in ${pcr_selection}; do
         pcr_params="${pcr_params} -p ${p}"
     done
 
