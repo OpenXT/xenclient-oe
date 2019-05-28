@@ -16,5 +16,6 @@ do_install() {
 }
 
 RDEPENDS_${PN} = " \
+    xenclient-tpm-scripts \
     tpm-tools-sa \
 "
