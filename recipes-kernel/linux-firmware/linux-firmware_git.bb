@@ -171,6 +171,8 @@ do_install() {
 
 PACKAGES =+ "${PN}-ralink-license ${PN}-ralink \
              ${PN}-radeon-license ${PN}-radeon \
+             ${PN}-nvidia \
+             ${PN}-intel \
              ${PN}-marvell-license ${PN}-sd8686 ${PN}-sd8787 ${PN}-sd8797 \
              ${PN}-ti-connectivity-license ${PN}-wl12xx ${PN}-wl18xx \
              ${PN}-vt6656-license ${PN}-vt6656 \
@@ -242,6 +244,16 @@ FILES_${PN}-radeon = " \
 "
 
 RDEPENDS_${PN}-radeon += "${PN}-radeon-license"
+
+# For nvidia
+FILES_${PN}-nvidia = " \
+  /lib/firmware/nvidia \
+"
+
+# For intel
+FILES_${PN}-intel = " \
+  /lib/firmware/intel \
+"
 
 # For marvell
 LICENSE_${PN}-sd8686 = "Firmware-Marvell"
