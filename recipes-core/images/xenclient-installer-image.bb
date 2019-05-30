@@ -45,6 +45,10 @@ IMAGE_INSTALL = "\
     linux-firmware-iwlwifi \
     linux-firmware-bnx2 \
     linux-firmware-i915 \
+    linux-firmware-nvidia \
+    linux-firmware-radeon \
+    libdrm-nouveau \
+    libdrm-radeon \
 "
 # The entire installer rootfs is passed as the initramfs.
 # Inflate the maximum value to 512M to reflect that (original definition is
