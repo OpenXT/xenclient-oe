@@ -139,7 +139,6 @@ remove_nonessential_initscripts() {
     remove_initscript "rmnologin.sh"
     remove_initscript "sshd"
     remove_initscript "urandom"
-    remove_initscript "save-rtc.sh"
     remove_initscript "networking"
 }
 ROOTFS_POSTPROCESS_COMMAND += "remove_nonessential_initscripts; "

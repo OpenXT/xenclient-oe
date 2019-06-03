@@ -99,7 +99,6 @@ ROOTFS_POSTPROCESS_COMMAND += '${@bb.utils.contains("IMAGE_FEATURES", "debug-twe
 remove_nonessential_initscripts() {
     remove_initscript "urandom"
     remove_initscript "sshd"
-    remove_initscript "save-rtc.sh"
     remove_initscript "hwclock.sh"
 }
 ROOTFS_POSTPROCESS_COMMAND += "remove_nonessential_initscripts; "
