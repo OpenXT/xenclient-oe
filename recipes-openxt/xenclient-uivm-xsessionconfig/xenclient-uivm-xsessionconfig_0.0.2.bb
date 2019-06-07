@@ -18,7 +18,7 @@ SRC_URI = " \
     file://nm-applets-agent \
     file://uim-toolbar-gtk-agent \
     file://keymap-agent \
-    file://v4v.modutils \
+    file://argo.modutils \
     file://xenfb2.modutils \
     file://xenkbd.modutils \
     file://xdg-open \
@@ -63,7 +63,7 @@ do_install () {
     install -m 644 ${WORKDIR}/framebuffer.conf ${D}${sysconfdir}/modprobe.d/
 
     install -d ${D}${sysconfdir}/modutils
-    install -m 644 ${WORKDIR}/v4v.modutils ${D}${sysconfdir}/modutils
+    install -m 644 ${WORKDIR}/argo.modutils ${D}${sysconfdir}/modutils
     install -m 644 ${WORKDIR}/xenfb2.modutils ${D}${sysconfdir}/modutils
     install -m 644 ${WORKDIR}/xenkbd.modutils ${D}${sysconfdir}/modutils
 

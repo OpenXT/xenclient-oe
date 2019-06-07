@@ -1,8 +1,8 @@
 SRC_URI += " \
-    file://surf-v4v.desktop \
+    file://surf-argo.desktop \
 "
 
 do_install_append() {
     install -m 0755 -d ${D}${datadir}/applications
-    install -m 0644 ${WORKDIR}/surf-v4v.desktop ${D}${datadir}/applications/surf-v4v.desktop
+    install -m 0644 ${WORKDIR}/surf-argo.desktop ${D}${datadir}/applications/surf-argo.desktop
 }
