@@ -35,7 +35,7 @@ exec 2> /dev/hvc0
 
 ## the modprobe of busybox-static is broken
 ## so we have to use insmod directly
-insmod /lib/modules/`uname -r`/extra/v4v.ko
+insmod /lib/modules/`uname -r`/extra/xen-argo.ko
 
 sync
 mkdir -p /proc /sys /mnt /tmp
