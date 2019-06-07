@@ -7,7 +7,7 @@ DEPENDS = " \
     pciutils \
     libpng \
     ${@bb.utils.contains('DISTRO_FEATURES', 'blktap2', 'xen-blktap', 'blktap3', d)} \
-    libv4v \
+    libargo \
     zlib \
     libcap-ng \
     libdmbus \
@@ -45,7 +45,7 @@ SRC_URI += "file://compile-time-stubdom-flag.patch \
             file://maintain-time-offset.patch \
             file://acpi-wakeup.patch \
             file://openxt-misc-fixes.patch \
-            file://qmp-v4v-char-driver.patch \
+            file://qmp-argo-char-driver.patch \
             file://use-relative-xenstore-nodes.patch \
             file://exit-mainloop-on-reset.patch \
             file://write-acpi-state-to-xenstore.patch \
@@ -113,7 +113,7 @@ EXTRA_OECONF += " \
     --enable-werror \
     --enable-surfman \
     --enable-atapi-pt \
-    --enable-atapi-pt-v4v \
+    --enable-atapi-pt-argo \
     --enable-readonly-ide \
     --enable-debug-info \
     --enable-trace-backends=nop \

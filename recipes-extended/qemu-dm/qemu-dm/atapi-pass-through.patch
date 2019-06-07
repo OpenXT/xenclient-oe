@@ -8,18 +8,18 @@ Provide hardware passthrough capability for CD/DVD drives.
 LONG DESCRIPTION:
 --------------------------------------------------------------------------------
 
-Added to protocols for use with qemu -drive: atapi-pt-v4v and atapi-pt-local
+Added to protocols for use with qemu -drive: atapi-pt-argo and atapi-pt-local
 
 Invocation for non-stubdom qemu:
 * -drive file=atapi-pt-local:<dom0 bsg dev path>,if=atapi-pt,media=cdrom
    [,format=raw][,readonly=on|off]
 
 Invocation for stubdom qemu:
-* -drive file=atapi-pt-v4v:<dom0 bsg dev path>,if=atapi-pt,media=cdrom
+* -drive file=atapi-pt-argo:<dom0 bsg dev path>,if=atapi-pt,media=cdrom
    [,format=raw][,readonly=on|off]
 
 Example:
-  -drive file=atapi-pt-v4v:/dev/bsg/1:0:0:0,if=atapi-pt,
+  -drive file=atapi-pt-argo:/dev/bsg/1:0:0:0,if=atapi-pt,
    media=cdrom,format=raw,readonly=on
 
 Logging:
@@ -140,20 +140,20 @@ OpenXT, Citrix, Initial Commit.
 Chris Patterson, <pattersonc@ainfosec.com>, 03/02/2015
 
 * use protocol instead of format specifiers:
- - atapi-pt created a two protocols: atapi-pt-v4v and atapi-pt-local.
+ - atapi-pt created a two protocols: atapi-pt-argo and atapi-pt-local.
  - example invocation:
  -- -drive file=atapi-pt-local:/dev/bsg/1:0:0:0,if=atapi-pt,media=cdrom[,format=raw]
 * build options
  - to build, two config options added to control feature inclusion:
  -- --enable-atapi-pt to enable local pt functionality
- -- --enable-atapi-pt-v4v to further enable v4v remoting
+ -- --enable-atapi-pt-argo to further enable argo remoting
  - Activate patches according to those switches, as well
    as work on vanilla qemu outside of xt using atapi-pt-local.
 * drop "xenclient" references (sufficiently indicated with CONFIG_ATAPI_PT)
 * some formatting (indent'd) for consistency within files (tabs to spaces, etc)
 * dropped pt.c
 * added some TODOs for open questions/concerns
-* close v4v socket on disconnect
+* close argo socket on disconnect
 
 Chris Patterson, <pattersonc@ainfosec.com>, 03/31/2015
 
@@ -164,7 +164,7 @@ communication mechanisms and fnctl-based lock in dom0
 * implemented device locking for both autolock and no-autolock
 * re-wrote protocol to communicate between atapi_pt_helper and stubdom
   - well defined message structures, added significant error checking
-  - added atapi_pt_v4v.h to be the common interface with atapi_pt_helper
+  - added atapi_pt_argo.h to be the common interface with atapi_pt_helper
   - strictly defined SG_IO message passing to dom0
 * modified logging interfaces to support runtime log level specification, as
 well as be consistent across all atapi-pt components.
@@ -219,7 +219,7 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
  block-obj-$(CONFIG_LINUX) += nvme.o
 --- /dev/null
 +++ b/block/atapi-pt-protocol.c
-@@ -0,0 +1,1500 @@
+@@ -0,0 +1,1503 @@
 +/*
 + * ATAPI guest commands translation.
 + *
@@ -265,12 +265,12 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
 +#include "hw/xen/xen_backend.h"
 +
 +
-+#ifdef CONFIG_ATAPI_PT_V4V
-+#include <libv4v.h>
++#ifdef CONFIG_ATAPI_PT_ARGO
++#include <libargo.h>
 +#endif
 +
 +#include "block/atapi_pt_ioctl.h"
-+#include "block/atapi_pt_v4v.h"
++#include "block/atapi_pt_argo.h"
 +
 +typedef struct AtapiPtDeviceInfo {
 +    /* /dev/bsg/a:b:c:d */
@@ -1063,152 +1063,155 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
 +    .bdrv_close          = pt_local_close,
 +};
 +
-+#ifdef CONFIG_ATAPI_PT_V4V
++#ifdef CONFIG_ATAPI_PT_ARGO
 +
-+#define V4V_TYPE 'W'
-+#define V4VIOCSETRINGSIZE       _IOW (V4V_TYPE,  1, uint32_t)
++#define ARGO_TYPE 'W'
++#define ARGOIOCSETRINGSIZE       _IOW (ARGO_TYPE,  1, uint32_t)
++
++#define XEN_ARGO_MSG_SLOT_SIZE 0x10
++#define XEN_ARGO_ROUNDUP(a) roundup((a), XEN_ARGO_MSG_SLOT_SIZE)
 +
 +#define ATAPI_CDROM_PORT 5000
-+#define V4V_ATAPI_PT_RING_SIZE \
-+  (V4V_ROUNDUP((((4096)*64) - sizeof(v4v_ring_t)-V4V_ROUNDUP(1))))
++#define ARGO_ATAPI_PT_RING_SIZE \
++  (XEN_ARGO_ROUNDUP((((4096)*64) - sizeof(xen_argo_ring_t)-XEN_ARGO_ROUNDUP(1))))
 +
-+#define MAX_V4V_MSG_SIZE (V4V_ATAPI_PT_RING_SIZE)
++#define MAX_ARGO_MSG_SIZE (ARGO_ATAPI_PT_RING_SIZE)
 +
 +typedef struct BDRVStubdomPassThroughState {
-+    int v4v_fd;
-+    v4v_addr_t remote_addr;
-+    v4v_addr_t local_addr;
++    int argo_fd;
++    xen_argo_addr_t remote_addr;
++    xen_argo_addr_t local_addr;
 +    uint8_t device_id;
 +    AtapiPtDeviceInfo dev_info;
 +} BDRVStubdomPassThroughState;
 +
 +/**
-+ * Sends v4v message to atapi-pt-helper.
++ * Sends argo message to atapi-pt-helper.
 + * @param[in] hs
 + * @param[in] buf: message to send
 + * @param[in] size: size of buf
 + * @returns true if message sent successfully, false otherwise.
 + */
-+static bool pt_v4v_send_message(BDRVStubdomPassThroughState *pts, void *buf,
++static bool pt_argo_send_message(BDRVStubdomPassThroughState *pts, void *buf,
 +                                size_t size)
 +{
 +    int ret;
 +
-+    ret = v4v_sendto(pts->v4v_fd, buf, size, 0, &pts->remote_addr);
++    ret = argo_sendto(pts->argo_fd, buf, size, 0, &pts->remote_addr);
 +
 +    if (ret != size) {
-+        PT_LOG("error: v4v_sendto() failed (%s) - %d %d.\n",
++        PT_LOG("error: argo_sendto() failed (%s) - %d %d.\n",
 +                strerror(errno), ret, (int)size);
 +        return false;
 +    }
 +
-+    PT_DEBUG("pt_v4v_send_message: cmd = %d - bytes = %d\n", *(char *)buf, ret);
++    PT_DEBUG("pt_argo_send_message: cmd = %d - bytes = %d\n", *(char *)buf, ret);
 +
 +    return true;
 +}
 +
 +/**
-+ * Receive v4v message to atapi-pt-helper.
++ * Receive argo message to atapi-pt-helper.
 + * @param[in] hs
 + * @param[out] buf: message to send
 + * @param[in] size: expected size of message
 + * @returns true if message received successfully, false otherwise.
 + */
-+static bool pt_v4v_recv_message(BDRVStubdomPassThroughState *pts, void *buf,
++static bool pt_argo_recv_message(BDRVStubdomPassThroughState *pts, void *buf,
 +                                size_t size)
 +{
 +    int ret;
 +
-+    ret = v4v_recvfrom(pts->v4v_fd, buf, size, 0, &pts->remote_addr);
++    ret = argo_recvfrom(pts->argo_fd, buf, size, 0, &pts->remote_addr);
 +
 +    if (ret != size) {
-+        PT_LOG("error: v4v_sendto() failed (%s) - %d %d.\n",
++        PT_LOG("error: argo_sendto() failed (%s) - %d %d.\n",
 +                strerror(errno), ret, (int)size);
 +        return false;
 +    }
 +
-+    PT_DEBUG("pt_v4v_recv_message: cmd = %d - bytes = %d\n", *(char *)buf, ret);
++    PT_DEBUG("pt_argo_recv_message: cmd = %d - bytes = %d\n", *(char *)buf, ret);
 +
 +    return true;
 +}
 +
 +/**
-+ * Close v4v device descriptor.
++ * Close argo device descriptor.
 + * @param[in] bs
 + */
-+static void pt_v4v_close(BlockDriverState* bs)
++static void pt_argo_close(BlockDriverState* bs)
 +{
 +    BDRVStubdomPassThroughState* pts = bs->opaque;
 +
-+    if (pts->v4v_fd == -1) {
-+        PT_LOG("v4v connection not initialized.");
++    if (pts->argo_fd == -1) {
++        PT_LOG("argo connection not initialized.");
 +    }
 +
-+    v4v_close(pts->v4v_fd);
-+    pts->v4v_fd = -1;
++    argo_close(pts->argo_fd);
++    pts->argo_fd = -1;
 +}
 +
 +/**
-+ * Open v4v descriptor for atapi-pt-v4v device.
++ * Open argo descriptor for atapi-pt-argo device.
 + * @param[in] pts
 + * @param[in] filename: dom0 device path e.g. /dev/bsg/a:b:c:d
 + * Returns: 0 on success, -1 on failure
 + */
-+static int pt_v4v_open_common(BDRVStubdomPassThroughState *pts,
++static int pt_argo_open_common(BDRVStubdomPassThroughState *pts,
 +                              const char *filename)
 +{
-+    pt_v4vcmd_open_request_t request;
-+    pt_v4vcmd_open_response_t response;
-+    uint32_t v4v_ring_size = V4V_ATAPI_PT_RING_SIZE;
++    pt_argocmd_open_request_t request;
++    pt_argocmd_open_response_t response;
++    uint32_t argo_ring_size = ARGO_ATAPI_PT_RING_SIZE;
 +
-+    PT_DEBUG("opening v4v socket...\n");
-+    pts->v4v_fd = v4v_socket(SOCK_DGRAM);
-+    if (pts->v4v_fd < 0) {
-+        PT_DEBUG("v4v_socket() failed (%s).\n", strerror(errno));
++    PT_DEBUG("opening argo socket...\n");
++    pts->argo_fd = argo_socket(SOCK_DGRAM);
++    if (pts->argo_fd < 0) {
++        PT_DEBUG("argo_socket() failed (%s).\n", strerror(errno));
 +        return -1;
 +    }
 +
-+    pts->local_addr.port = V4V_PORT_NONE;
-+    pts->local_addr.domain = V4V_DOMID_ANY;
++    pts->local_addr.aport = XEN_ARGO_PORT_NONE;
++    pts->local_addr.domain_id = XEN_ARGO_DOMID_ANY;
 +
-+    pts->remote_addr.port = ATAPI_CDROM_PORT;
-+    pts->remote_addr.domain = 0;
++    pts->remote_addr.aport = ATAPI_CDROM_PORT;
++    pts->remote_addr.domain_id = 0;
 +
-+    PT_DEBUG("setting v4v ring size...\n");
-+    ioctl(pts->v4v_fd, V4VIOCSETRINGSIZE, &v4v_ring_size);
++    PT_DEBUG("setting argo ring size...\n");
++    ioctl(pts->argo_fd, ARGOIOCSETRINGSIZE, &argo_ring_size);
 +
-+    PT_DEBUG("bind v4v socket with remote...\n");
-+    if (v4v_bind(pts->v4v_fd, &pts->local_addr, 0)) {
-+        v4v_close(pts->v4v_fd);
-+        pts->v4v_fd = -1;
-+        PT_DEBUG("error: v4v_bind() failed (%s).\n", strerror(errno));
++    PT_DEBUG("bind argo socket with remote...\n");
++    if (argo_bind(pts->argo_fd, &pts->local_addr, 0)) {
++        argo_close(pts->argo_fd);
++        pts->argo_fd = -1;
++        PT_DEBUG("error: argo_bind() failed (%s).\n", strerror(errno));
 +        return -1;
 +    }
 +
-+    PT_DEBUG("sending ATAPI_PTV4V_OPEN...\n");
++    PT_DEBUG("sending ATAPI_PTARGO_OPEN...\n");
 +
-+    request.cmd = ATAPI_PTV4V_OPEN;
++    request.cmd = ATAPI_PTARGO_OPEN;
 +    strncpy(&request.device_path[0], filename, sizeof(request.device_path) - 1);
 +    request.device_path[sizeof(request.device_path) - 1] = 0;
 +
-+    if (!pt_v4v_send_message(pts, &request, sizeof(request))) {
-+        PT_LOG("error: pt_v4v_send_message() failed\n");
-+        v4v_close(pts->v4v_fd);
-+        pts->v4v_fd = -1;
++    if (!pt_argo_send_message(pts, &request, sizeof(request))) {
++        PT_LOG("error: pt_argo_send_message() failed\n");
++        argo_close(pts->argo_fd);
++        pts->argo_fd = -1;
 +        return -1;
 +    }
 +
-+    if (!pt_v4v_recv_message(pts, &response, sizeof(response))) {
-+        PT_LOG("error: pt_v4v_recv_message failed\n");
-+        v4v_close(pts->v4v_fd);
-+        pts->v4v_fd = -1;
++    if (!pt_argo_recv_message(pts, &response, sizeof(response))) {
++        PT_LOG("error: pt_argo_recv_message failed\n");
++        argo_close(pts->argo_fd);
++        pts->argo_fd = -1;
 +        return -1;
 +    }
 +
-+    if (response.cmd != ATAPI_PTV4V_OPEN) {
++    if (response.cmd != ATAPI_PTARGO_OPEN) {
 +        PT_LOG("error: code mismatch - %d\n", response.cmd);
-+        v4v_close(pts->v4v_fd);
-+        pts->v4v_fd = -1;
++        argo_close(pts->argo_fd);
++        pts->argo_fd = -1;
 +        return -1;
 +    }
 +
@@ -1217,32 +1220,32 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
 +}
 +
 +/**
-+ * Parse the PT V4V file name.
-+ * @param[in] filename: format "atapi-pt-v4v:/dev/bsg/a:b:c:d"
++ * Parse the PT Argo file name.
++ * @param[in] filename: format "atapi-pt-argo:/dev/bsg/a:b:c:d"
 + * @param[in] options: QDict options dictionary to fill in.
 + * @param[in] errp: Error object to use on failure.
 + */
-+static void pt_v4v_parse_filename(const char *filename, QDict *options,
++static void pt_argo_parse_filename(const char *filename, QDict *options,
 +                                  Error **errp)
 +{
-+    if (strncmp(filename, "atapi-pt-v4v:", strlen("atapi-pt-v4v:")) != 0) {
-+        error_setg(errp, "File name string must start with 'atapi-pt-v4v:'");
++    if (strncmp(filename, "atapi-pt-argo:", strlen("atapi-pt-argo:")) != 0) {
++        error_setg(errp, "File name string must start with 'atapi-pt-argo:'");
 +        return;
 +    }
 +
-+    filename += strlen("atapi-pt-v4v:");
++    filename += strlen("atapi-pt-argo:");
 +    qdict_put(options, "filename", qstring_from_str(filename));
 +}
 +
 +/**
-+ * If protocol matches, opens v4v passthrough device to atapi-dm-helper.
++ * If protocol matches, opens argo passthrough device to atapi-dm-helper.
 + * @param[in] bs
 + * @param[in] options: QDict options dictionary to fill in.
 + * @param[in] flags: device open flags
 + * @param[in] errp: Error object to use on failure.
 + * @returns 0 if opened successfully, -errno otherwise
 + */
-+static int pt_v4v_open(BlockDriverState *bs, QDict *options, int flags,
++static int pt_argo_open(BlockDriverState *bs, QDict *options, int flags,
 +                       Error **errp)
 +{
 +    BDRVStubdomPassThroughState *pts = bs->opaque;
@@ -1270,7 +1273,7 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
 +
 +    atapi_pt_device_info_init(&pts->dev_info, filename, bs);
 +
-+    ret =  pt_v4v_open_common(pts, filename);
++    ret =  pt_argo_open_common(pts, filename);
 +
 +out:
 +    qemu_opts_del(opts);
@@ -1278,32 +1281,32 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
 +}
 +
 +/**
-+ * Probes device and matches if it looks to be a valid atapi-pt-v4v.
++ * Probes device and matches if it looks to be a valid atapi-pt-argo.
 + * @param[in] filename: format "atapi-pt-local:/dev/bsg/a:b:c:d"
 + * @returns 0 if invalid, 100 if valid (probe priority)
 + */
-+static int pt_v4v_probe_device(const char *filename)
++static int pt_argo_probe_device(const char *filename)
 +{
 +    BDRVStubdomPassThroughState pts;
 +
 +    memset(&pts, 0, sizeof(BDRVStubdomPassThroughState));
 +
 +    /* check protocol */
-+    if (strncmp(filename, "atapi-pt-v4v:", strlen("atapi-pt-v4v:")) != 0) {
++    if (strncmp(filename, "atapi-pt-argo:", strlen("atapi-pt-argo:")) != 0) {
 +        PT_DEBUG("not a pt device %s\n", filename);
 +        return -1;
 +    }
 +
-+    filename += strlen("atapi-pt-v4v:");
++    filename += strlen("atapi-pt-argo:");
 +
-+    /* try to open v4v device given filename */
-+    if (pt_v4v_open_common(&pts, filename) == -1) {
++    /* try to open argo device given filename */
++    if (pt_argo_open_common(&pts, filename) == -1) {
 +        PT_DEBUG("cannot open %s\n", filename);
 +        return -1;
 +    }
 +
-+    v4v_close(pts.v4v_fd);
-+    PT_DEBUG("v4v probe device ok: %s", filename);
++    argo_close(pts.argo_fd);
++    PT_DEBUG("argo probe device ok: %s", filename);
 +    return 100;
 +}
 +
@@ -1312,10 +1315,10 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
 + * @param[in] pts
 + * @returns 1 if lock held, 0 otherwise
 + */
-+static int pt_v4v_acquire_global_lock(BDRVStubdomPassThroughState *pts)
++static int pt_argo_acquire_global_lock(BDRVStubdomPassThroughState *pts)
 +{
-+    pt_v4vcmd_acquire_lock_request_t request;
-+    pt_v4vcmd_acquire_lock_response_t response;
++    pt_argocmd_acquire_lock_request_t request;
++    pt_argocmd_acquire_lock_response_t response;
 +
 +    if (pts->dev_info.lock_state == ATAPI_PT_LOCK_STATE_LOCKED_BY_ME) {
 +        /* already have lock */
@@ -1327,30 +1330,30 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
 +        return 0;
 +    }
 +
-+    PT_LOG("sending ATAPI_PTV4V_ACQUIRE_LOCK...\n");
++    PT_LOG("sending ATAPI_PTARGO_ACQUIRE_LOCK...\n");
 +
-+    request.cmd = ATAPI_PTV4V_ACQUIRE_LOCK;
++    request.cmd = ATAPI_PTARGO_ACQUIRE_LOCK;
 +    request.device_id = pts->device_id;
 +
-+    if (!pt_v4v_send_message(pts, &request, sizeof(request))) {
-+        PT_LOG("error: pt_v4v_send_message() failed\n");
-+        v4v_close(pts->v4v_fd);
-+        pts->v4v_fd = -1;
++    if (!pt_argo_send_message(pts, &request, sizeof(request))) {
++        PT_LOG("error: pt_argo_send_message() failed\n");
++        argo_close(pts->argo_fd);
++        pts->argo_fd = -1;
 +        return 0;
 +    }
 +
-+    if (!pt_v4v_recv_message(pts, &response, sizeof(response))) {
-+        PT_LOG("error: pt_v4v_recv_message failed\n");
-+        v4v_close(pts->v4v_fd);
-+        pts->v4v_fd = -1;
++    if (!pt_argo_recv_message(pts, &response, sizeof(response))) {
++        PT_LOG("error: pt_argo_recv_message failed\n");
++        argo_close(pts->argo_fd);
++        pts->argo_fd = -1;
 +        return 0;
 +    }
 +
 +    /* validate received packet header */
-+    if (response.cmd != ATAPI_PTV4V_ACQUIRE_LOCK) {
++    if (response.cmd != ATAPI_PTARGO_ACQUIRE_LOCK) {
 +        PT_LOG("error: invalid packet data\n");
-+        v4v_close(pts->v4v_fd);
-+        pts->v4v_fd = -1;
++        argo_close(pts->argo_fd);
++        pts->argo_fd = -1;
 +        return 0;
 +    }
 +
@@ -1375,24 +1378,24 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
 + * Releases global exclusive lock.
 + * @param[in] pts
 + */
-+static void pt_v4v_release_global_lock(BDRVStubdomPassThroughState *pts)
++static void pt_argo_release_global_lock(BDRVStubdomPassThroughState *pts)
 +{
-+    pt_v4vcmd_release_lock_request_t request;
++    pt_argocmd_release_lock_request_t request;
 +
 +    if (pts->dev_info.lock_state != ATAPI_PT_LOCK_STATE_LOCKED_BY_ME) {
 +        /* we don't have the lock, nothing to do */
 +        return;
 +    }
 +
-+    PT_DEBUG("sending ATAPI_PTV4V_RELEASE_LOCK...\n");
++    PT_DEBUG("sending ATAPI_PTARGO_RELEASE_LOCK...\n");
 +
-+    request.cmd = ATAPI_PTV4V_RELEASE_LOCK;
++    request.cmd = ATAPI_PTARGO_RELEASE_LOCK;
 +    request.device_id = pts->device_id;
 +
-+    if (!pt_v4v_send_message(pts, &request, sizeof(request))) {
-+        PT_LOG("error: pt_v4v_send_message() failed\n");
-+        v4v_close(pts->v4v_fd);
-+        pts->v4v_fd = -1;
++    if (!pt_argo_send_message(pts, &request, sizeof(request))) {
++        PT_LOG("error: pt_argo_send_message() failed\n");
++        argo_close(pts->argo_fd);
++        pts->argo_fd = -1;
 +        return;
 +    }
 +
@@ -1408,43 +1411,43 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
 +
 +
 +/**
-+ * Handles pass-through ioctls from atapi pt driver for atapi-pt-v4v devices
++ * Handles pass-through ioctls from atapi pt driver for atapi-pt-argo devices
 + * @param[in] bs
 + * @param[out] size: reserved size response - must not be NULL.
 + * Returns: 0 on success, non-zero on failure.
 + */
-+static int pt_v4v_sg_get_reserved_size(BlockDriverState *bs, uint32_t *size)
++static int pt_argo_sg_get_reserved_size(BlockDriverState *bs, uint32_t *size)
 +{
 +    BDRVStubdomPassThroughState *pts = bs->opaque;
 +
-+    pt_v4vcmd_sg_get_reserved_size_request_t request;
-+    pt_v4vcmd_sg_get_reserved_size_response_t response;
++    pt_argocmd_sg_get_reserved_size_request_t request;
++    pt_argocmd_sg_get_reserved_size_response_t response;
 +
-+    PT_DEBUG("sending ATAPI_PTV4V_SG_GET_RESERVED_SIZE...\n");
++    PT_DEBUG("sending ATAPI_PTARGO_SG_GET_RESERVED_SIZE...\n");
 +
 +    assert(size != NULL);
 +
 +    *size = 0;
 +
-+    request.cmd = ATAPI_PTV4V_SG_GET_RESERVED_SIZE;
++    request.cmd = ATAPI_PTARGO_SG_GET_RESERVED_SIZE;
 +    request.device_id = pts->device_id;
 +
-+    if (!pt_v4v_send_message(pts, &request, sizeof(request))) {
-+        PT_LOG("error: pt_v4v_send_message() failed\n");
-+        pt_v4v_close(bs);
++    if (!pt_argo_send_message(pts, &request, sizeof(request))) {
++        PT_LOG("error: pt_argo_send_message() failed\n");
++        pt_argo_close(bs);
 +        return -1;
 +    }
 +
-+    if (!pt_v4v_recv_message(pts, &response, sizeof(response))) {
-+        PT_LOG("error: pt_v4v_recv_message failed\n");
-+        pt_v4v_close(bs);
++    if (!pt_argo_recv_message(pts, &response, sizeof(response))) {
++        PT_LOG("error: pt_argo_recv_message failed\n");
++        pt_argo_close(bs);
 +        return -1;
 +    }
 +
 +    /* validate received packet header */
-+    if (response.cmd != ATAPI_PTV4V_SG_GET_RESERVED_SIZE) {
++    if (response.cmd != ATAPI_PTARGO_SG_GET_RESERVED_SIZE) {
 +        PT_LOG("error: invalid packet data\n");
-+        pt_v4v_close(bs);
++        pt_argo_close(bs);
 +        return -1;
 +    }
 +
@@ -1453,13 +1456,13 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
 +}
 +
 +/**
-+ * Handles pass-through ioctls from atapi pt driver for atapi-pt-v4v devices
++ * Handles pass-through ioctls from atapi pt driver for atapi-pt-argo devices
 + * @param[in] bs
 + * @param[in] req: sg ioctl command
 + * @param[inout] buf: pointer to in/out data
 + * Returns: 0 on success, non-zero on failure.
 + */
-+static int pt_v4v_sg_ioctl(BlockDriverState *bs, unsigned long int req,
++static int pt_argo_sg_ioctl(BlockDriverState *bs, unsigned long int req,
 +                           void *buf)
 +{
 +    BDRVStubdomPassThroughState *pts = bs->opaque;
@@ -1473,47 +1476,47 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
 +    uint64_t din_xferp = 0;
 +    uint32_t din_xfer_len = 0;
 +
-+    uint8_t buf_out[sizeof(pt_v4vcmd_sg_io_request_t) + cmd->dout_xfer_len];
-+    pt_v4vcmd_sg_io_request_t *request = (pt_v4vcmd_sg_io_request_t *)buf_out;
++    uint8_t buf_out[sizeof(pt_argocmd_sg_io_request_t) + cmd->dout_xfer_len];
++    pt_argocmd_sg_io_request_t *request = (pt_argocmd_sg_io_request_t *)buf_out;
 +
-+    uint8_t buf_in[sizeof(pt_v4vcmd_sg_io_response_t) + cmd->din_xfer_len];
-+    pt_v4vcmd_sg_io_response_t *response = (pt_v4vcmd_sg_io_response_t *)buf_in;
++    uint8_t buf_in[sizeof(pt_argocmd_sg_io_response_t) + cmd->din_xfer_len];
++    pt_argocmd_sg_io_response_t *response = (pt_argocmd_sg_io_response_t *)buf_in;
 +
 +    int len;
 +
-+    PT_DEBUG("sending ATAPI_PTV4V_SG_IO...\n");
++    PT_DEBUG("sending ATAPI_PTARGO_SG_IO...\n");
 +
-+    if (sizeof(buf_out) > MAX_V4V_MSG_SIZE) {
++    if (sizeof(buf_out) > MAX_ARGO_MSG_SIZE) {
 +        PT_LOG("error: dout_data too large - cannot complete command\n");
 +        return -1;
 +    }
 +    memset(buf_out, 0, sizeof(buf_out));
 +
-+    if (sizeof(buf_in) > MAX_V4V_MSG_SIZE) {
++    if (sizeof(buf_in) > MAX_ARGO_MSG_SIZE) {
 +        PT_LOG("error: din_data too large - cannot complete command\n");
 +        return -1;
 +    }
 +    memset(buf_in, 0, sizeof(buf_in));
 +
-+    if (pts->v4v_fd == -1) {
-+        PT_LOG("error: v4v connection not initialized.");
++    if (pts->argo_fd == -1) {
++        PT_LOG("error: argo connection not initialized.");
 +        return -1;
 +    }
 +
-+    request->cmd = ATAPI_PTV4V_SG_IO;
++    request->cmd = ATAPI_PTARGO_SG_IO;
 +    request->device_id = pts->device_id;
 +
 +    /* make sure dout_xfer_len will fit in request */
 +    if (sizeof(buf_out) < sizeof(request) + cmd->dout_xfer_len) {
 +        PT_LOG("error: bad dout_xfer_len %d", cmd->dout_xfer_len);
-+        pt_v4v_close(bs);
++        pt_argo_close(bs);
 +        return -1;
 +    }
 +
 +    /* make sure din_xfer_len will fit in response */
 +    if (sizeof(buf_in) < sizeof(response) + cmd->din_xfer_len) {
 +        PT_LOG("error: bad din_xfer_len %d", cmd->din_xfer_len);
-+        pt_v4v_close(bs);
++        pt_argo_close(bs);
 +        return -1;
 +    }
 +
@@ -1523,7 +1526,7 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
 +    /* make sure request data is sized properly */
 +    if (cmd->request_len != sizeof(request->request_data)) {
 +        PT_LOG("error: bad request_len %d", cmd->request_len);
-+        pt_v4v_close(bs);
++        pt_argo_close(bs);
 +        return -1;
 +    }
 +
@@ -1553,24 +1556,24 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
 +
 +    /* calculate packet len and fire away */
 +    len = sizeof(*request) + request->dout_data_len;
-+    if (!pt_v4v_send_message(pts, request, len)) {
-+        PT_LOG("error: pt_v4v_send_message() failed\n");
-+        pt_v4v_close(bs);
++    if (!pt_argo_send_message(pts, request, len)) {
++        PT_LOG("error: pt_argo_send_message() failed\n");
++        pt_argo_close(bs);
 +        return -1;
 +    }
 +
 +    /* response coming back should be sizeof reply plus expected din data len */
 +    len = sizeof(*response) + din_xfer_len;
-+    if (!pt_v4v_recv_message(pts, response, len)) {
-+        PT_LOG("error: pt_v4v_recv_message failed\n");
-+        pt_v4v_close(bs);
++    if (!pt_argo_recv_message(pts, response, len)) {
++        PT_LOG("error: pt_argo_recv_message failed\n");
++        pt_argo_close(bs);
 +        return -1;
 +    }
 +
 +    /* validate correct command code */
-+    if (response->cmd != ATAPI_PTV4V_SG_IO) {
++    if (response->cmd != ATAPI_PTARGO_SG_IO) {
 +        PT_LOG("error: command response bad = %d\n", response->cmd);
-+        pt_v4v_close(bs);
++        pt_argo_close(bs);
 +        return -1;
 +    }
 +
@@ -1578,7 +1581,7 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
 +    if (response->din_data_len != din_xfer_len) {
 +        PT_LOG("error: mismatch din_xfer_len! 0x%x 0%x\n",
 +                response->din_data_len, din_xfer_len);
-+        pt_v4v_close(bs);
++        pt_argo_close(bs);
 +        return -1;
 +    }
 +
@@ -1595,7 +1598,7 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
 +    if (cmd->din_xfer_len != din_xfer_len) {
 +        PT_LOG("error: mismatch cmd->din_xfer_len! 0x%x 0%x\n",
 +                cmd->din_xfer_len, din_xfer_len);
-+        pt_v4v_close(bs);
++        pt_argo_close(bs);
 +        return -1;
 +    }
 +
@@ -1618,13 +1621,13 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
 +}
 +
 +/**
-+ * Handles "ioctls" from atapi pt driver for atapi-pt-v4v devices.
++ * Handles "ioctls" from atapi pt driver for atapi-pt-argo devices.
 + * @param[in] bs
 + * @param[in] req: ioctl command from atapi_pt_cmd_t enum
 + * @param[inout] buf: pointer to in/out data
 + * Returns: 0 on success, non-zero on failure.
 + */
-+static int pt_v4v_ioctl(BlockDriverState *bs, unsigned long int req, void *buf)
++static int pt_argo_ioctl(BlockDriverState *bs, unsigned long int req, void *buf)
 +{
 +    BDRVStubdomPassThroughState *pts = bs->opaque;
 +    AtapiPtDeviceInfo *info = &pts->dev_info;
@@ -1654,18 +1657,18 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
 +            break;
 +        case ATAPI_PT_ACQUIRE_LOCK:
 +            PT_DEBUG("ATAPI_PT_ACQUIRE_LOCK: %s\n", info->device_path);
-+            pt_v4v_acquire_global_lock(pts);
++            pt_argo_acquire_global_lock(pts);
 +            if (buf) {
 +                *(uint32_t *)buf = info->lock_state;
 +            }
 +            break;
 +        case ATAPI_PT_RELEASE_LOCK:
 +            PT_DEBUG("ATAPI_PT_RELEASE_LOCK: %s\n", info->device_path);
-+            pt_v4v_release_global_lock(pts);
++            pt_argo_release_global_lock(pts);
 +            break;
 +        case ATAPI_PT_SG_IO:
 +            PT_DEBUG("ATAPI_PT_SG_IO: %s\n", info->device_path);
-+            if (pt_v4v_sg_ioctl(bs, SG_IO, buf) < 0) {
++            if (pt_argo_sg_ioctl(bs, SG_IO, buf) < 0) {
 +                PT_DEBUG("SG_IO ioctl() failed (%s).\n", strerror(errno));
 +                return -1;
 +            }
@@ -1675,7 +1678,7 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
 +            if (!buf) {
 +                return -ENOTSUP;
 +            }
-+            if (pt_v4v_sg_get_reserved_size(bs, buf) != 0) {
++            if (pt_argo_sg_get_reserved_size(bs, buf) != 0) {
 +                PT_DEBUG("SG_GET_RESERVED_SIZE ioctl() failed: %s\n",
 +                         strerror(errno));
 +                return -1;
@@ -1688,19 +1691,19 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
 +    return 0;
 +}
 +
-+static BlockDriver bdrv_host_pt_v4v = {
++static BlockDriver bdrv_host_pt_argo = {
 +    .format_name         = "atapi-pt-fmt",
-+    .protocol_name       = "atapi-pt-v4v",
++    .protocol_name       = "atapi-pt-argo",
 +    .instance_size       = sizeof(BDRVStubdomPassThroughState),
 +    .bdrv_needs_filename = true,
-+    .bdrv_probe_device   = pt_v4v_probe_device,
-+    .bdrv_parse_filename = pt_v4v_parse_filename,
-+    .bdrv_file_open      = pt_v4v_open,
-+    .bdrv_direct_ioctl   = pt_v4v_ioctl,
-+    .bdrv_close          = pt_v4v_close,
++    .bdrv_probe_device   = pt_argo_probe_device,
++    .bdrv_parse_filename = pt_argo_parse_filename,
++    .bdrv_file_open      = pt_argo_open,
++    .bdrv_direct_ioctl   = pt_argo_ioctl,
++    .bdrv_close          = pt_argo_close,
 +};
 +
-+#endif //CONFIG_ATAPI_PT_V4V
++#endif //CONFIG_ATAPI_PT_ARGO
 +
 +static void bdrv_pt_init(void)
 +{
@@ -1709,12 +1712,12 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
 +     * registered last will get probed first.
 +     */
 +#ifdef CONFIG_STUBDOM
-+# ifdef CONFIG_ATAPI_PT_V4V
++# ifdef CONFIG_ATAPI_PT_ARGO
 +    (void)bdrv_host_pt_local;
-+    bdrv_register(&bdrv_host_pt_v4v);
++    bdrv_register(&bdrv_host_pt_argo);
 +# endif
 +#else
-+    (void)bdrv_host_pt_v4v;
++    (void)bdrv_host_pt_argo;
 +    bdrv_register(&bdrv_host_pt_local);
 +#endif
 +}
@@ -1793,7 +1796,7 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
  glusterfs=""
  stubdom="no"
 +atapipt="no"
-+atapiptv4v="no"
++atapiptargo="no"
  glusterfs_xlator_opt="no"
  glusterfs_discard="no"
  glusterfs_fallocate="no"
@@ -1805,9 +1808,9 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
 +  ;;
 +  --disable-atapi-pt) atapipt="no"
 +  ;;
-+  --enable-atapi-pt-v4v) atapiptv4v="yes" && atapipt="yes"
++  --enable-atapi-pt-argo) atapiptargo="yes" && atapipt="yes"
 +  ;;
-+  --disable-atapi-pt-v4v) atapiptv4v="no"
++  --disable-atapi-pt-argo) atapiptargo="no"
 +  ;;
    --disable-virtio-blk-data-plane|--enable-virtio-blk-data-plane)
        echo "$0: $opt is obsolete, virtio-blk data-plane is always on" >&2
@@ -1817,7 +1820,7 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
  echo "gcov enabled      $gcov"
  echo "OpenXT stubdomain support $stubdom"
 +echo "ATAPI PT support  $atapipt"
-+echo "ATAPI PT V4V support  $atapiptv4v"
++echo "ATAPI PT Argo support  $atapiptargo"
  echo "TPM support       $tpm"
  echo "libssh2 support   $libssh2"
  echo "TPM passthrough   $tpm_passthrough"
@@ -1829,8 +1832,8 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
 +  echo "CONFIG_ATAPI_PT=y" >> $config_host_mak
 +fi
 +
-+if test "$atapiptv4v" = "yes" ; then
-+  echo "CONFIG_ATAPI_PT_V4V=y" >> $config_host_mak
++if test "$atapiptargo" = "yes" ; then
++  echo "CONFIG_ATAPI_PT_ARGO=y" >> $config_host_mak
 +fi
 +
  if test "$tpm" = "yes"; then
@@ -1892,7 +1895,7 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
 +#include "block/block_int.h"
 +#include "sysemu/block-backend.h"
 +#include "block/atapi_pt_ioctl.h"
-+#include "block/atapi_pt_v4v.h"
++#include "block/atapi_pt_argo.h"
 +
 +extern int pt_log_level;
 +
@@ -4122,7 +4125,7 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
 +
 +#endif /* !_ATAPI_PT_IOCTL_H_ */
 --- /dev/null
-+++ b/include/block/atapi_pt_v4v.h
++++ b/include/block/atapi_pt_argo.h
 @@ -0,0 +1,93 @@
 +/*
 + *
@@ -4143,8 +4146,8 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
 + * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 + */
 +
-+#ifndef _ATAPI_PT_V4V_H_
-+#define _ATAPI_PT_V4V_H_
++#ifndef _ATAPI_PT_ARGO_H_
++#define _ATAPI_PT_ARGO_H_
 +
 +typedef enum {
 +    ATAPI_PT_LOCK_STATE_UNLOCKED         = 0x00,
@@ -4153,70 +4156,70 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
 +} atapi_pt_lock_state_t;
 +
 +typedef enum {
-+    ATAPI_PTV4V_OPEN                     = 0x00,
-+    ATAPI_PTV4V_SG_IO                    = 0x01,
-+    ATAPI_PTV4V_SG_GET_RESERVED_SIZE     = 0x02,
-+    ATAPI_PTV4V_ACQUIRE_LOCK             = 0x03,
-+    ATAPI_PTV4V_RELEASE_LOCK             = 0x04,
-+} atapi_ptv4v_cmd_t;
++    ATAPI_PTARGO_OPEN                     = 0x00,
++    ATAPI_PTARGO_SG_IO                    = 0x01,
++    ATAPI_PTARGO_SG_GET_RESERVED_SIZE     = 0x02,
++    ATAPI_PTARGO_ACQUIRE_LOCK             = 0x03,
++    ATAPI_PTARGO_RELEASE_LOCK             = 0x04,
++} atapi_ptargo_cmd_t;
 +
 +typedef struct {
-+    uint8_t cmd; /* ATAPI_PTV4V_OPEN */
++    uint8_t cmd; /* ATAPI_PTARGO_OPEN */
 +    uint8_t device_id;
 +    char device_path[256];
-+} __attribute__((packed)) pt_v4vcmd_open_request_t;
++} __attribute__((packed)) pt_argocmd_open_request_t;
 +
 +typedef struct {
-+    uint8_t cmd; /* ATAPI_PTV4V_OPEN */
++    uint8_t cmd; /* ATAPI_PTARGO_OPEN */
 +    uint8_t device_id;
-+} __attribute__((packed)) pt_v4vcmd_open_response_t;
++} __attribute__((packed)) pt_argocmd_open_response_t;
 +
 +typedef struct {
-+    uint8_t cmd; /* ATAPI_PTV4V_ACQUIRE_LOCK */
++    uint8_t cmd; /* ATAPI_PTARGO_ACQUIRE_LOCK */
 +    uint8_t device_id;
-+} __attribute__((packed)) pt_v4vcmd_acquire_lock_request_t;
++} __attribute__((packed)) pt_argocmd_acquire_lock_request_t;
 +
 +typedef struct {
-+    uint8_t cmd; /* ATAPI_PTV4V_ACQUIRE_LOCK */
++    uint8_t cmd; /* ATAPI_PTARGO_ACQUIRE_LOCK */
 +    uint8_t device_id;
 +    uint8_t lock_state; /* atapi_pt_lock_state_t */
-+} __attribute__((packed)) pt_v4vcmd_acquire_lock_response_t;
++} __attribute__((packed)) pt_argocmd_acquire_lock_response_t;
 +
 +typedef struct {
-+    uint8_t cmd; /* ATAPI_PTV4V_RELEASE_LOCK */
++    uint8_t cmd; /* ATAPI_PTARGO_RELEASE_LOCK */
 +    uint8_t device_id;
-+} __attribute__((packed)) pt_v4vcmd_release_lock_request_t;
++} __attribute__((packed)) pt_argocmd_release_lock_request_t;
 +
 +typedef struct {
-+    uint8_t cmd; /* ATAPI_PTV4V_SG_GET_RESERVED_SIZE */
++    uint8_t cmd; /* ATAPI_PTARGO_SG_GET_RESERVED_SIZE */
 +    uint8_t device_id;
-+} __attribute__((packed)) pt_v4vcmd_sg_get_reserved_size_request_t;
++} __attribute__((packed)) pt_argocmd_sg_get_reserved_size_request_t;
 +
 +typedef struct {
-+    uint8_t cmd; /* ATAPI_PTV4V_SG_GET_RESERVED_SIZE */
++    uint8_t cmd; /* ATAPI_PTARGO_SG_GET_RESERVED_SIZE */
 +    uint8_t device_id;
 +    uint32_t size;
-+} __attribute__((packed)) pt_v4vcmd_sg_get_reserved_size_response_t;
++} __attribute__((packed)) pt_argocmd_sg_get_reserved_size_response_t;
 +
 +typedef struct {
-+    uint8_t cmd; /* ATAPI_PTV4V_SG_IO */
++    uint8_t cmd; /* ATAPI_PTARGO_SG_IO */
 +    uint8_t device_id;
 +    struct sg_io_v4 sgio;
 +    uint8_t request_data[12]; /* ATAPI_PACKET_SIZE */
 +    uint32_t dout_data_len;
 +    uint8_t dout_data[];
-+} __attribute__((packed)) pt_v4vcmd_sg_io_request_t;
++} __attribute__((packed)) pt_argocmd_sg_io_request_t;
 +
 +typedef struct {
-+    uint8_t cmd; /* ATAPI_PTV4V_SG_IO */
++    uint8_t cmd; /* ATAPI_PTARGO_SG_IO */
 +    uint8_t device_id;
 +    struct sg_io_v4 sgio;
 +    uint8_t sense_data[64]; /* struct request_sense */
 +    uint32_t din_data_len;
 +    uint8_t din_data[];
-+} __attribute__((packed)) pt_v4vcmd_sg_io_response_t;
++} __attribute__((packed)) pt_argocmd_sg_io_response_t;
 +
-+#endif /* !_ATAPI_PT_V4V_H_ */
++#endif /* !_ATAPI_PT_ARGO_H_ */
 --- a/include/block/block.h
 +++ b/include/block/block.h
 @@ -397,6 +397,9 @@ void bdrv_aio_cancel_async(BlockAIOCB *a
