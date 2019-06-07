@@ -1,5 +1,5 @@
 
-DESCRIPTION = "libv4v xctools"
+DESCRIPTION = "libargo xctools"
 LICENSE = "LGPLv2.1"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/LGPL-2.1;md5=1a6d268fd218675ffea8be556788b780"
 
@@ -14,16 +14,16 @@ export STAGING_KERNEL_DIR
 PV = "git${SRCPV}"
 
 SRCREV = "${AUTOREV}"
-SRC_URI = "git://${OPENXT_GIT_MIRROR}/v4v.git;protocol=${OPENXT_GIT_PROTOCOL};branch=${OPENXT_BRANCH}"
+SRC_URI = "git://${OPENXT_GIT_MIRROR}/linux-xen-argo.git;protocol=${OPENXT_GIT_PROTOCOL};branch=${OPENXT_BRANCH}"
 
-S="${WORKDIR}/git/libv4v"
+S="${WORKDIR}/git/libargo"
 
 DEB_SUITE = "wheezy"
 DEB_ARCH = "i386"
 
-DEB_NAME = "libv4v-1.0-0"
-DEB_DESC="v4v library"
-DEB_DESC_EXT=" This package provides the v4v library."
+DEB_NAME = "libargo-1.0-0"
+DEB_DESC="argo library"
+DEB_DESC_EXT=" This package provides the argo library."
 DEB_SECTION="libs"
 DEB_CREATEDEV="1"
 DEB_CREATE_SRC="1"
