@@ -16,7 +16,7 @@ IMAGE_INSTALL = " \
     initramfs-stubdomain \
     xen-xenstore \
     qemu-dm-stubdom \
-    v4v-module \
+    argo-module \
     simple-poweroff \
     rsyslog \
 "
