@@ -1,7 +1,7 @@
 DESCRIPTION = "Surface Manager XenClient"
 LICENSE = "LGPLv2.1"
 LIC_FILES_CHKSUM = "file://COPYING;md5=321bf41f280cf805086dd5a720b37785"
-DEPENDS = " xen xenfb2 libv4v dbus xenclient-idl xenclient-rpcgen-native libpng libsurfman libxenbackend surfman-sample libxcxenstore libedid libdmbus libpciaccess fbtap"
+DEPENDS = " xen xenfb2 libargo dbus xenclient-idl xenclient-rpcgen-native libpng libsurfman libxenbackend surfman-sample libxcxenstore libedid libdmbus libpciaccess fbtap"
 
 RDEPENDS_${PN} += "fbtap"
 

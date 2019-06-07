@@ -34,11 +34,11 @@
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <sys/un.h>
-#include <libv4v.h>
+#include <libargo.h>
 #include <signal.h>
 #include <xs.h>
 
-#define V4V     1
+#define ARGO     1
 #define PORT    5555
 #define DBUSSOCK "/var/run/dbus/system_bus_socket"
 
@@ -199,8 +199,8 @@ int main()
         perror("xs_domain_open");
         exit (EXIT_FAILURE);
     }
-#if V4V
-    listensock = socket(PF_XENV4V, SOCK_STREAM, 0);
+#if ARGO
+    listensock = socket(PF_XENARGO, SOCK_STREAM, 0);
 #else
     listensock = socket(PF_INET, SOCK_STREAM, 0);
 #endif
@@ -216,7 +216,7 @@ int main()
     opt=1;
     setsockopt(listensock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(int));
 
-#if !V4V
+#if !ARGO
     if (setsockopt(listensock, SOL_SOCKET, SO_BINDTODEVICE, &interface, strlen(interface))) {
         perror ("setsockopt(SO_BINDTODEVICE)");
 	exit (EXIT_FAILURE);

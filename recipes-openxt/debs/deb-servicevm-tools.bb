@@ -4,8 +4,8 @@ COMPATIBLE_MACHINE = "(xenclient-nilfvm)"
 
 DEB_PACKAGES = "\
         linux-openxt \
-        v4v-module \
-        deb-libv4v \
+        argo-module \
+        deb-libargo \
         xenclient-toolstack \
         db-tools \
         xenclient-dbusbouncer \

@@ -1,7 +1,7 @@
 DESCRIPTION = "XenClient DBUS socket connections dom0-uivm"
 LICENSE = "GPLv2"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/GPL-2.0;md5=801f80980d171dd6425610833a22dbe6"
-DEPENDS = "libv4v"
+DEPENDS = "libargo"
 RDEPENDS_${PN} += "xen-libxenstore"
 
 DEPENDS_append_xenclient-nilfvm += " ${@deb_bootstrap_deps(d)} "
@@ -24,12 +24,12 @@ DEB_SUITE = "wheezy"
 DEB_ARCH = "i386"
 
 DEB_NAME = "xenclient-dbusbouncer"
-DEB_DESC="V4V - UNIX socket proxy"
-DEB_DESC_EXT="This package provides a proxy for remote socket access using V4V."
+DEB_DESC="Argo - UNIX socket proxy"
+DEB_DESC_EXT="This package provides a proxy for remote socket access using Argo."
 DEB_SECTION="misc"
 DEB_PKG_MAINTAINER = "Citrix Systems <customerservice@citrix.com>"
 
-LDFLAGS += "-lv4v -lxenstore"
+LDFLAGS += "-largo -lxenstore"
 
 ASNEEDED = ""
 

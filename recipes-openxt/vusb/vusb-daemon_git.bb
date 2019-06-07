@@ -1,7 +1,7 @@
 DESCRIPTION = "Citrix USB Daemon for XenClient"
 LICENSE = "GPLv2"
 LIC_FILES_CHKSUM="file://COPYING;md5=4641e94ec96f98fabc56ff9cc48be14b"
-DEPENDS = " libusb-compat xen libv4v libxcdbus libevent libxcxenstore udev"
+DEPENDS = " libusb-compat xen libargo libxcdbus libevent libxcxenstore udev"
 RDEPENDS_${PN} += "libxcxenstore"
 
 PV = "0+git${SRCPV}"
