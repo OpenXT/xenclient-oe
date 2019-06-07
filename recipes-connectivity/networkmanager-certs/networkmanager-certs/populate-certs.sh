@@ -21,4 +21,4 @@
 # THE SOFTWARE.
 #
 
-LD_PRELOAD=/usr/lib/libv4v-1.0.so.0  /usr/bin/certs-sync
+LD_PRELOAD=/usr/lib/libargo-1.0.so.0  /usr/bin/certs-sync
