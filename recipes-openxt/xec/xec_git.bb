@@ -8,7 +8,7 @@ DEPENDS = " \
     hkg-parsec \
     hkg-text \
     compleat \
-    libxchv4v \
+    libxchargo \
 "
 RDEPENDS_${PN} += "glibc-gconv-utf-32"
 
