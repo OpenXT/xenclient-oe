@@ -96,6 +96,8 @@ SRC_URI_append = " \
     file://efi-load-options-no-default-image-name.patch \
     file://argo-suppress-debug-messages.patch \
     file://argo-add-viptables.patch \
+    file://argo-fix-full-ring-write-bug.patch \
+    file://argo-fix-requeue-msg-len-bug.patch \
 "
 
 COMPATIBLE_HOST = 'i686-oe-linux|(x86_64.*).*-linux|aarch64.*-linux'

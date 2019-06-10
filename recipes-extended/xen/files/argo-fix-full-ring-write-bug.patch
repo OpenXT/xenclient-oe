@@ -1,0 +1,55 @@
+################################################################################
+SHORT DESCRIPTION:
+################################################################################
+Fix issue of argo messages not being resent if ring is full.
+
+################################################################################
+LONG DESCRIPTION:
+################################################################################
+The argo kernel module depends on Xen's sendv() returning -EAGAIN if Xen
+tries to write to a ring that is too full. Xen, however, will instead return
+the value of pending_requeue (the requeue mechanism), which will always
+resolve to 0 on success. This gives the caller no way of knowing whether or
+not it should try sending again at a later time.
+
+Now, if the ring is too full, Xen will only overwrite the return code with
+that of pending_requeue() if pending_requeue returns a non-zero exit code.
+
+################################################################################
+CHANGELOG:
+################################################################################
+
+################################################################################
+REMOVAL:
+################################################################################
+This can be removed when the bug is fixed upstream.
+
+################################################################################
+UPSTREAM PLAN:
+################################################################################
+Patch has been submitted upstream and is pending approval.
+
+################################################################################
+INTERNAL DEPENDENCIES:
+################################################################################
+
+################################################################################
+PATCHES:
+################################################################################
+--- a/xen/common/argo.c
++++ b/xen/common/argo.c
+@@ -2287,9 +2287,13 @@ sendv(struct domain *src_d, xen_argo_add
+                              message_type, &len);
+         if ( ret == -EAGAIN )
+         {
++            int rc;
++
+             argo_dprintk("argo_ringbuf_sendv failed, EAGAIN\n");
+             /* requeue to issue a notification when space is there */
+-            ret = pending_requeue(dst_d, ring_info, src_id.domain_id, len);
++            rc = pending_requeue(dst_d, ring_info, src_id.domain_id, len);
++            if ( rc )
++                ret = rc;
+         }
+ 
+         spin_unlock(&ring_info->L3_lock);
