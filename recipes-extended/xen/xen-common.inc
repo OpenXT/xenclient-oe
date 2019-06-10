@@ -30,8 +30,6 @@ SRC_URI_append = " \
     file://allow-mwait-cstate.patch;patch=1 \
     file://xen-translate.patch;patch=1 \
     file://local-pxe-rom.patch;patch=1 \
-    file://v4v.patch;patch=1 \
-    file://v4v-viptables.patch;patch=1 \
     file://unmap-shared-info.patch;patch=1 \
     file://foreign-batch-cacheattr.patch;patch=1 \
     file://allow-pat-cacheattrs-for-all-domains.patch;patch=1 \
@@ -43,7 +41,6 @@ SRC_URI_append = " \
     file://workaround-nehalem-igd-vtd.patch;patch=1 \
     file://xen-x86-Fix-up-rules-when-forcing-mno-sse.patch;patch=1 \
     file://increase-ap-startup-time.patch;patch=1 \
-    file://openxt-xen-xsmv4vuse.patch \
     file://xenstat-disable-tmem-use.patch;patch=1 \
     file://acpi-slic-support.patch \
     file://tboot-xen-evtlog-support.patch \
@@ -90,11 +87,13 @@ SRC_URI_append = " \
     file://libxl-retry-qmp-pci-add.patch \
     ${BLKTAP_PATCHQUEUE} \
     file://efi-hardcode-openxt-cfg.patch \
-    file://0001-EFI-add-EFI_LOAD_OPTION-support.patch \
     file://shim-support-for-shim-lock-measure.patch \
     file://efi-require-shim.patch \
     file://tboot-measure-and-launch-from-xen-efi.patch \
     file://efi-load-options-no-default-image-name.patch \
+    file://v4v.patch \
+    file://v4v-viptables.patch \
+    file://openxt-xen-xsmv4vuse.patch \
 "
 
 COMPATIBLE_HOST = 'i686-oe-linux|(x86_64.*).*-linux|aarch64.*-linux'

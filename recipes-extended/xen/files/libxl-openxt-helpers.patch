@@ -54,7 +54,7 @@ PATCHES
  static const char *libxl_tapif_script(libxl__gc *gc,
                                        const libxl_domain_build_info *info)
  {
-@@ -1212,6 +1216,7 @@ static int libxl__build_device_model_arg
+@@ -1447,6 +1451,7 @@ static int libxl__build_device_model_arg
          }
          if (b_info->u.hvm.soundhw) {
              flexarray_vappend(dm_args, "-soundhw", b_info->u.hvm.soundhw, NULL);
@@ -62,7 +62,7 @@ PATCHES
          }
          if (!libxl__acpi_defbool_val(b_info)) {
              flexarray_append(dm_args, "-no-acpi");
-@@ -1891,6 +1896,25 @@ char *libxl__stub_dm_name(libxl__gc *gc,
+@@ -2115,6 +2120,25 @@ char *libxl__stub_dm_name(libxl__gc *gc,
      return GCSPRINTF("%s-dm", guest_name);
  }
  
@@ -88,7 +88,7 @@ PATCHES
  void libxl__spawn_stub_dm(libxl__egc *egc, libxl__stub_dm_spawn_state *sdss)
  {
      STATE_AO_GC(sdss->dm.spawn.ao);
-@@ -2026,6 +2050,22 @@ void libxl__spawn_stub_dm(libxl__egc *eg
+@@ -2253,6 +2277,22 @@ void libxl__spawn_stub_dm(libxl__egc *eg
          goto out;
      }
  
@@ -113,51 +113,70 @@ PATCHES
      libxl__store_libxl_entry(gc, dm_domid, "stubdom-version",
 --- a/tools/libxl/libxl_domain.c
 +++ b/tools/libxl/libxl_domain.c
-@@ -1023,6 +1023,7 @@ void libxl__destroy_domid(libxl__egc *eg
+@@ -1020,11 +1020,41 @@ static void domain_destroy_domid_cb(libx
+                                     libxl__ev_child *destroyer,
+                                     pid_t pid, int status);
+ 
++static void kill_openxt_helpers(libxl__gc *gc, uint32_t dm_domid)
++{
++    char *pid;
++
++    /* Kill qmp-helper */
++    pid = libxl__xs_read(gc, XBT_NULL,
++                         GCSPRINTF("/local/domain/%d/"XS_QMP_PID, dm_domid));
++    if (!pid)
++        LOG(ERROR, "Cannot get qmp_helper pid for domain %d", dm_domid);
++    else
++        kill(strtol(pid, NULL, 10), SIGKILL);
++
++    /* Kill atapi-pt-helper */
++    pid = libxl__xs_read(gc, XBT_NULL,
++                         GCSPRINTF("/local/domain/%d/"XS_ATAPI_PT_PID, dm_domid));
++    if (!pid)
++        LOG(ERROR, "Cannot get atapi-pt_helper pid for domain %d", dm_domid);
++    else
++        kill(strtol(pid, NULL, 10), SIGKILL);
++
++    /* Kill audio-helper */
++    pid = libxl__xs_read(gc, XBT_NULL,
++                         GCSPRINTF("/local/domain/%d/"XS_AUDIO_PID, dm_domid));
++    if (!pid)
++        LOG(ERROR, "Cannot get audio_helper pid for domain %d", dm_domid);
++    else
++        kill(strtol(pid, NULL, 10), SIGKILL);
++}
++
+ void libxl__destroy_domid(libxl__egc *egc, libxl__destroy_domid_state *dis)
+ {
+     STATE_AO_GC(dis->ao);
+     libxl_ctx *ctx = CTX;
      uint32_t domid = dis->domid;
++    uint32_t stubdom_id;
      char *dom_path;
      int rc, dm_present;
-+    char *pid;
  
-     libxl__ev_child_init(&dis->destroyer);
+@@ -1042,7 +1072,8 @@ void libxl__destroy_domid(libxl__egc *eg
  
-@@ -1072,6 +1073,33 @@ void libxl__destroy_domid(libxl__egc *eg
- 
-         libxl__qmp_cleanup(gc, domid);
+     switch (libxl__domain_type(gc, domid)) {
+     case LIBXL_DOMAIN_TYPE_HVM:
+-        if (libxl_get_stubdom_id(CTX, domid)) {
++        stubdom_id = libxl_get_stubdom_id(CTX, domid);
++        if (stubdom_id) {
+             dm_present = 0;
+             break;
+         }
+@@ -1079,6 +1110,8 @@ void libxl__destroy_domid(libxl__egc *eg
+         libxl__destroy_device_model(egc, &dis->ddms);
+         return;
+     } else {
++        /* OpenXT: if the domain has a stubdom, we kill the stubdom helpers here */
++        kill_openxt_helpers(gc, stubdom_id);
+         dm_destroy_cb(egc, &dis->ddms, 0);
+         return;
      }
-+    /* OpenXT: if the domain has a stubdom, we kill the stubdom helpers here */
-+    int dm_domid = libxl_get_stubdom_id(ctx, domid);
-+    if (dm_domid) {
-+        /* OpenXT: Kill qmp-helper */
-+        pid = libxl__xs_read(gc, XBT_NULL,
-+                             GCSPRINTF("/local/domain/%d/"XS_QMP_PID, dm_domid));
-+        if (!pid)
-+            LOG(ERROR, "Cannot get qmp_helper pid for domain %d", dm_domid);
-+        else
-+            kill(strtol(pid, NULL, 10), SIGKILL);
-+
-+        /* OpenXT: Kill atapi-pt-helper */
-+        pid = libxl__xs_read(gc, XBT_NULL,
-+                             GCSPRINTF("/local/domain/%d/"XS_ATAPI_PT_PID, dm_domid));
-+        if (!pid)
-+            LOG(ERROR, "Cannot get atapi-pt_helper pid for domain %d", dm_domid);
-+        else
-+            kill(strtol(pid, NULL, 10), SIGKILL);
-+
-+        /* OpenXT: Kill audio-helper */
-+        pid = libxl__xs_read(gc, XBT_NULL,
-+                             GCSPRINTF("/local/domain/%d/"XS_AUDIO_PID, dm_domid));
-+        if (!pid)
-+            LOG(ERROR, "Cannot get audio_helper pid for domain %d", dm_domid);
-+        else
-+            kill(strtol(pid, NULL, 10), SIGKILL);
-+}
-     dis->drs.ao = ao;
-     dis->drs.domid = domid;
-     dis->drs.callback = devices_destroy_cb;
 --- a/tools/libxl/libxl_internal.h
 +++ b/tools/libxl/libxl_internal.h
-@@ -131,6 +131,13 @@
+@@ -134,6 +134,13 @@
  #define MB(_mb)     (_AC(_mb, ULL) << 20)
  #define GB(_gb)     (_AC(_gb, ULL) << 30)
  
@@ -168,12 +187,12 @@ PATCHES
 +#define XS_ATAPI_PT_PID "atapi-pt-helper-pid"
 +#define XS_AUDIO_PID "audio-helper-pid"
 +
- #define ARRAY_SIZE(a) (sizeof(a) / sizeof(a[0]))
- 
  #define ROUNDUP(_val, _order)                                           \
+     (((unsigned long)(_val)+(1UL<<(_order))-1) & ~((1UL<<(_order))-1))
+ 
 --- a/tools/libxl/libxl_create.c
 +++ b/tools/libxl/libxl_create.c
-@@ -1590,12 +1590,10 @@ static void domcreate_devmodel_started(l
+@@ -1570,12 +1570,10 @@ static void domcreate_devmodel_started(l
      if (dcs->sdss.dm.guest_domid) {
          if (d_config->b_info.device_model_version
              == LIBXL_DEVICE_MODEL_VERSION_QEMU_XEN) {

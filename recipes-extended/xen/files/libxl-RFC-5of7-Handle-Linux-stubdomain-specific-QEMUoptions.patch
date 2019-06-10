@@ -53,7 +53,7 @@ PATCHES
      return libxl__strdup(gc, "no");
  #else
      return GCSPRINTF("%s/qemu-ifup", libxl__xen_script_dir_path());
-@@ -595,8 +598,8 @@ static int libxl__build_device_model_arg
+@@ -835,8 +838,8 @@ static int libxl__build_device_model_arg
                                        "tap,vlan=%d,ifname=%s,bridge=%s,"
                                        "script=%s,downscript=%s",
                                        nics[i].devid, ifname, nics[i].bridge,
@@ -64,23 +64,40 @@ PATCHES
                                    NULL);
                  ioemu_nics++;
              }
-@@ -912,6 +915,7 @@ static int libxl__build_device_model_arg
+@@ -1147,6 +1150,7 @@ static int libxl__build_device_model_arg
+     int i, connection, devid;
+     uint64_t ram_size;
      const char *path, *chardev;
-     char *user = NULL;
-     struct passwd *user_base, user_pwbuf;
 +    bool is_stubdom = libxl_defbool_val(b_info->device_model_stubdomain);
  
      dm_args = flexarray_make(gc, 16, 1);
      dm_envs = flexarray_make(gc, 16, 1);
-@@ -922,24 +926,18 @@ static int libxl__build_device_model_arg
+@@ -1157,38 +1161,18 @@ static int libxl__build_device_model_arg
                        "-xen-domid",
                        GCSPRINTF("%d", guest_domid), NULL);
  
 -    flexarray_append(dm_args, "-chardev");
--    flexarray_append(dm_args,
--                     GCSPRINTF("socket,id=libxl-cmd,"
--                                    "path=%s/qmp-libxl-%d,server,nowait",
--                                    libxl__run_dir_path(), guest_domid));
+-    if (state->dm_monitor_fd >= 0) {
+-        flexarray_append(dm_args,
+-            GCSPRINTF("socket,id=libxl-cmd,fd=%d,server,nowait",
+-                      state->dm_monitor_fd));
+-
+-        /*
+-         * Start QEMU with its "CPU" paused, it will not start any emulation
+-         * until the QMP command "cont" is used. This also prevent QEMU from
+-         * writing "running" to the "state" xenstore node so we only use this
+-         * flag when we have the QMP based startup notification.
+-         * */
+-        flexarray_append(dm_args, "-S");
+-    } else {
++    /* There is currently no way to access the QMP socket in the stubdom */
++    if (!is_stubdom) {
++        flexarray_append(dm_args, "-chardev");
+         flexarray_append(dm_args,
+                          GCSPRINTF("socket,id=libxl-cmd,"
+-                                   "path=%s,server,nowait",
+-                                   libxl__qemu_qmp_path(gc, guest_domid)));
+-    }
 -
 -    flexarray_append(dm_args, "-no-shutdown");
 -    flexarray_append(dm_args, "-mon");
@@ -91,17 +108,11 @@ PATCHES
 -                     GCSPRINTF("socket,id=libxenstat-cmd,"
 -                                    "path=%s/qmp-libxenstat-%d,server,nowait",
 -                                    libxl__run_dir_path(), guest_domid));
--
--    flexarray_append(dm_args, "-mon");
--    flexarray_append(dm_args, "chardev=libxenstat-cmd,mode=control");
-+    /* There is currently no way to access the QMP socket in the stubdom */
-+    if (!is_stubdom) {
-+        flexarray_append(dm_args, "-chardev");
-+        flexarray_append(dm_args,
-+                         GCSPRINTF("socket,id=libxl-cmd,"
 +                                        "path=%s/qmp-libxl-%d,server,nowait",
 +                                        libxl__run_dir_path(), guest_domid));
-+
+ 
+-    flexarray_append(dm_args, "-mon");
+-    flexarray_append(dm_args, "chardev=libxenstat-cmd,mode=control");
 +        flexarray_append(dm_args, "-no-shutdown");
 +        flexarray_append(dm_args, "-mon");
 +        flexarray_append(dm_args, "chardev=libxl-cmd,mode=control");
@@ -109,7 +120,7 @@ PATCHES
  
      for (i = 0; i < guest_config->num_channels; i++) {
          connection = guest_config->channels[i].connection;
-@@ -983,7 +981,7 @@ static int libxl__build_device_model_arg
+@@ -1232,7 +1216,7 @@ static int libxl__build_device_model_arg
          flexarray_vappend(dm_args, "-name", c_info->name, NULL);
      }
  
@@ -118,7 +129,7 @@ PATCHES
          char *vncarg = NULL;
  
          flexarray_append(dm_args, "-vnc");
-@@ -1034,7 +1032,7 @@ static int libxl__build_device_model_arg
+@@ -1283,7 +1267,7 @@ static int libxl__build_device_model_arg
       */
      flexarray_append_pair(dm_args, "-display", "none");
  
@@ -127,7 +138,7 @@ PATCHES
          flexarray_append(dm_args, "-sdl");
          if (sdl->display)
              flexarray_append_pair(dm_envs, "DISPLAY", sdl->display);
-@@ -1078,10 +1076,19 @@ static int libxl__build_device_model_arg
+@@ -1327,10 +1311,19 @@ static int libxl__build_device_model_arg
                  return ERROR_INVAL;
              }
              if (b_info->u.hvm.serial) {
@@ -149,7 +160,7 @@ PATCHES
                  for (p = b_info->u.hvm.serial_list;
                       *p;
                       p++) {
-@@ -1096,7 +1103,7 @@ static int libxl__build_device_model_arg
+@@ -1345,7 +1338,7 @@ static int libxl__build_device_model_arg
              flexarray_append(dm_args, "-nographic");
          }
  
@@ -158,7 +169,7 @@ PATCHES
              const libxl_spice_info *spice = &b_info->u.hvm.spice;
              char *spiceoptions = dm_spice_options(gc, spice);
              if (!spiceoptions)
-@@ -1235,8 +1242,8 @@ static int libxl__build_device_model_arg
+@@ -1484,8 +1477,8 @@ static int libxl__build_device_model_arg
                                   GCSPRINTF("type=tap,id=net%d,ifname=%s,"
                                             "script=%s,downscript=%s",
                                             nics[i].devid, ifname,
@@ -169,7 +180,7 @@ PATCHES
  
                  /* Userspace COLO Proxy need this */
  #define APPEND_COLO_SOCK_SERVER(sock_id, sock_ip, sock_port) ({             \
-@@ -1493,6 +1500,11 @@ static int libxl__build_device_model_arg
+@@ -1781,6 +1774,11 @@ static int libxl__build_device_model_arg
                           disks[i].vdev);
                      continue;
                  }
@@ -181,7 +192,7 @@ PATCHES
              } else {
                  if (format == NULL) {
                      LOGD(WARN, guest_domid,
-@@ -1592,6 +1604,10 @@ static int libxl__build_device_model_arg
+@@ -1880,6 +1878,10 @@ static int libxl__build_device_model_arg
                               "qemu-xen doesn't support read-only IDE disk drivers");
                          return ERROR_INVAL;
                      }
@@ -192,7 +203,7 @@ PATCHES
                      if (colo_mode == LIBXL__COLO_SECONDARY) {
                          drive = libxl__sprintf
                              (gc, "if=none,driver=%s,file=%s,id=%s",
-@@ -1705,7 +1721,7 @@ static int libxl__build_device_model_arg
+@@ -1932,7 +1934,7 @@ static int libxl__build_device_model_arg
                                          char ***args, char ***envs,
                                          const libxl__domain_build_state *state,
                                          int *dm_state_fd)
@@ -201,7 +212,7 @@ PATCHES
   * and therefore will be passing a filename rather than a fd. */
  {
      switch (guest_config->b_info.device_model_version) {
-@@ -1715,8 +1731,10 @@ static int libxl__build_device_model_arg
+@@ -1942,8 +1944,10 @@ static int libxl__build_device_model_arg
                                                    args, envs,
                                                    state);
      case LIBXL_DEVICE_MODEL_VERSION_QEMU_XEN:
@@ -214,7 +225,7 @@ PATCHES
          return libxl__build_device_model_args_new(gc, dm,
                                                    guest_domid, guest_config,
                                                    args, envs,
-@@ -1773,7 +1791,7 @@ static int libxl__vfb_and_vkb_from_hvm_g
+@@ -2001,7 +2005,7 @@ static int libxl__vfb_and_vkb_from_hvm_g
  
  static int libxl__write_stub_dmargs(libxl__gc *gc,
                                      int dm_domid, int guest_domid,
@@ -223,7 +234,7 @@ PATCHES
  {
      libxl_ctx *ctx = libxl__gc_owner(gc);
      int i;
-@@ -1801,7 +1819,9 @@ static int libxl__write_stub_dmargs(libx
+@@ -2029,7 +2033,9 @@ static int libxl__write_stub_dmargs(libx
      i = 1;
      dmargs[0] = '\0';
      while (args[i] != NULL) {
@@ -234,7 +245,7 @@ PATCHES
              strcat(dmargs, " ");
              strcat(dmargs, args[i]);
          }
-@@ -1946,7 +1966,8 @@ void libxl__spawn_stub_dm(libxl__egc *eg
+@@ -2187,7 +2193,8 @@ void libxl__spawn_stub_dm(libxl__egc *eg
          goto out;
      }
  
@@ -246,7 +257,7 @@ PATCHES
                                 libxl__xs_get_dompath(gc, guest_domid)),
 --- a/tools/libxl/libxl_types.idl
 +++ b/tools/libxl/libxl_types.idl
-@@ -122,6 +122,8 @@ libxl_disk_format = Enumeration("disk_fo
+@@ -129,6 +129,8 @@ libxl_disk_format = Enumeration("disk_fo
      (4, "RAW"),
      (5, "EMPTY"),
      (6, "QED"),
