@@ -55,6 +55,8 @@ do_install_append() {
     install -m 0755 -d ${D}/etc/network-daemon
     install -m 0755 ${WORKDIR}/git/dnsmasq-template ${D}/etc/network-daemon/dnsmasq-template
     install -m 0755 ${WORKDIR}/git/dnsmasq-script-template ${D}/etc/network-daemon/dnsmasq-script-template
+    install -m 0755 ${WORKDIR}/git/nws/bridge-connection ${D}/etc/network-daemon/bridge-connection
+    install -m 0755 ${WORKDIR}/git/nws/slave-connection ${D}/etc/network-daemon/slave-connection
 
     install -m 0755 -d ${D}/etc/network-daemon/scripts
     install -m 0755 ${S}/nw_notify ${D}/etc/network-daemon/scripts/nw_notify

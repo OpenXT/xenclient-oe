@@ -16,9 +16,10 @@ DEPENDS = " \
     ppp \
     intltool-native \
     libgudev \
+    modemmanager \
 "
 
-inherit gnome gettext systemd gobject-introspection
+inherit gnomebase gettext systemd vala gobject-introspection
 
 FILESEXTRAPATHS_prepend := "${THISDIR}/${BPN}-${PV}:"
 SRC_URI = " \
@@ -28,8 +29,12 @@ SRC_URI = " \
     file://db-nm-settings.patch \
     file://use-dom0-db-for-seen-bssids.patch \
     file://rpcgen-does-not-support-dbus-tuples.patch \
+    file://use-bridged-iface.patch \
+    file://xc-nutty-network.patch \
+    file://dont-reset-wired-mac-addr.patch \
+    file://remove-libgcrypt.patch \
+    file://use-correct-data-in-nl-cb.patch \
     file://NetworkManager.conf \
-    file://WiredEthernetConnection \
 "
 
 SRC_URI += " \
@@ -44,6 +49,7 @@ SRC_URI[sha256sum] = "064d27223d3824859df12e1fb25b787fec1c68bbc864dc52a0289b9211
 S = "${WORKDIR}/NetworkManager-${PV}"
 
 EXTRA_OECONF = " \
+    --enable-introspection \
     --enable-ifupdown \
     --disable-ifcfg-rh \
     --disable-ifnet \
@@ -55,20 +61,23 @@ EXTRA_OECONF = " \
     --with-iptables=${sbindir}/iptables \
     --with-tests \
     --with-dnsmasq=${bindir}/dnsmasq \
+    --with-modem-manager-1=yes \
     --enable-wimax=no \
+    --enable-polkit=no \
 "
 
 PACKAGECONFIG ??= "${@bb.utils.contains('DISTRO_FEATURES','systemd','systemd','consolekit',d)}"
 PACKAGECONFIG[systemd] = " \
-    --with-systemdsystemunitdir=${systemd_unitdir}/system --with-session-tracking=systemd --enable-polkit, \
+    --with-systemdsystemunitdir=${systemd_unitdir}/system --with-session-tracking=systemd, \
     --without-systemdsystemunitdir, \
-    polkit \
 "
 # consolekit is not picked by shlibs, so add it to RDEPENDS too
 PACKAGECONFIG[consolekit] = "--with-session-tracking=consolekit,,consolekit,consolekit"
 PACKAGECONFIG[concheck] = "--enable-concheck,--disable-concheck,libsoup-2.4"
 
-export GIR_EXTRA_LIBS_PATH="${B}/libnm-util/.libs:${B}/libnm-glib/.libs"
+do_compile_prepend () {
+    export GIR_EXTRA_LIBS_PATH="${B}/libnm-util/.libs:${B}/libnm-glib/.libs"
+}
 
 # Work around dbus permission problems since we lack a proper at_console
 do_install_prepend() {
@@ -94,7 +103,6 @@ do_install_append () {
     install -d ${D}${datadir}/xenclient/nm_scripts
     install -m 0755 ${WORKDIR}/db_to_nm.awk ${D}${datadir}/xenclient/nm_scripts/db_to_nm.awk
     install -m 0755 ${WORKDIR}/nm_to_db.awk ${D}${datadir}/xenclient/nm_scripts/nm_to_db.awk
-    install -m 0755 ${WORKDIR}/WiredEthernetConnection ${D}${datadir}/xenclient/nm_scripts/WiredEthernetConnection
     install -m 0644 ${WORKDIR}/NetworkManager.conf ${D}${datadir}/xenclient/nm_scripts/NetworkManager.conf
 
     install -m 0755 ${WORKDIR}/nm_sync.sh ${D}${bindir}/nm_sync.sh
