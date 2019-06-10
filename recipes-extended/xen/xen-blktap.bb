@@ -5,7 +5,7 @@ DESCRIPTION = "Xen hypervisor blktap2 and libvhd components"
 
 # In OpenXT, multiple recipes are used to build Xen and its components:
 # a 32-bit build of tools ; a 64-bit hypervisor ; and a separate blktap
-# build to fix potentially circular dependencies with libv4v and icbinn.
+# build to fix potentially circular dependencies with libargo and icbinn.
 #
 # This recipe shares a common xen.inc with other recipes.
 # PN in this recipe is "xen-blktap", rather than "xen" as xen.inc is
