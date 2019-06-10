@@ -5,7 +5,7 @@ DESCRIPTION = "Xen hypervisor libxl components"
 
 # In OpenXT, multiple recipes are used to build Xen and its components:
 # a 32-bit build of tools ; a 64-bit hypervisor ; a separate blktap
-# build to fix potentially circular dependencies with libv4v and icbinn
+# build to fix potentially circular dependencies with libargo and icbinn
 # and the remainder.
 #
 # This recipe shares a common xen.inc with other recipes.
