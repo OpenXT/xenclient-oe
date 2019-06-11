@@ -37,28 +37,28 @@ PATCHES
  #endif
 +    HYPERCALL(v4v_op),
      COMPAT_CALL(platform_op),
+ #ifdef CONFIG_PV
      COMPAT_CALL(mmuext_op),
-     HYPERCALL(xenpmu_op),
 --- a/xen/arch/x86/hypercall.c
 +++ b/xen/arch/x86/hypercall.c
-@@ -65,6 +65,7 @@ const hypercall_args_t hypercall_args_ta
+@@ -64,6 +64,7 @@ const hypercall_args_t hypercall_args_ta
      ARGS(domctl, 1),
      ARGS(kexec_op, 2),
      ARGS(tmem_op, 1),
 +    ARGS(v4v_op, 6),
-     ARGS(xenpmu_op, 2),
-     ARGS(dm_op, 3),
-     ARGS(mca, 1),
+ #ifdef CONFIG_ARGO
+     ARGS(argo_op, 5),
+ #endif
 --- a/xen/arch/x86/pv/hypercall.c
 +++ b/xen/arch/x86/pv/hypercall.c
-@@ -78,6 +78,7 @@ const hypercall_table_t pv_hypercall_tab
+@@ -77,6 +77,7 @@ const hypercall_table_t pv_hypercall_tab
  #ifdef CONFIG_TMEM
      HYPERCALL(tmem_op),
  #endif
 +    HYPERCALL(v4v_op),
      HYPERCALL(xenpmu_op),
-     COMPAT_CALL(dm_op),
-     HYPERCALL(mca),
+ #ifdef CONFIG_HVM
+     HYPERCALL(hvm_op),
 --- a/xen/common/Makefile
 +++ b/xen/common/Makefile
 @@ -56,6 +56,7 @@ obj-y += tasklet.o
@@ -71,17 +71,17 @@ PATCHES
  obj-y += vm_event.o
 --- a/xen/common/domain.c
 +++ b/xen/common/domain.c
-@@ -265,7 +265,8 @@ struct domain *domain_create(domid_t dom
+@@ -315,7 +315,8 @@ struct domain *domain_create(domid_t dom
  {
      struct domain *d, **pd, *old_hwdom = NULL;
-     enum { INIT_xsm = 1u<<0, INIT_watchdog = 1u<<1, INIT_rangeset = 1u<<2,
+     enum { INIT_watchdog = 1u<<1,
 -           INIT_evtchn = 1u<<3, INIT_gnttab = 1u<<4, INIT_arch = 1u<<5 };
 +           INIT_evtchn = 1u<<3, INIT_gnttab = 1u<<4, INIT_arch = 1u<<5,
 +           INIT_v4v = 1u<<6 };
      int err, init_status = 0;
  
-     if ( (d = alloc_domain_struct()) == NULL )
-@@ -290,6 +291,7 @@ struct domain *domain_create(domid_t dom
+     if ( config && (err = sanitise_domain_config(config)) )
+@@ -376,6 +377,7 @@ struct domain *domain_create(domid_t dom
      spin_lock_init(&d->hypercall_deadlock_mutex);
      INIT_PAGE_LIST_HEAD(&d->page_list);
      INIT_PAGE_LIST_HEAD(&d->xenpage_list);
@@ -89,7 +89,7 @@ PATCHES
  
      spin_lock_init(&d->node_affinity_lock);
      d->node_affinity = NODE_MASK_ALL;
-@@ -368,6 +370,10 @@ struct domain *domain_create(domid_t dom
+@@ -445,6 +447,10 @@ struct domain *domain_create(domid_t dom
              goto fail;
          init_status |= INIT_gnttab;
  
@@ -100,8 +100,8 @@ PATCHES
          err = -ENOMEM;
  
          d->pbuf = xzalloc_array(char, DOMAIN_PBUF_SIZE);
-@@ -422,6 +428,8 @@ struct domain *domain_create(domid_t dom
- 
+@@ -499,6 +505,8 @@ struct domain *domain_create(domid_t dom
+     }
      if ( init_status & INIT_arch )
          arch_domain_destroy(d);
 +    if ( init_status & INIT_v4v )
@@ -109,28 +109,17 @@ PATCHES
      if ( init_status & INIT_gnttab )
          grant_table_destroy(d);
      if ( init_status & INIT_evtchn )
-@@ -646,6 +654,7 @@ int domain_kill(struct domain *d)
-         if ( d->is_dying != DOMDYING_alive )
+@@ -720,6 +728,7 @@ int domain_kill(struct domain *d)
              return domain_kill(d);
          d->is_dying = DOMDYING_dying;
+         argo_destroy(d);
 +        v4v_destroy(d);
          evtchn_destroy(d);
          gnttab_release_mappings(d);
          tmem_destroy(d->tmem_client);
---- a/xen/common/event_channel.c
-+++ b/xen/common/event_channel.c
-@@ -746,7 +746,7 @@ void send_guest_vcpu_virq(struct vcpu *v
-     spin_unlock_irqrestore(&v->virq_lock, flags);
- }
- 
--static void send_guest_global_virq(struct domain *d, uint32_t virq)
-+void send_guest_global_virq(struct domain *d, uint32_t virq)
- {
-     unsigned long flags;
-     int port;
 --- /dev/null
 +++ b/xen/common/v4v.c
-@@ -0,0 +1,1964 @@
+@@ -0,0 +1,1962 @@
 +/******************************************************************************
 + * v4v.c
 + *
@@ -166,8 +155,6 @@ PATCHES
 +#define v4v_xmalloc_array(a,b) xmalloc_array(a,b)
 +#endif
 +
-+
-+extern void send_guest_global_virq(struct domain *d, uint32_t virq);
 +
 +DEFINE_XEN_GUEST_HANDLE (uint8_t);
 +static struct v4v_ring_info *v4v_ring_find_info (struct domain *d,
@@ -2651,24 +2638,22 @@ PATCHES
 + */
 --- a/xen/include/public/xen.h
 +++ b/xen/include/public/xen.h
-@@ -118,7 +118,7 @@ DEFINE_XEN_GUEST_HANDLE(xen_ulong_t);
- #define __HYPERVISOR_domctl               36
- #define __HYPERVISOR_kexec_op             37
- #define __HYPERVISOR_tmem_op              38
--#define __HYPERVISOR_xc_reserved_op       39 /* reserved for XenClient */
-+#define __HYPERVISOR_v4v_op               39 /* reserved for XenClient */
+@@ -118,6 +118,7 @@ DEFINE_XEN_GUEST_HANDLE(xen_ulong_t);
  #define __HYPERVISOR_xenpmu_op            40
  #define __HYPERVISOR_dm_op                41
+ #define __HYPERVISOR_txt_op               42
++#define __HYPERVISOR_v4v_op               43 /* reserved for XenClient */
  
-@@ -178,7 +178,7 @@ DEFINE_XEN_GUEST_HANDLE(xen_ulong_t);
- #define VIRQ_CON_RING   8  /* G. (DOM0) Bytes received on console            */
- #define VIRQ_PCPU_STATE 9  /* G. (DOM0) PCPU state changed                   */
- #define VIRQ_MEM_EVENT  10 /* G. (DOM0) A memory event has occured           */
--#define VIRQ_XC_RESERVED 11 /* G. Reserved for XenClient                     */
-+#define VIRQ_V4V        11 /* G. Reserved for XenClient                     */
+ /* Architecture-specific hypercall definitions. */
+ #define __HYPERVISOR_arch_0               48
+@@ -178,6 +179,7 @@ DEFINE_XEN_GUEST_HANDLE(xen_ulong_t);
+ #define VIRQ_ARGO       11 /* G. Argo interdomain message notification       */
  #define VIRQ_ENOMEM     12 /* G. (DOM0) Low on heap memory       */
  #define VIRQ_XENPMU     13 /* V.  PMC interrupt                              */
++#define VIRQ_V4V        14 /* G. Reserved for XenClient                     */
  
+ /* Architecture-specific VIRQ definitions. */
+ #define VIRQ_ARCH_0    16
 --- a/xen/include/xen/sched.h
 +++ b/xen/include/xen/sched.h
 @@ -15,6 +15,7 @@
@@ -2676,10 +2661,10 @@ PATCHES
  #include <xen/radix-tree.h>
  #include <xen/multicall.h>
 +#include <xen/v4v.h>
+ #include <xen/nospec.h>
  #include <xen/tasklet.h>
  #include <xen/mm.h>
- #include <xen/smp.h>
-@@ -486,6 +487,10 @@ struct domain
+@@ -490,6 +491,10 @@ struct domain
      rwlock_t vnuma_rwlock;
      struct vnuma_info *vnuma;
  
@@ -2777,7 +2762,7 @@ PATCHES
 + */
 --- a/xen/include/xsm/dummy.h
 +++ b/xen/include/xsm/dummy.h
-@@ -721,6 +721,11 @@ static XSM_INLINE int xsm_dm_op(XSM_DEFA
+@@ -724,6 +724,11 @@ static XSM_INLINE int xsm_dm_op(XSM_DEFA
      return xsm_default_action(action, current->domain, d);
  }
  
@@ -2796,9 +2781,9 @@ PATCHES
      int (*xen_version) (uint32_t cmd);
      int (*domain_resource_map) (struct domain *d);
 +    int (*v4v_send) (struct domain *dom1, struct domain *dom2);
- };
- 
- #ifdef CONFIG_XSM
+ #ifdef CONFIG_ARGO
+     int (*argo_enable) (const struct domain *d);
+     int (*argo_register_single_source) (const struct domain *d,
 @@ -692,6 +693,11 @@ static inline int xsm_dm_op(xsm_default_
      return xsm_ops->dm_op(d);
  }
@@ -2830,34 +2815,39 @@ PATCHES
      .xen_version = flask_xen_version,
      .domain_resource_map = flask_domain_resource_map,
 +    .v4v_send = flask_v4v_send,
- };
- 
- void __init flask_init(const void *policy_buffer, size_t policy_size)
+ #ifdef CONFIG_ARGO
+     .argo_enable = flask_argo_enable,
+     .argo_register_single_source = flask_argo_register_single_source,
 --- a/xen/xsm/flask/policy/access_vectors
 +++ b/xen/xsm/flask/policy/access_vectors
-@@ -533,3 +533,8 @@ class version
- # Xen build id
+@@ -532,6 +532,11 @@ class version
      xen_build_id
  }
-+
+ 
 +class v4v
 +{
 +    send
 +}
++
+ # Class argo is used to describe the Argo interdomain communication system.
+ class argo
+ {
 --- a/xen/xsm/flask/policy/security_classes
 +++ b/xen/xsm/flask/policy/security_classes
 @@ -19,5 +19,6 @@ class event
- class grant
  class security
  class version
+ class argo
 +class v4v
  
  # FLASK
 --- a/xen/xsm/dummy.c
 +++ b/xen/xsm/dummy.c
-@@ -159,4 +159,5 @@ void __init xsm_fixup_ops (struct xsm_op
+@@ -153,6 +153,7 @@ void __init xsm_fixup_ops (struct xsm_op
      set_to_dummy_if_null(ops, memory_translate);
      set_to_dummy_if_null(ops, xen_version);
      set_to_dummy_if_null(ops, domain_resource_map);
 +    set_to_dummy_if_null(ops, v4v_send);
- }
+ #ifdef CONFIG_ARGO
+     set_to_dummy_if_null(ops, argo_enable);
+     set_to_dummy_if_null(ops, argo_register_single_source);

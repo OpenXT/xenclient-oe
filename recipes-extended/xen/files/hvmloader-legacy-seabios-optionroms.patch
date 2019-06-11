@@ -35,17 +35,8 @@ PATCHES
 ################################################################################
 --- a/tools/firmware/Makefile
 +++ b/tools/firmware/Makefile
-@@ -12,7 +12,7 @@ DEBG_DIR := $(DESTDIR)$(DEBUG_DIR)$(XENF
- 
- SUBDIRS-y :=
- SUBDIRS-$(CONFIG_OVMF) += ovmf-dir
--SUBDIRS-$(CONFIG_SEABIOS) += seabios-dir
-+#SUBDIRS-$(CONFIG_SEABIOS) += seabios-dir
- SUBDIRS-$(CONFIG_ROMBIOS) += rombios
- SUBDIRS-$(CONFIG_ROMBIOS) += vgabios
- SUBDIRS-$(CONFIG_ROMBIOS) += etherboot
-@@ -22,11 +22,11 @@ SUBDIRS-y += hvmloader
- LD32BIT-$(CONFIG_FreeBSD) := LD32BIT_FLAG=-melf_i386_fbsd
+@@ -24,13 +24,13 @@ SEABIOSLD ?= $(LD)
+ SEABIOS_EXTRAVERSION ?= "-Xen"
  
  ovmf-dir:
 -	GIT=$(GIT) $(XEN_ROOT)/scripts/git-checkout.sh $(OVMF_UPSTREAM_URL) $(OVMF_UPSTREAM_REVISION) ovmf-dir
@@ -56,20 +47,38 @@ PATCHES
 -	GIT=$(GIT) $(XEN_ROOT)/scripts/git-checkout.sh $(SEABIOS_UPSTREAM_URL) $(SEABIOS_UPSTREAM_REVISION) seabios-dir
 +	GIT="$(GIT)" $(XEN_ROOT)/scripts/git-checkout.sh $(SEABIOS_UPSTREAM_URL) $(SEABIOS_UPSTREAM_REVISION) seabios-dir
  	cp seabios-config seabios-dir/.config;
- 	$(MAKE) -C seabios-dir olddefconfig
+-	$(MAKE) -C seabios-dir olddefconfig CC=$(SEABIOSCC) LD=$(SEABIOSLD)
++	$(MAKE) -C seabios-dir olddefconfig CC="$(SEABIOSCC)" LD="$(SEABIOSLD)"
+ 	rm -f seabios-dir/.version
+ 	echo '$(SEABIOS_UPSTREAM_REVISION)' > seabios-dir/.version
  
-@@ -41,7 +41,7 @@ ifeq ($(CONFIG_ROMBIOS),y)
+@@ -45,7 +45,7 @@ ifeq ($(CONFIG_ROMBIOS),y)
  	false ; \
  	fi
  endif
--	$(MAKE) $(LD32BIT-y) CC=$(CC) PYTHON=$(PYTHON) subdirs-$@
-+	$(MAKE) $(LD32BIT-y) CC="$(CC)" PYTHON="$(PYTHON)" subdirs-$@
- 
+-	$(MAKE) CC=$(CC) PYTHON=$(PYTHON) subdirs-$@
++	$(MAKE) CC="$(CC)" PYTHON="$(PYTHON)" subdirs-$@
  
  .PHONY: install
+ install: all
+@@ -123,7 +123,7 @@ seabios-dir-force-update: seabios-dir
+ 
+ subdir-clean-seabios-dir:
+ 	set -e; if test -d seabios-dir/.; then \
+-		$(MAKE) -C seabios-dir CC=$(SEABIOSCC) LD=$(SEABIOSLD) clean; \
++		$(MAKE) -C seabios-dir CC="$(SEABIOSCC)" LD="$(SEABIOSLD)" clean; \
+ 	fi
+ 
+ subtree-force-update:
+@@ -139,4 +139,4 @@ subtree-force-update-all:
+ 	$(MAKE) ovmf-dir-force-update
+ 
+ subdir-all-seabios-dir: seabios-dir
+-	$(MAKE) -C $< CC=$(SEABIOSCC) LD=$(SEABIOSLD) PYTHON=$(PYTHON) EXTRAVERSION=$(SEABIOS_EXTRAVERSION) all;
++	$(MAKE) -C $< CC="$(SEABIOSCC)" LD="$(SEABIOSLD)" PYTHON=$(PYTHON) EXTRAVERSION=$(SEABIOS_EXTRAVERSION) all;
 --- a/tools/firmware/hvmloader/Makefile
 +++ b/tools/firmware/hvmloader/Makefile
-@@ -35,7 +35,7 @@ OBJS  = hvmloader.o mp_tables.o util.o s
+@@ -32,7 +32,7 @@ OBJS  = hvmloader.o mp_tables.o util.o s
  OBJS += smp.o cacheattr.o xenbus.o vnuma.o
  OBJS += e820.o pci.o pir.o ctype.o
  OBJS += hvm_param.o
@@ -78,7 +87,7 @@ PATCHES
  ifeq ($(debug),y)
  OBJS += tests.o
  endif
-@@ -77,6 +77,7 @@ acpi:
+@@ -73,6 +73,7 @@ acpi:
  	$(MAKE) -C $(ACPI_PATH)  ACPI_BUILD_DIR=$(CURDIR) DSDT_FILES="$(DSDT_FILES)"
  
  rombios.o: roms.inc
@@ -122,10 +131,28 @@ PATCHES
  struct seabios_info {
      char signature[14]; /* XenHVMSeaBIOS\0 */
      uint8_t length;     /* Length of this struct */
-@@ -141,10 +153,66 @@ static void seabios_load(const struct bi
-     seabios_config.image_size = bios_length;
+@@ -130,9 +142,11 @@ static void seabios_setup_e820(void)
+     dump_e820_table(e820, info->e820_nr);
  }
  
++static void *ipxe_module_addr;
++
+ static void seabios_load(const struct bios_config *bios,
+                          void *bios_addr, uint32_t bios_length,
+-                         void *unused_addr)
++                         void *ipxe_addr)
+ {
+     unsigned int bios_dest = 0x100000 - bios_length;
+ 
+@@ -140,12 +154,76 @@ static void seabios_load(const struct bi
+     memcpy((void *)bios_dest, bios_addr, bios_length);
+     seabios_config.bios_address = bios_dest;
+     seabios_config.image_size = bios_length;
++
++    /* Stash ipxe address */
++    ipxe_module_addr = ipxe_addr;
++}
++
 +static void seabios_load_roms(void)
 +{
 +    int option_rom_sz = 0, vgabios_sz = 0, etherboot_sz = 0;
@@ -158,14 +185,19 @@ PATCHES
 +        break;
 +    }
 +
-+    etherboot_phys_addr = VGABIOS_PHYSICAL_ADDRESS + vgabios_sz;
-+    /* round address at 2k boundary for BIOS ROM scanning */
-+    etherboot_phys_addr = (etherboot_phys_addr + 0x7ff) & ~0x7ff;
-+    memcpy((void *)etherboot_phys_addr, etherboot, sizeof (etherboot));
-+    etherboot_sz = sizeof (etherboot);
++    if ( ipxe_module_addr )
++    {
++        etherboot_phys_addr = VGABIOS_PHYSICAL_ADDRESS + vgabios_sz;
++        /* round address at 2k boundary for BIOS ROM scanning */
++        etherboot_phys_addr = (etherboot_phys_addr + 0x7ff) & ~0x7ff;
++        etherboot_sz = scan_etherboot_nic(SEABIOS_OPTIONROM_PHYSICAL_END,
++                                          etherboot_phys_addr,
++                                          ipxe_module_addr);
 +
-+    option_rom_phys_addr = etherboot_phys_addr + etherboot_sz;
-+    option_rom_sz = pci_load_option_roms(SEABIOS_OPTIONROM_PHYSICAL_END, option_rom_phys_addr);
++        option_rom_phys_addr = etherboot_phys_addr + etherboot_sz;
++        option_rom_sz = pci_load_option_roms(SEABIOS_OPTIONROM_PHYSICAL_END, option_rom_phys_addr);
++
++    }
 +
 +    printf("Option ROMs:\n");
 +    if ( vgabios_sz )
@@ -180,8 +212,8 @@ PATCHES
 +        printf(" %05x-%05x: PCI Option ROMs\n",
 +               option_rom_phys_addr,
 +               option_rom_phys_addr + option_rom_sz - 1);
-+}
-+
+ }
+ 
  struct bios_config seabios_config = {
      .name = "SeaBIOS",
  
