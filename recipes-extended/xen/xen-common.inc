@@ -16,6 +16,9 @@ SRC_URI_append = " \
     file://defconfig \
     file://config.patch \
     file://disable-xen-root-check.patch \
+    file://kconfig-grant-table.patch \
+    file://kconfig-grant-table-v2-interface.patch \
+    file://kconfig-grant-table-exotic.patch \
     file://hvm-pm-hibernate-s-state.patch;patch=1 \
     file://prune-vga-acpi-dev.patch;patch=1 \
     file://smbios.patch;patch=1 \
