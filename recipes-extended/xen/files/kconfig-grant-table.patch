@@ -1,0 +1,262 @@
+################################################################################
+SHORT DESCRIPTION:
+################################################################################
+Upstream patch to add KCONFIG option to govern inclusion of the grant table
+implementation. 
+
+################################################################################
+LONG DESCRIPTION:
+################################################################################
+OpenXT currently requires the grant tables, so this option must be enabled in
+the build config:
+
+CONFIG_GRANT_TABLE=y
+
+################################################################################
+CHANGELOG
+################################################################################
+Introduced for OpenXT 9.0.
+
+################################################################################
+REMOVAL
+################################################################################
+When OpenXT adopts Xen 4.13 or later.
+
+################################################################################
+UPSTREAM PLAN
+################################################################################
+Already upstream for Xen 4.13.
+
+################################################################################
+INTERNAL DEPENDENCIES
+################################################################################
+This is a prerequisite for the OpenXT patches:
+* kconfig-grant-table-v2-interface.patch
+* kconfig-grant-table-exotic.patch
+
+################################################################################
+PATCHES
+################################################################################
+From d2151152dd2b38653fba8f1dbc2d4af7d404a3d4 Fri Jan 18 12:43:57 2019
+From: Wei Liu <wei.liu2@citrix.com>
+Date: Fri, 18 Jan 2019 12:43:57 +0000
+Subject: xen: make grant table support configurable
+
+Introduce CONFIG_GRANT_TABLE. Provide stubs and make sure x86 and arm
+hypervisors build with grant table disabled.
+
+Signed-off-by: Wei Liu <wei.liu2@citrix.com>
+Acked-by: Jan Beulich <jbeulich@suse.com>
+Acked-by: Julien Grall <julien.grall@arm.com>
+---
+ xen/arch/arm/traps.c          |  2 ++
+ xen/arch/x86/hvm/Makefile     |  2 +-
+ xen/arch/x86/hvm/hypercall.c  |  4 +++
+ xen/arch/x86/hypercall.c      |  2 ++
+ xen/arch/x86/pv/Makefile      |  2 +-
+ xen/arch/x86/pv/hypercall.c   |  2 ++
+ xen/common/Kconfig            | 11 ++++++++
+ xen/common/Makefile           |  2 +-
+ xen/include/xen/grant_table.h | 48 +++++++++++++++++++++++++++++++++++
+ 9 files changed, 72 insertions(+), 3 deletions(-)
+
+diff --git a/xen/arch/arm/traps.c b/xen/arch/arm/traps.c
+index 8741aa1d59..d8b9a8a0f0 100644
+--- a/xen/arch/arm/traps.c
++++ b/xen/arch/arm/traps.c
+@@ -1396,7 +1396,9 @@ static arm_hypercall_t arm_hypercall_table[] = {
+     HYPERCALL_DEPRECATED(physdev_op_compat, 1),
+     HYPERCALL(sysctl, 2),
+     HYPERCALL(hvm_op, 2),
++#ifdef CONFIG_GRANT_TABLE
+     HYPERCALL(grant_table_op, 3),
++#endif
+     HYPERCALL(multicall, 2),
+     HYPERCALL(platform_op, 1),
+     HYPERCALL_ARM(vcpu_op, 3),
+diff --git a/xen/arch/x86/hvm/Makefile b/xen/arch/x86/hvm/Makefile
+index 86b106f8e7..43e5f3a21f 100644
+--- a/xen/arch/x86/hvm/Makefile
++++ b/xen/arch/x86/hvm/Makefile
+@@ -7,7 +7,7 @@ obj-y += dm.o
+ obj-bin-y += dom0_build.init.o
+ obj-y += domain.o
+ obj-y += emulate.o
+-obj-y += grant_table.o
++obj-$(CONFIG_GRANT_TABLE) += grant_table.o
+ obj-y += hpet.o
+ obj-y += hvm.o
+ obj-y += hypercall.o
+diff --git a/xen/arch/x86/hvm/hypercall.c b/xen/arch/x86/hvm/hypercall.c
+index 5bb1750595..00455ff115 100644
+--- a/xen/arch/x86/hvm/hypercall.c
++++ b/xen/arch/x86/hvm/hypercall.c
+@@ -47,6 +47,7 @@ static long hvm_memory_op(int cmd, XEN_GUEST_HANDLE_PARAM(void) arg)
+     return rc;
+ }
+ 
++#ifdef CONFIG_GRANT_TABLE
+ static long hvm_grant_table_op(
+     unsigned int cmd, XEN_GUEST_HANDLE_PARAM(void) uop, unsigned int count)
+ {
+@@ -71,6 +72,7 @@ static long hvm_grant_table_op(
+     else
+         return compat_grant_table_op(cmd, uop, count);
+ }
++#endif
+ 
+ static long hvm_physdev_op(int cmd, XEN_GUEST_HANDLE_PARAM(void) arg)
+ {
+@@ -119,7 +121,9 @@ static long hvm_physdev_op(int cmd, XEN_GUEST_HANDLE_PARAM(void) arg)
+ 
+ static const hypercall_table_t hvm_hypercall_table[] = {
+     HVM_CALL(memory_op),
++#ifdef CONFIG_GRANT_TABLE
+     HVM_CALL(grant_table_op),
++#endif
+     COMPAT_CALL(vcpu_op),
+     HVM_CALL(physdev_op),
+     COMPAT_CALL(xen_version),
+diff --git a/xen/arch/x86/hypercall.c b/xen/arch/x86/hypercall.c
+index 93e78600da..cf44b82793 100644
+--- a/xen/arch/x86/hypercall.c
++++ b/xen/arch/x86/hypercall.c
+@@ -47,7 +47,9 @@ const hypercall_args_t hypercall_args_table[NR_hypercalls] =
+     ARGS(xen_version, 2),
+     ARGS(console_io, 3),
+     ARGS(physdev_op_compat, 1),
++#ifdef CONFIG_GRANT_TABLE
+     ARGS(grant_table_op, 3),
++#endif
+     ARGS(vm_assist, 2),
+     COMP(update_va_mapping_otherdomain, 4, 5),
+     ARGS(vcpu_op, 3),
+diff --git a/xen/arch/x86/pv/Makefile b/xen/arch/x86/pv/Makefile
+index 65bca04175..cf28434ba9 100644
+--- a/xen/arch/x86/pv/Makefile
++++ b/xen/arch/x86/pv/Makefile
+@@ -5,7 +5,7 @@ obj-y += emulate.o
+ obj-y += emul-gate-op.o
+ obj-y += emul-inv-op.o
+ obj-y += emul-priv-op.o
+-obj-y += grant_table.o
++obj-$(CONFIG_GRANT_TABLE) += grant_table.o
+ obj-y += hypercall.o
+ obj-y += iret.o
+ obj-y += misc-hypercalls.o
+diff --git a/xen/arch/x86/pv/hypercall.c b/xen/arch/x86/pv/hypercall.c
+index f452dd5c04..e9da8419ca 100644
+--- a/xen/arch/x86/pv/hypercall.c
++++ b/xen/arch/x86/pv/hypercall.c
+@@ -53,7 +53,9 @@ const hypercall_table_t pv_hypercall_table[] = {
+     COMPAT_CALL(xen_version),
+     HYPERCALL(console_io),
+     COMPAT_CALL(physdev_op_compat),
++#ifdef CONFIG_GRANT_TABLE
+     COMPAT_CALL(grant_table_op),
++#endif
+     COMPAT_CALL(vm_assist),
+     COMPAT_CALL(update_va_mapping_otherdomain),
+     COMPAT_CALL(iret),
+diff --git a/xen/common/Kconfig b/xen/common/Kconfig
+index 04384628bb..c838506241 100644
+--- a/xen/common/Kconfig
++++ b/xen/common/Kconfig
+@@ -11,6 +11,17 @@ config COMPAT
+ config CORE_PARKING
+ 	bool
+ 
++config GRANT_TABLE
++	bool "Grant table support" if EXPERT = "y"
++	default y
++	---help---
++	  Grant table provides a generic mechanism to memory sharing
++	  between domains. This shared memory interface underpins the
++	  split device drivers for block and network IO in a classic
++	  Xen setup.
++
++	  If unsure, say Y.
++
+ config HAS_ALTERNATIVE
+ 	bool
+ 
+diff --git a/xen/common/Makefile b/xen/common/Makefile
+index 59ac7ded6e..bca48e6e22 100644
+--- a/xen/common/Makefile
++++ b/xen/common/Makefile
+@@ -11,7 +11,7 @@ obj-y += event_2l.o
+ obj-y += event_channel.o
+ obj-y += event_fifo.o
+ obj-$(CONFIG_CRASH_DEBUG) += gdbstub.o
+-obj-y += grant_table.o
++obj-$(CONFIG_GRANT_TABLE) += grant_table.o
+ obj-y += guestcopy.o
+ obj-bin-y += gunzip.init.o
+ obj-y += irq.o
+diff --git a/xen/include/xen/grant_table.h b/xen/include/xen/grant_table.h
+index 12e8a4b80b..6f9345d9ef 100644
+--- a/xen/include/xen/grant_table.h
++++ b/xen/include/xen/grant_table.h
+@@ -29,6 +29,7 @@
+ #include <asm/page.h>
+ #include <asm/grant_table.h>
+ 
++#ifdef CONFIG_GRANT_TABLE
+ struct grant_table;
+ 
+ extern unsigned int opt_max_grant_frames;
+@@ -61,4 +62,51 @@ int gnttab_get_shared_frame(struct domain *d, unsigned long idx,
+ int gnttab_get_status_frame(struct domain *d, unsigned long idx,
+                             mfn_t *mfn);
+ 
++#else
++
++#define opt_max_grant_frames 0
++#define opt_max_maptrack_frames 0
++
++static inline int grant_table_init(struct domain *d,
++                                   unsigned int max_grant_frames,
++                                   unsigned int max_maptrack_frames)
++{
++    return 0;
++}
++
++static inline void grant_table_destroy(struct domain *d) {}
++
++static inline void grant_table_init_vcpu(struct vcpu *v) {}
++
++static inline void grant_table_warn_active_grants(struct domain *d) {}
++
++static inline void gnttab_release_mappings(struct domain *d) {}
++
++static inline int mem_sharing_gref_to_gfn(struct grant_table *gt,
++                                          grant_ref_t ref,
++                                          gfn_t *gfn, uint16_t *status)
++{
++    return -EINVAL;
++}
++
++static inline int gnttab_map_frame(struct domain *d, unsigned long idx,
++                                   gfn_t gfn, mfn_t *mfn)
++{
++    return -EINVAL;
++}
++
++static inline int gnttab_get_shared_frame(struct domain *d, unsigned long idx,
++                                          mfn_t *mfn)
++{
++    return -EINVAL;
++}
++
++static inline int gnttab_get_status_frame(struct domain *d, unsigned long idx,
++                                          mfn_t *mfn)
++{
++    return -EINVAL;
++}
++
++#endif /* CONFIG_GRANT_TABLE */
++
+ #endif /* __XEN_GRANT_TABLE_H__ */
+-- 
+2.17.1
+
