@@ -1,0 +1,211 @@
+################################################################################
+SHORT DESCRIPTION:
+################################################################################
+Add KCONFIG option to govern inclusion of several legacy grant table operations
+in version one of the grant tables interface that are not in common use.
+
+################################################################################
+LONG DESCRIPTION:
+################################################################################
+OpenXT does not require support for these operations in the grant tables.
+
+A 2017 analysis ("Deconstructing Xen") reported that the grant tables are
+responsible for 5% of issued XSA vulnerabilities, so reducing this surface is
+important.
+
+This option should be disabled in the build config:
+
+# CONFIG_GRANT_TABLE_EXOTIC is not set
+
+################################################################################
+CHANGELOG
+################################################################################
+Written by Christopher Clark for OpenXT 9.0.
+
+################################################################################
+REMOVAL
+################################################################################
+Only if upstreamed.
+
+################################################################################
+UPSTREAM PLAN
+################################################################################
+None at this time.
+
+################################################################################
+INTERNAL DEPENDENCIES
+################################################################################
+This patch depends on kconfig-grant-table.patch which is already present in
+upstream Xen for 4.13.
+
+################################################################################
+PATCHES
+################################################################################
+From 09d789085db0611f5ff52c0d53c7243cab6ddb18 Mon Sep 17 00:00:00 2001
+From: Christopher Clark <christopher.w.clark@gmail.com>
+Date: Sat, 18 May 2019 12:09:55 -0700
+Subject: xen/grant_table: Add CONFIG_GRANT_TABLE_EXOTIC Kconfig option
+
+Several of the grant table operations have fallen out of common use
+and are not required for operation of the supported PV drivers.
+
+    * GNTTABOP_unmap_and_replace
+    * GNTTABOP_transfer
+    * GNTTABOP_swap_grant_ref
+
+This option enables compile-time excision of unused code in a
+critical subsystem.
+
+Signed-off-by: Christopher Clark <christopher.clark6@baesystems.com>
+---
+ xen/common/Kconfig              | 10 ++++++++++
+ xen/common/compat/grant_table.c |  4 ++++
+ xen/common/grant_table.c        | 12 ++++++++++++
+ 3 files changed, 26 insertions(+)
+
+diff --git a/xen/common/Kconfig b/xen/common/Kconfig
+index a7c596bf9c..b262885f96 100644
+--- a/xen/common/Kconfig
++++ b/xen/common/Kconfig
+@@ -40,6 +40,16 @@ config GRANT_TABLE_V2
+ 	  If you do not require large memory support, say N.
+ 	  If you are paranoid, say N. If unsure, say Y.
+ 
++config GRANT_TABLE_EXOTIC
++	bool "Grant table exotic operations support" if EXPERT = "y"
++	depends on GRANT_TABLE
++	---help---
++	  Several of the grant table operations have fallen out of common
++	  use and are not required for the supported PV drivers.
++
++	  If you require backwards compatibility for old guests, say Y.
++	  If you are paranoid, say N. If unsure, say Y.
++
+ config HAS_ALTERNATIVE
+ 	bool
+ 
+diff --git a/xen/common/compat/grant_table.c b/xen/common/compat/grant_table.c
+index c56b590a5c..5c91ec1a64 100644
+--- a/xen/common/compat/grant_table.c
++++ b/xen/common/compat/grant_table.c
+@@ -193,6 +193,9 @@ int compat_grant_table_op(unsigned int cmd,
+             break;
+ 
+         case GNTTABOP_transfer:
++#ifndef CONFIG_GRANT_TABLE_EXOTIC
++            rc = -ENOSYS;
++#else
+             for ( n = 0; n < COMPAT_ARG_XLAT_SIZE / sizeof(*nat.xfer) && i < count && rc == 0; ++i, ++n )
+             {
+                 if ( unlikely(__copy_from_guest_offset(&cmp.xfer, cmp_uop, i, 1)) )
+@@ -224,6 +227,7 @@ int compat_grant_table_op(unsigned int cmd,
+                         rc = -EFAULT;
+                 }
+             }
++#endif
+             break;
+ 
+         case GNTTABOP_copy:
+diff --git a/xen/common/grant_table.c b/xen/common/grant_table.c
+index 7858aec2e0..20cd18e930 100644
+--- a/xen/common/grant_table.c
++++ b/xen/common/grant_table.c
+@@ -1589,6 +1589,7 @@ fault:
+     return -EFAULT;
+ }
+ 
++#ifdef CONFIG_GRANT_TABLE_EXOTIC
+ static void
+ unmap_and_replace(
+     struct gnttab_unmap_and_replace *op,
+@@ -1653,6 +1654,7 @@ fault:
+         unmap_common_complete(&common[i]);
+     return -EFAULT;
+ }
++#endif
+ 
+ static int
+ gnttab_populate_status_frames(struct domain *d, struct grant_table *gt,
+@@ -2047,6 +2049,7 @@ gnttab_query_size(
+     return 0;
+ }
+ 
++#ifdef CONFIG_GRANT_TABLE_EXOTIC
+ /*
+  * Check that the given grant reference (rd,ref) allows 'ld' to transfer
+  * ownership of a page frame. If so, lock down the grant entry.
+@@ -2328,6 +2331,7 @@ gnttab_transfer(
+ 
+     return 0;
+ }
++#endif
+ 
+ /*
+  * Undo acquire_grant_for_copy().  This has no effect on page type and
+@@ -3253,6 +3257,7 @@ gnttab_get_version(XEN_GUEST_HANDLE_PARAM(gnttab_get_version_t) uop)
+     return 0;
+ }
+ 
++#ifdef CONFIG_GRANT_TABLE_EXOTIC
+ static s16
+ swap_grant_ref(grant_ref_t ref_a, grant_ref_t ref_b)
+ {
+@@ -3339,6 +3344,7 @@ gnttab_swap_grant_ref(XEN_GUEST_HANDLE_PARAM(gnttab_swap_grant_ref_t) uop,
+     }
+     return 0;
+ }
++#endif
+ 
+ static int cache_flush(const gnttab_cache_flush_t *cflush, grant_ref_t *cur_ref)
+ {
+@@ -3500,6 +3506,7 @@ do_grant_table_op(
+         break;
+     }
+ 
++#ifdef CONFIG_GRANT_TABLE_EXOTIC
+     case GNTTABOP_unmap_and_replace:
+     {
+         XEN_GUEST_HANDLE_PARAM(gnttab_unmap_and_replace_t) unmap =
+@@ -3515,6 +3522,7 @@ do_grant_table_op(
+         }
+         break;
+     }
++#endif
+ 
+     case GNTTABOP_setup_table:
+         rc = gnttab_setup_table(
+@@ -3522,6 +3530,7 @@ do_grant_table_op(
+         ASSERT(rc <= 0);
+         break;
+ 
++#ifdef CONFIG_GRANT_TABLE_EXOTIC
+     case GNTTABOP_transfer:
+     {
+         XEN_GUEST_HANDLE_PARAM(gnttab_transfer_t) transfer =
+@@ -3537,6 +3546,7 @@ do_grant_table_op(
+         }
+         break;
+     }
++#endif
+ 
+     case GNTTABOP_copy:
+     {
+@@ -3577,6 +3587,7 @@ do_grant_table_op(
+         rc = gnttab_get_version(guest_handle_cast(uop, gnttab_get_version_t));
+         break;
+ 
++#ifdef CONFIG_GRANT_TABLE_EXOTIC
+     case GNTTABOP_swap_grant_ref:
+     {
+         XEN_GUEST_HANDLE_PARAM(gnttab_swap_grant_ref_t) swap =
+@@ -3592,6 +3603,7 @@ do_grant_table_op(
+         }
+         break;
+     }
++#endif
+ 
+     case GNTTABOP_cache_flush:
+     {
+-- 
+2.17.1
+
