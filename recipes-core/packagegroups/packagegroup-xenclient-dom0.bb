@@ -32,8 +32,8 @@ RDEPENDS_${PN} = " \
     e2fsprogs-tune2fs \
     e2fsprogs-resize2fs \
     kernel-modules \
-    libv4v \
-    libv4v-bin \
+    libargo \
+    libargo-bin \
     libedid \
     lvm2 \
     bridge-utils \

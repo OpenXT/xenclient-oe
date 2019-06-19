@@ -26,6 +26,6 @@ do_install() {
         mkdir -p "${D}/usr/share/${DEB_NAME}-${PR}"
 	cp -a xc-* include/ Makefile Kbuild dkms.conf "${D}/usr/share/${DEB_NAME}-${PR}"
 	mkdir -p "${D}/oe-for-staging"
-        install -D -m 0644 "${S}/include/xen/v4v.h" "${D}/oe-for-staging/usr/include/xen/v4v.h"
-        install -D -m 0644 "${S}/include/linux/v4v_dev.h" "${D}/oe-for-staging/usr/include/linux/v4v_dev.h"
+        install -D -m 0644 "${S}/include/xen/argo.h" "${D}/oe-for-staging/usr/include/xen/argo.h"
+        install -D -m 0644 "${S}/include/linux/argo_dev.h" "${D}/oe-for-staging/usr/include/linux/argo_dev.h"
 }

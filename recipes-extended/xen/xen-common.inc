@@ -94,9 +94,10 @@ SRC_URI_append = " \
     file://efi-require-shim.patch \
     file://tboot-measure-and-launch-from-xen-efi.patch \
     file://efi-load-options-no-default-image-name.patch \
-    file://v4v.patch \
-    file://v4v-viptables.patch \
-    file://openxt-xen-xsmv4vuse.patch \
+    file://argo-suppress-debug-messages.patch \
+    file://argo-add-viptables.patch \
+    file://argo-fix-full-ring-write-bug.patch \
+    file://argo-fix-requeue-msg-len-bug.patch \
 "
 
 COMPATIBLE_HOST = 'i686-oe-linux|(x86_64.*).*-linux|aarch64.*-linux'

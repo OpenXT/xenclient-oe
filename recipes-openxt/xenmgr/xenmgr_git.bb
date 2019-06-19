@@ -6,7 +6,7 @@ DEPENDS = " \
     xen-libxl \
     libxenmgr-core \
     libxchutils \
-    libxchv4v \
+    libxchargo \
     libxchxenstore \
     libxchdb \
     libxch-rpc \

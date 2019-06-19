@@ -12,7 +12,7 @@ a stubdomain, this patch forwards all of the QEMU information to an audio
 helper.
 
 Previous versions of this patch implemented the ALSA API in QEMU, and then
-forwarded the ALSA APIs over v4v. The problems with this approach is there
+forwarded the ALSA APIs over argo. The problems with this approach is there
 are a lot of ALSA APIs that must be called, resulting in unneeded context
 switching when collecting / delivering samples. This patch instead forwards
 the QEMU API to the audio helper, simplifiying the overall approach, and
@@ -57,7 +57,7 @@ PATCHES
  common-obj-$(CONFIG_AUDIO_DSOUND) += dsoundaudio.o
  common-obj-$(CONFIG_AUDIO_PT_INT) += audio_pt_int.o
  common-obj-$(CONFIG_AUDIO_WIN_INT) += audio_win_int.o
-+common-obj-$(CONFIG_AUDIO_OPENXT) += alsadef.o openxtv4v.o
++common-obj-$(CONFIG_AUDIO_OPENXT) += alsadef.o openxtargo.o
 +common-obj-$(CONFIG_AUDIO_OPENXT) += openxtdebug.o openxtaudio.o
  common-obj-y += wavcapture.o
  
@@ -288,7 +288,7 @@ PATCHES
 +#include "audio_int.h"
 +
 +#include "alsadef.h"
-+#include "openxtv4v.h"
++#include "openxtargo.h"
 +#include "openxtdebug.h"
 +#include "openxtpackets.h"
 +
@@ -320,20 +320,20 @@ PATCHES
 +bool playback_initialized = false;
 +bool capture_initialized = false;
 +
-+// Global V4V Packets
-+V4VPacket snd_packet;
-+V4VPacket rcv_packet;
++// Global Argo Packets
++ArgoPacket snd_packet;
++ArgoPacket rcv_packet;
 +
-+// GLobal V4V Connection
-+V4VConnection *conn = NULL;
++// GLobal Argo Connection
++ArgoConnection *conn = NULL;
 +
-+// Global V4V Packet Playback Bodies
++// Global Argo Packet Playback Bodies
 +OpenXTPlaybackPacket *playback_packet = NULL;
 +OpenXTPlaybackInitAckPacket *playback_init_ack_packet = NULL;
 +OpenXTPlaybackSetVolumePacket *playback_set_volume_packet = NULL;
 +OpenXTPlaybackGetAvailableAckPacket *playback_get_available_ack_packet = NULL;
 +
-+// Global V4V Packet Capture Bodies
++// Global Argo Packet Capture Bodies
 +OpenXTCapturePacket *capture_packet = NULL;
 +OpenXTCaptureAckPacket *capture_ack_packet = NULL;
 +OpenXTCaptureInitAckPacket *capture_init_ack_packet = NULL;
@@ -352,7 +352,7 @@ PATCHES
 +/// @param opcode the opcode that you wish to send. This can be any integer, but it should
 +/// match what you have in the audio helper.
 +///
-+/// @return -ENODEV if V4V is not connected
++/// @return -ENODEV if Argo is not connected
 +///         negative error code on error
 +///         0 on success
 +///
@@ -361,14 +361,14 @@ PATCHES
 +    int ret;
 +
 +    // Sanity checks
-+    openxt_assert_quiet(openxt_v4v_isconnected(conn) == true, -ENODEV);
++    openxt_assert_quiet(openxt_argo_isconnected(conn) == true, -ENODEV);
 +
 +    // Send the blank packet
-+    ret = openxt_v4v_set_opcode(&snd_packet, opcode);
++    ret = openxt_argo_set_opcode(&snd_packet, opcode);
 +    openxt_assert(ret == 0, ret);
-+    ret = openxt_v4v_set_length(&snd_packet, sizeof(OpenBlankPacket));
++    ret = openxt_argo_set_length(&snd_packet, sizeof(OpenBlankPacket));
 +    openxt_assert(ret == 0, ret);
-+    ret = openxt_v4v_send(conn, &snd_packet);
++    ret = openxt_argo_send(conn, &snd_packet);
 +    openxt_assert(ret == sizeof(OpenBlankPacket), ret);
 +
 +    // Success
@@ -390,7 +390,7 @@ PATCHES
 +/// to whatever you want.
 +///
 +/// @return -EINVAL if NULL is passed to the parameters
-+///         -ENODEV if V4V is not connected or the audio helper fails
++///         -ENODEV if Argo is not connected or the audio helper fails
 +///         negative error code on error
 +///         0 on success
 +///
@@ -404,7 +404,7 @@ PATCHES
 +    openxt_checkp(hw, -EINVAL);
 +    openxt_checkp(as, -EINVAL);
 +    openxt_assert_quiet(playback_initialized == false, -ENODEV);
-+    openxt_assert_quiet(openxt_v4v_isconnected(conn) == true, -ENODEV);
++    openxt_assert_quiet(openxt_argo_isconnected(conn) == true, -ENODEV);
 +
 +    // For whatever reason, QEMU will run this function once, or it can run it
 +    // 1000 times if an error occurs. The result if the VM gets bogged down
@@ -418,7 +418,7 @@ PATCHES
 +    // different then what you will see in the alsaaudio driver.
 +    ret = openxt_send_blank_packet(OPENXT_PLAYBACK_INIT);
 +    openxt_assert(ret == 0, ret);
-+    ret = openxt_v4v_recv(conn, &rcv_packet);
++    ret = openxt_argo_recv(conn, &rcv_packet);
 +    openxt_assert(ret == sizeof(OpenXTPlaybackInitAckPacket), ret);
 +
 +    // Make sure that ALSA configured correctly
@@ -472,13 +472,13 @@ PATCHES
 +
 +    // Sanity checks
 +    openxt_checkp(hw, 0);
-+    openxt_assert_quiet(openxt_v4v_isconnected(conn) == true, 0);
++    openxt_assert_quiet(openxt_argo_isconnected(conn) == true, 0);
 +
 +    // We need to find out how much space is available in ALSA so that we
 +    // know how many samples to read.
 +    ret = openxt_send_blank_packet(OPENXT_PLAYBACK_GET_AVAILABLE);
 +    openxt_assert(ret == 0, 0);
-+    ret = openxt_v4v_recv(conn, &rcv_packet);
++    ret = openxt_argo_recv(conn, &rcv_packet);
 +    openxt_assert(ret == sizeof(OpenXTPlaybackGetAvailableAckPacket), 0);
 +
 +    // The following figures out how many samples we "can" process in this
@@ -505,9 +505,9 @@ PATCHES
 +        len = audio_MIN(len, MAX_PCM_BUFFER_SIZE / sizeof(uint32_t));
 +
 +        // Setup the packet.
-+        ret = openxt_v4v_set_opcode(&snd_packet, OPENXT_PLAYBACK);
++        ret = openxt_argo_set_opcode(&snd_packet, OPENXT_PLAYBACK);
 +        openxt_assert(ret == 0, 0);
-+        ret = openxt_v4v_set_length(&snd_packet, PLAYBACK_PACKET_LENGTH(len));
++        ret = openxt_argo_set_length(&snd_packet, PLAYBACK_PACKET_LENGTH(len));
 +        openxt_assert(ret == 0, 0);
 +
 +        // Fill in the packet's body. Note that the hw->clip function is
@@ -522,7 +522,7 @@ PATCHES
 +        hw->clip(playback_packet->samples, hw->mix_buf + hw->rpos, len);
 +
 +        // Send the packet to the helper.
-+        ret = openxt_v4v_send(conn, &snd_packet);
++        ret = openxt_argo_send(conn, &snd_packet);
 +        openxt_assert(ret == PLAYBACK_PACKET_LENGTH(len), 0);
 +
 +        // We need to advance the internal pointers.
@@ -594,7 +594,7 @@ PATCHES
 +    int ret;
 +
 +    // Sanity checks
-+    openxt_assert_quiet(openxt_v4v_isconnected(conn) == true, -ENODEV);
++    openxt_assert_quiet(openxt_argo_isconnected(conn) == true, -ENODEV);
 +
 +    // Process the command
 +    switch(cmd) {
@@ -627,9 +627,9 @@ PATCHES
 +            if (sw != NULL) {
 +
 +                // Setup the packet
-+                ret = openxt_v4v_set_opcode(&snd_packet, OPENXT_PLAYBACK_SET_VOLUME);
++                ret = openxt_argo_set_opcode(&snd_packet, OPENXT_PLAYBACK_SET_VOLUME);
 +                openxt_assert(ret == 0, -1);
-+                ret = openxt_v4v_set_length(&snd_packet, sizeof(OpenXTPlaybackSetVolumePacket));
++                ret = openxt_argo_set_length(&snd_packet, sizeof(OpenXTPlaybackSetVolumePacket));
 +                openxt_assert(ret == 0, -1);
 +
 +                // Setup the packet.
@@ -645,7 +645,7 @@ PATCHES
 +                }
 +
 +                // Send the packet
-+                ret = openxt_v4v_send(conn, &snd_packet);
++                ret = openxt_argo_send(conn, &snd_packet);
 +                openxt_assert(ret == sizeof(OpenXTPlaybackSetVolumePacket), -1);
 +
 +                // Done
@@ -676,7 +676,7 @@ PATCHES
 +/// to whatever you want.
 +///
 +/// @return -EINVAL if NULL is passed to the parameters
-+///         -ENODEV if V4V is not connected or the audio helper fails
++///         -ENODEV if Argo is not connected or the audio helper fails
 +///         negative error code on error
 +///         0 on success
 +///
@@ -690,7 +690,7 @@ PATCHES
 +    openxt_checkp(hw, -EINVAL);
 +    openxt_checkp(as, -EINVAL);
 +    openxt_assert_quiet(capture_initialized == false, -ENODEV);
-+    openxt_assert_quiet(openxt_v4v_isconnected(conn) == true, -ENODEV);
++    openxt_assert_quiet(openxt_argo_isconnected(conn) == true, -ENODEV);
 +
 +    // For whatever reason, QEMU will run this function once, or it can run it
 +    // 1000 times if an error occurs. The result if the VM gets bogged down
@@ -704,7 +704,7 @@ PATCHES
 +    // different then what you will see in the alsaaudio driver.
 +    ret = openxt_send_blank_packet(OPENXT_CAPTURE_INIT);
 +    openxt_assert(ret == 0, ret);
-+    ret = openxt_v4v_recv(conn, &rcv_packet);
++    ret = openxt_argo_recv(conn, &rcv_packet);
 +    openxt_assert(ret == sizeof(OpenXTCaptureInitAckPacket), ret);
 +
 +    // Make sure that ALSA configured correctly
@@ -751,7 +751,7 @@ PATCHES
 +
 +    // Sanity checks
 +    openxt_checkp(hw, 0);
-+    openxt_assert_quiet(openxt_v4v_isconnected(conn) == true, 0);
++    openxt_assert_quiet(openxt_argo_isconnected(conn) == true, 0);
 +
 +    // Calculate the total amount of space that is available in the emulated
 +    // hardware. This is basically the total size of the buffer, minus the
@@ -773,9 +773,9 @@ PATCHES
 +        len = audio_MIN(len, MAX_PCM_BUFFER_SIZE / sizeof(uint32_t));
 +
 +        // Setup the packet so that we can ask for a set of samples from dom0
-+        ret = openxt_v4v_set_opcode(&snd_packet, OPENXT_CAPTURE);
++        ret = openxt_argo_set_opcode(&snd_packet, OPENXT_CAPTURE);
 +        openxt_assert(ret == 0, 0);
-+        ret = openxt_v4v_set_length(&snd_packet, sizeof(OpenXTCapturePacket));
++        ret = openxt_argo_set_length(&snd_packet, sizeof(OpenXTCapturePacket));
 +        openxt_assert(ret == 0, 0);
 +
 +        // Tell dom0 how many samples need to be collected.
@@ -783,14 +783,14 @@ PATCHES
 +
 +        // Send the request to dom0, and then wait for the samples to come back.
 +        // Note that in this case, we don't really have a way to validate the
-+        // packet size here for the result. The V4V logic will at least verify
++        // packet size here for the result. The Argo logic will at least verify
 +        // that the packet's len is what it reports, but it's possible for a
 +        // messed up audio helper to give use a num_samples that doesn't correlate
 +        // with the actually number of samples. This will not result in an overflow
 +        // but it would result in garbage being sent to QEMU (not a big deal).
-+        ret = openxt_v4v_send(conn, &snd_packet);
++        ret = openxt_argo_send(conn, &snd_packet);
 +        openxt_assert(ret == sizeof(OpenXTCapturePacket), 0);
-+        ret = openxt_v4v_recv(conn, &rcv_packet);
++        ret = openxt_argo_recv(conn, &rcv_packet);
 +        openxt_assert(ret >= 0, 0);
 +
 +        // Check to see if we got any samples back. If we didn't there is nothing
@@ -864,7 +864,7 @@ PATCHES
 +    int ret;
 +
 +    // Sanity checks
-+    openxt_assert_quiet(openxt_v4v_isconnected(conn) == true, -ENODEV);
++    openxt_assert_quiet(openxt_argo_isconnected(conn) == true, -ENODEV);
 +
 +    // Process the command
 +    switch(cmd) {
@@ -909,36 +909,36 @@ PATCHES
 +{
 +    // Setup
 +    openxt_debug_init();
-+    conn = openxt_v4v_open(V4V_PORT_NONE, V4V_DOMID_ANY, OPENXT_AUDIO_PORT, 0);
++    conn = openxt_argo_open(XEN_ARGO_PORT_NONE, XEN_ARGO_DOMID_ANY, OPENXT_AUDIO_PORT, 0);
 +    openxt_assert(conn != NULL, NULL);
 +
 +    // Cleanup memory(safety)
-+    memset(&snd_packet, 0, sizeof(V4VPacket));
-+    memset(&rcv_packet, 0, sizeof(V4VPacket));
++    memset(&snd_packet, 0, sizeof(ArgoPacket));
++    memset(&rcv_packet, 0, sizeof(ArgoPacket));
 +
 +    // Pointer checks
-+    openxt_checkp(playback_packet = openxt_v4v_get_body(&snd_packet), NULL);
-+    openxt_checkp(playback_init_ack_packet = openxt_v4v_get_body(&rcv_packet), NULL);
-+    openxt_checkp(playback_set_volume_packet = openxt_v4v_get_body(&snd_packet), NULL);
-+    openxt_checkp(playback_get_available_ack_packet = openxt_v4v_get_body(&rcv_packet), NULL);
++    openxt_checkp(playback_packet = openxt_argo_get_body(&snd_packet), NULL);
++    openxt_checkp(playback_init_ack_packet = openxt_argo_get_body(&rcv_packet), NULL);
++    openxt_checkp(playback_set_volume_packet = openxt_argo_get_body(&snd_packet), NULL);
++    openxt_checkp(playback_get_available_ack_packet = openxt_argo_get_body(&rcv_packet), NULL);
 +
 +    // Pointer checks
-+    openxt_checkp(capture_packet = openxt_v4v_get_body(&snd_packet), NULL);
-+    openxt_checkp(capture_ack_packet = openxt_v4v_get_body(&rcv_packet), NULL);
-+    openxt_checkp(capture_init_ack_packet = openxt_v4v_get_body(&rcv_packet), NULL);
-+    openxt_checkp(capture_get_available_ack_packet = openxt_v4v_get_body(&rcv_packet), NULL);
++    openxt_checkp(capture_packet = openxt_argo_get_body(&snd_packet), NULL);
++    openxt_checkp(capture_ack_packet = openxt_argo_get_body(&rcv_packet), NULL);
++    openxt_checkp(capture_init_ack_packet = openxt_argo_get_body(&rcv_packet), NULL);
++    openxt_checkp(capture_get_available_ack_packet = openxt_argo_get_body(&rcv_packet), NULL);
 +
 +    // Size checks
-+    openxt_assert(openxt_v4v_validate(sizeof(OpenXTPlaybackPacket)) == true, NULL);
-+    openxt_assert(openxt_v4v_validate(sizeof(OpenXTPlaybackInitAckPacket)) == true, NULL);
-+    openxt_assert(openxt_v4v_validate(sizeof(OpenXTPlaybackSetVolumePacket)) == true, NULL);
-+    openxt_assert(openxt_v4v_validate(sizeof(OpenXTPlaybackGetAvailableAckPacket)) == true, NULL);
++    openxt_assert(openxt_argo_validate(sizeof(OpenXTPlaybackPacket)) == true, NULL);
++    openxt_assert(openxt_argo_validate(sizeof(OpenXTPlaybackInitAckPacket)) == true, NULL);
++    openxt_assert(openxt_argo_validate(sizeof(OpenXTPlaybackSetVolumePacket)) == true, NULL);
++    openxt_assert(openxt_argo_validate(sizeof(OpenXTPlaybackGetAvailableAckPacket)) == true, NULL);
 +
 +    // Size checks
-+    openxt_assert(openxt_v4v_validate(sizeof(OpenXTCapturePacket)) == true, NULL);
-+    openxt_assert(openxt_v4v_validate(sizeof(OpenXTCaptureAckPacket)) == true, NULL);
-+    openxt_assert(openxt_v4v_validate(sizeof(OpenXTCaptureInitAckPacket)) == true, NULL);
-+    openxt_assert(openxt_v4v_validate(sizeof(OpenXTCaptureGetAvailableAckPacket)) == true, NULL);
++    openxt_assert(openxt_argo_validate(sizeof(OpenXTCapturePacket)) == true, NULL);
++    openxt_assert(openxt_argo_validate(sizeof(OpenXTCaptureAckPacket)) == true, NULL);
++    openxt_assert(openxt_argo_validate(sizeof(OpenXTCaptureInitAckPacket)) == true, NULL);
++    openxt_assert(openxt_argo_validate(sizeof(OpenXTCaptureGetAvailableAckPacket)) == true, NULL);
 +
 +    // Success. We don't have an init/fini pointer to return as we use
 +    // global memory like the other drivers, so like the other drivers we
@@ -956,14 +956,14 @@ PATCHES
 +
 +    // Unused / Sanity checks
 +    openxt_unused(opaque);
-+    openxt_assert_quiet(openxt_v4v_isconnected(conn) == true);
++    openxt_assert_quiet(openxt_argo_isconnected(conn) == true);
 +
 +    // Setup the packet
 +    ret = openxt_send_blank_packet(OPENXT_FINI);
 +    openxt_assert(ret == 0);
 +
 +    // Cleanup
-+    openxt_v4v_close(conn);
++    openxt_argo_close(conn);
 +    openxt_debug_fini();
 +}
 +
@@ -1519,16 +1519,16 @@ PATCHES
 +// The following means that we should have room for roughly 1280 samples
 +#define MAX_PCM_BUFFER_SIZE (4096)
 +
-+// Define the maximum size of a V4V packet
-+#define V4V_MAX_PACKET_BODY_SIZE (4096 * 2)
++// Define the maximum size of a Argo packet
++#define ARGO_MAX_PACKET_BODY_SIZE (4096 * 2)
 +
-+// The following is the V4V port that we will use for communications.
++// The following is the Argo port that we will use for communications.
 +#define OPENXT_AUDIO_PORT 5001
 +
 +#endif // OPENXT_SETTINGS
 \ No newline at end of file
 --- /dev/null
-+++ b/audio/openxtv4v.c
++++ b/audio/openxtargo.c
 @@ -0,0 +1,378 @@
 +//
 +// Copyright (c) 2015 Assured Information Security, Inc
@@ -1552,23 +1552,23 @@ PATCHES
 +// Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 +//
 +
-+#include "openxtv4v.h"
++#include "openxtargo.h"
 +#include "openxtdebug.h"
 +
 +///
-+/// This is the main function to setup your V4V connection to another domain.
++/// This is the main function to setup your Argo connection to another domain.
 +/// The following provides suggested arguments for this function:
 +///
 +/// Clients
-+/// - local port = V4V_PORT_NONE
-+/// - local domid = V4V_DOMID_ANY
++/// - local port = XEN_ARGO_PORT_NONE
++/// - local domid = XEN_ARGO_DOMID_ANY
 +/// - remote port = <port #>
 +/// - remote domid = <server domid, likely == 0>
 +///
 +/// Servers
 +/// - local port = <port #>
-+/// - local domid = V4V_DOMID_ANY
-+/// - remote port = V4V_PORT_NONE
++/// - local domid = XEN_ARGO_DOMID_ANY
++/// - remote port = XEN_ARGO_PORT_NONE
 +/// - remote domid = <client domid>
 +///
 +/// @param lport local port
@@ -1578,26 +1578,26 @@ PATCHES
 +///
 +/// @return NULL on failure, valid pointer on success
 +///
-+V4VConnection *openxt_v4v_open(int32_t lport, int32_t ldomid, int32_t rport, int32_t rdomid)
++ArgoConnection *openxt_argo_open(int32_t lport, int32_t ldomid, int32_t rport, int32_t rdomid)
 +{
 +    // Create a new connection structure
-+    V4VConnection *conn = calloc(1, sizeof(V4VConnection));
++    ArgoConnection *conn = calloc(1, sizeof(ArgoConnection));
 +    openxt_checkp(conn, NULL);
 +
 +    // Initialize the connection for safety.
 +    conn->fd = -1;
 +    conn->connected = false;
-+    conn->local_addr.port = lport;
-+    conn->local_addr.domain = ldomid;
-+    conn->remote_addr.port = rport;
-+    conn->remote_addr.domain = rdomid;
++    conn->local_addr.aport = lport;
++    conn->local_addr.domain_id = ldomid;
++    conn->remote_addr.aport = rport;
++    conn->remote_addr.domain_id = rdomid;
 +
-+    // Attempt to open a V4V socket
-+    if((conn->fd = v4v_socket(SOCK_DGRAM)) <= 0)
++    // Attempt to open an Argo socket
++    if((conn->fd = argo_socket(SOCK_DGRAM)) <= 0)
 +        goto failure;
 +
-+    // Bind to V4V
-+    if(v4v_bind(conn->fd, &conn->local_addr, conn->remote_addr.domain) != 0)
++    // Bind to Argo
++    if(argo_bind(conn->fd, &conn->local_addr, conn->remote_addr.domain_id) != 0)
 +        goto failure;
 +
 +    // We are now connected
@@ -1618,16 +1618,16 @@ PATCHES
 +///
 +/// The following is for internal use only.
 +///
-+int openxt_v4v_close_internal(V4VConnection *conn)
++int openxt_argo_close_internal(ArgoConnection *conn)
 +{
 +    int ret = 0;
 +
 +    // Sanity checks
 +    openxt_checkp(conn, -EINVAL);
 +
-+    // Close V4V
++    // Close Argo
 +    if (conn->fd >= 0)
-+        ret = v4v_close(conn->fd);
++        ret = argo_close(conn->fd);
 +
 +    // We are no longer connected
 +    conn->fd = -1;
@@ -1638,18 +1638,18 @@ PATCHES
 +}
 +
 +///
-+/// Once you are done with V4V, run this function. Note that this function
++/// Once you are done with Argo, run this function. Note that this function
 +/// could be called by this API if something bad happens.
 +///
 +/// Note that this free's conn, so don't call it twice :)
 +///
 +/// @return -EINVAL if conn == NULL,
-+///          negative error code on failure of v4v_close,
++///          negative error code on failure of argo_close,
 +///          0 on success
 +///
-+int openxt_v4v_close(V4VConnection *conn)
++int openxt_argo_close(ArgoConnection *conn)
 +{
-+    int ret = openxt_v4v_close_internal(conn);
++    int ret = openxt_argo_close_internal(conn);
 +
 +    // Sanity checks
 +    openxt_checkp(conn, -EINVAL);
@@ -1662,12 +1662,12 @@ PATCHES
 +}
 +
 +///
-+/// The following function will tell you if the V4V socket is open and
++/// The following function will tell you if the Argo socket is open and
 +/// connected
 +///
 +/// @return true = connected, false = disconnected or conn == NULL
 +///
-+bool openxt_v4v_isconnected(V4VConnection *conn)
++bool openxt_argo_isconnected(ArgoConnection *conn)
 +{
 +    // Sanity checks
 +    openxt_checkp(conn, false);
@@ -1678,15 +1678,15 @@ PATCHES
 +
 +///
 +/// The following can be used as a safety to make sure that your packets are
-+/// not bigger than a V4V packet. This way you can use the packet structures
++/// not bigger than an Argo packet. This way you can use the packet structures
 +/// all you want later without fear of buffer overflows.
 +///
 +/// @param size the size of your packet
 +/// @return true = safe, false = unsafe (likely will overflow)
 +///
-+bool openxt_v4v_validate(int32_t size)
++bool openxt_argo_validate(int32_t size)
 +{
-+    return size <= V4V_MAX_PACKET_BODY_SIZE;
++    return size <= ARGO_MAX_PACKET_BODY_SIZE;
 +}
 +
 +///
@@ -1697,7 +1697,7 @@ PATCHES
 +///
 +/// @return -EINVAL if packet == NULL, 0 on success
 +///
-+int openxt_v4v_set_opcode(V4VPacket *packet, int32_t opcode)
++int openxt_argo_set_opcode(ArgoPacket *packet, int32_t opcode)
 +{
 +    // Sanity checks
 +    openxt_checkp(packet, -EINVAL);
@@ -1717,14 +1717,14 @@ PATCHES
 +///
 +/// @return -EINVAL if packet == NULL, -EOVERFLOW if the length is too large, 0 on success
 +///
-+int openxt_v4v_set_length(V4VPacket *packet, int32_t length)
++int openxt_argo_set_length(ArgoPacket *packet, int32_t length)
 +{
 +    // Sanity checks
 +    openxt_checkp(packet, -EINVAL);
-+    openxt_assert(length <= V4V_MAX_PACKET_BODY_SIZE, -EOVERFLOW);
++    openxt_assert(length <= ARGO_MAX_PACKET_BODY_SIZE, -EOVERFLOW);
 +
 +    // Set the opcode of the packet
-+    packet->header.length = length + sizeof(V4VPacketHeader);
++    packet->header.length = length + sizeof(ArgoPacketHeader);
 +
 +    // Success
 +    return 0;
@@ -1737,7 +1737,7 @@ PATCHES
 +///
 +/// @return -EINVAL if packet == NULL, opcode on success
 +///
-+int openxt_v4v_get_opcode(V4VPacket *packet)
++int openxt_argo_get_opcode(ArgoPacket *packet)
 +{
 +    // Sanity checks
 +    openxt_checkp(packet, -EINVAL);
@@ -1753,13 +1753,13 @@ PATCHES
 +///
 +/// @return -EINVAL if packet == NULL, length on success
 +///
-+int openxt_v4v_get_length(V4VPacket *packet)
++int openxt_argo_get_length(ArgoPacket *packet)
 +{
 +    // Sanity checks
 +    openxt_checkp(packet, -EINVAL);
 +
 +    // Success
-+    return packet->header.length - sizeof(V4VPacketHeader);
++    return packet->header.length - sizeof(ArgoPacketHeader);
 +}
 +
 +///
@@ -1768,23 +1768,23 @@ PATCHES
 +///
 +/// @code
 +///
-+/// V4VPacket snd_packet;
-+/// MyPacket *packet = openxt_v4v_get_body(&snd_packet);
++/// ArgoPacket snd_packet;
++/// MyPacket *packet = openxt_argo_get_body(&snd_packet);
 +///
 +/// packet->data1 = data1;
 +/// packet->data2 = data2;
 +///
-+/// openxt_v4v_set_opcode(&snd_packet, opcode);
-+/// openxt_v4v_set_length(&snd_packet, sizeof(MyPacket));
++/// openxt_argo_set_opcode(&snd_packet, opcode);
++/// openxt_argo_set_length(&snd_packet, sizeof(MyPacket));
 +///
-+/// openxt_v4v_send(conn, &snd_packet);
++/// openxt_argo_send(conn, &snd_packet);
 +///
 +/// @endcode
 +///
 +/// @param packet the packet that you want body access to
 +/// @return NULL = packet == NULL, valid pointer on success
 +///
-+void *openxt_v4v_get_body(V4VPacket *packet)
++void *openxt_argo_get_body(ArgoPacket *packet)
 +{
 +    // Sanity checks
 +    openxt_checkp(packet, NULL);
@@ -1794,18 +1794,18 @@ PATCHES
 +}
 +
 +///
-+/// The following function will send a V4V packet.
++/// The following function will send a Argo packet.
 +///
-+/// @param conn the V4V connection created using openxt_v4v_open.
++/// @param conn the Argo connection created using openxt_argo_open.
 +/// @param packet the packet to send
 +///
 +/// @return -EINVAL if conn or packet == NULL,
 +///         -EOVERFLOW if the packet length is too large,
 +///         -ENODEV if conn is closed,
-+///          negative errno if v4v_sendto fails,
++///          negative errno if argo_sendto fails,
 +///          ret >= 0 on success representing number of bytes sent
 +///
-+int openxt_v4v_send(V4VConnection *conn, V4VPacket *packet)
++int openxt_argo_send(ArgoConnection *conn, ArgoPacket *packet)
 +{
 +    // Local variables
 +    int ret;
@@ -1813,53 +1813,53 @@ PATCHES
 +    // Sanity checks
 +    openxt_checkp(conn, -EINVAL);
 +    openxt_checkp(packet, -EINVAL);
-+    openxt_assert(openxt_v4v_get_length(packet) <= V4V_MAX_PACKET_BODY_SIZE, -EOVERFLOW);
++    openxt_assert(openxt_argo_get_length(packet) <= ARGO_MAX_PACKET_BODY_SIZE, -EOVERFLOW);
 +
 +    // Make sure that we are actually connected. Note that we make this a
 +    // quite failure because if a problem happens, we will close the connection
 +    // and it's possible that the code might continue attempting to send, and
 +    // we do not want to kill performance by logging a ton of error messages
-+    openxt_assert_quiet(openxt_v4v_isconnected(conn) == true, -ENODEV);
++    openxt_assert_quiet(openxt_argo_isconnected(conn) == true, -ENODEV);
 +
 +    // Send the packet. Note that we handle printing useful error messages
 +    // here. All the user should have to do, is validate that the send was
 +    // successful
-+    ret = v4v_sendto(conn->fd, (char *)packet, packet->header.length, 0, &conn->remote_addr);
++    ret = argo_sendto(conn->fd, (char *)packet, packet->header.length, 0, &conn->remote_addr);
 +    if (ret <= 0) {
 +
 +        switch (ret) {
 +
 +            // Failed to send anything
 +            case 0:
-+                openxt_warn("failed openxt_v4v_send, wrote 0 bytes: %d - %s\n", errno, strerror(errno));
-+                openxt_v4v_close_internal(conn);
++                openxt_warn("failed openxt_argo_send, wrote 0 bytes: %d - %s\n", errno, strerror(errno));
++                openxt_argo_close_internal(conn);
 +                return -errno;
 +
 +            // Error
 +            default:
-+                openxt_warn("failed openxt_v4v_send: %d - %s\n", errno, strerror(errno));
-+                openxt_v4v_close_internal(conn);
++                openxt_warn("failed openxt_argo_send: %d - %s\n", errno, strerror(errno));
++                openxt_argo_close_internal(conn);
 +                return -errno;
 +        }
 +    }
 +
 +    // Success
-+    return ret - sizeof(V4VPacketHeader);
++    return ret - sizeof(ArgoPacketHeader);
 +}
 +
 +///
-+/// The following function will send a V4V packet.
++/// The following function will send a Argo packet.
 +///
-+/// @param conn the V4V connection created using openxt_v4v_open.
++/// @param conn the Argo connection created using openxt_argo_open.
 +/// @param packet the packet to send
 +///
 +/// @return -EINVAL if conn or packet == NULL,
 +///         -EIO if the received packet length != length in header,
 +///         -ENODEV if conn is closed,
-+///          negative errno if v4v_recvfrom fails,
++///          negative errno if argo_recvfrom fails,
 +///          ret >= 0 on success representing number of bytes received
 +///
-+int openxt_v4v_recv(V4VConnection *conn, V4VPacket *packet)
++int openxt_argo_recv(ArgoConnection *conn, ArgoPacket *packet)
 +{
 +    // Local variables
 +    int ret;
@@ -1872,26 +1872,26 @@ PATCHES
 +    // quite failure because if a problem happens, we will close the connection
 +    // and it's possible that the code might continue attempting to send, and
 +    // we do not want to kill performance by logging a ton of error messages
-+    openxt_assert_quiet(openxt_v4v_isconnected(conn) == true, -ENODEV);
++    openxt_assert_quiet(openxt_argo_isconnected(conn) == true, -ENODEV);
 +
 +    // Send the packet. Note that we handle printing useful error messages
 +    // here. All the user should have to do, is validate that the send was
 +    // successful
-+    ret = v4v_recvfrom(conn->fd, (char *)packet, sizeof(V4VPacket), 0, &conn->remote_addr);
++    ret = argo_recvfrom(conn->fd, (char *)packet, sizeof(ArgoPacket), 0, &conn->remote_addr);
 +    if (ret <= 0) {
 +
 +        switch (ret) {
 +
 +            // Failed to receive anything
 +            case 0:
-+                openxt_warn("failed openxt_v4v_recv, read 0 bytes: %d - %s\n", errno, strerror(errno));
-+                openxt_v4v_close_internal(conn);
++                openxt_warn("failed openxt_argo_recv, read 0 bytes: %d - %s\n", errno, strerror(errno));
++                openxt_argo_close_internal(conn);
 +                return -errno;
 +
 +            // Error
 +            default:
-+                openxt_warn("failed openxt_v4v_recv: %d - %s\n", errno, strerror(errno));
-+                openxt_v4v_close_internal(conn);
++                openxt_warn("failed openxt_argo_recv: %d - %s\n", errno, strerror(errno));
++                openxt_argo_close_internal(conn);
 +                return -errno;
 +        }
 +    }
@@ -1900,16 +1900,16 @@ PATCHES
 +    // amount of data that we read, is equal to the amount of data that the
 +    // packet should have returned. If it is not, we have an error
 +    if (packet->header.length != ret) {
-+        openxt_warn("failed openxt_v4v_recv: length mismatch %d - %d\n", packet->header.length, ret);
-+        openxt_v4v_close_internal(conn);
++        openxt_warn("failed openxt_argo_recv: length mismatch %d - %d\n", packet->header.length, ret);
++        openxt_argo_close_internal(conn);
 +        return -EIO;
 +    }
 +
 +    // Success
-+    return ret - sizeof(V4VPacketHeader);
++    return ret - sizeof(ArgoPacketHeader);
 +}
 --- /dev/null
-+++ b/audio/openxtv4v.h
++++ b/audio/openxtargo.h
 @@ -0,0 +1,78 @@
 +//
 +// Copyright (c) 2015 Assured Information Security, Inc
@@ -1933,62 +1933,62 @@ PATCHES
 +// Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 +//
 +
-+#ifndef OPENXT_V4V_H
-+#define OPENXT_V4V_H
++#ifndef OPENXT_ARGO_H
++#define OPENXT_ARGO_H
 +
-+#include <libv4v.h>
++#include <libargo.h>
 +#include <stdbool.h>
 +#include <sys/types.h>
 +#include <sys/ioctl.h>
 +
 +#include "openxtsettings.h"
 +
-+typedef struct V4VConnection {
++typedef struct ArgoConnection {
 +
 +    int fd;
 +    bool connected;
-+    v4v_addr_t local_addr;
-+    v4v_addr_t remote_addr;
++    xen_argo_addr_t local_addr;
++    xen_argo_addr_t remote_addr;
 +
-+} V4VConnection;
++} ArgoConnection;
 +
-+V4VConnection *openxt_v4v_open(int32_t lport, int32_t ldomid, int32_t rport, int32_t rdomid);
-+int openxt_v4v_close_internal(V4VConnection *conn);
-+int openxt_v4v_close(V4VConnection *conn);
-+bool openxt_v4v_isconnected(V4VConnection *conn);
++ArgoConnection *openxt_argo_open(int32_t lport, int32_t ldomid, int32_t rport, int32_t rdomid);
++int openxt_argo_close_internal(ArgoConnection *conn);
++int openxt_argo_close(ArgoConnection *conn);
++bool openxt_argo_isconnected(ArgoConnection *conn);
 +
-+typedef struct V4VPacketHeader {
++typedef struct ArgoPacketHeader {
 +
 +    int32_t opcode;
 +    int32_t length;
 +
-+} V4VPacketHeader;
++} ArgoPacketHeader;
 +
-+typedef struct V4VPacketBody {
++typedef struct ArgoPacketBody {
 +
-+    char buffer[V4V_MAX_PACKET_BODY_SIZE];
++    char buffer[ARGO_MAX_PACKET_BODY_SIZE];
 +
-+} V4VPacketBody;
++} ArgoPacketBody;
 +
-+typedef struct V4VPacket {
++typedef struct ArgoPacket {
 +
-+    V4VPacketHeader header;
-+    V4VPacketBody body;
++    ArgoPacketHeader header;
++    ArgoPacketBody body;
 +
-+} V4VPacket;
++} ArgoPacket;
 +
-+bool openxt_v4v_validate(int32_t size);
++bool openxt_argo_validate(int32_t size);
 +
-+int openxt_v4v_set_opcode(V4VPacket *packet, int32_t opcode);
-+int openxt_v4v_set_length(V4VPacket *packet, int32_t length);
-+int32_t openxt_v4v_get_opcode(V4VPacket *packet);
-+int32_t openxt_v4v_get_length(V4VPacket *packet);
-+void *openxt_v4v_get_body(V4VPacket *packet);
++int openxt_argo_set_opcode(ArgoPacket *packet, int32_t opcode);
++int openxt_argo_set_length(ArgoPacket *packet, int32_t length);
++int32_t openxt_argo_get_opcode(ArgoPacket *packet);
++int32_t openxt_argo_get_length(ArgoPacket *packet);
++void *openxt_argo_get_body(ArgoPacket *packet);
 +
-+int openxt_v4v_send(V4VConnection *conn, V4VPacket *packet);
-+int openxt_v4v_recv(V4VConnection *conn, V4VPacket *packet);
++int openxt_argo_send(ArgoConnection *conn, ArgoPacket *packet);
++int openxt_argo_recv(ArgoConnection *conn, ArgoPacket *packet);
 +
-+#endif // OPENXT_V4V_H
++#endif // OPENXT_ARGO_H
 --- a/configure
 +++ b/configure
 @@ -877,7 +877,7 @@ Haiku)

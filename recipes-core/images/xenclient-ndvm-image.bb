@@ -40,8 +40,8 @@ IMAGE_INSTALL = " \
     busybox \
     openssh \
     kernel-modules \
-    libv4v \
-    libv4v-bin \
+    libargo \
+    libargo-bin \
     dbus \
     xenclient-dbusbouncer \
     networkmanager \
@@ -54,7 +54,7 @@ IMAGE_INSTALL = " \
     ipsec-tools \
     rsyslog \
     xenclient-udev-force-discreet-net-to-eth0 \
-    v4v-module \
+    argo-module \
     xen-libxenstore \
     xen-xenstore \
     xen-ocaml-libs \
@@ -79,7 +79,7 @@ post_rootfs_shell_commands() {
     # Change root shell.
     sed -i 's|root:x:0:0:root:/root:/bin/sh|root:x:0:0:root:/root:/bin/bash|' ${IMAGE_ROOTFS}/etc/passwd;
 
-    # Trick to resolve dom0 name with V4V.
+    # Trick to resolve dom0 name with argo.
     echo '1.0.0.0 dom0' >> ${IMAGE_ROOTFS}/etc/hosts;
 
     # enable ctrlaltdel reboot because PV driver uses ctrl+alt+del to interpret reboot issued via xenstore

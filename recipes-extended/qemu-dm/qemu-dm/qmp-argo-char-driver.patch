@@ -4,10 +4,10 @@
  baum.o-libs := $(BRLAPI_LIBS)
  
  common-obj-$(CONFIG_SPICE) += spice.o
-+chardev-obj-$(CONFIG_XEN) += char-v4v.o
++chardev-obj-$(CONFIG_XEN) += char-argo.o
 --- /dev/null
-+++ b/chardev/char-v4v.c
-@@ -0,0 +1,326 @@
++++ b/chardev/char-argo.c
+@@ -0,0 +1,331 @@
 +/*
 + * QEMU System Emulator
 + *
@@ -40,29 +40,34 @@
 +
 +#include "chardev/char-io.h"
 +#include "sys/ioctl.h"
-+#include <libv4v.h>
++#include <libargo.h>
++#include <sys/param.h>
++
 +
 +/***********************************************************/
-+/* V4V console for QMP */
++/* Argo console for QMP */
 +
-+#define V4V_TYPE 'W'
-+#define V4VIOCSETRINGSIZE       _IOW (V4V_TYPE,  1, uint32_t)
++#define ARGO_TYPE 'W'
++#define ARGOIOCSETRINGSIZE       _IOW (ARGO_TYPE,  1, uint32_t)
 +
-+#define V4V_QH_PORT 5100
-+#define V4V_CHARDRV_PORT 15100
-+#define V4V_CHARDRV_RING_SIZE \
-+  (V4V_ROUNDUP((((4096)*4) - sizeof(v4v_ring_t)-V4V_ROUNDUP(1))))
++#define XEN_ARGO_MSG_SLOT_SIZE 0x10
++#define XEN_ARGO_ROUNDUP(a) roundup((a), XEN_ARGO_MSG_SLOT_SIZE)
 +
-+#define V4V_CHARDRV_NAME  "[v4v-chardrv]"
++#define ARGO_QH_PORT 5100
++#define ARGO_CHARDRV_PORT 15100
++#define ARGO_CHARDRV_RING_SIZE \
++  (XEN_ARGO_ROUNDUP((((4096)*4) - sizeof(xen_argo_ring_t)-XEN_ARGO_ROUNDUP(1))))
 +
-+#define V4V_MAGIC_CONNECT    "live"
-+#define V4V_MAGIC_DISCONNECT "dead"
++#define ARGO_CHARDRV_NAME  "[argo-chardrv]"
++
++#define ARGO_MAGIC_CONNECT    "live"
++#define ARGO_MAGIC_DISCONNECT "dead"
 +
 +typedef struct {
 +    Chardev parent;
 +    QIOChannel *ioc;
-+    v4v_addr_t remote_addr;
-+    v4v_addr_t local_addr;
++    xen_argo_addr_t remote_addr;
++    xen_argo_addr_t local_addr;
 +    uint8_t buf[CHR_READ_BUF_LEN];
 +    int fd;
 +    int bufcnt;
@@ -70,36 +75,36 @@
 +    int max_size;
 +    int connected;
 +    bool stream;
-+} V4vChardev;
++} ArgoChardev;
 +
-+#define TYPE_CHARDEV_V4V "chardev-v4v"
-+#define V4V_CHARDEV(obj)                                     \
-+    OBJECT_CHECK(V4vChardev, (obj), TYPE_CHARDEV_V4V)
++#define TYPE_CHARDEV_ARGO "chardev-argo"
++#define ARGO_CHARDEV(obj)                                     \
++    OBJECT_CHECK(ArgoChardev, (obj), TYPE_CHARDEV_ARGO)
 +
 +
-+static int v4v_chr_write(Chardev *chr, const uint8_t *buf, int len)
++static int argo_chr_write(Chardev *chr, const uint8_t *buf, int len)
 +{
-+    V4vChardev *s = V4V_CHARDEV(chr);
++    ArgoChardev *s = ARGO_CHARDEV(chr);
 +    int ret;
 +
 +    if (s->stream) {
-+        ret = v4v_send(s->fd, buf, len, 0);
++        ret = argo_send(s->fd, buf, len, 0);
 +    } else {
-+        ret = v4v_sendto(s->fd, buf, len, 0, &s->remote_addr);
++        ret = argo_sendto(s->fd, buf, len, 0, &s->remote_addr);
 +    }
 +    if (ret != len) {
-+        fprintf(stderr, "%s error: v4v_sendto() failed (%s) - %d %d.\n",
-+                V4V_CHARDRV_NAME, strerror(errno), ret, len);
++        fprintf(stderr, "%s error: argo_sendto() failed (%s) - %d %d.\n",
++                ARGO_CHARDRV_NAME, strerror(errno), ret, len);
 +        return 0;
 +    }
 +
 +    return ret;
 +}
 +
-+static int v4v_chr_read_poll(void *opaque)
++static int argo_chr_read_poll(void *opaque)
 +{
 +    Chardev *chr = CHARDEV(opaque);
-+    V4vChardev *s = V4V_CHARDEV(chr);
++    ArgoChardev *s = ARGO_CHARDEV(chr);
 +
 +    s->max_size = qemu_chr_be_can_write(chr);
 +
@@ -114,59 +119,59 @@
 +    return s->max_size;
 +}
 +
-+static gboolean v4v_chr_read(QIOChannel *chan, GIOCondition cond, void *opaque);
++static gboolean argo_chr_read(QIOChannel *chan, GIOCondition cond, void *opaque);
 +
-+static void v4v_chr_update_read_handler(Chardev *chr)
++static void argo_chr_update_read_handler(Chardev *chr)
 +{
-+    V4vChardev *s = V4V_CHARDEV(chr);
++    ArgoChardev *s = ARGO_CHARDEV(chr);
 +
 +    remove_fd_in_watch(chr);
 +    if (s->ioc) {
 +        chr->gsource = io_add_watch_poll(chr, s->ioc,
-+                                         v4v_chr_read_poll,
-+                                         v4v_chr_read, chr,
++                                         argo_chr_read_poll,
++                                         argo_chr_read, chr,
 +                                         chr->gcontext);
 +    }
 +}
 +
-+static gboolean v4v_chr_read(QIOChannel *chan, GIOCondition cond, void *opaque)
++static gboolean argo_chr_read(QIOChannel *chan, GIOCondition cond, void *opaque)
 +{
 +    Chardev *chr = CHARDEV(opaque);
-+    V4vChardev *s = V4V_CHARDEV(chr);
++    ArgoChardev *s = ARGO_CHARDEV(chr);
 +    int ret;
 +
 +    if (s->max_size == 0)
 +        return FALSE;
 +
-+    ret = v4v_recvfrom(s->fd, s->buf, sizeof(s->buf), 0, &s->remote_addr);
++    ret = argo_recvfrom(s->fd, s->buf, sizeof(s->buf), 0, &s->remote_addr);
 +    if (ret < 0) {
-+        fprintf(stderr, "%s error: v4v_recvfrom() failed (%s) - %d.\n",
-+                V4V_CHARDRV_NAME, strerror(errno), ret);
++        fprintf(stderr, "%s error: argo_recvfrom() failed (%s) - %d.\n",
++                ARGO_CHARDRV_NAME, strerror(errno), ret);
 +        return FALSE;
 +    }
 +
 +    if (!s->stream) {
-+        if (s->connected == 0 && !strncmp((char*)(s->buf), V4V_MAGIC_CONNECT, 4)) {
-+            fprintf(stderr, "v4v_recvfrom() returned V4V_MAGIC_CONNECT, connecting.\n");
-+            v4v_chr_update_read_handler(chr);
++        if (s->connected == 0 && !strncmp((char*)(s->buf), ARGO_MAGIC_CONNECT, 4)) {
++            fprintf(stderr, "argo_recvfrom() returned ARGO_MAGIC_CONNECT, connecting.\n");
++            argo_chr_update_read_handler(chr);
 +            qemu_chr_be_event(chr, CHR_EVENT_OPENED);
 +            if (!chr->gsource) {
 +                chr->gsource = io_add_watch_poll(chr, s->ioc,
-+                                                 v4v_chr_read_poll,
-+                                                 v4v_chr_read, chr, chr->gcontext);
++                                                 argo_chr_read_poll,
++                                                 argo_chr_read, chr, chr->gcontext);
 +            }
 +            s->connected = 1;
 +            return FALSE;
 +        }
-+        if (s->connected == 1 && !strncmp((char*)(s->buf), V4V_MAGIC_DISCONNECT, 4)) {
-+            v4v_chr_update_read_handler(chr);
++        if (s->connected == 1 && !strncmp((char*)(s->buf), ARGO_MAGIC_DISCONNECT, 4)) {
++            argo_chr_update_read_handler(chr);
 +            qemu_chr_be_event(chr, CHR_EVENT_CLOSED);
 +            if (!chr->gsource) {
 +                chr->gsource = io_add_watch_poll(chr, s->ioc,
-+                                                 v4v_chr_read_poll,
-+                                                 v4v_chr_read, chr, chr->gcontext);
++                                                 argo_chr_read_poll,
++                                                 argo_chr_read, chr, chr->gcontext);
 +            }
-+            fprintf(stderr, "v4v_recvfrom() returned V4V_MAGIC_DISCONNECT, closing.\n");
++            fprintf(stderr, "argo_recvfrom() returned ARGO_MAGIC_DISCONNECT, closing.\n");
 +            s->connected = 0;
 +            return FALSE;
 +        }
@@ -183,16 +188,16 @@
 +    return TRUE;
 +}
 +
-+static GSource *v4v_chr_add_watch(Chardev *chr, GIOCondition cond)
++static GSource *argo_chr_add_watch(Chardev *chr, GIOCondition cond)
 +{
-+    V4vChardev *s = V4V_CHARDEV(chr);
++    ArgoChardev *s = ARGO_CHARDEV(chr);
 +    return qio_channel_create_watch(s->ioc, cond);
 +}
 +
-+static void char_v4v_finalize(Object *obj)
++static void char_argo_finalize(Object *obj)
 +{
 +    Chardev *chr = CHARDEV(obj);
-+    V4vChardev *s = V4V_CHARDEV(chr);
++    ArgoChardev *s = ARGO_CHARDEV(chr);
 +
 +    remove_fd_in_watch(chr);
 +    if (s->ioc) {
@@ -204,7 +209,7 @@
 +    qemu_chr_be_event(chr, CHR_EVENT_CLOSED);
 +}
 +
-+static void qemu_chr_parse_v4v(QemuOpts *opts, ChardevBackend *backend,
++static void qemu_chr_parse_argo(QemuOpts *opts, ChardevBackend *backend,
 +                               Error **errp)
 +{
 +    uint64_t domid = qemu_opt_get_number(opts, "domid", 0);
@@ -213,18 +218,18 @@
 +    const char *localport_str = qemu_opt_get(opts, "localport");
 +    bool stream = qemu_opt_get_bool(opts, "stream", false);
 +    uint32_t port, localport;
-+    ChardevV4v *v4v;
++    ChardevArgo *argo;
 +
-+    port = port_str ? strtoul(port_str, NULL, 0) : V4V_QH_PORT;
++    port = port_str ? strtoul(port_str, NULL, 0) : ARGO_QH_PORT;
 +    localport = localport_str ? strtoul(localport_str, NULL, 0) : 0;
 +
-+    backend->type = CHARDEV_BACKEND_KIND_V4V;
-+    if (domid > 0x7fff) {
-+        error_setg(errp, "chardev: v4v: domid invalid");
++    backend->type = CHARDEV_BACKEND_KIND_ARGO;
++    if (domid > 0x7ff4) {
++        error_setg(errp, "chardev: argo: domid invalid");
 +        return;
 +    }
 +    if (port > 0xffff) {
-+        error_setg(errp, "chardev: v4v: port %u out of range", port);
++        error_setg(errp, "chardev: argo: port %u out of range", port);
 +        return;
 +    }
 +    if (localport == 0) {
@@ -232,63 +237,63 @@
 +    }
 +    if (localport > 0xffff) {
 +        error_setg(errp,
-+                   "chardev: v4v: localport %u out of range", localport);
++                   "chardev: argo: localport %u out of range", localport);
 +        return;
 +    }
 +
-+    v4v = backend->u.v4v.data = g_new0(ChardevV4v, 1);
-+    qemu_chr_parse_common(opts, qapi_ChardevV4v_base(v4v));
++    argo = backend->u.argo.data = g_new0(ChardevArgo, 1);
++    qemu_chr_parse_common(opts, qapi_ChardevArgo_base(argo));
 +
-+    v4v->domid     = domid;
-+    v4v->port      = port;
-+    v4v->localport = localport;
-+    v4v->stream    = stream;
++    argo->domid     = domid;
++    argo->port      = port;
++    argo->localport = localport;
++    argo->stream    = stream;
 +}
 +
-+static void qmp_chr_open_v4v(Chardev *chr,
++static void qmp_chr_open_argo(Chardev *chr,
 +                             ChardevBackend *backend,
 +                             bool *be_opened,
 +                             Error **errp)
 +{
-+    V4vChardev *s = V4V_CHARDEV(chr);
-+    ChardevV4v *v4v = backend->u.v4v.data;
-+    uint32_t v4v_ring_size = V4V_CHARDRV_RING_SIZE;
++    ArgoChardev *s = ARGO_CHARDEV(chr);
++    ChardevArgo *argo = backend->u.argo.data;
++    uint32_t argo_ring_size = ARGO_CHARDRV_RING_SIZE;
 +    int fd = -1;
 +
-+    s->local_addr.port = v4v->localport;
-+    s->local_addr.domain = V4V_DOMID_ANY;
-+    s->remote_addr.port = v4v->port;
-+    s->remote_addr.domain = v4v->domid;
-+    s->stream = v4v->stream;
++    s->local_addr.aport = argo->localport;
++    s->local_addr.domain_id = XEN_ARGO_DOMID_ANY;
++    s->remote_addr.aport = argo->port;
++    s->remote_addr.domain_id = argo->domid;
++    s->stream = argo->stream;
 +
-+    fd = v4v_socket(s->stream ? SOCK_STREAM : SOCK_DGRAM);
++    fd = argo_socket(s->stream ? SOCK_STREAM : SOCK_DGRAM);
 +    if (fd < 0) {
-+        error_setg(errp, "%s cannot create v4v socket - err: %d",
-+                   V4V_CHARDRV_NAME, fd);
++        error_setg(errp, "%s cannot create argo socket - err: %d",
++                   ARGO_CHARDRV_NAME, fd);
 +        return;
 +    }
 +
-+    if (ioctl(fd, V4VIOCSETRINGSIZE, &v4v_ring_size)) {
++    if (ioctl(fd, ARGOIOCSETRINGSIZE, &argo_ring_size)) {
 +        error_setg(errp,
-+                   "%s failed to set ring size v4v socket - err: %d",
-+                   V4V_CHARDRV_NAME, errno);
++                   "%s failed to set ring size argo socket - err: %d",
++                   ARGO_CHARDRV_NAME, errno);
 +        close(fd);
 +        return;
 +    }
 +
-+    if (v4v_bind(fd, &s->local_addr, 0)) {
++    if (argo_bind(fd, &s->local_addr, 0)) {
 +        error_setg(errp,
-+                   "%s failed to bind v4v socket - err: %d",
-+                   V4V_CHARDRV_NAME, errno);
++                   "%s failed to bind argo socket - err: %d",
++                   ARGO_CHARDRV_NAME, errno);
 +        close(fd);
 +        return;
 +    }
 +
 +    if (s->stream) {
-+        if (v4v_connect(fd, &s->remote_addr)) {
++        if (argo_connect(fd, &s->remote_addr)) {
 +            error_setg(errp,
-+                       "%s failed to connect v4v socket - err: %d",
-+                       V4V_CHARDRV_NAME, errno);
++                       "%s failed to connect argo socket - err: %d",
++                       ARGO_CHARDRV_NAME, errno);
 +            close(fd);
 +            return;
 +        }
@@ -306,31 +311,31 @@
 +    /* TODO currently starting up open */
 +    s->connected = 1;
 +
-+    fprintf(stderr, "Opened V4V chardev\n");
++    fprintf(stderr, "Opened Argo chardev\n");
 +}
 +
-+static void char_v4v_class_init(ObjectClass *oc, void *data)
++static void char_argo_class_init(ObjectClass *oc, void *data)
 +{
 +    ChardevClass *cc = CHARDEV_CLASS(oc);
 +
-+    cc->parse = qemu_chr_parse_v4v;
-+    cc->open = qmp_chr_open_v4v;
-+    cc->chr_write = v4v_chr_write;
-+    cc->chr_add_watch = v4v_chr_add_watch;
-+    cc->chr_update_read_handler = v4v_chr_update_read_handler;
++    cc->parse = qemu_chr_parse_argo;
++    cc->open = qmp_chr_open_argo;
++    cc->chr_write = argo_chr_write;
++    cc->chr_add_watch = argo_chr_add_watch;
++    cc->chr_update_read_handler = argo_chr_update_read_handler;
 +}
 +
-+static const TypeInfo char_v4v_type_info = {
-+    .name = TYPE_CHARDEV_V4V,
++static const TypeInfo char_argo_type_info = {
++    .name = TYPE_CHARDEV_ARGO,
 +    .parent = TYPE_CHARDEV,
-+    .instance_size = sizeof(V4vChardev),
-+    .instance_finalize = char_v4v_finalize,
-+    .class_init = char_v4v_class_init,
++    .instance_size = sizeof(ArgoChardev),
++    .instance_finalize = char_argo_finalize,
++    .class_init = char_argo_class_init,
 +};
 +
 +static void register_types(void)
 +{
-+    type_register_static(&char_v4v_type_info);
++    type_register_static(&char_argo_type_info);
 +}
 +
 +type_init(register_types);
@@ -340,7 +345,7 @@
          strcmp(filename, "msmouse") == 0 ||
          strcmp(filename, "wctablet") == 0 ||
          strcmp(filename, "braille") == 0 ||
-+        strcmp(filename, "v4v")     == 0 ||
++        strcmp(filename, "argo")     == 0 ||
          strcmp(filename, "testdev") == 0 ||
          strcmp(filename, "stdio")   == 0) {
          qemu_opt_set(opts, "backend", filename, &error_abort);
@@ -360,7 +365,7 @@
  #define TYPE_CHARDEV_SERIAL "chardev-serial"
  #define TYPE_CHARDEV_SOCKET "chardev-socket"
  #define TYPE_CHARDEV_UDP "chardev-udp"
-+#define TYPE_CHARDEV_V4V "chardev-v4v"
++#define TYPE_CHARDEV_ARGO "chardev-argo"
  
  #define CHARDEV_IS_RINGBUF(chr) \
      object_dynamic_cast(OBJECT(chr), TYPE_CHARDEV_RINGBUF)
@@ -370,18 +375,18 @@
    'base': 'ChardevCommon' }
  
  ##
-+# @ChardevV4v:
++# @ChardevArgo:
 +#
-+# Configuration info for v4v socket chardevs.
++# Configuration info for argo socket chardevs.
 +#
 +# @domid: remote domain id (defaults to 0 dom0)
 +# @port: remote port (defaults to 5100 QMP helper)
 +# @localport: local port (defaults to port + 10000)
-+# @stream: Use V4V SOCK_STREAM (defaults to false, SOCK_DGRAM)
++# @stream: Use Argo SOCK_STREAM (defaults to false, SOCK_DGRAM)
 +#
 +# Since: Not upstream
 +##
-+{ 'struct': 'ChardevV4v', 'data': { '*domid'    : 'int',
++{ 'struct': 'ChardevArgo', 'data': { '*domid'    : 'int',
 +                                  '*port'       : 'int',
 +                                  '*localport'  : 'int',
 +                                  '*stream'     : 'bool' },
@@ -395,7 +400,7 @@
                                         'spiceport': 'ChardevSpicePort',
  # TODO: { 'type': 'ChardevSpicePort', 'if': 'defined(CONFIG_SPICE)' },
                                         'vc'     : 'ChardevVC',
-+                                       'v4v'    : 'ChardevV4v',
++                                       'argo'    : 'ChardevArgo',
                                         'ringbuf': 'ChardevRingbuf',
                                         # next one is just for compatibility
                                         'memory' : 'ChardevRingbuf' } }
@@ -406,7 +411,7 @@
      "-chardev parport,id=id,path=path[,mux=on|off][,logfile=PATH][,logappend=on|off]\n"
  #endif
 +#if defined(CONFIG_XEN)
-+    "-chardev v4v,id=id[,port=5100][,domid=0][,localport=15100][,stream=on|off]\n"
++    "-chardev argo,id=id[,port=5100][,domid=0][,localport=15100][,stream=on|off]\n"
 +    "         [,logfile=PATH][,logappend=on|off]\n"
 +#endif
  #if defined(CONFIG_SPICE)
