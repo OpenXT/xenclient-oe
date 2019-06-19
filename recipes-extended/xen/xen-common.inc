@@ -98,6 +98,7 @@ SRC_URI_append = " \
     file://argo-add-viptables.patch \
     file://argo-fix-full-ring-write-bug.patch \
     file://argo-fix-requeue-msg-len-bug.patch \
+    file://libxl-seabios-ipxe.patch \
 "
 
 COMPATIBLE_HOST = 'i686-oe-linux|(x86_64.*).*-linux|aarch64.*-linux'
