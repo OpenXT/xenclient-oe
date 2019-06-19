@@ -90,7 +90,7 @@ EXTRA_OEMAKE += "CONFIG_IOEMU=n"
 EXTRA_OEMAKE += "CONFIG_TESTS=n"
 EXTRA_OEMAKE += "DESTDIR=${D}"
 
-EXTRA_OECONF += " --enable-blktap2 "
+EXTRA_OECONF += " --enable-blktap2 --with-system-ipxe=/usr/share/firmware/82540em.rom "
 
 #Make sure we disable all compiler optimizations to avoid a nasty segfault in the 
 #reboot case.

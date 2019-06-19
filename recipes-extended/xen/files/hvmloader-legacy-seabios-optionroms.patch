@@ -108,7 +108,7 @@ PATCHES
  echo "};"
 --- a/tools/firmware/hvmloader/seabios.c
 +++ b/tools/firmware/hvmloader/seabios.c
-@@ -25,10 +25,22 @@
+@@ -25,10 +25,23 @@
  #include "util.h"
  
  #include "smbios_types.h"
@@ -127,11 +127,12 @@ PATCHES
 +#include "roms.inc"
 +
 +#define SEABIOS_OPTIONROM_PHYSICAL_END 0x000EA000
++#define OPTIONROM_PHYSICAL_ADDRESS     0x000C8000
 +
  struct seabios_info {
      char signature[14]; /* XenHVMSeaBIOS\0 */
      uint8_t length;     /* Length of this struct */
-@@ -130,9 +142,11 @@ static void seabios_setup_e820(void)
+@@ -130,9 +143,11 @@ static void seabios_setup_e820(void)
      dump_e820_table(e820, info->e820_nr);
  }
  
@@ -144,7 +145,7 @@ PATCHES
  {
      unsigned int bios_dest = 0x100000 - bios_length;
  
-@@ -140,12 +154,76 @@ static void seabios_load(const struct bi
+@@ -140,12 +155,79 @@ static void seabios_load(const struct bi
      memcpy((void *)bios_dest, bios_addr, bios_length);
      seabios_config.bios_address = bios_dest;
      seabios_config.image_size = bios_length;
@@ -188,6 +189,9 @@ PATCHES
 +    if ( ipxe_module_addr )
 +    {
 +        etherboot_phys_addr = VGABIOS_PHYSICAL_ADDRESS + vgabios_sz;
++        if ( etherboot_phys_addr < OPTIONROM_PHYSICAL_ADDRESS )
++            etherboot_phys_addr = OPTIONROM_PHYSICAL_ADDRESS;
++
 +        /* round address at 2k boundary for BIOS ROM scanning */
 +        etherboot_phys_addr = (etherboot_phys_addr + 0x7ff) & ~0x7ff;
 +        etherboot_sz = scan_etherboot_nic(SEABIOS_OPTIONROM_PHYSICAL_END,
@@ -222,3 +226,22 @@ PATCHES
  
      .bios_load = seabios_load,
  
+--- a/tools/firmware/hvmloader/hvmloader.c
++++ b/tools/firmware/hvmloader/hvmloader.c
+@@ -363,9 +363,15 @@ int main(void)
+     bios_module = get_module_entry(hvm_start_info, "firmware");
+     if ( bios_module )
+     {
++        const struct hvm_modlist_entry *ipxe;
++        uint32_t ipxe_paddr = 0;
+         uint32_t paddr = bios_module->paddr;
++
++        ipxe = get_module_entry(hvm_start_info, "ipxe");
++        if ( ipxe )
++            ipxe_paddr = ipxe->paddr;
+ 
+-        bios->bios_load(bios, (void *)paddr, bios_module->size, NULL);
++        bios->bios_load(bios, (void *)paddr, bios_module->size, (void*)ipxe_paddr);
+     }
+ #ifdef ENABLE_ROMBIOS
+     else if ( bios == &rombios_config )
