@@ -41,16 +41,16 @@ PATCHES
 +# dmbus probe
 +
 +if test "$xen" != "no"; then
-+    dmbus_libs="-lv4v_nointerposer -ldmbus"
++    dmbus_libs="-largo_nointerposer -ldmbus"
 +    cat > $TMPC << EOF &&
-+#include <libv4v.h>
++#include <libargo.h>
 +#include <libdmbus.h>
 +int main(void) {
 +    int fd;
 +    unsigned int port;
 +    struct dmbus_conn_prologue prologue;
 +
-+    fd = v4v_socket(SOCK_STREAM);
++    fd = argo_socket(SOCK_STREAM);
 +    port = DMBUS_BASE_PORT;
 +    (void) port;
 +    (void) prologue;
@@ -102,7 +102,7 @@ PATCHES
 +#include <errno.h>
 +#include <stdlib.h>
 +#include <string.h>
-+#include <libv4v.h>
++#include <libargo.h>
 +#include <libdmbus.h>
 +
 +#include "qemu/osdep.h"
@@ -114,7 +114,7 @@ PATCHES
 +
 +struct service {
 +    int fd;
-+    v4v_addr_t peer;
++    xen_argo_addr_t peer;
 +    const struct dmbus_ops *ops;
 +    void *opaque;
 +    struct dmbus_conn_prologue prologue;
@@ -212,7 +212,7 @@ PATCHES
 +    }
 +
 +    qemu_set_fd_handler(s->fd, NULL, NULL, NULL);
-+    v4v_close(s->fd);
++    argo_close(s->fd);
 +    fprintf(stderr, "Remote service disconnected, scheduling reconnection.\n");
 +    timer_mod(s->reconnect_timer, qemu_clock_get_ms(QEMU_CLOCK_REALTIME) + 1000);
 +}
@@ -225,7 +225,7 @@ PATCHES
 +    while ((s->len < sizeof(struct dmbus_msg_hdr)) ||
 +           (s->len < m->hdr.msg_len)) {
 +
-+        rc = v4v_recv(s->fd, s->buff + s->len, sizeof(s->buff) - s->len, 0);
++        rc = argo_recv(s->fd, s->buff + s->len, sizeof(s->buff) - s->len, 0);
 +        switch (rc) {
 +        case 0:
 +            handle_disconnect(s);
@@ -253,7 +253,7 @@ PATCHES
 +    union dmbus_msg *m = (union dmbus_msg *)s->buff;
 +
 +    do {
-+        rc = v4v_recv(s->fd, s->buff + s->len, sizeof(s->buff) - s->len,
++        rc = argo_recv(s->fd, s->buff + s->len, sizeof(s->buff) - s->len,
 +                      MSG_DONTWAIT);
 +
 +        switch (rc) {
@@ -319,18 +319,18 @@ PATCHES
 +    struct service *s = opaque;
 +    int rc;
 +
-+    s->fd = v4v_socket(SOCK_STREAM);
++    s->fd = argo_socket(SOCK_STREAM);
 +    if (s->fd == -1) {
 +        goto rearm;
 +    }
-+    rc = v4v_connect(s->fd, &s->peer);
++    rc = argo_connect(s->fd, &s->peer);
 +    if (rc == -1) {
-+        v4v_close(s->fd);
++        argo_close(s->fd);
 +        goto rearm;
 +    }
-+    rc = v4v_send(s->fd, &s->prologue, sizeof(s->prologue), 0);
++    rc = argo_send(s->fd, &s->prologue, sizeof(s->prologue), 0);
 +    if (rc != sizeof(s->prologue)) {
-+        v4v_close(s->fd);
++        argo_close(s->fd);
 +        goto rearm;
 +    }
 +
@@ -372,20 +372,20 @@ PATCHES
 +        return NULL;
 +    }
 +
-+    s->fd = v4v_socket(SOCK_STREAM);
++    s->fd = argo_socket(SOCK_STREAM);
 +    if (s->fd == -1) {
-+        fprintf(stderr, "%s: Failed to create v4v socket: %s\n",
++        fprintf(stderr, "%s: Failed to create argo socket: %s\n",
 +                __func__, strerror(errno));
 +        free(s);
 +        return NULL;
 +    }
 +
-+    s->peer.port = DMBUS_BASE_PORT + service;
-+    s->peer.domain = 0; /* Dom0 */
++    s->peer.aport = DMBUS_BASE_PORT + service;
++    s->peer.domain_id = 0; /* Dom0 */
 +
-+    rc = v4v_connect(s->fd, &s->peer);
++    rc = argo_connect(s->fd, &s->peer);
 +    if (rc == -1) {
-+        fprintf(stderr, "%s: Failed to connect v4v socket: %s\n",
++        fprintf(stderr, "%s: Failed to connect argo socket: %s\n",
 +                __func__, strerror(errno));
 +        goto close;
 +    }
@@ -394,7 +394,7 @@ PATCHES
 +    s->prologue.type = devtype;
 +    fill_hash(s->prologue.hash);
 +
-+    rc = v4v_send(s->fd, &s->prologue, sizeof(s->prologue), 0);
++    rc = argo_send(s->fd, &s->prologue, sizeof(s->prologue), 0);
 +    if (rc != sizeof(s->prologue)) {
 +        fprintf(stderr, "%s: Failed to initialize dmbus connection: %s\n",
 +                __func__, strerror(errno));
@@ -409,7 +409,7 @@ PATCHES
 +
 +    return s;
 +close:
-+    v4v_close(s->fd);
++    argo_close(s->fd);
 +    free(s);
 +    return NULL;
 +}
@@ -421,7 +421,7 @@ PATCHES
 +
 +    qemu_set_fd_handler(s->fd, NULL, NULL, NULL);
 +    timer_free(s->reconnect_timer);
-+    v4v_close(s->fd);
++    argo_close(s->fd);
 +    free(s);
 +}
 +
@@ -440,7 +440,7 @@ PATCHES
 +    hdr->msg_len = len;
 +
 +    while (b < len) {
-+        rc = v4v_send(s->fd, data + b, len - b, 0);
++        rc = argo_send(s->fd, data + b, len - b, 0);
 +        if (rc == -1) {
 +            if (errno == ECONNRESET) {
 +                handle_disconnect(s);

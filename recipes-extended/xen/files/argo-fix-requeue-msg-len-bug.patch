@@ -1,0 +1,124 @@
+################################################################################
+SHORT DESCRIPTION:
+################################################################################
+Fix issue of Xen spurriously waking domains to write more data
+even if receive ring is full.
+
+################################################################################
+LONG DESCRIPTION:
+################################################################################
+When a message is requeue'd in Xen's internal queue, the queue entry
+contains the length of the message so that Xen knows to send a VIRQ to
+the respective domain when enough space frees up in the ring. Due to a
+small bug, however, Xen doesn't populate the length of the msg if a given
+write fails, so this length is always reported as zero. This causes Xen
+to spurriously wake up a domain even when the ring is still full.
+
+This patch makes sure that the msg len is properly reported by populating
+it in the event of a write failure.
+
+################################################################################
+CHANGELOG:
+################################################################################
+
+################################################################################
+REMOVAL:
+################################################################################
+This can be removed when the bug is fixed upstream.
+
+################################################################################
+UPSTREAM PLAN:
+################################################################################
+Patch has been submitted upstream and is pending approval.
+
+################################################################################
+INTERNAL DEPENDENCIES:
+################################################################################
+
+################################################################################
+PATCHES:
+################################################################################
+--- a/xen/common/argo.c
++++ b/xen/common/argo.c
+@@ -778,27 +778,20 @@ iov_count(const xen_argo_iov_t *piov, un
+ static int
+ ringbuf_insert(const struct domain *d, struct argo_ring_info *ring_info,
+                const struct argo_ring_id *src_id, xen_argo_iov_t *iovs,
+-               unsigned int niov, uint32_t message_type,
+-               unsigned long *out_len)
++               unsigned int niov, uint32_t message_type, unsigned int len)
+ {
+     xen_argo_ring_t ring;
+     struct xen_argo_ring_message_header mh = { };
+     int sp, ret;
+-    unsigned int len = 0;
+     xen_argo_iov_t *piov;
+     XEN_GUEST_HANDLE(uint8) NULL_hnd = { };
+ 
+     ASSERT(LOCKING_L3(d, ring_info));
+ 
+     /*
+-     * Obtain the total size of data to transmit -- sets the 'len' variable
+-     * -- and sanity check that the iovs conform to size and number limits.
+      * Enforced below: no more than 'len' bytes of guest data
+      * (plus the message header) will be sent in this operation.
+      */
+-    ret = iov_count(iovs, niov, &len);
+-    if ( ret )
+-        return ret;
+ 
+     /*
+      * Upper bound check the message len against the ring size.
+@@ -996,8 +989,6 @@ ringbuf_insert(const struct domain *d, s
+      * versus performance cost could be added to decide that here.
+      */
+ 
+-    *out_len = len;
+-
+     return ret;
+ }
+ 
+@@ -2204,7 +2195,7 @@ sendv(struct domain *src_d, xen_argo_add
+     struct argo_ring_id src_id;
+     struct argo_ring_info *ring_info;
+     int ret = 0;
+-    unsigned long len = 0;
++    unsigned int len = 0;
+ 
+     argo_dprintk("sendv: (%u:%x)->(%u:%x) niov:%u type:%x\n",
+                  src_addr->domain_id, src_addr->aport, dst_addr->domain_id,
+@@ -2283,17 +2274,25 @@ sendv(struct domain *src_d, xen_argo_add
+     {
+         spin_lock(&ring_info->L3_lock);
+ 
+-        ret = ringbuf_insert(dst_d, ring_info, &src_id, iovs, niov,
+-                             message_type, &len);
+-        if ( ret == -EAGAIN )
++        /*
++         * Obtain the total size of data to transmit -- sets the 'len' variable
++         * -- and sanity check that the iovs conform to size and number limits.
++         */
++        ret = iov_count(iovs, niov, &len);
++        if ( !ret )
+         {
+-            int rc;
++            ret = ringbuf_insert(dst_d, ring_info, &src_id, iovs, niov,
++                                 message_type, len);
++            if ( ret == -EAGAIN )
++            {
++                int rc;
+ 
+-            argo_dprintk("argo_ringbuf_sendv failed, EAGAIN\n");
+-            /* requeue to issue a notification when space is there */
+-            rc = pending_requeue(dst_d, ring_info, src_id.domain_id, len);
+-            if ( rc )
+-                ret = rc;
++                argo_dprintk("argo_ringbuf_sendv failed, EAGAIN\n");
++                /* requeue to issue a notification when space is there */
++                rc = pending_requeue(dst_d, ring_info, src_id.domain_id, len);
++                if ( rc )
++                    ret = rc;
++            }
+         }
+ 
+         spin_unlock(&ring_info->L3_lock);

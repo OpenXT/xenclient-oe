@@ -5,7 +5,7 @@ DESCRIPTION = "Xen hypervisor, 64-bit build"
 
 # In OpenXT, multiple recipes are used to build Xen and its components:
 # a 32-bit build of tools ; a 64-bit hypervisor; and a separate blktap
-# build to fix potentially circular dependencies with libv4v and icbinn.
+# build to fix potentially circular dependencies with libargo and icbinn.
 #
 # This recipe shares a common xen.inc with other recipes.
 # PN in this recipe is "xen-hypervisor", rather than "xen" as xen.inc is
@@ -77,6 +77,9 @@ do_configure() {
     #same hypercall headers
     echo "CONFIG_TXT_OP=y" >> "${B}/xen/.config"
 
+    # Enable argo
+    echo "CONFIG_ARGO=y" >> "${B}/xen/.config"
+
     # do configure
     oe_runconf
 }
@@ -87,10 +90,6 @@ do_compile() {
     export CPP="${HOST_PREFIX}cpp ${TOOLCHAIN_OPTIONS}"
 
     oe_runmake -C xen olddefconfig
-    # public/v4v.h is not compliant at all, headers++.chk will fail trying as
-    # it tries to include <xen/xen.h> (which is not present...).
-    # By-pass the problem by CXX=/bin/false, not generating headers++.chk.
-    oe_runmake CXX=/bin/false dist-xen
 }
 
 do_install() {

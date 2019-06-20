@@ -59,9 +59,9 @@ IMAGE_INSTALL = "\
     packagegroup-base \
     xenfb2 \
     kernel-modules \
-    v4v-module \
-    libv4v \
-    libv4v-bin \
+    argo-module \
+    libargo \
+    libargo-bin \
     xinit \
     xprop \
     xrandr \
@@ -122,7 +122,7 @@ post_rootfs_shell_commands() {
     # Change root shell.
     sed -i 's|root:x:0:0:root:/root:/bin/sh|root:x:0:0:root:/root:/bin/bash|' ${IMAGE_ROOTFS}/etc/passwd
 
-    # Trick to resolve dom0 name with V4V.
+    # Trick to resolve dom0 name with argo.
     echo '1.0.0.0 dom0' >> ${IMAGE_ROOTFS}/etc/hosts
 
     # HACK: Force remove unwanted packages.

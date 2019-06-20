@@ -2,20 +2,20 @@
 DEPENDS_append_class-native += " \
     libselinux \
 "
-# DBus will not link with libv4v in the native case.
-# The v4v kernel headers cannot be expected in the native environment since
-# libv4v depends on Xen, and the hypervisor headers are not separated from the
+# DBus will not link with libargo in the native case.
+# The argo kernel headers cannot be expected in the native environment since
+# libargo depends on Xen, and the hypervisor headers are not separated from the
 # main recipe.
 DEPENDS_append_class-target += " \
     libselinux \
-    libv4v \
+    libargo \
 "
 FILESEXTRAPATHS_prepend := "${THISDIR}/patches:"
 
 SRC_URI += " \
     file://0001-Make-the-default-DBus-reply-timeout-configurable.patch \
     file://add-domid-authentication.patch \
-    file://v4v.patch \
+    file://argo.patch \
     file://fix-segfault-bus_connection_disconnected.patch \
 "
 
@@ -27,8 +27,8 @@ do_install_append() {
     # This relies entirely on:
     # - A trusted dom0 (with DBus not listening wildly)
     # - A sane XSM policy
-    # - A sane set of viptables (V4V)
-    # - A trusted rpc-proxy implementation (daemon listening on v4v to proxy
+    # - A sane set of viptables (argo)
+    # - A trusted rpc-proxy implementation (daemon listening on argo to proxy
     #   DBus requests)
     # - A sane white-list defined for rpc-proxy.
     # (Since DBus 1.9?) /etc/dbus-1/system.conf is deprecated, use

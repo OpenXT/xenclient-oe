@@ -5,7 +5,7 @@ COMPATIBLE_MACHINE = "(xenclient-dom0)"
 DISTROS = "wheezy"
 
 DEB_IMAGE_INSTALL = "\
-	deb-libv4v \
+	deb-libargo \
 	deb-xc-pvdrivers-dkms \
 	deb-xenmou-dkms \
 	deb-libxenstore \

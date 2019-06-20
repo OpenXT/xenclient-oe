@@ -6,7 +6,7 @@ PV = "0+git${SRCPV}"
 
 SRCREV = "${AUTOREV}"
 SRC_URI = "git://${OPENXT_GIT_MIRROR}/pv-linux-drivers.git;protocol=${OPENXT_GIT_PROTOCOL};branch=${OPENXT_BRANCH}"
-DEPENDS = "virtual/kernel v4v-module"
+DEPENDS = "virtual/kernel argo-module"
 
 S = "${WORKDIR}/git/xc-audio"
 
