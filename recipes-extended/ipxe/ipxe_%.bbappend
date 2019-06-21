@@ -20,4 +20,5 @@ EXTRA_OEMAKE_append = " HOST_CFLAGS='${BUILD_CFLAGS} ${BUILD_LDFLAGS}'"
 
 do_compile_append() {
     oe_runmake bin/intel.rom
+    oe_runmake bin/82540em.rom
 }

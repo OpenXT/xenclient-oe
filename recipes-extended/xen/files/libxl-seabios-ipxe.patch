@@ -1,0 +1,75 @@
+################################################################################
+SHORT DESCRIPTION: 
+################################################################################
+Modify libxl to pass ipxe ROM for seabios.
+
+################################################################################
+LONG DESCRIPTION: 
+################################################################################
+Upstream xen only supports passing the ipxe file to hvmloader if we're using
+rombios. Because we use seabios, we need to disable the check for rombios
+so we can use --with-system-ipxe, and enable the codepath if the bios we're
+using is seabios in libxl_dom.c
+################################################################################
+CHANGELOG 
+################################################################################
+
+################################################################################
+REMOVAL 
+################################################################################
+None
+
+################################################################################
+UPSTREAM PLAN
+################################################################################
+None
+
+################################################################################
+INTERNAL DEPENDENCIES 
+################################################################################
+
+################################################################################
+PATCHES 
+################################################################################
+
+--- a/tools/configure.ac
++++ b/tools/configure.ac
+@@ -266,10 +266,6 @@ AC_ARG_WITH([system-ipxe],
+ ],[])
+ AS_IF([test "x$ipxe" = "xy" -o -n "$ipxe_path" ], [
+ 
+-    AS_IF([test "x$enable_rombios" = "xno"], [
+-        AC_MSG_ERROR([Rombios is required to use IPXE])
+-    ], [])
+-
+     AC_DEFINE_UNQUOTED([IPXE_PATH],
+                        ["${ipxe_path:-$XENFIRMWAREDIR/ipxe.bin}"],
+                        [IPXE path])
+--- a/tools/libxl/libxl_dom.c
++++ b/tools/libxl/libxl_dom.c
+@@ -1150,7 +1150,8 @@ static int libxl__domain_firmware(libxl_
+     }
+ 
+     if (info->type == LIBXL_DOMAIN_TYPE_HVM &&
+-        info->u.hvm.bios == LIBXL_BIOS_TYPE_ROMBIOS &&
++        (info->u.hvm.bios == LIBXL_BIOS_TYPE_ROMBIOS ||
++         info->u.hvm.bios == LIBXL_BIOS_TYPE_SEABIOS) &&
+         libxl__ipxe_path()) {
+         const char *fp = libxl__ipxe_path();
+         rc = xc_dom_module_file(dom, fp, "ipxe");
+--- a/tools/configure
++++ b/tools/configure
+@@ -4622,13 +4622,6 @@ fi
+ if test "x$ipxe" = "xy" -o -n "$ipxe_path" ; then :
+ 
+ 
+-    if test "x$enable_rombios" = "xno"; then :
+-
+-        as_fn_error $? "Rombios is required to use IPXE" "$LINENO" 5
+-
+-fi
+-
+-
+ cat >>confdefs.h <<_ACEOF
+ #define IPXE_PATH "${ipxe_path:-$XENFIRMWAREDIR/ipxe.bin}"
+ _ACEOF
