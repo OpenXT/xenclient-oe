@@ -1,0 +1,83 @@
+################################################################################
+SHORT DESCRIPTION:
+################################################################################
+Force page scrub after domain shutdown, not during idle loop.
+
+################################################################################
+LONG DESCRIPTION:
+################################################################################
+In recent Xen versions, page scrubbing has been reworked to occur asynchronously
+during an idle loop. Therefore, it is possible that pages once owned by a guest
+will never have their pages scrubbed if Xen never schedules the loop to run. Xen
+WILL scrub pages before given to a newly booted guest, but during the time the 
+guest is off, it's possible to have unscrubbed pages from previous guests
+hanging about.
+
+So, we reintroduce page scrubbing in free_xenheap_pages and free_domheap_pages,
+so that a guest's pages are scrubbed synchronously when shutdown. We leave
+the idle loop otherwise untouched to reduce the complexity of the patch.
+scrub_free_pages (the logic called from the idle loop) is ultimately called on
+boot when the idle loop is initialized, but after the first run, pages are no
+longer scrubbed from this function.
+
+################################################################################
+CHANGELOG
+################################################################################
+Authors:
+Chris Rogers <rogersc@ainfosec.com>
+
+################################################################################
+REMOVAL
+################################################################################
+Never
+
+################################################################################
+UPSTREAM PLAN
+################################################################################
+Expand this patch to use a boot or build time option that turns synchronous
+scrubbing on/off and submit upstream. Making it configurable would support
+both the client usecase and server usecase.
+
+################################################################################
+INTERNAL DEPENDENCIES
+################################################################################
+
+################################################################################
+PATCHES
+################################################################################
+
+--- a/xen/common/page_alloc.c
++++ b/xen/common/page_alloc.c
+@@ -2211,10 +2211,15 @@ void free_xenheap_pages(void *v, unsigne
+ 
+     pg = virt_to_page(v);
+ 
++
++    /* Scrub the pages here, not in the idle loop */
+     for ( i = 0; i < (1u << order); i++ )
++    {
++        scrub_one_page(&pg[i]);
+         pg[i].count_info &= ~PGC_xen_heap;
++    }
+ 
+-    free_heap_pages(pg, order, true);
++    free_heap_pages(pg, order, false);
+ }
+ 
+ #endif  /* CONFIG_SEPARATE_XENHEAP */
+@@ -2395,8 +2400,13 @@ void free_domheap_pages(struct page_info
+             drop_dom_ref = false;
+             scrub = 1;
+         }
+-
+-        free_heap_pages(pg, order, scrub);
++        /* scrub the pages here, not in the idle loop */
++        if ( unlikely(scrub) ) {
++            for ( i = 0; i < (1 << order); i++ ) {
++                scrub_one_page(&pg[i]);
++            }
++        }
++        free_heap_pages(pg, order, false);
+     }
+ 
+     if ( drop_dom_ref )
