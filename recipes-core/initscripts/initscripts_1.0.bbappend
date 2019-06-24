@@ -4,6 +4,7 @@ FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}-${PV}:"
 
 SRC_URI += " \
     file://mountearly.sh \
+    file://udev-volatiles.sh \
     file://finish.sh \
     file://volatiles \
 "
@@ -41,6 +42,7 @@ do_install () {
 	install -m 0644    ${WORKDIR}/volatiles		${D}${sysconfdir}/default/volatiles/00_core
 	install -m 0755    ${WORKDIR}/finish.sh		${D}${sysconfdir}/init.d
 	install -m 0755    ${WORKDIR}/mountearly.sh	${D}${sysconfdir}/init.d
+	install -m 0755    ${WORKDIR}/udev-volatiles.sh	${D}${sysconfdir}/init.d
 
 #
 # Install device dependent scripts
@@ -64,6 +66,7 @@ do_install () {
 	update-rc.d -r ${D} populate-volatile.sh start 37 S .
 	update-rc.d -r ${D} finish.sh start 99 S .
 	update-rc.d -r ${D} mountearly.sh start 01 S .
+	update-rc.d -r ${D} udev-volatiles.sh start 03 S .
 }
 
 pkg_postinst_${PN}_append() {
