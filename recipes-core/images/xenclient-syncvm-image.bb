@@ -52,8 +52,6 @@ post_rootfs_shell_commands() {
 
     # TODO: This can be handled through populate-volatiles.sh
     # Create read-only rootfs required links.
-    rm -f ${IMAGE_ROOTFS}/etc/resolv.conf;
-    ln -s /var/volatile/etc/resolv.conf ${IMAGE_ROOTFS}/etc/resolv.conf;
     rm -f ${IMAGE_ROOTFS}/etc/network/interfaces;
     ln -s /var/volatile/etc/network/interfaces ${IMAGE_ROOTFS}/etc/network/interfaces;
 }
