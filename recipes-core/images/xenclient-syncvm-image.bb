@@ -49,11 +49,6 @@ post_rootfs_shell_commands() {
 
     # Trick to resolve dom0 name with V4V.
     echo '1.0.0.0 dom0' >> ${IMAGE_ROOTFS}/etc/hosts;
-
-    # TODO: This can be handled through populate-volatiles.sh
-    # Create read-only rootfs required links.
-    rm -f ${IMAGE_ROOTFS}/etc/network/interfaces;
-    ln -s /var/volatile/etc/network/interfaces ${IMAGE_ROOTFS}/etc/network/interfaces;
 }
 ROOTFS_POSTPROCESS_COMMAND += "post_rootfs_shell_commands; "
 
