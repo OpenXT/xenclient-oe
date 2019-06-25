@@ -50,5 +50,5 @@ SRC_URI_append_xenclient-dom0 = "file://efi-tables-for-dom0.patch \
 	"
 
 LIC_FILES_CHKSUM = "file://COPYING;md5=bbea815ee2795b2f4230826c0c6b8814"
-SRC_URI[kernel.md5sum] = "e0b861a1b0293feede66cabaeba95bb2"
-SRC_URI[kernel.sha256sum] = "707642e993775618a5afa039b1058fa49f1c0faada46e8cdcb976241bca6b288"
+SRC_URI[kernel.md5sum] = "0be944ea4d72ec038720a3908b498bdb"
+SRC_URI[kernel.sha256sum] = "e647730b7eafac70c3bd7abed4e6ed5a09eb794c645fcb0c62a79f62edbdeb02"
