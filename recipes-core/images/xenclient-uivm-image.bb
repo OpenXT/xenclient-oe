@@ -21,10 +21,6 @@ BAD_RECOMMENDATIONS += " \
     avahi-daemon \
     avahi-autoipd \
 "
-# List of packages removed at rootfs-postprocess.
-PACKAGE_REMOVE = " \
-    busybox-hwclock \
-"
 
 # Specifies the list of locales to install into the image during the root
 # filesystem construction process.
@@ -124,10 +120,6 @@ post_rootfs_shell_commands() {
 
     # Trick to resolve dom0 name with argo.
     echo '1.0.0.0 dom0' >> ${IMAGE_ROOTFS}/etc/hosts
-
-    # HACK: Force remove unwanted packages.
-    # These should not be installed in the first place?
-    opkg -f ${IPKGCONF_TARGET} -o ${IMAGE_ROOTFS} ${OPKG_ARGS} -force-depends remove ${PACKAGE_REMOVE}
 }
 ROOTFS_POSTPROCESS_COMMAND += "post_rootfs_shell_commands; "
 
@@ -139,7 +131,6 @@ remove_nonessential_initscripts() {
     remove_initscript "rmnologin.sh"
     remove_initscript "sshd"
     remove_initscript "urandom"
-    remove_initscript "save-rtc.sh"
     remove_initscript "networking"
 }
 ROOTFS_POSTPROCESS_COMMAND += "remove_nonessential_initscripts; "
