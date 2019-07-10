@@ -1,6 +1,8 @@
 # Use OpenXT defeconfig.
 FILESEXTRAPATHS_prepend := "${THISDIR}/files:${THISDIR}/${BPN}:"
 
+SRC_URI += "file://busybox-CVE-2017-16544.patch"
+
 # We should use sh wrappers instead of links so the commands could get correct
 # security labels
 python create_sh_wrapper_reset_alternative_vars_openxt () {
