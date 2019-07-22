@@ -8,6 +8,9 @@ v3 certificates, and other security standards."
 HOMEPAGE = "http://www.mozilla.org/projects/security/pki/nss/"
 SECTION = "libs"
 
+DEPENDS = "sqlite3 nspr zlib nss-native"
+DEPENDS_class-native = "sqlite3-native nspr-native zlib-native"
+
 LICENSE = "MPL-2.0 | (MPL-2.0 & GPL-2.0+) | (MPL-2.0 & LGPL-2.1+)"
 
 LIC_FILES_CHKSUM = "file://nss/COPYING;md5=3b1e88e1b9c0b5a4b2881d46cce06a18 \
@@ -25,20 +28,18 @@ SRC_URI = "http://ftp.mozilla.org/pub/mozilla.org/security/nss/releases/${VERSIO
            file://nss-fix-nsinstall-build.patch \
            file://disable-Wvarargs-with-clang.patch \
            file://pqg.c-ULL_addend.patch \
-           file://Fix-compilation-for-X32.patch \
+           file://blank-cert9.db \
+           file://blank-key4.db \
+           file://system-pkcs11.txt \
            "
 
-SRC_URI[md5sum] = "5922468bb1c54e4c8067f153fcf467e5"
-SRC_URI[sha256sum] = "a3c15d367caf784f33d96dbafbdffc16a8e42fb8c8aedfce97bf92a9f918dda0"
+SRC_URI[md5sum] = "f1752d7223ee9d910d551e57264bafa8"
+SRC_URI[sha256sum] = "112f05223d1fde902c170966bfc6f011b24a838be16969b110ecf2bb7bc24e8b"
 
 UPSTREAM_CHECK_URI = "https://developer.mozilla.org/en-US/docs/Mozilla/Projects/NSS/NSS_Releases"
 UPSTREAM_CHECK_REGEX = "NSS_(?P<pver>.+)_release_notes"
 
 inherit siteinfo
-
-DEPENDS = "sqlite3 nspr zlib nss-native"
-DEPENDS_class-native = "sqlite3-native nspr-native zlib-native"
-RDEPENDS_${PN}-smime = "perl"
 
 TD = "${S}/tentative-dist"
 TDS = "${S}/tentative-dist-staging"
@@ -89,6 +90,8 @@ do_compile() {
         OS_TEST=ppc64
     elif [ "${TARGET_ARCH}" = "mips" -o "${TARGET_ARCH}" = "mipsel" -o "${TARGET_ARCH}" = "mips64" -o "${TARGET_ARCH}" = "mips64el" ]; then
         OS_TEST=mips
+    elif [ "${TARGET_ARCH}" = "aarch64_be" ]; then
+        OS_TEST="aarch64"
     else
         OS_TEST="${TARGET_ARCH}"
     fi
@@ -114,8 +117,8 @@ do_compile() {
         OS_TEST=${OS_TEST} \
         RPATH="${RPATH}"
 }
-do_compile[vardepsexclude] += "SITEINFO_BITS"
 
+do_compile[vardepsexclude] += "SITEINFO_BITS"
 
 do_install_prepend_class-nativesdk() {
     export LDFLAGS=""
@@ -144,6 +147,9 @@ do_install() {
         OS_TEST=ppc64
     elif [ "${TARGET_ARCH}" = "mips" -o "${TARGET_ARCH}" = "mipsel" -o "${TARGET_ARCH}" = "mips64" -o "${TARGET_ARCH}" = "mips64el" ]; then
         OS_TEST=mips
+    elif [ "${TARGET_ARCH}" = "aarch64_be" ]; then
+        CPU_ARCH=aarch64
+        OS_TEST="aarch64"
     else
         OS_TEST="${TARGET_ARCH}"
     fi
@@ -188,6 +194,7 @@ do_install() {
         install -m 755 -t ${D}/${bindir} $binary
     done
 }
+
 do_install[vardepsexclude] += "SITEINFO_BITS"
 
 do_install_append() {
@@ -208,12 +215,16 @@ do_install_append() {
 }
 
 do_install_append_class-target() {
-    # Create a blank certificate
-    mkdir -p ${D}${sysconfdir}/pki/nssdb/
-    touch ./empty_password
-    certutil -N -d ${D}${sysconfdir}/pki/nssdb/ -f ./empty_password
-    chmod 644 ${D}${sysconfdir}/pki/nssdb/*.db
-    rm ./empty_password
+    # It used to call certutil to create a blank certificate with empty password at
+    # build time, but the checksum of key4.db changes every time when certutil is called.
+    # It causes non-determinism issue, so provide databases with a blank certificate
+    # which are originally from output of nss in qemux86-64 build. You can get these
+    # databases by:
+    # certutil -N -d sql:/database/path/ --empty-password
+    install -d ${D}${sysconfdir}/pki/nssdb/
+    install -m 0644 ${WORKDIR}/blank-cert9.db ${D}${sysconfdir}/pki/nssdb/cert9.db
+    install -m 0644 ${WORKDIR}/blank-key4.db ${D}${sysconfdir}/pki/nssdb/key4.db
+    install -m 0644 ${WORKDIR}/system-pkcs11.txt ${D}${sysconfdir}/pki/nssdb/pkcs11.txt
 }
 
 PACKAGE_WRITE_DEPS += "nss-native"
@@ -237,17 +248,20 @@ PACKAGES =+ "${PN}-smime"
 FILES_${PN}-smime = "\
     ${bindir}/smime \
 "
+
 FILES_${PN} = "\
     ${sysconfdir} \
     ${bindir} \
     ${libdir}/lib*.chk \
     ${libdir}/lib*.so \
     "
+
 FILES_${PN}-dev = "\
     ${libdir}/nss \
     ${libdir}/pkgconfig/* \
     ${includedir}/* \
     "
 
-BBCLASSEXTEND = "native nativesdk"
+RDEPENDS_${PN}-smime = "perl"
 
+BBCLASSEXTEND = "native nativesdk"
