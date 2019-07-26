@@ -12,6 +12,7 @@ IMAGE_FEATURES += " \
     package-management \
     read-only-rootfs \
     empty-root-password \
+    root-bash-shell \
 "
 
 IMAGE_FSTYPES = "ext3.disk.vhd.gz"
@@ -25,12 +26,17 @@ BAD_RECOMMENDATIONS += " \
     avahi-autoipd \
     ca-certificates \
 "
-# List of packages removed at rootfs-postprocess.
+# List of packages that should not be installed
 PACKAGE_REMOVE = " \
     hicolor-icon-theme \
 "
 
 IMAGE_FEATURES += "empty-root-password"
+
+INITSCRIPT_REMOVE = " \
+    urandom \
+    sshd \
+"
 
 IMAGE_INSTALL = " \
     ${ROOTFS_PKGMANAGE} \
@@ -40,7 +46,6 @@ IMAGE_INSTALL = " \
     packagegroup-xenclient-common \
     util-linux-mount \
     util-linux-umount \
-    busybox \
     openssh \
     kernel-modules \
     libargo \
@@ -74,9 +79,6 @@ require xenclient-version.inc
 inherit xenclient-licences
 
 post_rootfs_shell_commands() {
-    # Change root shell.
-    sed -i 's|root:x:0:0:root:/root:/bin/sh|root:x:0:0:root:/root:/bin/bash|' ${IMAGE_ROOTFS}/etc/passwd;
-
     # Trick to resolve dom0 name with argo.
     echo '1.0.0.0 dom0' >> ${IMAGE_ROOTFS}/etc/hosts;
 
@@ -85,14 +87,5 @@ post_rootfs_shell_commands() {
 
     # NDVM doesn't have a /dev/tty1, disable the login shell on it
     sed -i 's/[^#].*getty.*tty1$/#&/' ${IMAGE_ROOTFS}/etc/inittab ;
-
-    # Forcibly remove packages in PACKAGE_REMOVE variable.
-    opkg -f ${IPKGCONF_TARGET} -o ${IMAGE_ROOTFS} ${OPKG_ARGS} -force-depends remove ${PACKAGE_REMOVE};
 }
 ROOTFS_POSTPROCESS_COMMAND += "post_rootfs_shell_commands; "
-
-remove_nonessential_initscripts() {
-    remove_initscript "urandom"
-    remove_initscript "sshd"
-}
-ROOTFS_POSTPROCESS_COMMAND += "remove_nonessential_initscripts; "

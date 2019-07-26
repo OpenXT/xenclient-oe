@@ -2,7 +2,10 @@
 
 inherit openxt-image
 
-IMAGE_FEATURES += "package-management"
+IMAGE_FEATURES += " \
+    package-management \
+    root-bash-shell \
+"
 
 COMPATIBLE_MACHINE = "(xenclient-dom0)"
 
@@ -32,8 +35,6 @@ IMAGE_INSTALL += "\
 #IMAGE_PREPROCESS_COMMAND = "create_etc_timestamp"
 
 post_rootfs_shell_commands() {
-	sed -i 's|root:x:0:0:root:/root:/bin/sh|root:x:0:0:root:/root:/bin/bash|' ${IMAGE_ROOTFS}/etc/passwd;
-
 	rm ${IMAGE_ROOTFS}/etc/hosts; ln -s /tmp/hosts ${IMAGE_ROOTFS}/etc/hosts;
 
 	# Add initramfs

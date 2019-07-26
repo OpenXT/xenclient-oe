@@ -45,3 +45,27 @@ start_tty_on_hvc0() {
 }
 ROOTFS_POSTPROCESS_COMMAND += '${@bb.utils.contains("IMAGE_FEATURES", "debug-tweaks", "start_tty_on_hvc0; ", "",d)}'
 
+# Forcibly remove packages disregarding if it creates a broken dependency
+force_package_removal() {
+    if [ -n "${PACKAGE_REMOVE}" ]; then
+        opkg -f "${IPKGCONF_TARGET}" -o "${IMAGE_ROOTFS}" ${OPKG_ARGS} -force-depends remove ${PACKAGE_REMOVE};
+    fi
+}
+ROOTFS_POSTPROCESS_COMMAND += "force_package_removal; "
+
+# Change root shell.
+root_bash_shell() {
+    sed -i 's|root:x:0:0:root:/root:/bin/sh|root:x:0:0:root:/root:/bin/bash|' "${IMAGE_ROOTFS}/etc/passwd"
+}
+ROOTFS_POSTPROCESS_COMMAND += '${@bb.utils.contains("IMAGE_FEATURES", "root-bash-shell", "root_bash_shell; ", "",d)}'
+IMAGE_FEATURES[validitems] += "root-bash-shell"
+
+# Remove initscripts pulled-in by dependencies or not required for operation.
+remove_nonessential_initscripts() {
+    if [ -n "${INITSCRIPT_REMOVE}" ]; then
+        for i in "${INITSCRIPT_REMOVE}"; do
+            remove_initscript "${i}"
+        done
+    fi
+}
+ROOTFS_POSTPROCESS_COMMAND += "remove_nonessential_initscripts; "

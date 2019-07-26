@@ -34,7 +34,15 @@ BAD_RECOMMENDATIONS += " \
     ${@bb.utils.contains('IMAGE_FEATURES', 'web-certificates', '', 'ca-certificates', d)} \
 "
 
-IMAGE_FEATURES += "empty-root-password"
+INITSCRIPT_REMOVE = " \
+    blktap \
+    sshd-argo \
+"
+
+IMAGE_FEATURES += " \
+    empty-root-password \
+    root-bash-shell \
+"
 
 IMAGE_INSTALL = "\
     initscripts \
@@ -91,20 +99,10 @@ post_rootfs_shell_commands() {
     ln -s /config/etc/shadow ${IMAGE_ROOTFS}/etc/shadow;
     ln -s /config/etc/passwd ${IMAGE_ROOTFS}/etc/passwd;
 
-    # Use bash as login shell
-    sed -i 's|root:x:0:0:root:/root:/bin/sh|root:x:0:0:root:/root:/bin/bash|' ${IMAGE_ROOTFS}/config/etc/passwd;
-
     # Create file to identify this as the host installer filesystem
     touch ${IMAGE_ROOTFS}/etc/xenclient-host-installer;
 }
 ROOTFS_POSTPROCESS_COMMAND += "post_rootfs_shell_commands; "
-
-# Remove initscripts pulled-in by dependencies or not required for operation.
-remove_nonessential_initscripts() {
-    remove_initscript "blktap"
-    remove_initscript "sshd-argo"
-}
-ROOTFS_POSTPROCESS_COMMAND += "remove_nonessential_initscripts; "
 
 ## Work-around:
 ## Disable lvmetad in the installer. There seem to be a race with eudev and

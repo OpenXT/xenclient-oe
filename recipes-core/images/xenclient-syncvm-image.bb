@@ -11,12 +11,17 @@ inherit openxt-image
 IMAGE_FEATURES += " \
     package-management \
     read-only-rootfs \
+    root-bash-shell \
 "
 
 IMAGE_FSTYPES = "ext3.vhd.gz"
 export IMAGE_BASENAME = "xenclient-syncvm-image"
 
 COMPATIBLE_MACHINE = "(xenclient-syncvm)"
+
+INITSCRIPT_REMOVE = " \
+    urandom \
+"
 
 IMAGE_INSTALL = "\
     ${ROOTFS_PKGMANAGE} \
@@ -44,15 +49,7 @@ post_rootfs_shell_commands() {
     # enable ctrlaltdel reboot because PV driver uses ctrl+alt+del to interpret reboot issued via xenstore
     echo 'ca:12345:ctrlaltdel:/sbin/shutdown -t1 -a -r now' >> ${IMAGE_ROOTFS}/etc/inittab;
 
-    # Change root shell.
-    sed -i 's|root:x:0:0:root:/root:/bin/sh|root:x:0:0:root:/root:/bin/bash|' ${IMAGE_ROOTFS}/etc/passwd;
-
     # Trick to resolve dom0 name with argo.
     echo '1.0.0.0 dom0' >> ${IMAGE_ROOTFS}/etc/hosts;
 }
 ROOTFS_POSTPROCESS_COMMAND += "post_rootfs_shell_commands; "
-
-remove_nonessential_initscripts() {
-    remove_initscript "urandom"
-}
-ROOTFS_POSTPROCESS_COMMAND += "remove_nonessential_initscripts; "
