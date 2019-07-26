@@ -6,6 +6,8 @@ LIC_FILES_CHKSUM = " \
     file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302 \
 "
 
+inherit openxt-selinux-image
+
 IMAGE_FEATURES += " \
     package-management \
     read-only-rootfs \
@@ -24,8 +26,7 @@ BAD_RECOMMENDATIONS += " \
     ${@bb.utils.contains('IMAGE_FEATURES', 'web-certificates', '', 'ca-certificates', d)} \
 "
 
-IMAGE_INSTALL = "\
-    ${ROOTFS_PKGMANAGE} \
+IMAGE_INSTALL += "\
     initscripts \
     modules-dom0 \
     packagegroup-core-boot \
@@ -40,14 +41,9 @@ IMAGE_INSTALL = "\
     ${@bb.utils.contains('IMAGE_FEATURES', 'debug-tweaks', 'packagegroup-selinux-policycoreutils audit', '' ,d)} \
 "
 
-inherit openxt-selinux-image
 inherit xenclient-licences
 
-require xenclient-image-common.inc
 require xenclient-version.inc
-
-# zap root password for release images
-ROOTFS_POSTPROCESS_COMMAND += '${@base_conditional("DISTRO_TYPE", "release", "zap_root_password; ", "",d)}'
 
 post_rootfs_shell_commands() {
     # Change root shell.

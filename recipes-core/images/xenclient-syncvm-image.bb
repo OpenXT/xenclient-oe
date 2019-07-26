@@ -6,6 +6,8 @@ LIC_FILES_CHKSUM = " \
     file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302 \
 "
 
+inherit openxt-image
+
 IMAGE_FEATURES += " \
     package-management \
     read-only-rootfs \
@@ -35,10 +37,8 @@ IMAGE_INSTALL = "\
     ${@bb.utils.contains('DISTRO_FEATURES', 'blktap2', 'xen-blktap', 'blktap3', d)} \
 "
 
-require xenclient-image-common.inc
 require xenclient-version.inc
 inherit xenclient-licences
-inherit image
 
 post_rootfs_shell_commands() {
     # enable ctrlaltdel reboot because PV driver uses ctrl+alt+del to interpret reboot issued via xenstore

@@ -6,6 +6,8 @@ LIC_FILES_CHKSUM = " \
     file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302 \
 "
 
+inherit openxt-image
+
 IMAGE_FEATURES += " \
     package-management \
     read-only-rootfs \
@@ -44,14 +46,12 @@ XSERVER = " \
     xf86-input-keyboard \
 "
 
-IMAGE_INSTALL = "\
-    ${ROOTFS_PKGMANAGE} \
+IMAGE_INSTALL += "\
     ${XSERVER} \
     modules-uivm \
     packagegroup-xenclient-common \
     packagegroup-xenclient-xfce-minimal \
     openssh \
-    packagegroup-core-boot \
     packagegroup-base \
     xenfb2 \
     kernel-modules \
@@ -100,13 +100,8 @@ IMAGE_INSTALL = "\
     matchbox-keyboard-im \
 "
 
-require xenclient-image-common.inc
 require xenclient-version.inc
 inherit xenclient-licences
-inherit image
-
-#zap root password for release images
-ROOTFS_POSTPROCESS_COMMAND += '${@base_conditional("DISTRO_TYPE", "release", "zap_root_password; ", "",d)}'
 
 post_rootfs_shell_commands() {
     # Start WM right away.
@@ -122,9 +117,6 @@ post_rootfs_shell_commands() {
     echo '1.0.0.0 dom0' >> ${IMAGE_ROOTFS}/etc/hosts
 }
 ROOTFS_POSTPROCESS_COMMAND += "post_rootfs_shell_commands; "
-
-# Get a tty on hvc0 when in debug mode.
-ROOTFS_POSTPROCESS_COMMAND += '${@bb.utils.contains("IMAGE_FEATURES", "debug-tweaks", "start_tty_on_hvc0; ", "",d)}'
 
 remove_nonessential_initscripts() {
     remove_initscript "finish.sh"

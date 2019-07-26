@@ -55,10 +55,9 @@ IMAGE_INSTALL = "\
 # 128M in bitbake.conf)
 INITRAMFS_MAXSIZE = "524288"
 
-inherit image
+inherit openxt-image
 inherit xenclient-licences
 
-require xenclient-image-common.inc
 require xenclient-version.inc
 
 post_rootfs_shell_commands() {

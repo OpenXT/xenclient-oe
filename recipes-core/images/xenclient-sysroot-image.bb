@@ -1,6 +1,7 @@
 # XenClient sysroot image
 
-include xenclient-image-common.inc
+inherit openxt-image
+
 IMAGE_FEATURES += "package-management"
 
 COMPATIBLE_MACHINE = "(xenclient-dom0)"
@@ -19,21 +20,16 @@ export IMAGE_BASENAME = "xenclient-sysroot-image"
 export STAGING_KERNEL_DIR
 
 DEPENDS = "packagegroup-base packagegroup-xenclient-dom0"
-IMAGE_INSTALL = "\
-    ${ROOTFS_PKGMANAGE} \
+IMAGE_INSTALL += "\
     initscripts \
     modules \
     packagegroup-base \
-    packagegroup-core-boot \
     packagegroup-xenclient-common \
     packagegroup-xenclient-dom0 \
     essential-target-builddepends \
-    ${ANGSTROM_EXTRA_INSTALL}"
+    "
 
 #IMAGE_PREPROCESS_COMMAND = "create_etc_timestamp"
-
-#zap root password for release images
-ROOTFS_POSTPROCESS_COMMAND += '${@base_conditional("DISTRO_TYPE", "release", "zap_root_password; ", "",d)}'
 
 post_rootfs_shell_commands() {
 	sed -i 's|root:x:0:0:root:/root:/bin/sh|root:x:0:0:root:/root:/bin/bash|' ${IMAGE_ROOTFS}/etc/passwd;
@@ -81,7 +77,6 @@ remove_initscripts() {
 
 ROOTFS_POSTPROCESS_COMMAND += " post_rootfs_shell_commands; remove_initscripts; "
 
-inherit image
 inherit xenclient-licences
 require xenclient-version.inc
 

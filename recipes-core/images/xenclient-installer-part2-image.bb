@@ -22,7 +22,7 @@ PACKAGE_INSTALL = "xenclient-installer-part2"
 
 IMAGE_INSTALL = ""
 
-inherit image
+inherit openxt-image
 inherit xenclient-licences
 
 require xenclient-version.inc

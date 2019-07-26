@@ -6,9 +6,12 @@ LIC_FILES_CHKSUM = " \
     file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302 \
 "
 
+inherit openxt-selinux-image
+
 IMAGE_FEATURES += " \
     package-management \
     read-only-rootfs \
+    empty-root-password \
 "
 
 IMAGE_FSTYPES = "ext3.disk.vhd.gz"
@@ -67,13 +70,8 @@ IMAGE_INSTALL = " \
     iputils-ping \
 "
 
-require xenclient-image-common.inc
 require xenclient-version.inc
 inherit xenclient-licences
-inherit openxt-selinux-image
-
-# zap root password for release images
-ROOTFS_POSTPROCESS_COMMAND += '${@base_conditional("DISTRO_TYPE", "release", "zap_root_password; ", "",d)}'
 
 post_rootfs_shell_commands() {
     # Change root shell.
@@ -92,9 +90,6 @@ post_rootfs_shell_commands() {
     opkg -f ${IPKGCONF_TARGET} -o ${IMAGE_ROOTFS} ${OPKG_ARGS} -force-depends remove ${PACKAGE_REMOVE};
 }
 ROOTFS_POSTPROCESS_COMMAND += "post_rootfs_shell_commands; "
-
-# Get a tty on hvc0 when in debug mode.
-ROOTFS_POSTPROCESS_COMMAND += '${@bb.utils.contains("IMAGE_FEATURES", "debug-tweaks", "start_tty_on_hvc0; ", "",d)}'
 
 remove_nonessential_initscripts() {
     remove_initscript "urandom"
