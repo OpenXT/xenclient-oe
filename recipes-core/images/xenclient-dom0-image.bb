@@ -7,6 +7,10 @@ LIC_FILES_CHKSUM = " \
 "
 
 inherit openxt-selinux-image
+inherit openxt-vm-common
+
+INITRD_VM = "xenclient-initramfs-image"
+INSTALL_VM_INITRD = "1"
 
 IMAGE_FEATURES += " \
     package-management \
@@ -59,9 +63,6 @@ post_rootfs_shell_commands() {
     ln -s /var/volatile/etc/resolv.conf ${IMAGE_ROOTFS}/etc/resolv.conf
 
     echo 'kernel.printk_ratelimit = 0' >> ${IMAGE_ROOTFS}/etc/sysctl.conf
-
-    # Add initramfs
-    cat ${DEPLOY_DIR_IMAGE}/xenclient-initramfs-image-xenclient-dom0.cpio.gz > ${IMAGE_ROOTFS}/boot/initramfs.gz
 
     # Create mountpoint for /mnt/secure
     mkdir -p ${IMAGE_ROOTFS}/mnt/secure
