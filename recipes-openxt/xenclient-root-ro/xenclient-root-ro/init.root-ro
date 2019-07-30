@@ -161,6 +161,30 @@ txt_failure()
     exit 1
 }
 
+srtm_upgrade()
+{
+    dialog --colors --backtitle "${BACK_TITLE}" --defaultno \
+        --yes-label "Continue" --no-label "Shutdown" --yesno "
+    \ZbSRTM Upgrade Detected\ZB
+
+    The system has detected a Static Root of Trust for Measurement(SRTM) 
+    only configuration on the previous install. This is usually due to a
+    recent upgrade from a version of OpenXT that only supported SRTM.
+
+    This version of OpenXT uses Dynamic Root of Trust for Measurement (DRTM)
+    in addition to SRTM. Because of this, measurement will fail to unseal the
+    platform. To continue utilizing the highest level of measurement for OpenXT, 
+    please reseal now to use both DRTM and SRTM." 0 0
+
+    [ $? -ne 0 ] && poweroff
+
+    recovery
+    [ $? -eq 0 ] && return 0
+
+    poweroff
+    exit 1
+}
+
 unseal_failure()
 {
     dialog --colors --backtitle "${BACK_TITLE}" --defaultno \
@@ -337,6 +361,16 @@ unlock_config()
                 touch ${measured_flag}
                 return 0
             }
+
+            if [ -e ${tss_path}.srtm ]; then
+                maybe_break "srtm-upgrade"
+                rm ${tss_path}.srtm
+                srtm_upgrade
+                [ -f ${measured_flag} ] && rm -f ${measured_flag}
+                reseal "${tss_path}"
+                return 3
+            fi
+
             maybe_break "measure-fail"
 
             # store PCR hints for recovery
