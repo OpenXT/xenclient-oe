@@ -619,23 +619,123 @@ tpm2_write_tboot_policy() {
                  "${policy}" >/dev/null 2>&1
 }
 
+# Usage: tpm_get_syspath [TPM-DEVICE-ID]
+# Verify and print the path of the TPM, with the given id (default:0), on
+# stdout. Returns 0 on success, 1 if the path in the sysfs cannot be found.
+tpm_get_syspath() {
+    local devid="${1:-0}"
+    local syspath="/sys/class/tpm/tpm${devid}"
+
+    if [ ! -e "${syspath}" ]; then
+        echo "tpm_get_syspath: tpm${devid} has no entry in the sysfs." >&2
+        return 1
+    fi
+    echo "${syspath}"
+}
+
+# Usage: tpm_get_ev_separator
+# Print the EV_SEPARATOR value as presented by the kernel, or our best guess as
+# what it may be, on stdout.
+tpm_get_ev_separator() {
+    local evs
+
+    if is_tpm_2_0; then
+        # TPM 2.0: `printf "\xff\xff\xff\xff" | sha256sum`, best guess...
+        evs="df3f619804a92fdb4057192dc43dd748ea778adc52bc498ce80524c014b81119"
+    else
+        # TPM 1.2 will expose a securityfs node with ASCII values.
+        local path="/sys/kernel/security/tpm0/ascii_bios_measurements"
+
+        evs=$(awk '$1 == 4 && $3 == 04 { print $2 }' "${path}")
+        # Fallback: Pick `printf "\xff\xff\xff\xff" | sha1sum`, best guess...
+        evs=${evs:-"d9be6524a5f5047db5866813acf3277892a7a30a"}
+    fi
+    echo "${evs}"
+}
+
+# Usage: tpm_list_pcrs
+# Print all the PCR values of the first TPM on stdout.
+tpm_list_pcrs() {
+    if is_tpm_2_0; then
+        tpm2_pcrlist
+    else
+        cat "$(tpm_get_syspath)/device/pcrs"
+    fi
+}
+
+# tpm_pcrlist_save PCRLIST-FILE PCR-IDS
+# Write the list of PCR-IDS to the PCRLIST-FILE, overwriting the existing one
+# if necessary.
+tpm_pcrlist_save() {
+    local file="$1"
+    shift 1
+    local pcrlist=""
+
+    # Sanity check list of number in PCR id range ([0-23])
+    for p in "$@"; do
+        pcrid="${p%%:*}"
+        if [ "$(expr "${pcrid}" : '^[[:digit:]]\+$')" -a \
+             "${pcrid}" -gt 23 -o "${pcrid}" -lt 0 ]; then
+            return 1
+        fi
+        pcrlist="${pcrlist} ${pcrid}"
+    done
+
+    echo "${pcrlist}" > "${file}"
+}
+
+# tpm_pcrs_to_opts PCR-IDS
+# Print a list of options from PCR-IDS suitable to use as argument with TSS
+# utilities. This makes handling TPM1.2 and TPM2.0 TSS stacks easier.
+tpm_pcrs_to_opts() {
+    local tss_opt
+    local pcr_opts
+
+    if is_tpm_2_0; then
+        tss_opt="-r"
+    else
+        tss_opt="-p"
+    fi
+    for p in "$@"; do
+        pcr_opts="${pcr_opts} ${tss_opt} ${p}"
+    done
+    echo "${pcr_opts}"
+}
+
+# Usage: tpm_pcr_value_normalize PCR-VALUE
+# Print the PCR-VALUE, from TPM-TSS output, normalized on stdout.
+# Normalized here means no space, all lowercase, no PCR identifier, and only
+# the last line.
+# This is relevant for to be consistent across TSS versions and keeps format
+# sanitizing in one centralized place, should it require to be amended.
+tpm_pcr_value_normalize() {
+    echo "$1" | awk -F ':' 'END{ gsub(" ", "", $2); print tolower($2) }'
+}
+
+# Usage: tpm_get_hash_algorithm
+# Print the default hash algorithm to use within the current environment.
+tpm_get_hash_algorithm() {
+    local hashalg="sha1"
+
+    if is_tpm_2_0; then
+        if pcr_bank_exists "sha256"; then
+            hashalg="sha256"
+        fi
+    fi
+    echo "${hashalg}"
+}
+
 # Usage: tpm_get_pcr PCR-ID
 # Print the content of PCR-ID on stdout. The value is normalized: all
 # lowercase, no space.
 tpm_get_pcr() {
-    local pcr="${1}"
+    local pcr="$1"
+    local hashalg="$(tpm_get_hash_algorithm)"
 
-    is_tpm_2_0
-    if [ $? -eq 0 ]; then
-        if pcr_bank_exists "sha256"; then
-            echo "$(tpm2_pcrlist -L sha256:${pcr} | tail -1 | cut -f2 -d: | tr 'A-Z' 'a-z' | tr -d \ )"
-        else
-            echo "$(tpm2_pcrlist -L sha1:${pcr} | tail -1 | cut -f2 -d: | tr 'A-Z' 'a-z' | tr -d \ )"
-        fi
+    if is_tpm_2_0; then
+        tpm_pcr_value_normalize "$(tpm2_pcrlist -L ${hashalg}:${pcr})"
     else
-        local tpm="$(find /sys/class -name tpm0 2>/dev/null)/device"
-
-        echo "$(grep PCR-${pcr} ${tpm}/pcrs|cut -f2 -d:|tr 'A-Z' 'a-z'|tr -d \ )"
+        tpm_pcr_value_normalize "$(grep PCR-${pcr} "$(tpm_get_syspath)/device/pcrs")"
     fi
 }
 
