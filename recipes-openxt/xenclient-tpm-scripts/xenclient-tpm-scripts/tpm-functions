@@ -743,200 +743,155 @@ tpm_get_pcr() {
 # Seal the secret key file and create the sealed key pair for unsealing.
 tpm_seal() {
     local root=""
-    local hashalg="sha1"
+    local hashalg="$(tpm_get_hash_algorithm)"
     local pcrs=""
-    local pcr_params=""
     local OPTIND
     local opt
+    local allout
 
     while getopts ":a:r:p:" opt; do
         case "${opt}" in
-            a)
-                hashalg=${OPTARG}
-            ;;
-            r)
-                root=${OPTARG}
-            ;;
-            p)
-                pcrs="${pcrs} ${OPTARG}"
-            ;;
+            a) hashalg="${OPTARG}" ;;
+            r) root="${OPTARG}" ;;
+            p) pcrs="${pcrs} ${OPTARG}" ;;
         esac
     done
     shift $((OPTIND-1))
 
-    local secret="${root}/${1}"
-    local tss="${root}/${2}"
+    local secret="${root}/$1"
+    local tss="${root}/$2"
 
-    for p in ${pcrs}; do
-        if [[ "${tpm2}" -eq 0 ]]; then
-            pcr_params="${pcr_params} -r ${p}"
-        else
-            pcr_params="${pcr_params} -p ${p}"
+    local pcr_opts="$(tpm_pcrs_to_opts ${pcrs})"
+
+    if ! tpm_pcrlist_save "${tss}.pcrs" ${pcrs}; then
+        echo "tpm_seal: Failed to save PCR ID list." >&2
+        return 1
+    fi
+
+    if is_tpm_2_0; then
+        if ! pcr_bank_exists "${hashalg}"; then
+            echo "tpm_seal: Requested algorithm \"${hashalg}\" does not "\
+                "exist or is not supported." >&2
+            return 1
         fi
-    done
 
-    is_tpm_2_0
-    if [ $? -eq 0 ]; then
-        pcr_bank_exists "${hashalg}"
-        [ $? -eq 0 ] || return 1
-
-        # pcr_params starts with -p or -r, but that's okay because
-        # echo only honors flags -n -e & -E
-        echo "${pcr_params}" > ${tss}.pcrs
-
-        case $hashalg in
+        case "${hashalg}" in
         sha1)
-            sealout=$(tpm2_sealdata -H ${OXT_HANDLE_SHA1} -I ${secret} \
-                -O ${tss}.sha1 -o ${tss}.pub.sha1 -g ${TPM_ALG_SHA1} \
-                -G ${TPM_ALG_KEYEDHASH} -b ${OXT_SEAL_ATTR} ${pcr_params} 2>&1)
-            return $?
+            allout="$(tpm2_sealdata -H "${OXT_HANDLE_SHA1}" -I "${secret}" \
+                -O "${tss}.sha1" -o "${tss}.pub.sha1" -g "${TPM_ALG_SHA1}" \
+                -G "${TPM_ALG_KEYEDHASH}" -b "${OXT_SEAL_ATTR}" \
+                ${pcr_opts} 2>&1)"
+            if [ $? -ne 0 ]; then
+                echo "tpm_seal: Failed to seal data (TPM 2.0) "\
+                    "using sha1 algorithm:" >&2
+                echo "${allout}" >&2
+                return 1
+            fi
         ;;
         sha256)
-            sealout=$(tpm2_sealdata -H ${OXT_HANDLE_SHA256} -I ${secret} \
-                -O ${tss}.sha256 -o ${tss}.pub.sha256 -g ${TPM_ALG_SHA256} \
-                -G ${TPM_ALG_KEYEDHASH} -b ${OXT_SEAL_ATTR} ${pcr_params} 2>&1)
-            return $?
+            allout="$(tpm2_sealdata -H "${OXT_HANDLE_SHA256}" -I "${secret}" \
+                -O "${tss}.sha256" -o "${tss}.pub.sha256" -g "${TPM_ALG_SHA256}" \
+                -G "${TPM_ALG_KEYEDHASH}" -b "${OXT_SEAL_ATTR}" \
+                ${pcr_opts} 2>&1)"
+            if [ $? -ne 0 ]; then
+                echo "tpm_seal: Failed to seal data (TPM 2.0) "\
+                    "using sha256 algorithm:" >&2
+                echo "${allout}" >&2
+                return 1
+            fi
         ;;
         *)
+            echo "tpm_seal: Algorithm \"${hashalg}\" is not supported." >&2
             return 1
         ;;
         esac
     else
-        sealout=$(tpm_sealdata_sa -i ${secret} -o ${tss}.sha1 \
-            -z ${pcr_params} 2>&1)
-        return $?
-    fi
-}
-
-tpm_forward_seal() {
-    local root=""
-    local forward_values=""
-    local hashalg="sha1"
-    local pcrs=""
-    local pcr_params=""
-    local OPTIND
-    local opt
-    local p
-    is_tpm_2_0
-    local tpm2=$?
-
-    while getopts ":a:r:p:" opt; do
-        case "${opt}" in
-            a)
-                hashalg=${OPTARG}
-            ;;
-            r)
-                root=${OPTARG}
-            ;;
-            p)
-                pcrs="${pcrs} ${OPTARG}"
-            ;;
-        esac
-    done
-    shift $((OPTIND-1))
-
-    local key="${root}/${1}"
-    local tss="${root}/${2}"
-
-    for p in ${pcrs}; do
-        if [[ "${tpm2}" -eq 0 ]]; then
-            pcr_params="${pcr_params} -r ${p}"
-        else
-            pcr_params="${pcr_params} -p ${p}"
-        fi
-    done
-
-    if [ "${tpm2}" -eq 0 ];
-    then
-        seal_file=${key}
-        clean_old_tpm_files
-        if pcr_bank_exists "sha256"; then
-            # We only want the PCRs numbers and not the forward seal values
-            echo "${pcr_params}" | \
-                sed -e 's/:[0-9a-zA-Z]\{64\}//g' > ${tss}.pcrs
-            tpm2_sealdata -H ${OXT_HANDLE_SHA256} -I ${seal_file} \
-                          -O ${tss}.sha256 -o ${tss}.pub.sha256 \
-                          -g ${TPM_ALG_SHA256} -G ${TPM_ALG_KEYEDHASH} \
-                          -b ${OXT_SEAL_ATTR} ${pcr_params} 2>&1
-            err=$?
-            if [ $err -ne 0 ]; then return $err; fi
-        fi
-        [ -e ${tss} ] || [ -e ${tss}.sha256 ] && return 0
-        return 1
-    else
-        /etc/init.d/trousers status > /dev/null 2>&1
+        allout="$(tpm_sealdata_sa -i "${secret}" -o "${tss}.sha1" \
+            -z ${apcr_opts} 2>&1)"
         if [ $? -ne 0 ]; then
-            tpm_sealdata_sa -i ${key} -o ${tss} -z ${pcr_params} 2>&1
-            return $?
-        else
-            tpm_sealdata -i ${key} -o ${tss} -z ${pcr_params} 2>&1
-            return $?
+            echo "tpm_seal: Failed to seal data (TPM 1.2):" >&2
+            echo "${allout}" >&2
+            return 1
         fi
     fi
+
+    return 0
 }
 
-# Usage: tpm_unseal [ -a hash-algorithm ] [-r path-to-root ] [ -p pcr-id ] TSS-FILE-BASENAME
+# Usage: tpm_unseal [ -a hash-algorithm ] [-r path-to-root ] TSS-FILE-BASENAME
 # Ask the TPM for the secret key using the sealed TSS keys given the current
 # PCR values.
 # Print the secret on stdout on success, otherwise print the error logs on
 # stderr and nothing on stdout.
-# -p has no effect.
 tpm_unseal() {
     local root=""
-    local hashalg="sha1"
+    local hashalg="$(tpm_get_hash_algorithm)"
     local pcrs=""
-    local pcr_params=""
     local OPTIND
     local opt
+    # Capture stderr into this variable while stdout is output normally.
+    # The usual sleight of hand goes:
+    #    { stderr="$(cmd args 2>&1 1>&3 3>&-)"; } 3>&1
+    local stderr
 
-    while getopts ":a:r:p:" opt; do
+    while getopts ":a:r:" opt; do
         case "${opt}" in
-            a)
-                hashalg=${OPTARG}
-            ;;
-            r)
-                root=${OPTARG}
-            ;;
-            p)
-                pcrs="${pcrs} ${OPTARG}"
-            ;;
+            a) hashalg="${OPTARG}" ;;
+            r) root="${OPTARG}" ;;
         esac
     done
     shift $((OPTIND-1))
 
-    local tss="${root}/${1}"
+    local tss="${root}/$1"
+    local pcr_opts="$(tpm_pcrs_to_opts $(cat "${tss}.pcrs"))"
 
-    is_tpm_2_0
-    if [ $? -eq 0 ]; then
-        for p in ${pcrs}; do
-            pcr_params="${pcr_params} -r ${p}"
-        done
+    if is_tpm_2_0; then
+        if ! pcr_bank_exists "${hashalg}"; then
+            echo "tpm_seal: Requested algorithm \"${hashalg}\" does not "\
+                "exist or is not supported." >&2
+            return 1
+        fi
 
-        pcr_bank_exists "${hashalg}"
-        [ $? -eq 0 ] || return 1
-
-        case $hashalg in
+        case "${hashalg}" in
         sha1)
-            tpm2_unsealdata -H ${OXT_HANDLE_SHA1} -n "${tss}.sha1" \
-                            -u "${tss}.pub.sha1" -g ${TPM_ALG_SHA1} \
-                            $( < ${tss}.pcrs ) 2>/dev/null
-            return $?
+            { stderr="$(tpm2_unsealdata -H "${OXT_HANDLE_SHA1}" \
+                -n "${tss}.sha1" -u "${tss}.pub.sha1" \
+                -g "${TPM_ALG_SHA1}" ${pcr_opts} 2>&1 1>&3 3>&-)"; } 3>&1
+            if [ "$?" -ne 0 ]; then
+                echo "tpm_unseal: Failed to unseal data (TPM 2.0) "\
+                    "using sha1 algorithm:" >&2
+                echo "${stderr}" >&2
+                return 1
+            fi
         ;;
         sha256)
-            tpm2_unsealdata -H ${OXT_HANDLE_SHA256} -n "${tss}.sha256" \
-                            -u "${tss}.pub.sha256" -g ${TPM_ALG_SHA256} \
-                            $( < ${tss}.pcrs ) 2>/dev/null
-            return $?
+            { stderr="$(tpm2_unsealdata -H "${OXT_HANDLE_SHA256}" \
+                -n "${tss}.sha256" -u "${tss}.pub.sha256" \
+                -g "${TPM_ALG_SHA256}" ${pcr_opts} 2>&1 1>&3 3>&-)"; } 3>&1
+            if [ "$?" -ne 0 ]; then
+                echo "tpm_unseal: Failed to unseal data (TPM 2.0) "\
+                    "using sha256 algorithm:" >&2
+                echo "${stderr}" >&2
+                return 1
+            fi
         ;;
         *)
+            echo "tpm_unseal: Algorithm \"${hashalg}\" is not supported." >&2
             return 1
         ;;
         esac
     else
-        tpm_unsealdata_sa -z -i $tss 2>/dev/null
-        ret=$?
+        # tpm_unsealdata_sa does not offer to unseal against a given list of
+        # PCRs.
+        { stderr="$(tpm_unsealdata_sa -z -i "${tss}.sha1" 2>&1 1>&3 3>&-)"; } 3>&1
+        if [ "$?" -ne 0 ]; then
+            echo "tpm_unseal: Failed to unseal data (TPM 1.2): " >&2
+            echo "${stderr}" >&2
+            return 1
+        fi
     fi
 
+    return 0
 }
 
 QUIRK_D="/usr/lib/tpm-scripts/quirks.d"
