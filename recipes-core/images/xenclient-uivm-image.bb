@@ -6,10 +6,13 @@ LIC_FILES_CHKSUM = " \
     file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302 \
 "
 
+inherit openxt-image
+
 IMAGE_FEATURES += " \
     package-management \
     read-only-rootfs \
     empty-root-password \
+    root-bash-shell \
 "
 IMAGE_FSTYPES = "ext3.vhd.gz"
 export IMAGE_BASENAME = "xenclient-uivm-image"
@@ -20,6 +23,14 @@ COMPATIBLE_MACHINE = "(xenclient-uivm)"
 BAD_RECOMMENDATIONS += " \
     avahi-daemon \
     avahi-autoipd \
+"
+
+INITSCRIPT_REMOVE = " \
+    finish.sh \
+    rmnologin.sh \
+    sshd \
+    urandom \
+    networking \
 "
 
 # Specifies the list of locales to install into the image during the root
@@ -44,14 +55,12 @@ XSERVER = " \
     xf86-input-keyboard \
 "
 
-IMAGE_INSTALL = "\
-    ${ROOTFS_PKGMANAGE} \
+IMAGE_INSTALL += "\
     ${XSERVER} \
     modules-uivm \
     packagegroup-xenclient-common \
     packagegroup-xenclient-xfce-minimal \
     openssh \
-    packagegroup-core-boot \
     packagegroup-base \
     xenfb2 \
     kernel-modules \
@@ -100,13 +109,8 @@ IMAGE_INSTALL = "\
     matchbox-keyboard-im \
 "
 
-require xenclient-image-common.inc
 require xenclient-version.inc
 inherit xenclient-licences
-inherit image
-
-#zap root password for release images
-ROOTFS_POSTPROCESS_COMMAND += '${@base_conditional("DISTRO_TYPE", "release", "zap_root_password; ", "",d)}'
 
 post_rootfs_shell_commands() {
     # Start WM right away.
@@ -115,22 +119,7 @@ post_rootfs_shell_commands() {
     # enable ctrlaltdel reboot because PV driver uses ctrl+alt+del to interpret reboot issued via xenstore
     echo 'ca:12345:ctrlaltdel:/sbin/shutdown -t1 -a -r now' >> ${IMAGE_ROOTFS}/etc/inittab
 
-    # Change root shell.
-    sed -i 's|root:x:0:0:root:/root:/bin/sh|root:x:0:0:root:/root:/bin/bash|' ${IMAGE_ROOTFS}/etc/passwd
-
     # Trick to resolve dom0 name with argo.
     echo '1.0.0.0 dom0' >> ${IMAGE_ROOTFS}/etc/hosts
 }
 ROOTFS_POSTPROCESS_COMMAND += "post_rootfs_shell_commands; "
-
-# Get a tty on hvc0 when in debug mode.
-ROOTFS_POSTPROCESS_COMMAND += '${@bb.utils.contains("IMAGE_FEATURES", "debug-tweaks", "start_tty_on_hvc0; ", "",d)}'
-
-remove_nonessential_initscripts() {
-    remove_initscript "finish.sh"
-    remove_initscript "rmnologin.sh"
-    remove_initscript "sshd"
-    remove_initscript "urandom"
-    remove_initscript "networking"
-}
-ROOTFS_POSTPROCESS_COMMAND += "remove_nonessential_initscripts; "

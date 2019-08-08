@@ -1,5 +1,7 @@
+inherit openxt-image
+
 DEPENDS += "policycoreutils-native attr-native"
-IMAGE_INSTALL += " \
+IMAGE_INSTALL_append += " \
     libselinux-bin \
     policycoreutils-loadpolicy \
     policycoreutils-newrole \
@@ -34,4 +36,3 @@ DEPENDS += " \
 
 IMAGE_PREPROCESS_COMMAND += "selinux_set_labels; "
 
-inherit core-image

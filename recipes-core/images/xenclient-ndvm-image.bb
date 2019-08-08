@@ -6,9 +6,13 @@ LIC_FILES_CHKSUM = " \
     file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302 \
 "
 
+inherit openxt-selinux-image
+
 IMAGE_FEATURES += " \
     package-management \
     read-only-rootfs \
+    empty-root-password \
+    root-bash-shell \
 "
 
 IMAGE_FSTYPES = "ext3.disk.vhd.gz"
@@ -22,12 +26,17 @@ BAD_RECOMMENDATIONS += " \
     avahi-autoipd \
     ca-certificates \
 "
-# List of packages removed at rootfs-postprocess.
+# List of packages that should not be installed
 PACKAGE_REMOVE = " \
     hicolor-icon-theme \
 "
 
 IMAGE_FEATURES += "empty-root-password"
+
+INITSCRIPT_REMOVE = " \
+    urandom \
+    sshd \
+"
 
 IMAGE_INSTALL = " \
     ${ROOTFS_PKGMANAGE} \
@@ -37,7 +46,6 @@ IMAGE_INSTALL = " \
     packagegroup-xenclient-common \
     util-linux-mount \
     util-linux-umount \
-    busybox \
     openssh \
     kernel-modules \
     libargo \
@@ -67,18 +75,10 @@ IMAGE_INSTALL = " \
     iputils-ping \
 "
 
-require xenclient-image-common.inc
 require xenclient-version.inc
 inherit xenclient-licences
-inherit openxt-selinux-image
-
-# zap root password for release images
-ROOTFS_POSTPROCESS_COMMAND += '${@base_conditional("DISTRO_TYPE", "release", "zap_root_password; ", "",d)}'
 
 post_rootfs_shell_commands() {
-    # Change root shell.
-    sed -i 's|root:x:0:0:root:/root:/bin/sh|root:x:0:0:root:/root:/bin/bash|' ${IMAGE_ROOTFS}/etc/passwd;
-
     # Trick to resolve dom0 name with argo.
     echo '1.0.0.0 dom0' >> ${IMAGE_ROOTFS}/etc/hosts;
 
@@ -87,17 +87,5 @@ post_rootfs_shell_commands() {
 
     # NDVM doesn't have a /dev/tty1, disable the login shell on it
     sed -i 's/[^#].*getty.*tty1$/#&/' ${IMAGE_ROOTFS}/etc/inittab ;
-
-    # Forcibly remove packages in PACKAGE_REMOVE variable.
-    opkg -f ${IPKGCONF_TARGET} -o ${IMAGE_ROOTFS} ${OPKG_ARGS} -force-depends remove ${PACKAGE_REMOVE};
 }
 ROOTFS_POSTPROCESS_COMMAND += "post_rootfs_shell_commands; "
-
-# Get a tty on hvc0 when in debug mode.
-ROOTFS_POSTPROCESS_COMMAND += '${@bb.utils.contains("IMAGE_FEATURES", "debug-tweaks", "start_tty_on_hvc0; ", "",d)}'
-
-remove_nonessential_initscripts() {
-    remove_initscript "urandom"
-    remove_initscript "sshd"
-}
-ROOTFS_POSTPROCESS_COMMAND += "remove_nonessential_initscripts; "

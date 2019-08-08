@@ -6,9 +6,16 @@ LIC_FILES_CHKSUM = " \
     file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302 \
 "
 
+inherit openxt-selinux-image
+inherit openxt-vm-common
+
+INITRD_VM = "xenclient-initramfs-image"
+INSTALL_VM_INITRD = "1"
+
 IMAGE_FEATURES += " \
     package-management \
     read-only-rootfs \
+    root-bash-shell \
 "
 IMAGE_FSTYPES = "ext3.gz"
 export IMAGE_BASENAME = "xenclient-dom0-image"
@@ -24,8 +31,7 @@ BAD_RECOMMENDATIONS += " \
     ${@bb.utils.contains('IMAGE_FEATURES', 'web-certificates', '', 'ca-certificates', d)} \
 "
 
-IMAGE_INSTALL = "\
-    ${ROOTFS_PKGMANAGE} \
+IMAGE_INSTALL += "\
     initscripts \
     modules-dom0 \
     packagegroup-core-boot \
@@ -40,19 +46,11 @@ IMAGE_INSTALL = "\
     ${@bb.utils.contains('IMAGE_FEATURES', 'debug-tweaks', 'packagegroup-selinux-policycoreutils audit', '' ,d)} \
 "
 
-inherit openxt-selinux-image
 inherit xenclient-licences
 
-require xenclient-image-common.inc
 require xenclient-version.inc
 
-# zap root password for release images
-ROOTFS_POSTPROCESS_COMMAND += '${@base_conditional("DISTRO_TYPE", "release", "zap_root_password; ", "",d)}'
-
 post_rootfs_shell_commands() {
-    # Change root shell.
-    sed -i 's|root:x:0:0:root:/root:/bin/sh|root:x:0:0:root:/root:/bin/bash|' ${IMAGE_ROOTFS}/etc/passwd
-
     mkdir -p ${IMAGE_ROOTFS}/config/etc
     mv ${IMAGE_ROOTFS}/etc/passwd ${IMAGE_ROOTFS}/config/etc
     mv ${IMAGE_ROOTFS}/etc/shadow ${IMAGE_ROOTFS}/config/etc
@@ -65,9 +63,6 @@ post_rootfs_shell_commands() {
     ln -s /var/volatile/etc/resolv.conf ${IMAGE_ROOTFS}/etc/resolv.conf
 
     echo 'kernel.printk_ratelimit = 0' >> ${IMAGE_ROOTFS}/etc/sysctl.conf
-
-    # Add initramfs
-    cat ${DEPLOY_DIR_IMAGE}/xenclient-initramfs-image-xenclient-dom0.cpio.gz > ${IMAGE_ROOTFS}/boot/initramfs.gz
 
     # Create mountpoint for /mnt/secure
     mkdir -p ${IMAGE_ROOTFS}/mnt/secure
@@ -82,12 +77,6 @@ post_rootfs_shell_commands() {
     mkdir -p ${IMAGE_ROOTFS}/var/lib/xen
     mkdir -p ${IMAGE_ROOTFS}/etc/xen
     touch ${IMAGE_ROOTFS}/etc/xen/xl.conf
-
-    # Remove network modules except netfront
-    for x in `find ${IMAGE_ROOTFS}/lib/modules -name *.ko | grep drivers/net | grep -v xen-netfront`; do
-        pkg="kernel-module-`basename $x .ko | sed s/_/-/g`"
-        opkg ${IPKG_ARGS} -force-depends remove $pkg
-    done
 
     # Write coredumps in /var/cores
     echo 'kernel.core_pattern = /var/cores/%e-%t.%p.core' >> ${IMAGE_ROOTFS}/etc/sysctl.conf
