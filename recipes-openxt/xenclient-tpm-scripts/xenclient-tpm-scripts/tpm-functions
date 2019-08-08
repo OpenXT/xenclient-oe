@@ -123,21 +123,23 @@ alg_to_handle () {
     esac
 }
 
-tcsd_start() {
-    is_tpm_2_0
-    local tpm2=$?
-    if [ "${tpm2}" -ne 0 ];
-    then
-        local ret=1
-        /etc/init.d/trousers status > /dev/null
-        if [ $? -ne 0 ]; then
-            /etc/init.d/trousers start > /dev/null
-            sleep 1
-            /etc/init.d/trousers status > /dev/null
-            [ $? -ne 0 ] && return 1
-        fi
+tcsd_running() {
+    if [ ! -x "/etc/init.d/trousers" ]; then
+        return 1
     fi
-    return 0
+    /etc/init.d/trousers status > /dev/null 2>&1
+}
+
+tcsd_start() {
+    # TPM2.0 TSS does not require tcsd.
+    if is_tpm_2_0; then
+        return 0
+    fi
+    if tcsd_running; then
+        return 0
+    fi
+
+    /etc/init.d/trousers start
 }
 # Function to determin whether or not the TPM is active
 # returns 0 if active
@@ -806,8 +808,14 @@ tpm_seal() {
         ;;
         esac
     else
-        allout="$(tpm_sealdata_sa -i "${secret}" -o "${tss}.sha1" \
-            -z ${apcr_opts} 2>&1)"
+        local tss_bin="tpm_sealdata"
+
+        # Use the standalone binary if tcsd is not running.
+        if ! tcsd_running; then
+            tss_bin="${tss_bin}_sa"
+        fi
+        allout="$(${tss_bin} -i "${secret}" -o "${tss}.sha1" \
+            -z ${pcr_opts} 2>&1)"
         if [ $? -ne 0 ]; then
             echo "tpm_seal: Failed to seal data (TPM 1.2):" >&2
             echo "${allout}" >&2
@@ -881,9 +889,15 @@ tpm_unseal() {
         ;;
         esac
     else
+        local tss_bin="tpm_unsealdata"
+
+        # Use the standalone binary if tcsd is not running.
+        if ! tcsd_running; then
+            tss_bin="${tss_bin}_sa"
+        fi
         # tpm_unsealdata_sa does not offer to unseal against a given list of
         # PCRs.
-        { stderr="$(tpm_unsealdata_sa -z -i "${tss}.sha1" 2>&1 1>&3 3>&-)"; } 3>&1
+        { stderr="$(${tss_bin} -z -i "${tss}.sha1" 2>&1 1>&3 3>&-)"; } 3>&1
         if [ "$?" -ne 0 ]; then
             echo "tpm_unseal: Failed to unseal data (TPM 1.2): " >&2
             echo "${stderr}" >&2
