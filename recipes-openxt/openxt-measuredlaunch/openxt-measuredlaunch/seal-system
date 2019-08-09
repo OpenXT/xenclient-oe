@@ -90,11 +90,7 @@ rotate_sealed_keyfiles() {
 
 # Globals
 hashalg="$(tpm_get_hash_algorithm)"
-if is_tpm_2_0; then
-    tpm2="0"
-else
-    tpm2="1"
-fi
+tpm_ver="$(get_tpm_version)"
 
 # Configurables
 operation="seal"
@@ -228,8 +224,8 @@ forward)
         # correct predict PCR15 during forward seal.
         root_hash=$(dd status=none if=${root_dev} iflag=direct bs=8M | \
                         ${hashalg}sum|cut -f1 -d' ')
-        [ "${tpm2}" -ne 0 ] && root_hash=$(echo -n ${root_hash} | \
-                                               ${hashalg}sum|cut -f1 -d' ')
+        [ "${tpm_ver}" = "1.2" ] && root_hash=$(echo -n ${root_hash} | \
+                                                ${hashalg}sum|cut -f1 -d' ')
         pcr15=$(hash_extend 0 ${root_hash} ${hashalg}) ||
                 err "failed to hash root device"
 
@@ -276,7 +272,7 @@ unseal)
         err "sealed key file missing"
     fi
 
-    if [ "${tpm2}" -eq "0" -a ! -e "${sealed_key}.pub.${hashalg}" ]; then
+    if [ "${tpm_ver}" = "2.0" -a ! -e "${sealed_key}.pub.${hashalg}" ]; then
         err "sealed pub key file missing"
     fi
 

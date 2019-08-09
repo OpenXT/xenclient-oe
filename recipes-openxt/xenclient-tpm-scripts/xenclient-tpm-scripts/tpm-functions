@@ -30,21 +30,26 @@ clean_old_tpm_files () {
     [ -e /boot/system/tpm/config.tss.pub.sha256 ] && rm /boot/system/tpm/config.tss.pub.sha256
 }
 
-is_tpm_2_0 () {
+# Usage: get_tpm_version [DEVID]
+# Print the version of the TPM device with DEVID (default to 0).
+get_tpm_version() {
+    local devid="${1:-0}"
+    local path="$(tpm_get_syspath "${devid}")"
+
     # See the TPM chardev driver implementation:
     # https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux-stable.git/tree/drivers/char/tpm/tpm-sysfs.c?h=v4.14.34#n296
     # Assuming a TPM has already been detected, absence of the sysfs entry
     # means TPM 2.0.
     # This is still valid on Linux 4.16.
-    if [ ! -e /sys/class/tpm/tpm0/device/caps ]; then
-        return 0
+    if [ ! -e "${path}/device/caps" ]; then
+        echo "2.0"
+    else
+        awk '/TCG version:/ { print $3 }' "${path}/device/caps"
     fi
+}
 
-    # Sysfs caps entry contains TPM manufacturer and version info.
-    # https://www.kernel.org/doc/Documentation/ABI/stable/sysfs-class-tpm
-    local tpm_ver="$(awk '/TCG version:/ { print $3 }' /sys/class/tpm/tpm0/device/caps)"
-
-    [ "${tpm_ver}" = "2.0" ]
+is_tpm_2_0 () {
+    [ "$(get_tpm_version)" = "2.0" ]
 }
 
 pcr_bank_exists () {
