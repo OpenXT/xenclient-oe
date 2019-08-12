@@ -116,15 +116,32 @@ handle_alg() {
     esac
 }
 
+# Usage: alg_to_handle TPM-ALGORITHM-CODE
+# Print the matching handle code for the given TPM algorithm code, or nothing
+# if no match is found.
+# Supported: OXT_HANDLE_SHA1, OXT_HANDLE_SHA256.
 alg_to_handle () {
-    alg=$1
-    case $alg in
-        ${TPM_ALG_SHA256})
-            echo "${OXT_HANDLE_SHA256}"
-            ;;
-        ${TPM_ALG_SHA1})
-            echo "${OXT_HANDLE_SHA1}"
-            ;;
+    local alg="$1"
+
+    case "${alg}" in
+        "${TPM_ALG_SHA1}") echo "${OXT_HANDLE_SHA1}" ;;
+        "${TPM_ALG_SHA256}") echo "${OXT_HANDLE_SHA256}" ;;
+    esac
+}
+
+# Usage: hashalg_to_alg HASH-ALGORITHM-STRING
+# Print the matching TPM algorithm code for the given hash algorithm, or
+# nothing if no match is found.
+# Supported: sha1, sha256, sha384, sha512, sm3_256.
+hashalg_to_alg() {
+    local hashalg="$1"
+
+    case "${hashalg}" in
+        "sha1") echo "${TPM_ALG_SHA1}" ;;
+        "sha256") echo "${TPM_ALG_SHA256}" ;;
+        "sha384") echo "${TPM_ALG_SHA384}" ;;
+        "sha512") echo "${TPM_ALG_SHA512}" ;;
+        "sm3_256") echo "${TPM_ALG_SM3_256}" ;;
     esac
 }
 
@@ -776,42 +793,25 @@ tpm_seal() {
     fi
 
     if is_tpm_2_0; then
-        if ! pcr_bank_exists "${hashalg}"; then
-            echo "tpm_seal: Requested algorithm \"${hashalg}\" does not "\
-                "exist or is not supported." >&2
+        local alg="$(hashalg_to_alg "${hashalg}")"
+        local handle="$(alg_to_handle "${alg}")"
+
+        if [ -z "${alg}" -o -z "${handle}" ] || \
+            ! pcr_bank_exists "${hashalg}"; then
+            echo "tpm_unseal: Algorithm \"${hashalg}\" is not supported." >&2
             return 1
         fi
 
-        case "${hashalg}" in
-        sha1)
-            allout="$(tpm2_sealdata -H "${OXT_HANDLE_SHA1}" -I "${secret}" \
-                -O "${tss}.sha1" -o "${tss}.pub.sha1" -g "${TPM_ALG_SHA1}" \
-                -G "${TPM_ALG_KEYEDHASH}" -b "${OXT_SEAL_ATTR}" \
-                ${pcr_opts} 2>&1)"
-            if [ $? -ne 0 ]; then
-                echo "tpm_seal: Failed to seal data (TPM 2.0) "\
-                    "using sha1 algorithm:" >&2
-                echo "${allout}" >&2
-                return 1
-            fi
-        ;;
-        sha256)
-            allout="$(tpm2_sealdata -H "${OXT_HANDLE_SHA256}" -I "${secret}" \
-                -O "${tss}.sha256" -o "${tss}.pub.sha256" -g "${TPM_ALG_SHA256}" \
-                -G "${TPM_ALG_KEYEDHASH}" -b "${OXT_SEAL_ATTR}" \
-                ${pcr_opts} 2>&1)"
-            if [ $? -ne 0 ]; then
-                echo "tpm_seal: Failed to seal data (TPM 2.0) "\
-                    "using sha256 algorithm:" >&2
-                echo "${allout}" >&2
-                return 1
-            fi
-        ;;
-        *)
-            echo "tpm_seal: Algorithm \"${hashalg}\" is not supported." >&2
+        allout="$(tpm2_sealdata -H "${handle}" -I "${secret}" \
+            -O "${tss}.${hashalg}" -o "${tss}.pub.${hashalg}" -g "${alg}" \
+            -G "${TPM_ALG_KEYEDHASH}" -b "${OXT_SEAL_ATTR}" \
+            ${pcr_opts} 2>&1)"
+        if [ $? -ne 0 ]; then
+            echo "tpm_seal: Failed to seal data (TPM 2.0) "\
+                "using ${hashalg} algorithm:" >&2
+            echo "${allout}" >&2
             return 1
-        ;;
-        esac
+        fi
     else
         local tss_bin="tpm_sealdata"
 
@@ -859,40 +859,24 @@ tpm_unseal() {
     local pcr_opts="$(tpm_pcrs_to_opts $(cat "${tss}.pcrs"))"
 
     if is_tpm_2_0; then
-        if ! pcr_bank_exists "${hashalg}"; then
-            echo "tpm_seal: Requested algorithm \"${hashalg}\" does not "\
-                "exist or is not supported." >&2
+        local alg="$(hashalg_to_alg "${hashalg}")"
+        local handle="$(alg_to_handle "${alg}")"
+
+        if [ -z "${alg}" -o -z "${handle}" ] || \
+            ! pcr_bank_exists "${hashalg}"; then
+            echo "tpm_unseal: Algorithm \"${hashalg}\" is not supported." >&2
             return 1
         fi
 
-        case "${hashalg}" in
-        sha1)
-            { stderr="$(tpm2_unsealdata -H "${OXT_HANDLE_SHA1}" \
-                -n "${tss}.sha1" -u "${tss}.pub.sha1" \
-                -g "${TPM_ALG_SHA1}" ${pcr_opts} 2>&1 1>&3 3>&-)"; } 3>&1
-            if [ "$?" -ne 0 ]; then
-                echo "tpm_unseal: Failed to unseal data (TPM 2.0) "\
-                    "using sha1 algorithm:" >&2
-                echo "${stderr}" >&2
-                return 1
-            fi
-        ;;
-        sha256)
-            { stderr="$(tpm2_unsealdata -H "${OXT_HANDLE_SHA256}" \
-                -n "${tss}.sha256" -u "${tss}.pub.sha256" \
-                -g "${TPM_ALG_SHA256}" ${pcr_opts} 2>&1 1>&3 3>&-)"; } 3>&1
-            if [ "$?" -ne 0 ]; then
-                echo "tpm_unseal: Failed to unseal data (TPM 2.0) "\
-                    "using sha256 algorithm:" >&2
-                echo "${stderr}" >&2
-                return 1
-            fi
-        ;;
-        *)
-            echo "tpm_unseal: Algorithm \"${hashalg}\" is not supported." >&2
+        { stderr="$(tpm2_unsealdata -H "${handle}" \
+            -n "${tss}.${hashalg}" -u "${tss}.pub.${hashalg}" \
+            -g "${alg}" ${pcr_opts} 2>&1 1>&3 3>&-)"; } 3>&1
+        if [ "$?" -ne 0 ]; then
+            echo "tpm_unseal: Failed to unseal data (TPM 2.0) "\
+                "using ${hashalg} algorithm:" >&2
+            echo "${stderr}" >&2
             return 1
-        ;;
-        esac
+        fi
     else
         local tss_bin="tpm_unsealdata"
 
