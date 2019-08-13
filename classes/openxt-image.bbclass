@@ -63,7 +63,7 @@ IMAGE_FEATURES[validitems] += "root-bash-shell"
 # Remove initscripts pulled-in by dependencies or not required for operation.
 remove_nonessential_initscripts() {
     if [ -n "${INITSCRIPT_REMOVE}" ]; then
-        for i in "${INITSCRIPT_REMOVE}"; do
+        for i in ${INITSCRIPT_REMOVE}; do
             remove_initscript "${i}"
         done
     fi
