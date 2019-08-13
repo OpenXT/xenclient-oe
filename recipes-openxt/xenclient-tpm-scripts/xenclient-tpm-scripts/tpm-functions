@@ -766,8 +766,52 @@ tpm_get_pcr() {
     fi
 }
 
+# Usage tpm_save_keyfiles BASENAME
+# Rename the existing sealed key files for BASENAME with the .old suffix.
+tpm_save_keyfiles() {
+    local basename="$1"
+    local ext
+
+    for ext in {,.pub}.sha1 {,.pub}.sha256; do
+        if [ -e "${basename}${ext}" ]; then
+            mv "${basename}${ext}" "${basename}${ext}.old"
+        fi
+    done
+}
+
+# Usage tpm_restore_keyfiles BASENAME
+# Renamed the saved key files for BASENAME without the .old suffix.
+# Fails if the saved key files are incoherent.
+tpm_restore_keyfiles() {
+    local basename="$1"
+    local valid="false"
+    local ext alg
+
+    if is_tpm_2_0; then
+        for alg in sha1 sha256; do
+            if [ -e "${basename}.${alg}.old" -a -e "${basename}.pub.${alg}.old" ]; then
+                valid="true"
+            fi
+        done
+    else
+        if [ -e "${basename}.sha1.old" ]; then
+            valid="true"
+        fi
+    fi
+    if [ "${valid}" != "true" ]; then
+        return 1
+    fi
+
+    for ext in {,.pub}.sha1 {,.pub}.sha256; do
+        if [ -e "${basename}${ext}.old" ]; then
+            mv "${basename}${ext}.old" "${basename}${ext}"
+        fi
+    done
+}
+
 # Usage: tpm_seal [ -a hash-algorithm ] [-r path-to-root ] [ -p pcr-id[:value] ] SECRET-KEY-FILE TSS-BASENAME
-# Seal the secret key file and create the sealed key pair for unsealing.
+# Seal the secret key file and create the sealed key/key-pair for unsealing.
+# Existing key(s) will be saved and renamed with the .old suffix on success.
 tpm_seal() {
     local root=""
     local hashalg="$(tpm_get_hash_algorithm)"
@@ -805,6 +849,7 @@ tpm_seal() {
             return 1
         fi
 
+        tpm_save_keyfiles "${tss}"
         allout="$(tpm2_sealdata -H "${handle}" -I "${secret}" \
             -O "${tss}.${hashalg}" -o "${tss}.pub.${hashalg}" -g "${alg}" \
             -G "${TPM_ALG_KEYEDHASH}" -b "${OXT_SEAL_ATTR}" \
@@ -813,6 +858,7 @@ tpm_seal() {
             echo "tpm_seal: Failed to seal data (TPM 2.0) "\
                 "using ${hashalg} algorithm:" >&2
             echo "${allout}" >&2
+            tpm_restore_keyfiles "${tss}"
             return 1
         fi
     else
@@ -822,11 +868,13 @@ tpm_seal() {
         if ! tcsd_running; then
             tss_bin="${tss_bin}_sa"
         fi
+        tpm_save_keyfiles "${tss}"
         allout="$(${tss_bin} -i "${secret}" -o "${tss}.sha1" \
             -z ${pcr_opts} 2>&1)"
         if [ $? -ne 0 ]; then
             echo "tpm_seal: Failed to seal data (TPM 1.2):" >&2
             echo "${allout}" >&2
+            tpm_restore_keyfiles "${tss}"
             return 1
         fi
     fi
