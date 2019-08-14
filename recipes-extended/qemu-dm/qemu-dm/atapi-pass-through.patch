@@ -225,7 +225,7 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
 +atapi-pt-protocol.o-libs := $(LIBARGO_LIBS)
 --- /dev/null
 +++ b/block/atapi-pt-protocol.c
-@@ -0,0 +1,1503 @@
+@@ -0,0 +1,1505 @@
 +/*
 + * ATAPI guest commands translation.
 + *
@@ -359,6 +359,20 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
 +            .name = "filename",
 +            .type = QEMU_OPT_STRING,
 +            .help = "ATAPI PT file name",
++        },
++        {
++            .name = "domid",
++            .type = QEMU_OPT_NUMBER,
++            .help = "argo domid (default 0)",
++        },
++        {
++            .name = "port",
++            .type = QEMU_OPT_NUMBER,
++#define str(s) #s
++#define xstr(s) str(s)
++            .help = "argo port (default " xstr(ATAPI_CDROM_PORT) ")",
++#undef xstr
++#undef str
 +        },
 +        { /* end of list */ }
 +    },
@@ -1161,10 +1175,12 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
 + * Open argo descriptor for atapi-pt-argo device.
 + * @param[in] pts
 + * @param[in] filename: dom0 device path e.g. /dev/bsg/a:b:c:d
++ * @param[in] domid: domid running atapi-pt-helper
++ * @param[in] port: port for atapi-pt-helper
 + * Returns: 0 on success, -1 on failure
 + */
 +static int pt_argo_open_common(BDRVStubdomPassThroughState *pts,
-+                              const char *filename)
++                              const char *filename, int domid, int port)
 +{
 +    pt_argocmd_open_request_t request;
 +    pt_argocmd_open_response_t response;
@@ -1180,14 +1196,14 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
 +    pts->local_addr.aport = XEN_ARGO_PORT_NONE;
 +    pts->local_addr.domain_id = XEN_ARGO_DOMID_ANY;
 +
-+    pts->remote_addr.aport = ATAPI_CDROM_PORT;
-+    pts->remote_addr.domain_id = 0;
++    pts->remote_addr.aport = port;
++    pts->remote_addr.domain_id = domid;
 +
 +    PT_DEBUG("setting argo ring size...\n");
 +    ioctl(pts->argo_fd, ARGOIOCSETRINGSIZE, &argo_ring_size);
 +
 +    PT_DEBUG("bind argo socket with remote...\n");
-+    if (argo_bind(pts->argo_fd, &pts->local_addr, 0)) {
++    if (argo_bind(pts->argo_fd, &pts->local_addr, domid)) {
 +        argo_close(pts->argo_fd);
 +        pts->argo_fd = -1;
 +        PT_DEBUG("error: argo_bind() failed (%s).\n", strerror(errno));
@@ -1257,6 +1273,7 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
 +    BDRVStubdomPassThroughState *pts = bs->opaque;
 +    QemuOpts *opts;
 +    Error *local_err = NULL;
++    uint64_t domid, port;
 +    const char *filename;
 +    int ret = 0;
 +
@@ -1275,45 +1292,31 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
 +        goto out;
 +    }
 +
++    domid = qemu_opt_get_number(opts, "domid", 0);
++    if (domid >= DOMID_FIRST_RESERVED) {
++        error_setg(errp, "ATAPI_PT argo domid %lu out of range (0-%u)", domid,
++                   DOMID_FIRST_RESERVED - 1);
++        ret = -EINVAL;
++        goto out;
++    }
++
++    port = qemu_opt_get_number(opts, "port", ATAPI_CDROM_PORT);
++    if (port > 0xffffffff) {
++        error_setg(errp, "ATAPI_PT argo port %lu out of range (0-%u)", port,
++                   0xffffffff);
++        ret = -EINVAL;
++        goto out;
++    }
++
 +    PT_LOG("opening: %s - readonly=%d\n", filename, bdrv_is_read_only(bs));
 +
 +    atapi_pt_device_info_init(&pts->dev_info, filename, bs);
 +
-+    ret =  pt_argo_open_common(pts, filename);
++    ret = pt_argo_open_common(pts, filename, domid, port);
 +
 +out:
 +    qemu_opts_del(opts);
 +    return ret;
-+}
-+
-+/**
-+ * Probes device and matches if it looks to be a valid atapi-pt-argo.
-+ * @param[in] filename: format "atapi-pt-local:/dev/bsg/a:b:c:d"
-+ * @returns 0 if invalid, 100 if valid (probe priority)
-+ */
-+static int pt_argo_probe_device(const char *filename)
-+{
-+    BDRVStubdomPassThroughState pts;
-+
-+    memset(&pts, 0, sizeof(BDRVStubdomPassThroughState));
-+
-+    /* check protocol */
-+    if (strncmp(filename, "atapi-pt-argo:", strlen("atapi-pt-argo:")) != 0) {
-+        PT_DEBUG("not a pt device %s\n", filename);
-+        return -1;
-+    }
-+
-+    filename += strlen("atapi-pt-argo:");
-+
-+    /* try to open argo device given filename */
-+    if (pt_argo_open_common(&pts, filename) == -1) {
-+        PT_DEBUG("cannot open %s\n", filename);
-+        return -1;
-+    }
-+
-+    argo_close(pts.argo_fd);
-+    PT_DEBUG("argo probe device ok: %s", filename);
-+    return 100;
 +}
 +
 +/**
@@ -1702,7 +1705,6 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
 +    .protocol_name       = "atapi-pt-argo",
 +    .instance_size       = sizeof(BDRVStubdomPassThroughState),
 +    .bdrv_needs_filename = true,
-+    .bdrv_probe_device   = pt_argo_probe_device,
 +    .bdrv_parse_filename = pt_argo_parse_filename,
 +    .bdrv_file_open      = pt_argo_open,
 +    .bdrv_direct_ioctl   = pt_argo_ioctl,
