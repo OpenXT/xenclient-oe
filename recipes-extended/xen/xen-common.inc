@@ -99,6 +99,7 @@ SRC_URI_append = " \
     file://argo-fix-full-ring-write-bug.patch \
     file://argo-fix-requeue-msg-len-bug.patch \
     file://argo-quiet-xsm-check-during-init.patch \
+    file://argo-xmit-xsm-context.patch \
     file://libxl-seabios-ipxe.patch \
     file://memory-scrub-on-domain-shutdown.patch \
 "
