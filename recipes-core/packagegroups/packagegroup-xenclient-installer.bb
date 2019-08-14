@@ -20,7 +20,6 @@ RDEPENDS_${PN} = " \
     efibootmgr \
     eject \
     ethtool \
-    falloc \
     gptfdisk \
     grub-efi \
     intel-microcode \
@@ -52,6 +51,7 @@ RDEPENDS_${PN} = " \
     tpm-tools \
     trousers \
     trousers-data \
+    util-linux \
     util-linux-fdisk \
     util-linux-mount \
     util-linux-sfdisk \
