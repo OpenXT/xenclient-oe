@@ -12,15 +12,9 @@ fi
 # Environment.
 
 begin "Populate volatiles for udev..."
-RESTORECON=${RESTORECON:-/sbin/restorecon}
-if [ ! -x "${RESTORECON}" ]; then
-    failure "SELinux \`${RESTORECON}' tool is missing."
-    exit 1
-fi
-
 mkdir -p /run/lock
-if ! ${RESTORECON} -R /run/lock ; then
-    failure "${RESTORECON} failed."
+if ! restore -R /run/lock ; then
+    failure "${RESTORECON} -R /run/lock failed."
     exit 1
 fi
 
