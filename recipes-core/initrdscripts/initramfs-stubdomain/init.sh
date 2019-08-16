@@ -84,4 +84,4 @@ dmargs="$( xenstore-read ${vm_uuid}/image/dmargs )"
 echo "target $target vm_uuid $vm_uuid"
 echo "Invoking qemu with dmargs       = ${dmargs}"
 /usr/bin/qemu-system-i386 ${dmargs}
-poweroff
+poweroff -f
