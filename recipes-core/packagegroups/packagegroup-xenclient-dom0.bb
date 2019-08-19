@@ -116,7 +116,7 @@ RDEPENDS_${PN} = " \
     xen-xenstore \
     tpm2-tss \
     tpm2-tools \
-    ${@bb.utils.contains('DISTRO_FEATURES', 'blktap2', 'xen-blktap xen-libblktapctl xen-libvhd', 'blktap3', d)} \
+    ${@bb.utils.contains('DISTRO_FEATURES', 'blktap2', 'xen-blktap xen-libblktapctl xen-libvhd', 'blktap3 tapback', d)} \
     pesign \
     ipxe \
 "

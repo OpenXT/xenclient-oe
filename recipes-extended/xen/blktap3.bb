@@ -26,8 +26,11 @@ S = "${WORKDIR}/git"
 
 inherit autotools-brokensep xenclient update-rc.d
 
-INITSCRIPT_NAME = "tapback-daemon"
-INITSCRIPT_PARAMS = "defaults 61"
+PACKAGES =+ "tapback"
+
+INITSCRIPT_PACKAGES = "tapback"
+INITSCRIPT_NAME_tapback = "tapback"
+INITSCRIPT_PARAMS_tapback = "defaults 61"
 
 TARGET_CPPFLAGS += "-DTAP_CTL_NO_DEFAULT_CGROUP_SLICE"
 
@@ -39,9 +42,9 @@ do_install_append() {
 	if ${@bb.utils.contains('DISTRO_FEATURES', 'systemd', 'false', 'true', d)}; then
 		rm -rf ${D}/usr/lib/systemd
 	fi
-	install -d ${D}/etc/init.d
+	install -d ${D}${sysconfdir}/init.d
 	install -m 0755 ${WORKDIR}/tapback.initscript \
-		${D}/etc/init.d/tapback-daemon
+		${D}${sysconfdir}/init.d/tapback
 }
 
 # QA dev-elf: libvhdio-3.5.0.so does not honor the SOLIBSDEV format.
@@ -54,6 +57,10 @@ FILES_${PN}-dev += " \
 "
 FILES_${PN} += " \
     ${libdir}/libvhdio-*.so \
+"
+FILES_tapback += " \
+    ${bindir}/tapback \
+    ${sysconfdir}/init.d/tapback \
 "
 RDEPENDS_${PN} += "glibc-gconv-utf-16"
 RCONFLICTS_${PN} = "xen-blktap xen-libblktap xen-libblktapctl xen-libvhd"

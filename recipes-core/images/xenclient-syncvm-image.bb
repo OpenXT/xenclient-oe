@@ -20,6 +20,8 @@ export IMAGE_BASENAME = "xenclient-syncvm-image"
 COMPATIBLE_MACHINE = "(xenclient-syncvm)"
 
 INITSCRIPT_REMOVE = " \
+    finish.sh \
+    rmnologin.sh \
     urandom \
 "
 
