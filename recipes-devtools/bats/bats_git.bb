@@ -7,15 +7,12 @@ SRCREV = "03608115df2071fff4eaaff1605768c275e5f81f"
 
 S = "${WORKDIR}/git"
 
+inherit allarch
+
 do_install () {
     ${S}/install.sh ${D}/${exec_prefix}
 }
 
-PACKAGES = "${PN} ${PN}-doc"
-
-FILES_${PN} = "\
-	${bindir}/* \
-	${exec_prefix}/libexec/*"
-
-FILES_${PN}-doc = "\
-	${mandir}/*"
+RDEPENDS_${PN} += " \
+    bash \
+"
