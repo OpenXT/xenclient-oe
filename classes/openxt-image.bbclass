@@ -17,7 +17,7 @@ remove_initscript() {
 }
 
 #zap any empty root passwords for release images
-ROOTFS_POSTPROCESS_COMMAND += '${@base_conditional("DISTRO_TYPE", "release", "zap_empty_root_password; ", "",d)}'
+ROOTFS_POSTPROCESS_COMMAND += '${@oe.utils.conditional("DISTRO_TYPE", "release", "zap_empty_root_password; ", "",d)}'
 
 # Make sysvinit verbose if debug-tweaks is enabled
 activate_verbose_sysvinit() {
