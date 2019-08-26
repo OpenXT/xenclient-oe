@@ -1,49 +1,64 @@
 ################################################################################
 SHORT DESCRIPTION: 
 ################################################################################
-Detects XciVMM CPUID signature as XenVMM.
+Halt when no bootable device is found.
 
 ################################################################################
 LONG DESCRIPTION: 
 ################################################################################
-OpenXT changes CPUID instruction emulation to return "XciVMMXciVMM" as
-signature. SeaBIOS still needs to detect it is running on Xen.
+SeaBIOS, by default, will reboot the system when no bootable device is found.
+We prefered to halt instead, avoiding VM rebooting continuously, triggering
+graphic and input switches as they do.
 
 ################################################################################
 CHANGELOG 
 ################################################################################
-Documented: Eric Chanudet, chanudete@ainfosec.com, 17/03/2015
 Ported to SeaBIOS 1.7.5: Eric Chanudet, chanudete@ainfosec.com, 01/03/2015
 
 ################################################################################
 REMOVAL 
 ################################################################################
-This patch is required to handle Xen modified CPUID signature.
+This patch can be removed safely if the feature is not wanted anymore.
 
 ################################################################################
 UPSTREAM PLAN 
 ################################################################################
-This is OpenXT specific. There is no plan to upstream this patch.
+This is an OpenXT work-around. There is no plan to upstream this patch.
 
 ################################################################################
 INTERNAL DEPENDENCIES 
 ################################################################################
-Depends on Xen: xc-xt-cpuid.patch
+None.
 
 ################################################################################
 PATCHES
 ################################################################################
-Index: seabios-1.9.1/src/fw/xen.c
-===================================================================
---- seabios-1.9.1.orig/src/fw/xen.c
-+++ seabios-1.9.1/src/fw/xen.c
-@@ -69,7 +69,8 @@ void xen_preinit(void)
+--- a/src/boot.c
++++ b/src/boot.c
+@@ -706,17 +706,21 @@ boot_fail(void)
+     if (BootRetryTime == (u32)-1)
+         printf("No bootable device.\n");
+     else
+-        printf("No bootable device.  Retrying in %d seconds.\n"
++        printf("No bootable device.  Halt in %d seconds.\n"
+                , BootRetryTime/1000);
+-    // Wait for 'BootRetryTime' milliseconds and then reboot.
++    // Wait for 'BootRetryTime' milliseconds and then halt.
+     u32 end = irqtimer_calc(BootRetryTime);
+     for (;;) {
+-        if (BootRetryTime != (u32)-1 && irqtimer_check(end))
++        if (irqtimer_check(end))
+             break;
+         yield_toirq();
+     }
+-    printf("Rebooting.\n");
+-    reset();
++    /* Halt cpu */
++    printf("Halt.\n");
++    irq_disable();
++    for (;;) {
++        hlt();
++    }
+ }
  
-         dprintf(9, "Found hypervisor signature \"%s\" at %x\n",
-                 signature, base);
--        if (strcmp(signature, "XenVMMXenVMM") == 0) {
-+        if (strcmp(signature, "XenVMMXenVMM") == 0 ||
-+            strcmp(signature, "XciVMMXciVMM") == 0) {
-             /* Set debug_io_port first, so the following messages work. */
-             DebugOutputPort = 0xe9;
-             debug_banner();
+ // Determine next boot method and attempt a boot using it.

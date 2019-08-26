@@ -1,4 +1,4 @@
-FILESEXTRAPATHS_prepend := "${THISDIR}/${BPN}-${PV}:"
+FILESEXTRAPATHS_prepend := "${THISDIR}/patches:"
 
 SRC_URI += " \
     file://halt-if-no-bootable.patch \
