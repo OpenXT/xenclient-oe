@@ -17,8 +17,6 @@ IMAGE_INSTALL = " \
     xen-xenstore \
     qemu-dm-stubdom \
     argo-module \
-    simple-poweroff \
-    rsyslog \
 "
 IMAGE_LINGUAS = ""
 

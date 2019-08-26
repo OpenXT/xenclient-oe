@@ -26,7 +26,6 @@ SRC_URI += "file://compile-time-stubdom-flag.patch \
             file://generic-xenstore-extensions.patch \
             file://readonly-ide.patch \
             file://hvm-param-dm-domain.patch \
-            file://logging-syslog.patch \
             file://dmbus.patch \
             file://switcher.patch \
             file://acpi.patch \
@@ -46,7 +45,6 @@ SRC_URI += "file://compile-time-stubdom-flag.patch \
             file://acpi-wakeup.patch \
             file://openxt-misc-fixes.patch \
             file://qmp-argo-char-driver.patch \
-            file://use-relative-xenstore-nodes.patch \
             file://exit-mainloop-on-reset.patch \
             file://write-acpi-state-to-xenstore.patch \
             file://set-blockdev-ro.patch \
@@ -71,9 +69,12 @@ FILES_${PN}-dbg += "/usr/lib/.debug/* /usr/libexec/.debug/*"
 FILES_${PN}-extra-keymaps = "/usr/share/qemu/keymaps/*"
 FILES_${PN}-extra-roms = "/usr/share/qemu/*"
 INSANE_SKIP_${PN}-extra-roms = "arch"
-FILES_${PN}-utils = "/usr/libexec/*"
+FILES_${PN}-utils = "/usr/libexec/* \
+                     /usr/bin/qemu-pr-helper \
+"
 
-PACKAGES += "${PN}-extra-keymaps ${PN}-extra-roms ${PN}-utils"
+PACKAGES += "${PN}-extra-keymaps ${PN}-extra-roms"
+PACKAGES =+ "${PN}-utils"
 
 EXTRA_OECONF += " \
     --enable-xen \

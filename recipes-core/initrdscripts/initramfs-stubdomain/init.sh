@@ -75,8 +75,6 @@ mkdir -p /var/run
 export USE_INTEL_SB=1
 export INTEL_DBUS=1
 
-rsyslogd -f /etc/rsyslog.conf
-
 echo "Starting qemu directly."
 target="$( xenstore-read target )"
 vm_uuid="$( xenstore-read /local/domain/${target}/vm )"
@@ -84,4 +82,4 @@ dmargs="$( xenstore-read ${vm_uuid}/image/dmargs )"
 echo "target $target vm_uuid $vm_uuid"
 echo "Invoking qemu with dmargs       = ${dmargs}"
 /usr/bin/qemu-system-i386 ${dmargs}
-poweroff
+poweroff -f
