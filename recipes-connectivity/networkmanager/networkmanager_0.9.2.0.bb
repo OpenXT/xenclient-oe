@@ -21,7 +21,7 @@ DEPENDS += " \
 # gnomebase.bbclass strongly assign SRC_URI.
 GNOME_COMPRESS_TYPE = "bz2"
 GNOMEBN = "NetworkManager"
-inherit gnome
+inherit gnomebase
 
 FILESEXTRAPATHS_prepend := "${THISDIR}/${BPN}-${PV}:"
 SRC_URI += " \
