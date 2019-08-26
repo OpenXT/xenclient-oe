@@ -1,0 +1,94 @@
+From 7a5db1e174a1c359150dbd0ae3eaadb2a3eb6e0e Mon Sep 17 00:00:00 2001
+From: Jason Andryuk <jandryuk@gmail.com>
+Date: Fri, 16 Aug 2019 13:20:46 -0400
+Subject: [PATCH] xsm: Don't audit argo enable xsm check during initialization
+
+argo_init calls xsm_argo_enable to see if the policy allows access
+to argo.  If it does, then argo is setup for the domain - otherwise it
+is not initialized.
+
+When a Flask policy selectively enables argo for only certain domain
+types, creating domains without the permission generates an AVC.
+Generating an AVC is misleading since it's Xen calling XSM to make an
+initialization decision and not the domain trying to access argo.
+
+Add xsm_flask_enable_noaudit to bypass the AVC generation for this case.
+
+Signed-off-by: Jason Andryuk <jandryuk@gmail.com>
+---
+ xen/common/argo.c       | 2 +-
+ xen/include/xsm/dummy.h | 5 +++++
+ xen/include/xsm/xsm.h   | 6 ++++++
+ xen/xsm/flask/hooks.c   | 7 +++++++
+ 4 files changed, 19 insertions(+), 1 deletion(-)
+
+--- a/xen/common/argo.c
++++ b/xen/common/argo.c
+@@ -2584,7 +2584,7 @@ argo_init(struct domain *d)
+ {
+     struct argo_domain *argo;
+ 
+-    if ( !opt_argo || xsm_argo_enable(d) )
++    if ( !opt_argo || xsm_argo_enable_noaudit(d) )
+     {
+         argo_dprintk("argo disabled, domid: %u\n", d->domain_id);
+         return 0;
+--- a/xen/include/xsm/dummy.h
++++ b/xen/include/xsm/dummy.h
+@@ -732,6 +732,11 @@ static XSM_INLINE int xsm_argo_enable(co
+     return 0;
+ }
+ 
++static XSM_INLINE int xsm_argo_enable_noaudit(const struct domain *d)
++{
++    return 0;
++}
++
+ static XSM_INLINE int xsm_argo_register_single_source(const struct domain *d,
+                                                       const struct domain *t)
+ {
+--- a/xen/include/xsm/xsm.h
++++ b/xen/include/xsm/xsm.h
+@@ -184,6 +184,7 @@ struct xsm_operations {
+     int (*domain_resource_map) (struct domain *d);
+ #ifdef CONFIG_ARGO
+     int (*argo_enable) (const struct domain *d);
++    int (*argo_enable_noaudit) (const struct domain *d);
+     int (*argo_register_single_source) (const struct domain *d,
+                                         const struct domain *t);
+     int (*argo_register_any_source) (const struct domain *d);
+@@ -717,6 +718,11 @@ static inline int xsm_argo_enable(const
+     return xsm_ops->argo_enable(d);
+ }
+ 
++static inline int xsm_argo_enable_noaudit(const struct domain *d)
++{
++    return xsm_ops->argo_enable_noaudit(d);
++}
++
+ static inline int xsm_argo_register_single_source(const struct domain *d,
+                                                   const struct domain *t)
+ {
+--- a/xen/xsm/flask/hooks.c
++++ b/xen/xsm/flask/hooks.c
+@@ -1726,6 +1726,12 @@ static int flask_argo_enable(const struc
+                         ARGO__ENABLE, NULL);
+ }
+ 
++static int flask_argo_enable_noaudit(const struct domain *d)
++{
++    return avc_has_perm_noaudit(domain_sid(d), SECINITSID_XEN, SECCLASS_ARGO,
++                        ARGO__ENABLE, NULL);
++}
++
+ static int flask_argo_register_single_source(const struct domain *d,
+                                              const struct domain *t)
+ {
+@@ -1882,6 +1888,7 @@ static struct xsm_operations flask_ops =
+     .domain_resource_map = flask_domain_resource_map,
+ #ifdef CONFIG_ARGO
+     .argo_enable = flask_argo_enable,
++    .argo_enable_noaudit = flask_argo_enable_noaudit,
+     .argo_register_single_source = flask_argo_register_single_source,
+     .argo_register_any_source = flask_argo_register_any_source,
+     .argo_send = flask_argo_send,

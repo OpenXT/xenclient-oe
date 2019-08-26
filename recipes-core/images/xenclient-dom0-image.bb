@@ -16,6 +16,7 @@ IMAGE_FEATURES += " \
     package-management \
     read-only-rootfs \
     root-bash-shell \
+    wildcard-sshd-argo \
 "
 IMAGE_FSTYPES = "ext3.gz"
 export IMAGE_BASENAME = "xenclient-dom0-image"
