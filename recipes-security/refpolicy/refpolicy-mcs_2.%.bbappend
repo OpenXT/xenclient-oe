@@ -182,6 +182,7 @@ SRC_URI += " \
     file://patches/storage-Add-fcontexts-for-NVMe-disks.patch \
     file://patches/signed-kernel-modprobe.patch \
     file://patches/add-missing-dbusd-permissions.patch \
+    file://patches/xl-sysadm-interfaces.patch \
 "
 #file://patches/upstream-add-binder-security-class.patch
 #file://patches/upstream-update-netlink-classes.patch
