@@ -1,11 +1,13 @@
-SUMMARY = "OpenXT bats test scripts"
+SUMMARY = "OpenXT bats test scripts."
 LICENSE = "MIT"
-LIC_FILES_CHKSUM = "file://LICENSE;md5=9cfc4a8eac3fe9bdc740b8e3760c5ade"
+LIC_FILES_CHKSUM = "file://LICENSE;md5=c93f84859222e5549645b5fee3d87947"
 
-SRC_URI = "git://github.com/apertussolutions/openxt-bats-suite.git;protocol=git"
+SRC_URI = "git://${OPENXT_GIT_MIRROR}/bats-suite.git;protocol=${OPENXT_GIT_PROTOCOL};branch=${OPENXT_BRANCH}"
 SRCREV = "${AUTOREV}"
 
 S = "${WORKDIR}/git"
+
+inherit allarch
 
 do_install () {
     if [ -e "${S}/dom0" ]; then
@@ -26,6 +28,9 @@ do_install () {
 }
 
 FILES_${PN} = " \
-	${libexecdir}/*"
+    ${libexecdir} \
+"
 
-RDEPENDS_${PN} = "bats"
+RDEPENDS_${PN} = " \
+    bats \
+"
