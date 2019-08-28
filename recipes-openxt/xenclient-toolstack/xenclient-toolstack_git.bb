@@ -10,7 +10,7 @@ DEPENDS_append_xenclient-nilfvm += " ${@deb_bootstrap_deps(d)} "
 inherit autotools-brokensep ocaml findlib
 inherit ${@"xenclient-simple-deb"if(d.getVar("MACHINE",1)=="xenclient-nilfvm")else("null")}
 
-PACKAGES = "${PN}-dbg ${PN}-doc ${PN}-locale ${PN}-dev ${PN}-staticdev ${PN} \
+PACKAGES = "${PN}-dbg ${PN}-doc ${PN}-locale ${PN}-dev ${PN}-staticdev ${PN}-block-scripts ${PN} \
             ${PN}-libs-dbg ${PN}-libs-staticdev ${PN}-libs-dev ${PN}-libs \
             "
 # This is a little hybrid between usual package and findlib installation.
@@ -22,6 +22,12 @@ FILES_${PN} = " \
 "
 FILES_${PN}-dbg += " \
     /usr/src/debug \
+"
+FILES_${PN}-block-scripts = " \
+    ${sysconfdir}/xen/scripts/block \
+    ${sysconfdir}/xen/scripts/tap \
+    ${sysconfdir}/udev/rules.d/xen-block-backend.rules \
+    ${sysconfdir}/udev/rules.d/xen-tap-backend.rules \
 "
 FILES_${PN}-libs = " \
     ${sitelibdir}/*/*${SOLIBSDEV} \

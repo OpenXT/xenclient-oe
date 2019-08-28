@@ -86,6 +86,7 @@ SRC_URI_append = " \
     file://libxl-disable-vnc-query-when-disabled.patch \
     file://xl-shutdown-wait-for-domain-death.patch \
     file://libxl-allow-save-vnuma.patch \
+    file://libxl-block-scripts-log-to-syslog.patch \
     file://domain-reboot.patch \
     file://libxl-retry-qmp-pci-add.patch \
     ${BLKTAP_PATCHQUEUE} \
