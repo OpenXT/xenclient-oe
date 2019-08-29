@@ -61,7 +61,9 @@ swapon -a 2> /dev/null
 
 # Create xl directories
 mkdir -p /var/run/xen
+restore /var/run/xen
 mkdir -p /var/log/xen
+restore /var/log/xen
 
 : exit 0
 
