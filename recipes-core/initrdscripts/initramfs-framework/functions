@@ -1,0 +1,48 @@
+#!/bin/sh
+# Copyright (C) 2019 Apertus Solutions, LLC
+# Licensed on MIT
+
+# Process any break kernel parameters
+check_break() {
+    local h="${1}"
+    local b="${2}"
+
+    if [ -n "${bootparam_break}" ]; then
+        for i in $(echo "${bootparam_break}" | sed "s/,/ /g"); do
+            if [ "${i}" = "${b}" ]; then
+                msg "Launching ${b} break ${h} hook"
+                sh
+            fi
+        done
+    fi
+}
+
+# Log message using User-level message facility to kernel log buffer
+log() {
+    local level="${1}"
+    local pri=$(( 8 + 6 )) # Default to info
+
+    case "${level}" in
+        "emerg") pri=$(( 8 + 0 )); shift ;;
+        "alert") pri=$(( 8 + 1 )); shift ;;
+        "crit") pri=$(( 8 + 2 )); shift ;;
+        "err") pri=$(( 8 + 3 )); shift ;;
+        "warning") pri=$(( 8 + 4 )); shift ;;
+        "notice") pri=$(( 8 + 5 )); shift ;;
+        "info") pri=$(( 8 + 6 )); shift ;;
+        "debug") pri=$(( 8 + 7 )); shift ;;
+    esac
+    echo "<${pri}> $@" > /dev/kmsg
+}
+
+functions_enabled() {
+    msg "Loading utility functions"
+
+    add_module_pre_hook check_break
+    add_module_post_hook check_break
+    return 1
+}
+
+functions_run() {
+    :
+}
