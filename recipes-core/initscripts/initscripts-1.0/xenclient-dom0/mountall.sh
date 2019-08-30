@@ -48,8 +48,8 @@ then
 	restore /dev/initctl
 fi
 
-# /config and /boot/system are relabeled earlier in boot
-restore_firstboot -r /storage /var/log /var/cores
+# /config is relabeled earlier in boot (xenclient-config-access).
+restore_firstboot -r /storage /var/log /var/cores /boot/system
 
 kill -USR1 1
 
