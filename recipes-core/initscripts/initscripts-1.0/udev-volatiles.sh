@@ -12,10 +12,16 @@ fi
 # Environment.
 
 begin "Populate volatiles for udev..."
-mkdir -p /run/lock
-if ! restore -R /run/lock ; then
-    failure "${RESTORECON} -R /run/lock failed."
-    exit 1
-fi
+
+for dir in \
+    /run/lock \
+    /var/volatile/tmp
+do
+    mkdir -p "${dir}"
+    if ! restore -R "${dir}" ; then
+        failure "${RESTORECON} -R ${dir} failed."
+        exit 1
+    fi
+done
 
 success "Udev volatiles ready."
