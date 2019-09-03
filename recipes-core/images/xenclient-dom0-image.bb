@@ -44,6 +44,7 @@ IMAGE_INSTALL += "\
     txt-info-module \
     xenclient-preload-hs-libs \
     linux-firmware-i915 \
+    devicemodel-stubdom \
     ${@bb.utils.contains('IMAGE_FEATURES', 'debug-tweaks', 'packagegroup-selinux-policycoreutils audit', '' ,d)} \
 "
 
@@ -83,17 +84,6 @@ post_rootfs_shell_commands() {
     echo 'kernel.core_pattern = /var/cores/%e-%t.%p.core' >> ${IMAGE_ROOTFS}/etc/sysctl.conf
 }
 ROOTFS_POSTPROCESS_COMMAND += "post_rootfs_shell_commands; "
-
-### Stubdomain stuff - temporary
-STUBDOMAIN_DEPLOY_DIR_IMAGE = "${DEPLOY_DIR}/images/xenclient-stubdomain"
-STUBDOMAIN_IMAGE = "${STUBDOMAIN_DEPLOY_DIR_IMAGE}/xenclient-stubdomain-initramfs-image-xenclient-stubdomain.cpio.gz"
-STUBDOMAIN_KERNEL = "${STUBDOMAIN_DEPLOY_DIR_IMAGE}/bzImage-xenclient-stubdomain.bin"
-process_tmp_stubdomain_items() {
-    mkdir -p ${IMAGE_ROOTFS}/usr/lib/xen/boot
-    cat ${STUBDOMAIN_IMAGE} > ${IMAGE_ROOTFS}/usr/lib/xen/boot/stubdomain-initramfs
-    cat ${STUBDOMAIN_KERNEL} > ${IMAGE_ROOTFS}/usr/lib/xen/boot/stubdomain-bzImage
-}
-ROOTFS_POSTPROCESS_COMMAND += "process_tmp_stubdomain_items; "
 
 # Get rid of unneeded initscripts
 remove_initscripts() {
