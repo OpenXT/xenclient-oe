@@ -154,20 +154,6 @@ PATCHES
      }
      default:
          ret = ERROR_INVAL;
---- a/tools/libxl/libxl_disk.c
-+++ b/tools/libxl/libxl_disk.c
-@@ -451,6 +451,11 @@ static void device_disk_add(libxl__egc *
-     aodev->action = LIBXL__DEVICE_ACTION_ADD;
-     libxl__wait_device_connection(egc, aodev);
- 
-+    libxl__xs_printf(gc, XBT_NULL,
-+                     GCSPRINTF("%s/hotplug-status",
-+                               libxl__device_backend_path(gc, device)),
-+                     "connected");
-+
-     rc = 0;
- 
- out:
 --- a/tools/libxl/libxl_dm.c
 +++ b/tools/libxl/libxl_dm.c
 @@ -2358,6 +2358,24 @@ retry_transaction:
@@ -510,64 +496,6 @@ PATCHES
                  if (common_domname
                      && strcmp(d_config.c_info.name, common_domname)) {
                      d_config.c_info.name = strdup(common_domname);
---- a/tools/libxl/libxl_console.c
-+++ b/tools/libxl/libxl_console.c
-@@ -688,11 +688,16 @@ out:
-     return AO_INPROGRESS;
- }
- 
-+static LIBXL_DEFINE_UPDATE_DEVID(vfb)
-+static LIBXL_DEFINE_DEVICE_FROM_TYPE(vfb)
-+
- static int libxl__set_xenstore_vfb(libxl__gc *gc, uint32_t domid,
-                                    libxl_device_vfb *vfb,
-                                   flexarray_t *back, flexarray_t *front,
-                                   flexarray_t *ro_front)
- {
-+    libxl__device *device;
-+
-     flexarray_append_pair(back, "vnc",
-                           libxl_defbool_val(vfb->vnc.enable) ? "1" : "0");
-     flexarray_append_pair(back, "vnclisten", vfb->vnc.listen);
-@@ -711,6 +716,13 @@ static int libxl__set_xenstore_vfb(libxl
-     if (vfb->sdl.display) {
-         flexarray_append_pair(back, "display", vfb->sdl.display);
-     }
-+    GCNEW(device);
-+    libxl__device_from_vfb(gc, domid, vfb, device);
-+    libxl__xs_printf(gc, XBT_NULL,
-+                     GCSPRINTF("%s/hotplug-status",
-+                               libxl__device_backend_path(gc, device)),
-+                     "connected");
-+
- 
-     return 0;
- }
-@@ -728,9 +740,6 @@ static int libxl__set_xenstore_vfb(libxl
- #define libxl_device_vfb_list NULL
- #define libxl_device_vfb_compare NULL
- 
--static LIBXL_DEFINE_UPDATE_DEVID(vfb)
--static LIBXL_DEFINE_DEVICE_FROM_TYPE(vfb)
--
- /* vfb */
- LIBXL_DEFINE_DEVICE_REMOVE(vfb)
- 
---- a/tools/libxl/libxl_device.c
-+++ b/tools/libxl/libxl_device.c
-@@ -1993,6 +1993,12 @@ void libxl__device_add_async(libxl__egc
-     aodev->action = LIBXL__DEVICE_ACTION_ADD;
-     libxl__wait_device_connection(egc, aodev);
- 
-+    if (device->backend_kind == LIBXL__DEVICE_KIND_VIF)
-+        libxl__xs_printf(gc, XBT_NULL,
-+                         GCSPRINTF("%s/hotplug-status",
-+                                   libxl__device_backend_path(gc, device)),
-+                         "connected");
-+
-     rc = 0;
- 
- out:
 --- a/tools/libxl/libxl_qmp.c
 +++ b/tools/libxl/libxl_qmp.c
 @@ -1019,6 +1019,11 @@ int libxl__qmp_system_wakeup(libxl__gc *
