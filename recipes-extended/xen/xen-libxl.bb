@@ -22,6 +22,7 @@ python () {
                 'libxlutil-dev',
                 'libxenlight',
                 'libxenlight-dev'
+                'cmp-fd-file-inode',
                 ]:
         d.renameVar("FILES_xen-libxl-" + PKG, "FILES_xen-" + PKG)
 
@@ -63,6 +64,7 @@ PACKAGES = " \
     xen-libxenlight \
     xen-libxenlight-dev \
     xen-libxl-staticdev \
+    xen-cmp-fd-file-inode \
     ${PN}-dbg \
     "
 
@@ -85,6 +87,9 @@ FILES_${PN}-dbg += " \
     ${sbindir}/.debug \
     ${libdir}/.debug \
     /usr/src/debug \
+"
+FILES_xen-cmp-fd-file-inode = " \
+    ${libdir}/xen/bin/cmp-fd-file-inode \
 "
 
 CFLAGS_prepend += "${@bb.utils.contains('DISTRO_FEATURES', 'blktap2', '', '-I${STAGING_INCDIR}/blktap',d)}"
