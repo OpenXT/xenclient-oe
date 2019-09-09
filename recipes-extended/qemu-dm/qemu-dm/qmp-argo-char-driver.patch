@@ -7,7 +7,7 @@
 +chardev-obj-$(CONFIG_XEN) += char-argo.o
 --- /dev/null
 +++ b/chardev/char-argo.c
-@@ -0,0 +1,331 @@
+@@ -0,0 +1,345 @@
 +/*
 + * QEMU System Emulator
 + *
@@ -85,17 +85,31 @@
 +static int argo_chr_write(Chardev *chr, const uint8_t *buf, int len)
 +{
 +    ArgoChardev *s = ARGO_CHARDEV(chr);
++    int write_len = len;
 +    int ret;
 +
++ again:
 +    if (s->stream) {
-+        ret = argo_send(s->fd, buf, len, 0);
++        ret = argo_send(s->fd, buf, write_len, 0);
 +    } else {
-+        ret = argo_sendto(s->fd, buf, len, 0, &s->remote_addr);
++        ret = argo_sendto(s->fd, buf, write_len, 0, &s->remote_addr);
 +    }
-+    if (ret != len) {
-+        fprintf(stderr, "%s error: argo_sendto() failed (%s) - %d %d.\n",
-+                ARGO_CHARDRV_NAME, strerror(errno), ret, len);
-+        return 0;
++
++    if (ret == -1 && errno == EMSGSIZE) {
++        /*
++         * try again with a smaller chunk, but avoid 0 since argo_send returns
++         * 0 for that case and we'll end up looping.  Instead return -1 since
++         * we haven't made progress and the message will get dropped.
++         */
++        write_len /= 2;
++        if (write_len) {
++            goto again;
++        }
++    }
++
++    if (ret == -1) {
++        fprintf(stderr, "%s error: argo_sendto() errno=%d (%s) len=%d write_len=%d.\n",
++                ARGO_CHARDRV_NAME, errno, strerror(errno), len, write_len);
 +    }
 +
 +    return ret;
@@ -224,7 +238,7 @@
 +    localport = localport_str ? strtoul(localport_str, NULL, 0) : 0;
 +
 +    backend->type = CHARDEV_BACKEND_KIND_ARGO;
-+    if (domid > 0x7ff4) {
++    if (domid >= DOMID_FIRST_RESERVED) {
 +        error_setg(errp, "chardev: argo: domid invalid");
 +        return;
 +    }
