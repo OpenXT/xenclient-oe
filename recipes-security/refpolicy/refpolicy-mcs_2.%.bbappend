@@ -217,7 +217,7 @@ EXTRA_OEMAKE += "PKGNAME=${POLICY_NAME}-${PV}"
 do_srctree_copy() {
         cp -r ${WORKDIR}/policy ${S}/
 }
-addtask do_srctree_copy after do_unpack before do_compile
+addtask do_srctree_copy after do_unpack before do_patch
 do_srctree_copy[doc] = "Copy layer provided policy files in work directory."
 do_srctree_copy[dirs] = "${B}"
 

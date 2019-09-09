@@ -48,8 +48,8 @@ then
 	restore /dev/initctl
 fi
 
-# /config and /boot/system are relabeled earlier in boot
-restore_firstboot -r /storage /var/log /var/cores
+# /config is relabeled earlier in boot (xenclient-config-access).
+restore_firstboot -r /storage /var/log /var/cores /boot/system
 
 kill -USR1 1
 
@@ -59,9 +59,4 @@ kill -USR1 1
 #
 swapon -a 2> /dev/null
 
-# Create xl directories
-mkdir -p /var/run/xen
-mkdir -p /var/log/xen
-
 : exit 0
-

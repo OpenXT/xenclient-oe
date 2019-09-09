@@ -1,7 +1,5 @@
-Index: refpolicy/policy/modules/kernel/devices.fc
-===================================================================
---- refpolicy.orig/policy/modules/kernel/devices.fc
-+++ refpolicy/policy/modules/kernel/devices.fc
+--- a/policy/modules/kernel/devices.fc
++++ b/policy/modules/kernel/devices.fc
 @@ -178,7 +178,10 @@ ifdef(`distro_suse', `
  /dev/usb/mdc800.*	-c	gen_context(system_u:object_r:scanner_device_t,s0)
  /dev/usb/scanner.*	-c	gen_context(system_u:object_r:scanner_device_t,s0)
@@ -13,10 +11,8 @@ Index: refpolicy/policy/modules/kernel/devices.fc
  /dev/xen/evtchn		-c	gen_context(system_u:object_r:xen_device_t,s0)
  /dev/xen/gntdev		-c	gen_context(system_u:object_r:xen_device_t,s0)
  /dev/xen/gntalloc	-c	gen_context(system_u:object_r:xen_device_t,s0)
-Index: refpolicy/policy/modules/kernel/devices.if
-===================================================================
---- refpolicy.orig/policy/modules/kernel/devices.if
-+++ refpolicy/policy/modules/kernel/devices.if
+--- a/policy/modules/kernel/devices.if
++++ b/policy/modules/kernel/devices.if
 @@ -4186,6 +4186,24 @@ interface(`dev_rw_sysfs',`
  
  ########################################
@@ -71,16 +67,43 @@ Index: refpolicy/policy/modules/kernel/devices.if
  	manage_chr_files_pattern($1, device_t, xen_device_t)
  ')
  
-@@ -4929,7 +4953,7 @@ interface(`dev_filetrans_xen',`
+@@ -4929,7 +4953,34 @@ interface(`dev_filetrans_xen',`
  		type device_t, xen_device_t;
  	')
  
 -	filetrans_pattern($1, device_t, xen_device_t, chr_file, $2)
 +	filetrans_pattern($1, device_t, xen_device_t, { chr_file blk_file }, $2)
++')
++
++########################################
++## <summary>
++##	Automatic type transition to the type
++##	for blktap directory when created in /dev/xen
++##	for blktap device nodes when created in /dev/xen/<blktap-directory>
++## </summary>
++## <param name="domain">
++##	<summary>
++##	Domain allowed access.
++##	</summary>
++## </param>
++## <param name="dirname" optional="true">
++##	<summary>
++##	The name of the directory object being created.
++##	</summary>
++## </param>
++#
++interface(`dev_filetrans_blktap',`
++	gen_require(`
++		type device_t, xen_device_t, blktap_device_t;
++	')
++
++	filetrans_pattern($1, device_t, xen_device_t, { dir }, $2)
++	create_dirs_pattern($1, xen_device_t, xen_device_t)
++	filetrans_pattern($1, xen_device_t, blktap_device_t, { chr_file blk_file })
  ')
  
  ########################################
-@@ -5102,3 +5126,171 @@ interface(`dev_unconfined',`
+@@ -5102,3 +5153,171 @@ interface(`dev_unconfined',`
  
  	typeattribute $1 devices_unconfined_type;
  ')
@@ -252,10 +275,8 @@ Index: refpolicy/policy/modules/kernel/devices.if
 +
 +        rw_chr_files_pattern($1, device_t, loop_control_device_t)
 +')
-Index: refpolicy/policy/modules/kernel/devices.te
-===================================================================
---- refpolicy.orig/policy/modules/kernel/devices.te
-+++ refpolicy/policy/modules/kernel/devices.te
+--- a/policy/modules/kernel/devices.te
++++ b/policy/modules/kernel/devices.te
 @@ -9,6 +9,7 @@ attribute device_node;
  attribute memory_raw_read;
  attribute memory_raw_write;

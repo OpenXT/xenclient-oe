@@ -1,7 +1,5 @@
-Index: refpolicy/policy/modules/kernel/files.fc
-===================================================================
---- refpolicy.orig/policy/modules/kernel/files.fc
-+++ refpolicy/policy/modules/kernel/files.fc
+--- a/policy/modules/kernel/files.fc
++++ b/policy/modules/kernel/files.fc
 @@ -46,6 +46,9 @@ ifdef(`distro_suse',`
  #
  /etc			-d	gen_context(system_u:object_r:etc_t,s0)
@@ -17,7 +15,7 @@ Index: refpolicy/policy/modules/kernel/files.fc
  
  /etc/network/ifstate	--	gen_context(system_u:object_r:etc_runtime_t,s0)
 +/var/volatile/etc/ifstate	--	gen_context(system_u:object_r:etc_runtime_t,s0)
-+/var/run/ifstate		--	gen_context(system_u:object_r:etc_runtime_t,s0)
++/run/ifstate		--	gen_context(system_u:object_r:etc_runtime_t,s0)
  
  /etc/ptal/ptal-printd-like -- 	gen_context(system_u:object_r:etc_runtime_t,s0)
  
@@ -40,15 +38,7 @@ Index: refpolicy/policy/modules/kernel/files.fc
  
  /var/log/lost\+found	-d	gen_context(system_u:object_r:lost_found_t,mls_systemhigh)
  /var/log/lost\+found/.*		<<none>>
-@@ -267,6 +277,7 @@ ifndef(`distro_redhat',`
- 
- /var/run		-d	gen_context(system_u:object_r:var_run_t,s0-mls_systemhigh)
- /var/run		-l	gen_context(system_u:object_r:var_run_t,s0)
-+/var/run/hosts			gen_context(system_u:object_r:etc_t,s0)
- 
- /var/spool(/.*)?		gen_context(system_u:object_r:var_spool_t,s0)
- /var/spool/postfix/etc(/.*)?	gen_context(system_u:object_r:etc_t,s0)
-@@ -280,6 +291,17 @@ ifndef(`distro_redhat',`
+@@ -280,6 +290,17 @@ ifndef(`distro_redhat',`
  /var/tmp/systemd-private-[^/]+/tmp	-d	gen_context(system_u:object_r:tmp_t,s0-mls_systemhigh)
  /var/tmp/systemd-private-[^/]+/tmp/.*	<<none>>
  /var/tmp/vi\.recover	-d	gen_context(system_u:object_r:tmp_t,s0)
@@ -66,10 +56,8 @@ Index: refpolicy/policy/modules/kernel/files.fc
  
  ifdef(`distro_debian',`
  /run/motd		--	gen_context(system_u:object_r:initrc_var_run_t,s0)
-Index: refpolicy/policy/modules/kernel/files.if
-===================================================================
---- refpolicy.orig/policy/modules/kernel/files.if
-+++ refpolicy/policy/modules/kernel/files.if
+--- a/policy/modules/kernel/files.if
++++ b/policy/modules/kernel/files.if
 @@ -1234,6 +1234,7 @@ interface(`files_list_all',`
  	')
  
@@ -112,7 +100,44 @@ Index: refpolicy/policy/modules/kernel/files.if
  ##	Read sockets with the default file type.
  ## </summary>
  ## <param name="domain">
-@@ -3370,6 +3391,25 @@ interface(`files_getattr_isid_type_dirs'
+@@ -3123,6 +3144,36 @@ interface(`files_create_boot_flag',`
+ 
+ ########################################
+ ## <summary>
++##	Create a runtime configuration file.
++## </summary>
++## <desc>
++##	<p>
++##	Create a runtime configuration file, such as /run/ifstate.
++##	</p>
++## </desc>
++## <param name="domain">
++##	<summary>
++##	Domain allowed access.
++##	</summary>
++## </param>
++## <param name="name" optional="true">
++##	<summary>
++##	The name of the object being created.
++##	</summary>
++## </param>
++## <rolecap/>
++#
++interface(`files_create_etc_runtime',`
++	gen_require(`
++		type var_run_t, etc_runtime_t;
++	')
++
++	allow $1 etc_runtime_t:file manage_file_perms;
++	filetrans_pattern($1, var_run_t, etc_runtime_t, file, $2)
++')
++
++########################################
++## <summary>
+ ##	Delete a boot flag.
+ ## </summary>
+ ## <desc>
+@@ -3370,6 +3421,25 @@ interface(`files_getattr_isid_type_dirs'
  
  ########################################
  ## <summary>
@@ -138,7 +163,7 @@ Index: refpolicy/policy/modules/kernel/files.if
  ##	Do not audit attempts to search directories on new filesystems
  ##	that have not yet been labeled.  (Deprecated)
  ## </summary>
-@@ -3610,6 +3650,25 @@ interface(`files_manage_isid_type_files'
+@@ -3610,6 +3680,25 @@ interface(`files_manage_isid_type_files'
  
  ########################################
  ## <summary>
@@ -164,7 +189,7 @@ Index: refpolicy/policy/modules/kernel/files.if
  ##	Create, read, write, and delete symbolic links
  ##	on new filesystems that have not yet been labeled.  (Deprecated)
  ## </summary>
-@@ -4086,6 +4145,24 @@ interface(`files_read_mnt_symlinks',`
+@@ -4086,6 +4175,24 @@ interface(`files_read_mnt_symlinks',`
  
  ########################################
  ## <summary>
@@ -189,7 +214,7 @@ Index: refpolicy/policy/modules/kernel/files.if
  ##	Create, read, write, and delete symbolic links in /mnt.
  ## </summary>
  ## <param name="domain">
-@@ -4435,6 +4512,7 @@ interface(`files_getattr_tmp_dirs',`
+@@ -4435,6 +4542,7 @@ interface(`files_getattr_tmp_dirs',`
  		type tmp_t;
  	')
  
@@ -197,7 +222,7 @@ Index: refpolicy/policy/modules/kernel/files.if
  	allow $1 tmp_t:dir getattr;
  ')
  
-@@ -4454,6 +4532,7 @@ interface(`files_dontaudit_getattr_tmp_d
+@@ -4454,6 +4562,7 @@ interface(`files_dontaudit_getattr_tmp_d
  		type tmp_t;
  	')
  
@@ -205,7 +230,7 @@ Index: refpolicy/policy/modules/kernel/files.if
  	dontaudit $1 tmp_t:dir getattr;
  ')
  
-@@ -4472,6 +4551,7 @@ interface(`files_search_tmp',`
+@@ -4472,6 +4581,7 @@ interface(`files_search_tmp',`
  		type tmp_t;
  	')
  
@@ -213,7 +238,7 @@ Index: refpolicy/policy/modules/kernel/files.if
  	allow $1 tmp_t:dir search_dir_perms;
  	allow $1 tmp_t:lnk_file read_lnk_file_perms;
  ')
-@@ -4491,6 +4571,7 @@ interface(`files_dontaudit_search_tmp',`
+@@ -4491,6 +4601,7 @@ interface(`files_dontaudit_search_tmp',`
  		type tmp_t;
  	')
  
@@ -221,7 +246,7 @@ Index: refpolicy/policy/modules/kernel/files.if
  	dontaudit $1 tmp_t:dir search_dir_perms;
  ')
  
-@@ -4509,6 +4590,7 @@ interface(`files_list_tmp',`
+@@ -4509,6 +4620,7 @@ interface(`files_list_tmp',`
  		type tmp_t;
  	')
  
@@ -229,7 +254,7 @@ Index: refpolicy/policy/modules/kernel/files.if
  	allow $1 tmp_t:dir list_dir_perms;
  	allow $1 tmp_t:lnk_file read_lnk_file_perms;
  ')
-@@ -4528,6 +4610,7 @@ interface(`files_dontaudit_list_tmp',`
+@@ -4528,6 +4640,7 @@ interface(`files_dontaudit_list_tmp',`
  		type tmp_t;
  	')
  
@@ -237,7 +262,7 @@ Index: refpolicy/policy/modules/kernel/files.if
  	dontaudit $1 tmp_t:dir list_dir_perms;
  ')
  
-@@ -4546,6 +4629,7 @@ interface(`files_delete_tmp_dir_entry',`
+@@ -4546,6 +4659,7 @@ interface(`files_delete_tmp_dir_entry',`
  		type tmp_t;
  	')
  
@@ -245,7 +270,7 @@ Index: refpolicy/policy/modules/kernel/files.if
  	allow $1 tmp_t:dir del_entry_dir_perms;
  	allow $1 tmp_t:lnk_file read_lnk_file_perms;
  ')
-@@ -4565,6 +4649,7 @@ interface(`files_read_generic_tmp_files'
+@@ -4565,6 +4679,7 @@ interface(`files_read_generic_tmp_files'
  		type tmp_t;
  	')
  
@@ -253,7 +278,7 @@ Index: refpolicy/policy/modules/kernel/files.if
  	read_files_pattern($1, tmp_t, tmp_t)
  	allow $1 tmp_t:lnk_file read_lnk_file_perms;
  ')
-@@ -4584,6 +4669,7 @@ interface(`files_manage_generic_tmp_dirs
+@@ -4584,6 +4699,7 @@ interface(`files_manage_generic_tmp_dirs
  		type tmp_t;
  	')
  
@@ -261,7 +286,7 @@ Index: refpolicy/policy/modules/kernel/files.if
  	manage_dirs_pattern($1, tmp_t, tmp_t)
  	allow $1 tmp_t:lnk_file read_lnk_file_perms;
  ')
-@@ -4603,6 +4689,7 @@ interface(`files_manage_generic_tmp_file
+@@ -4603,6 +4719,7 @@ interface(`files_manage_generic_tmp_file
  		type tmp_t;
  	')
  
@@ -269,7 +294,7 @@ Index: refpolicy/policy/modules/kernel/files.if
  	manage_files_pattern($1, tmp_t, tmp_t)
  	allow $1 tmp_t:lnk_file read_lnk_file_perms;
  ')
-@@ -4622,6 +4709,7 @@ interface(`files_read_generic_tmp_symlin
+@@ -4622,6 +4739,7 @@ interface(`files_read_generic_tmp_symlin
  		type tmp_t;
  	')
  
@@ -277,7 +302,7 @@ Index: refpolicy/policy/modules/kernel/files.if
  	read_lnk_files_pattern($1, tmp_t, tmp_t)
  ')
  
-@@ -4640,6 +4728,7 @@ interface(`files_rw_generic_tmp_sockets'
+@@ -4640,6 +4758,7 @@ interface(`files_rw_generic_tmp_sockets'
  		type tmp_t;
  	')
  
@@ -285,7 +310,7 @@ Index: refpolicy/policy/modules/kernel/files.if
  	rw_sock_files_pattern($1, tmp_t, tmp_t)
  	allow $1 tmp_t:lnk_file read_lnk_file_perms;
  ')
-@@ -4677,6 +4766,7 @@ interface(`files_setattr_all_tmp_dirs',`
+@@ -4677,6 +4796,7 @@ interface(`files_setattr_all_tmp_dirs',`
  		attribute tmpfile;
  	')
  
@@ -293,7 +318,7 @@ Index: refpolicy/policy/modules/kernel/files.if
  	allow $1 tmpfile:dir { search_dir_perms setattr };
  ')
  
-@@ -4695,6 +4785,7 @@ interface(`files_list_all_tmp',`
+@@ -4695,6 +4815,7 @@ interface(`files_list_all_tmp',`
  		attribute tmpfile;
  	')
  
@@ -301,7 +326,7 @@ Index: refpolicy/policy/modules/kernel/files.if
  	allow $1 tmpfile:dir list_dir_perms;
  ')
  
-@@ -4776,6 +4867,7 @@ interface(`files_relabel_all_tmp_files',
+@@ -4776,6 +4897,7 @@ interface(`files_relabel_all_tmp_files',
  		type var_t;
  	')
  
@@ -309,7 +334,7 @@ Index: refpolicy/policy/modules/kernel/files.if
  	allow $1 var_t:dir search_dir_perms;
  	relabel_files_pattern($1, tmpfile, tmpfile)
  ')
-@@ -4867,6 +4959,7 @@ interface(`files_purge_tmp',`
+@@ -4867,6 +4989,7 @@ interface(`files_purge_tmp',`
  		attribute tmpfile;
  	')
  
@@ -317,7 +342,7 @@ Index: refpolicy/policy/modules/kernel/files.if
  	allow $1 tmpfile:dir list_dir_perms;
  	delete_dirs_pattern($1, tmpfile, tmpfile)
  	delete_files_pattern($1, tmpfile, tmpfile)
-@@ -5387,9 +5480,10 @@ interface(`files_delete_kernel_symbol_ta
+@@ -5387,9 +5510,10 @@ interface(`files_delete_kernel_symbol_ta
  #
  interface(`files_search_var',`
  	gen_require(`
@@ -329,7 +354,7 @@ Index: refpolicy/policy/modules/kernel/files.if
  	allow $1 var_t:dir search_dir_perms;
  ')
  
-@@ -5413,6 +5507,24 @@ interface(`files_dontaudit_write_var_dir
+@@ -5413,6 +5537,24 @@ interface(`files_dontaudit_write_var_dir
  
  ########################################
  ## <summary>
@@ -354,7 +379,7 @@ Index: refpolicy/policy/modules/kernel/files.if
  ##	Allow attempts to write to /var.dirs
  ## </summary>
  ## <param name="domain">
-@@ -5798,9 +5910,10 @@ interface(`files_rw_var_lib_dirs',`
+@@ -5798,9 +5940,10 @@ interface(`files_rw_var_lib_dirs',`
  #
  interface(`files_var_lib_filetrans',`
  	gen_require(`
@@ -366,7 +391,7 @@ Index: refpolicy/policy/modules/kernel/files.if
  	allow $1 var_t:dir search_dir_perms;
  	filetrans_pattern($1, var_lib_t, $2, $3, $4)
  ')
-@@ -5858,9 +5971,10 @@ interface(`files_read_var_lib_symlinks',
+@@ -5858,9 +6001,10 @@ interface(`files_read_var_lib_symlinks',
  #
  interface(`files_manage_urandom_seed',`
  	gen_require(`
@@ -378,7 +403,7 @@ Index: refpolicy/policy/modules/kernel/files.if
  	allow $1 var_t:dir search_dir_perms;
  	manage_files_pattern($1, var_lib_t, var_lib_t)
  ')
-@@ -6234,6 +6348,69 @@ interface(`files_lock_filetrans',`
+@@ -6234,6 +6378,69 @@ interface(`files_lock_filetrans',`
  
  ########################################
  ## <summary>
@@ -448,7 +473,7 @@ Index: refpolicy/policy/modules/kernel/files.if
  ##	Do not audit attempts to get the attributes
  ##	of the /var/run directory.
  ## </summary>
-@@ -6254,6 +6431,25 @@ interface(`files_dontaudit_getattr_pid_d
+@@ -6254,6 +6461,25 @@ interface(`files_dontaudit_getattr_pid_d
  
  ########################################
  ## <summary>
@@ -474,7 +499,7 @@ Index: refpolicy/policy/modules/kernel/files.if
  ##	Set the attributes of the /var/run directory.
  ## </summary>
  ## <param name="domain">
-@@ -6289,6 +6485,7 @@ interface(`files_search_pids',`
+@@ -6289,6 +6515,7 @@ interface(`files_search_pids',`
  
  	allow $1 var_run_t:lnk_file read_lnk_file_perms;
  	search_dirs_pattern($1, var_t, var_run_t)
@@ -482,7 +507,7 @@ Index: refpolicy/policy/modules/kernel/files.if
  ')
  
  ########################################
-@@ -6509,6 +6706,7 @@ interface(`files_dontaudit_getattr_all_p
+@@ -6509,6 +6736,7 @@ interface(`files_dontaudit_getattr_all_p
  interface(`files_dontaudit_write_all_pids',`
  	gen_require(`
  		attribute pidfile;
@@ -490,7 +515,7 @@ Index: refpolicy/policy/modules/kernel/files.if
  	')
  
  	dontaudit $1 var_run_t:lnk_file read_lnk_file_perms;
-@@ -6517,6 +6715,42 @@ interface(`files_dontaudit_write_all_pid
+@@ -6517,6 +6745,42 @@ interface(`files_dontaudit_write_all_pid
  
  ########################################
  ## <summary>
@@ -533,7 +558,7 @@ Index: refpolicy/policy/modules/kernel/files.if
  ##	Do not audit attempts to ioctl daemon runtime data files.
  ## </summary>
  ## <param name="domain">
-@@ -6585,6 +6819,24 @@ interface(`files_delete_all_pids',`
+@@ -6585,6 +6849,24 @@ interface(`files_delete_all_pids',`
  
  ########################################
  ## <summary>
@@ -558,7 +583,7 @@ Index: refpolicy/policy/modules/kernel/files.if
  ##	Delete all process ID directories.
  ## </summary>
  ## <param name="domain">
-@@ -6906,3 +7158,21 @@ interface(`files_unconfined',`
+@@ -6906,3 +7188,21 @@ interface(`files_unconfined',`
  
  	typeattribute $1 files_unconfined_type;
  ')
@@ -580,10 +605,8 @@ Index: refpolicy/policy/modules/kernel/files.if
 +
 +	typeattribute $1 files_unconfined_readonly_type;
 +')
-Index: refpolicy/policy/modules/kernel/files.te
-===================================================================
---- refpolicy.orig/policy/modules/kernel/files.te
-+++ refpolicy/policy/modules/kernel/files.te
+--- a/policy/modules/kernel/files.te
++++ b/policy/modules/kernel/files.te
 @@ -6,6 +6,7 @@ policy_module(files, 1.23.0)
  #
  
