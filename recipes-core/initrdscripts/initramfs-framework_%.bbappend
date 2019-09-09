@@ -1,6 +1,7 @@
 FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
 
 SRC_URI += " \
+    file://functions \
     file://lvm \
     file://bootfs \
     file://tpm \
@@ -10,6 +11,9 @@ SRC_URI += " \
 
 do_install_append() {
     install -d ${D}/init.d
+
+    # functions
+    install -m 0755 ${WORKDIR}/functions ${D}/init.d/00-functions
 
     # lvm
     install -m 0755 ${WORKDIR}/lvm ${D}/init.d/89-lvm
@@ -28,12 +32,17 @@ do_install_append() {
 }
 
 PACKAGES += " \
+            initramfs-module-functions \
             initramfs-module-lvm \
             initramfs-module-bootfs \
             initramfs-module-tpm \
             initramfs-module-tpm2 \
             initramfs-module-selinux \
             "
+
+SUMMARY_initramfs-module-functions = "initramfs support for functions"
+RDEPENDS_initramfs-module-functions = "${PN}-base"
+FILES_initramfs-module-functions = "/init.d/00-functions"
 
 SUMMARY_initramfs-module-lvm = "initramfs support for lvm"
 RDEPENDS_initramfs-module-lvm = "${PN}-base lvm2"
