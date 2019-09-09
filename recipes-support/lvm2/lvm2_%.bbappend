@@ -2,8 +2,6 @@ FILESEXTRAPATHS_prepend := "${THISDIR}/${BPN}:"
 
 SRC_URI += " \
     file://yocto-initscripts.patch \
-    file://0001-lvmetad-fix-segfault-on-i386.patch \
-    file://volatiles.99_lvmetad \
 "
 
 # meta-oe recipe will already _append the autotools do_install(), and
@@ -18,9 +16,6 @@ do_install_append() {
         mv -f ${D}${sysconfdir}/rc.d/init.d/* ${D}${sysconfdir}/init.d/
         rm -rf ${D}${sysconfdir}/rc.d
     fi
-
-    install -d ${D}${sysconfdir}/default/volatiles
-    install -m 0644 ${WORKDIR}/volatiles.99_lvmetad ${D}${sysconfdir}/default/volatiles/99_lvmetad
 }
 
 PACKAGES =+ "${PN}-conf"
@@ -35,4 +30,7 @@ CONFFILES_${PN}-conf = " \
 
 FILES_${PN} += " \
     ${sysconfdir}/default/volatiles \
+"
+RDEPENDS_${PN} += " \
+    bash \
 "
