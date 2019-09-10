@@ -388,24 +388,11 @@ encrypted_unlock() {
     local part="${1}"
     local name="${2}"
     local key_file="${3}"
-    local ret=0
 
-    is_tpm_2_0
-    local tpm2=$?
-    if [ "${tpm2}" -eq 0 ];
-    then
-        if pcr_bank_exists "sha256"; then
-            local unseal_file=${key_file}
-            tpm2_unsealdata -H 0x81000000 -n "${unseal_file}.sha256" -u "${key_file}.pub.sha256" -g 0xB $( < ${unseal_file}.pcrs )| cryptsetup -q -d - -S ${ESLOT} luksOpen "${part}" "${name}" >/dev/null 2>&1
-            ret=$?
-        fi
-    else
-        tpm_unsealdata_sa -z -i $key_file | \
-            cryptsetup -q -d - -S ${ESLOT} luksOpen "${part}" "${name}" >/dev/null 2>&1
-        ret=$?
-    fi
-
-    return $ret
+    # Since the key is read from stdin, `-d -` is absolutely necessary, or
+    # cryptsetup will stop reading it at the first LF character.
+    tpm_unseal "${key_file}" | \
+        cryptsetup -d - -S "${ESLOT}" luksOpen "${part}" "${name}"
 }
 
 remove_own_key() {

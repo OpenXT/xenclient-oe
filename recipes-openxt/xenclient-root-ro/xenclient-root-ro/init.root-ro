@@ -223,64 +223,37 @@ fail_first_seal()
 
 seal()
 {
-    local tss_file=${1}
-    local sealerr=0
-    local file_exists=1
+    local config_key="/config/keys/config.key"
+    local sealed_key="$1"
     local sealout=""
-    local seal_file="/config/keys/config.key"
+    local sealrc=""
+    local pcr_opts
+
     maybe_break "seal"
+
     dialog --colors --backtitle "${BACK_TITLE}" --mixedgauge \
         "  Sealing..." 0 0 20
 
-    is_tpm_2_0
-    local tpm2=$?
-
-    if [ "${tpm2}" -eq 0 ];
-    then
-        clean_old_tpm_files
-        if pcr_bank_exists "sha256"; then
-            sealout=$(tpm2_sealdata -H 0x81000000 -I ${seal_file} -O ${tss_file}.sha256 -o ${tss_file}.pub.sha256 -g 0xB -G 0x8 -b 0x492 $(cat /config/config.pcrs) 2>&1 )
-            cp /config/config.pcrs ${tss_file}.pcrs
-            sealerr=$?
-        fi
-    else
-        sealout=$(tpm_sealdata_sa -i /config/keys/config.key \
-            -o ${tss_file} -z $(cat /config/config.pcrs) 2>&1)
-        sealerr=$?
-    fi
-
-    if [ -e ${tss_file} ]; then
-        file_exists=0
-    elif [ -e ${tss_file}.sha256 ]; then
-        file_exists=0
-    else
-        file_exists=1
-    fi
-
-
-    if [ $sealerr -eq 0 ] && [ $file_exists -eq 0 ]; then
-        dialog --colors --backtitle "${BACK_TITLE}" --mixedgauge \
-            "  Sealing: Done" 0 0 100
-
-        # store PCR hints for recovery
-        #  do PCR quote
-        if [ "${PCR_DEV}" ]; then
-            [ -f "${PCRS_BAD}" ] && rm "${PCRS_BAD}"
-            if [ "${tpm2}" -eq 0 ];
-            then
-                tpm2_pcrlist > "${PCRS_GOOD}"
-            else
-                cat "${PCR_DEV}/device/pcrs" > "${PCRS_GOOD}"
-            fi
-        fi
-
-        poweroff -r
-        exit 1
-    else
+    for p in $(cat "/config/config.pcrs"); do
+        pcr_opts="${pcr_opts} -p ${p}"
+    done
+    sealout="$(tpm_seal ${pcr_opts} "${config_key}" "${sealed_key}" 2>&1)"
+    sealrc="$?"
+    if [ "${sealrc}" -ne "0" ]; then
         dialog --colors --backtitle "${BACK_TITLE}" --msgbox \
-            "Sealing Failed\n  Error code : $sealerr\n  Output : $sealout" 0 0
+            "Sealing Failed\n  Error code: ${sealrc}\n  Output: ${sealout}" 0 0
         return 1
     fi
+
+    rm -f "${PCRS_BAD}"
+    tpm_list_pcrs > "${PCRS_GOOD}"
+
+    dialog --colors --backtitle "${BACK_TITLE}" --mixedgauge \
+        "  Sealing: Done" 0 0 100
+
+    poweroff -r
+    # Just reboot into sealed system...
+    exit 1
 }
 
 reseal()
@@ -307,9 +280,7 @@ unlock_config()
     local measured_flag="/config/tpm/measured-boot"
 
     local sig=$(dd if="${lv_path}" bs=4 count=1 2>/dev/null)
-    is_tpm_2_0
-    local tpm2=$?
-    case "$sig" in
+    case "${sig}" in
     LUKS)
         if [ -e /boot/system/tpm/enabled ]; then
             # This will seal/reboot or fail/halt
@@ -340,13 +311,7 @@ unlock_config()
             maybe_break "measure-fail"
 
             # store PCR hints for recovery
-            #  do PCR quote
-            if [ "${tpm2}" -eq 0 ];
-            then
-                [ -d "${PCR_DEV}" ] && tpm2_pcrlist > "${PCRS_BAD}"
-            else
-                [ -d "${PCR_DEV}" ] && cat "${PCR_DEV}/device/pcrs" > "${PCRS_BAD}"
-            fi
+            tpm_list_pcrs > "${PCRS_BAD}"
 
             unseal_failure
             [ -f ${measured_flag} ] && rm -f ${measured_flag}

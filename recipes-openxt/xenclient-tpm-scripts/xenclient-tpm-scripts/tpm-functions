@@ -30,30 +30,38 @@ clean_old_tpm_files () {
     [ -e /boot/system/tpm/config.tss.pub.sha256 ] && rm /boot/system/tpm/config.tss.pub.sha256
 }
 
-is_tpm_2_0 () {
+# Usage: get_tpm_version [DEVID]
+# Print the version of the TPM device with DEVID (default to 0).
+get_tpm_version() {
+    local devid="${1:-0}"
+    local path="$(tpm_get_syspath "${devid}")"
+
     # See the TPM chardev driver implementation:
     # https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux-stable.git/tree/drivers/char/tpm/tpm-sysfs.c?h=v4.14.34#n296
     # Assuming a TPM has already been detected, absence of the sysfs entry
     # means TPM 2.0.
     # This is still valid on Linux 4.16.
-    if [ ! -e /sys/class/tpm/tpm0/device/caps ]; then
-        return 0
+    if [ ! -e "${path}/device/caps" ]; then
+        echo "2.0"
+    else
+        awk '/TCG version:/ { print $3 }' "${path}/device/caps"
     fi
-
-    # Sysfs caps entry contains TPM manufacturer and version info.
-    # https://www.kernel.org/doc/Documentation/ABI/stable/sysfs-class-tpm
-    local tpm_ver="$(awk '/TCG version:/ { print $3 }' /sys/class/tpm/tpm0/device/caps)"
-
-    [ "${tpm_ver}" = "2.0" ]
 }
 
-pcr_bank_exists () {
-    local alg_in=$1
+is_tpm_2_0 () {
+    [ "$(get_tpm_version)" = "2.0" ]
+}
 
-    banks=$(tpm2_pcrlist -s | cut -d ':' -f 2)
+# Usage: pcr_bank_exists HASH-ALGORITHM-STRING
+# Returns successfuly if a matching bank exists for the given hash algorithm.
+pcr_bank_exists () {
+    local alg_in="$1"
+    local bank
+    local banks="$(tpm2_pcrlist -s | cut -d ':' -f 2)"
+
     for bank in $banks; do
-        alg=$(echo $bank | cut -d '(' -f 1)
-        if [ "$alg" = $alg_in ]; then
+        local alg="$(echo "${bank}" | cut -d '(' -f 1)"
+        if [ "${alg}" = "${alg_in}" ]; then
             return 0
         fi
     done
@@ -111,33 +119,52 @@ handle_alg() {
     esac
 }
 
+# Usage: alg_to_handle TPM-ALGORITHM-CODE
+# Print the matching handle code for the given TPM algorithm code, or nothing
+# if no match is found.
+# Supported: OXT_HANDLE_SHA1, OXT_HANDLE_SHA256.
 alg_to_handle () {
-    alg=$1
-    case $alg in
-        ${TPM_ALG_SHA256})
-            echo "${OXT_HANDLE_SHA256}"
-            ;;
-        ${TPM_ALG_SHA1})
-            echo "${OXT_HANDLE_SHA1}"
-            ;;
+    local alg="$1"
+
+    case "${alg}" in
+        "${TPM_ALG_SHA1}") echo "${OXT_HANDLE_SHA1}" ;;
+        "${TPM_ALG_SHA256}") echo "${OXT_HANDLE_SHA256}" ;;
     esac
 }
 
-tcsd_start() {
-    is_tpm_2_0
-    local tpm2=$?
-    if [ "${tpm2}" -ne 0 ];
-    then
-        local ret=1
-        /etc/init.d/trousers status > /dev/null
-        if [ $? -ne 0 ]; then
-            /etc/init.d/trousers start > /dev/null
-            sleep 1
-            /etc/init.d/trousers status > /dev/null
-            [ $? -ne 0 ] && return 1
-        fi
+# Usage: hashalg_to_alg HASH-ALGORITHM-STRING
+# Print the matching TPM algorithm code for the given hash algorithm, or
+# nothing if no match is found.
+# Supported: sha1, sha256, sha384, sha512, sm3_256.
+hashalg_to_alg() {
+    local hashalg="$1"
+
+    case "${hashalg}" in
+        "sha1") echo "${TPM_ALG_SHA1}" ;;
+        "sha256") echo "${TPM_ALG_SHA256}" ;;
+        "sha384") echo "${TPM_ALG_SHA384}" ;;
+        "sha512") echo "${TPM_ALG_SHA512}" ;;
+        "sm3_256") echo "${TPM_ALG_SM3_256}" ;;
+    esac
+}
+
+tcsd_running() {
+    if [ ! -x "/etc/init.d/trousers" ]; then
+        return 1
     fi
-    return 0
+    /etc/init.d/trousers status > /dev/null 2>&1
+}
+
+tcsd_start() {
+    # TPM2.0 TSS does not require tcsd.
+    if is_tpm_2_0; then
+        return 0
+    fi
+    if tcsd_running; then
+        return 0
+    fi
+
+    /etc/init.d/trousers start
 }
 # Function to determin whether or not the TPM is active
 # returns 0 if active
@@ -619,213 +646,306 @@ tpm2_write_tboot_policy() {
                  "${policy}" >/dev/null 2>&1
 }
 
-tpm_get_pcr() {
-    local pcr="${1}"
+# Usage: tpm_get_syspath [TPM-DEVICE-ID]
+# Verify and print the path of the TPM, with the given id (default:0), on
+# stdout. Returns 0 on success, 1 if the path in the sysfs cannot be found.
+tpm_get_syspath() {
+    local devid="${1:-0}"
+    local syspath="/sys/class/tpm/tpm${devid}"
 
-    is_tpm_2_0
-    if [ $? -eq 0 ]; then
-        if pcr_bank_exists "sha256"; then
-            echo "$(tpm2_pcrlist -L sha256:${pcr} | tail -1 | cut -f2 -d: | tr 'A-Z' 'a-z' | tr -d \ )"
-        else
-            echo "$(tpm2_pcrlist -L sha1:${pcr} | tail -1 | cut -f2 -d: | tr 'A-Z' 'a-z' | tr -d \ )"
-        fi
+    if [ ! -e "${syspath}" ]; then
+        echo "tpm_get_syspath: tpm${devid} has no entry in the sysfs." >&2
+        return 1
+    fi
+    echo "${syspath}"
+}
+
+# Usage: tpm_get_ev_separator
+# Print the EV_SEPARATOR value as presented by the kernel, or our best guess as
+# what it may be, on stdout.
+tpm_get_ev_separator() {
+    local evs
+
+    if is_tpm_2_0; then
+        # TPM 2.0: `printf "\xff\xff\xff\xff" | sha256sum`, best guess...
+        evs="df3f619804a92fdb4057192dc43dd748ea778adc52bc498ce80524c014b81119"
     else
-        local tpm="$(find /sys/class -name tpm0 2>/dev/null)/device"
+        # TPM 1.2 will expose a securityfs node with ASCII values.
+        local path="/sys/kernel/security/tpm0/ascii_bios_measurements"
 
-        echo "$(grep PCR-${pcr} ${tpm}/pcrs|cut -f2 -d:|tr 'A-Z' 'a-z'|tr -d \ )"
+        evs=$(awk '$1 == 4 && $3 == 04 { print $2 }' "${path}")
+        # Fallback: Pick `printf "\xff\xff\xff\xff" | sha1sum`, best guess...
+        evs=${evs:-"d9be6524a5f5047db5866813acf3277892a7a30a"}
+    fi
+    echo "${evs}"
+}
+
+# Usage: tpm_list_pcrs
+# Print all the PCR values of the first TPM on stdout.
+tpm_list_pcrs() {
+    if is_tpm_2_0; then
+        tpm2_pcrlist
+    else
+        cat "$(tpm_get_syspath)/device/pcrs"
     fi
 }
 
+# tpm_pcrlist_save PCRLIST-FILE PCR-IDS
+# Write the list of PCR-IDS to the PCRLIST-FILE, overwriting the existing one
+# if necessary.
+tpm_pcrlist_save() {
+    local file="$1"
+    shift 1
+    local pcrlist=""
+
+    # Sanity check list of number in PCR id range ([0-23])
+    for p in "$@"; do
+        pcrid="${p%%:*}"
+        if [ "$(expr "${pcrid}" : '^[[:digit:]]\+$')" -a \
+             "${pcrid}" -gt 23 -o "${pcrid}" -lt 0 ]; then
+            return 1
+        fi
+        pcrlist="${pcrlist} ${pcrid}"
+    done
+
+    echo "${pcrlist}" > "${file}"
+}
+
+# tpm_pcrs_to_opts PCR-IDS
+# Print a list of options from PCR-IDS suitable to use as argument with TSS
+# utilities. This makes handling TPM1.2 and TPM2.0 TSS stacks easier.
+tpm_pcrs_to_opts() {
+    local tss_opt
+    local pcr_opts
+
+    if is_tpm_2_0; then
+        tss_opt="-r"
+    else
+        tss_opt="-p"
+    fi
+    for p in "$@"; do
+        pcr_opts="${pcr_opts} ${tss_opt} ${p}"
+    done
+    echo "${pcr_opts}"
+}
+
+# Usage: tpm_pcr_value_normalize PCR-VALUE
+# Print the PCR-VALUE, from TPM-TSS output, normalized on stdout.
+# Normalized here means no space, all lowercase, no PCR identifier, and only
+# the last line.
+# This is relevant for to be consistent across TSS versions and keeps format
+# sanitizing in one centralized place, should it require to be amended.
+tpm_pcr_value_normalize() {
+    echo "$1" | awk -F ':' 'END{ gsub(" ", "", $2); print tolower($2) }'
+}
+
+# Usage: tpm_get_hash_algorithm
+# Print the default hash algorithm to use within the current environment.
+tpm_get_hash_algorithm() {
+    local hashalg="sha1"
+
+    if is_tpm_2_0; then
+        if pcr_bank_exists "sha256"; then
+            hashalg="sha256"
+        fi
+    fi
+    echo "${hashalg}"
+}
+
+# Usage: tpm_get_pcr PCR-ID
+# Print the content of PCR-ID on stdout. The value is normalized: all
+# lowercase, no space.
+tpm_get_pcr() {
+    local pcr="$1"
+    local hashalg="$(tpm_get_hash_algorithm)"
+
+    if is_tpm_2_0; then
+        tpm_pcr_value_normalize "$(tpm2_pcrlist -L ${hashalg}:${pcr})"
+    else
+        tpm_pcr_value_normalize "$(grep PCR-${pcr} "$(tpm_get_syspath)/device/pcrs")"
+    fi
+}
+
+# Usage tpm_save_keyfiles BASENAME
+# Rename the existing sealed key files for BASENAME with the .old suffix.
+tpm_save_keyfiles() {
+    local basename="$1"
+    local ext
+
+    for ext in {,.pub}.sha1 {,.pub}.sha256; do
+        if [ -e "${basename}${ext}" ]; then
+            mv "${basename}${ext}" "${basename}${ext}.old"
+        fi
+    done
+}
+
+# Usage tpm_restore_keyfiles BASENAME
+# Renamed the saved key files for BASENAME without the .old suffix.
+# Fails if the saved key files are incoherent.
+tpm_restore_keyfiles() {
+    local basename="$1"
+    local valid="false"
+    local ext alg
+
+    if is_tpm_2_0; then
+        for alg in sha1 sha256; do
+            if [ -e "${basename}.${alg}.old" -a -e "${basename}.pub.${alg}.old" ]; then
+                valid="true"
+            fi
+        done
+    else
+        if [ -e "${basename}.sha1.old" ]; then
+            valid="true"
+        fi
+    fi
+    if [ "${valid}" != "true" ]; then
+        return 1
+    fi
+
+    for ext in {,.pub}.sha1 {,.pub}.sha256; do
+        if [ -e "${basename}${ext}.old" ]; then
+            mv "${basename}${ext}.old" "${basename}${ext}"
+        fi
+    done
+}
+
+# Usage: tpm_seal [ -a hash-algorithm ] [-r path-to-root ] [ -p pcr-id[:value] ] SECRET-KEY-FILE TSS-BASENAME
+# Seal the secret key file and create the sealed key/key-pair for unsealing.
+# Existing key(s) will be saved and renamed with the .old suffix on success.
 tpm_seal() {
     local root=""
-    local hashalg="sha1"
+    local hashalg="$(tpm_get_hash_algorithm)"
     local pcrs=""
-    local pcr_params=""
     local OPTIND
     local opt
+    local allout
 
     while getopts ":a:r:p:" opt; do
         case "${opt}" in
-            a)
-                hashalg=${OPTARG}
-            ;;
-            r)
-                root=${OPTARG}
-            ;;
-            p)
-                pcrs="${pcrs} ${OPTARG}"
-            ;;
+            a) hashalg="${OPTARG}" ;;
+            r) root="${OPTARG}" ;;
+            p) pcrs="${pcrs} ${OPTARG}" ;;
         esac
     done
     shift $((OPTIND-1))
 
-    local secret="${root}/${1}"
-    local tss="${root}/${2}"
+    local secret="${root}/$1"
+    local tss="${root}/$2"
 
-    for p in ${pcrs}; do
-        if [[ "${tpm2}" -eq 0 ]]; then
-            pcr_params="${pcr_params} -r ${p}"
-        else
-            pcr_params="${pcr_params} -p ${p}"
-        fi
-    done
+    local pcr_opts="$(tpm_pcrs_to_opts ${pcrs})"
 
-    is_tpm_2_0
-    if [ $? -eq 0 ]; then
-        pcr_bank_exists "${hashalg}"
-        [ $? -eq 0 ] || return 1
-
-        # pcr_params starts with -p or -r, but that's okay because
-        # echo only honors flags -n -e & -E
-        echo "${pcr_params}" > ${tss}.pcrs
-
-        case $hashalg in
-        sha1)
-            sealout=$(tpm2_sealdata -H ${OXT_HANDLE_SHA1} -I ${secret} \
-                -O ${tss}.sha1 -o ${tss}.pub.sha1 -g ${TPM_ALG_SHA1} \
-                -G ${TPM_ALG_KEYEDHASH} -b ${OXT_SEAL_ATTR} ${pcr_params} 2>&1)
-            return $?
-        ;;
-        sha256)
-            sealout=$(tpm2_sealdata -H ${OXT_HANDLE_SHA256} -I ${secret} \
-                -O ${tss}.sha256 -o ${tss}.pub.sha256 -g ${TPM_ALG_SHA256} \
-                -G ${TPM_ALG_KEYEDHASH} -b ${OXT_SEAL_ATTR} ${pcr_params} 2>&1)
-            return $?
-        ;;
-        *)
-            return 1
-        ;;
-        esac
-    else
-        sealout=$(tpm_sealdata_sa -i ${secret} -o ${tss}.sha1 \
-            -z ${pcr_params} 2>&1)
-        return $?
-    fi
-}
-
-tpm_forward_seal() {
-    local root=""
-    local forward_values=""
-    local hashalg="sha1"
-    local pcrs=""
-    local pcr_params=""
-    local OPTIND
-    local opt
-    local p
-    is_tpm_2_0
-    local tpm2=$?
-
-    while getopts ":a:r:p:" opt; do
-        case "${opt}" in
-            a)
-                hashalg=${OPTARG}
-            ;;
-            r)
-                root=${OPTARG}
-            ;;
-            p)
-                pcrs="${pcrs} ${OPTARG}"
-            ;;
-        esac
-    done
-    shift $((OPTIND-1))
-
-    local key="${root}/${1}"
-    local tss="${root}/${2}"
-
-    for p in ${pcrs}; do
-        if [[ "${tpm2}" -eq 0 ]]; then
-            pcr_params="${pcr_params} -r ${p}"
-        else
-            pcr_params="${pcr_params} -p ${p}"
-        fi
-    done
-
-    if [ "${tpm2}" -eq 0 ];
-    then
-        seal_file=${key}
-        clean_old_tpm_files
-        if pcr_bank_exists "sha256"; then
-            # We only want the PCRs numbers and not the forward seal values
-            echo "${pcr_params}" | \
-                sed -e 's/:[0-9a-zA-Z]\{64\}//g' > ${tss}.pcrs
-            tpm2_sealdata -H ${OXT_HANDLE_SHA256} -I ${seal_file} \
-                          -O ${tss}.sha256 -o ${tss}.pub.sha256 \
-                          -g ${TPM_ALG_SHA256} -G ${TPM_ALG_KEYEDHASH} \
-                          -b ${OXT_SEAL_ATTR} ${pcr_params} 2>&1
-            err=$?
-            if [ $err -ne 0 ]; then return $err; fi
-        fi
-        [ -e ${tss} ] || [ -e ${tss}.sha256 ] && return 0
+    if ! tpm_pcrlist_save "${tss}.pcrs" ${pcrs}; then
+        echo "tpm_seal: Failed to save PCR ID list." >&2
         return 1
-    else
-        /etc/init.d/trousers status > /dev/null 2>&1
+    fi
+
+    if is_tpm_2_0; then
+        local alg="$(hashalg_to_alg "${hashalg}")"
+        local handle="$(alg_to_handle "${alg}")"
+
+        if [ -z "${alg}" -o -z "${handle}" ] || \
+            ! pcr_bank_exists "${hashalg}"; then
+            echo "tpm_unseal: Algorithm \"${hashalg}\" is not supported." >&2
+            return 1
+        fi
+
+        tpm_save_keyfiles "${tss}"
+        allout="$(tpm2_sealdata -H "${handle}" -I "${secret}" \
+            -O "${tss}.${hashalg}" -o "${tss}.pub.${hashalg}" -g "${alg}" \
+            -G "${TPM_ALG_KEYEDHASH}" -b "${OXT_SEAL_ATTR}" \
+            ${pcr_opts} 2>&1)"
         if [ $? -ne 0 ]; then
-            tpm_sealdata_sa -i ${key} -o ${tss} -z ${pcr_params} 2>&1
-            return $?
-        else
-            tpm_sealdata -i ${key} -o ${tss} -z ${pcr_params} 2>&1
-            return $?
+            echo "tpm_seal: Failed to seal data (TPM 2.0) "\
+                "using ${hashalg} algorithm:" >&2
+            echo "${allout}" >&2
+            tpm_restore_keyfiles "${tss}"
+            return 1
+        fi
+    else
+        local tss_bin="tpm_sealdata"
+
+        # Use the standalone binary if tcsd is not running.
+        if ! tcsd_running; then
+            tss_bin="${tss_bin}_sa"
+        fi
+        tpm_save_keyfiles "${tss}"
+        allout="$(${tss_bin} -i "${secret}" -o "${tss}.sha1" \
+            -z ${pcr_opts} 2>&1)"
+        if [ $? -ne 0 ]; then
+            echo "tpm_seal: Failed to seal data (TPM 1.2):" >&2
+            echo "${allout}" >&2
+            tpm_restore_keyfiles "${tss}"
+            return 1
         fi
     fi
+
+    return 0
 }
 
+# Usage: tpm_unseal [ -a hash-algorithm ] [-r path-to-root ] TSS-FILE-BASENAME
+# Ask the TPM for the secret key using the sealed TSS keys given the current
+# PCR values.
+# Print the secret on stdout on success, otherwise print the error logs on
+# stderr and nothing on stdout.
 tpm_unseal() {
     local root=""
-    local hashalg="sha1"
+    local hashalg="$(tpm_get_hash_algorithm)"
     local pcrs=""
-    local pcr_params=""
     local OPTIND
     local opt
+    # Capture stderr into this variable while stdout is output normally.
+    # The usual sleight of hand goes:
+    #    { stderr="$(cmd args 2>&1 1>&3 3>&-)"; } 3>&1
+    local stderr
 
-    while getopts ":a:r:p:" opt; do
+    while getopts ":a:r:" opt; do
         case "${opt}" in
-            a)
-                hashalg=${OPTARG}
-            ;;
-            r)
-                root=${OPTARG}
-            ;;
-            p)
-                pcrs="${pcrs} ${OPTARG}"
-            ;;
+            a) hashalg="${OPTARG}" ;;
+            r) root="${OPTARG}" ;;
         esac
     done
     shift $((OPTIND-1))
 
-    local tss="${root}/${1}"
+    local tss="${root}/$1"
+    local pcr_opts="$(tpm_pcrs_to_opts $(cat "${tss}.pcrs"))"
 
-    is_tpm_2_0
-    if [ $? -eq 0 ]; then
-        for p in ${pcrs}; do
-            pcr_params="${pcr_params} -r ${p}"
-        done
+    if is_tpm_2_0; then
+        local alg="$(hashalg_to_alg "${hashalg}")"
+        local handle="$(alg_to_handle "${alg}")"
 
-        pcr_bank_exists "${hashalg}"
-        [ $? -eq 0 ] || return 1
-
-        case $hashalg in
-        sha1)
-            tpm2_unsealdata -H ${OXT_HANDLE_SHA1} -n "${tss}.sha1" \
-                            -u "${tss}.pub.sha1" -g ${TPM_ALG_SHA1} \
-                            $( < ${tss}.pcrs ) 2>/dev/null
-            return $?
-        ;;
-        sha256)
-            tpm2_unsealdata -H ${OXT_HANDLE_SHA256} -n "${tss}.sha256" \
-                            -u "${tss}.pub.sha256" -g ${TPM_ALG_SHA256} \
-                            $( < ${tss}.pcrs ) 2>/dev/null
-            return $?
-        ;;
-        *)
+        if [ -z "${alg}" -o -z "${handle}" ] || \
+            ! pcr_bank_exists "${hashalg}"; then
+            echo "tpm_unseal: Algorithm \"${hashalg}\" is not supported." >&2
             return 1
-        ;;
-        esac
+        fi
+
+        { stderr="$(tpm2_unsealdata -H "${handle}" \
+            -n "${tss}.${hashalg}" -u "${tss}.pub.${hashalg}" \
+            -g "${alg}" ${pcr_opts} 2>&1 1>&3 3>&-)"; } 3>&1
+        if [ "$?" -ne 0 ]; then
+            echo "tpm_unseal: Failed to unseal data (TPM 2.0) "\
+                "using ${hashalg} algorithm:" >&2
+            echo "${stderr}" >&2
+            return 1
+        fi
     else
-        tpm_unsealdata_sa -z -i $tss 2>/dev/null
-        ret=$?
+        local tss_bin="tpm_unsealdata"
+
+        # Use the standalone binary if tcsd is not running.
+        if ! tcsd_running; then
+            tss_bin="${tss_bin}_sa"
+        fi
+        # tpm_unsealdata_sa does not offer to unseal against a given list of
+        # PCRs.
+        { stderr="$(${tss_bin} -z -i "${tss}.sha1" 2>&1 1>&3 3>&-)"; } 3>&1
+        if [ "$?" -ne 0 ]; then
+            echo "tpm_unseal: Failed to unseal data (TPM 1.2): " >&2
+            echo "${stderr}" >&2
+            return 1
+        fi
     fi
 
+    return 0
 }
 
 QUIRK_D="/usr/lib/tpm-scripts/quirks.d"

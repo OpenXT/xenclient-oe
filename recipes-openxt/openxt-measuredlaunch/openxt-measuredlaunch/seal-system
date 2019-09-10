@@ -1,20 +1,26 @@
 #!/bin/bash
 
-. /usr/lib/openxt/ml-functions
-[ $? -eq 0 ] || {
-    echo "failed to load ml-functions"
-    exit 1
-}
-
-if [ -f /etc/openxt/seal-system.conf ]; then
-    . /etc/openxt/seal-system.conf
-fi
-
+# Usage: err MESSAGE
+# Print MESSAGE on stderr and end the script with an error code 1.
 err() {
     echo "seal-system: $1" >&2
     exit 1
 }
 
+# Load openxt-measuredlaunch helpers.
+if [ ! -f /usr/lib/openxt/ml-functions ]; then
+    err "Failed to load ml-functions. \
+        Is openxt-measuredlaunch installed correctly?"
+fi
+. /usr/lib/openxt/ml-functions
+
+# Load optional script configuration.
+if [ -f /etc/openxt/seal-system.conf ]; then
+    . /etc/openxt/seal-system.conf
+fi
+
+# Usage: constains_only STRING CHARACTER
+# Succeeds when all the characters in STRING are CHARACTER.
 contains_only() {
     local s="$1"
     local c="$2"
@@ -46,11 +52,15 @@ Usage: seal-system [-h] [-s|-u|-f] [-ctpgbr path] -[48 object[,objects]]"
 EOF
 }
 
+# Usage: pcr_in_selection PCR-ID
+# Returns 0 if pcr-id PCR is in ${pcr_selection}, 1 otherwise.
+# ${pcr_selection} is defined in the 'Configurables' section, it contains the
+# list of PCRs defined in ${config_pcrs}.
 pcr_in_selection() {
-    pcr="$1"
+    local pcr="$1"
 
-    for p in $pcr_selection ; do
-        if [ $p -eq $pcr ] ; then
+    for p in ${pcr_selection}; do
+        if [ "${p}" -eq "${pcr}" ]; then
             return 0
         fi
     done
@@ -58,24 +68,15 @@ pcr_in_selection() {
     return 1
 }
 
-read_pcr_selection() {
-    # strip out -r/-p to leave just the digits
-    sed -e 's/-[rp]//g' $config_pcrs
-}
-
 # Globals
-TPM_DEV="$(find /sys/class -name tpm0)/device"
-
-is_tpm_2_0
-tpm2=$?
+hashalg="$(tpm_get_hash_algorithm)"
+tpm_ver="$(get_tpm_version)"
 
 # Configurables
 operation="seal"
 config_key="/config/keys/config.key"
 sealed_key="/boot/system/tpm/config.tss"
 config_pcrs="/config/config.pcrs"
-pcr_selection="$( read_pcr_selection )"
-hashalg="sha1"
 good_pcrs="/config/good.pcrs"
 bad_pcrs="/boot/system/tpm/bad.pcrs"
 root_dev="/dev/mapper/xenclient-root"
@@ -105,127 +106,67 @@ pcr8_objs=(
 )
 
 while getopts ":sufc:t:p:g:b:r:4:8:h" opt; do
-    case $opt in
-    s)
-        operation="seal"
-    ;;
-    u)
-        operation="unseal"
-    ;;
-    f)
-        operation="forward"
-    ;;
-    c)
-        config_key=${OPTARG}
-    ;;
-    t)
-        sealed_key=${OPTARG}
-    ;;
-    p)
-        pcr_list=${OPTARG}
-    ;;
-    g)
-        good_pcrs=${OPTARG}
-    ;;
-    b)
-        bad_pcrs=${OPTARG}
-    ;;
-    r)
-        root_dev=${OPTARG}
-    ;;
-    [48])
-        IFS=', ' read -r -a "pcr${opt}_objs" <<< "${OPTARG}"
-    ;;
-    h)
-        usage
-        exit 0
-    ;;
-    *)
-        err "invalid option: -$opt"
-    ;;
+    case "${opt}" in
+    s) operation="seal" ;;
+    u) operation="unseal" ;;
+    f) operation="forward" ;;
+    c) config_key="${OPTARG}" ;;
+    t) sealed_key="${OPTARG}" ;;
+    p) config_pcrs="${OPTARG}" ;;
+    g) good_pcrs="${OPTARG}" ;;
+    b) bad_pcrs="${OPTARG}" ;;
+    r) root_dev="${OPTARG}" ;;
+    [48]) IFS=', ' read -r -a "pcr${opt}_objs" <<< "${OPTARG}" ;;
+    h) usage
+       exit 0
+       ;;
+    \?) err "unknown option: -${OPTARG}" ;;
+    *) err "getopts falal error" ;;
     esac
 done
 
-case $operation in
+# read_pcr_selection will read ${config_pcrs} which can be changed on cmdline.
+pcr_selection="$(cat "${config_pcrs}")"
+
+case "${operation}" in
 seal)
-    file_exists=1
-    if [ "${tpm2}" -eq 0 ];
-    then
-        sealerr=0
-        seal_file=${config_key}
-        clean_old_tpm_files
-        if pcr_bank_exists "sha256" && [ ${sealerr} -eq 0 ]; then
-            sealout=$(tpm2_sealdata -H 0x81000000 -I ${seal_file} -O ${sealed_key}.sha256 -o ${sealed_key}.pub.sha256 -g 0xB -G 8 -b 0x492 $(cat /config/config.pcrs) 2>&1)
-            sealerr=$?
-        fi
-    else
-        sealout=$(tpm_sealdata_sa -i ${config_key} \
-            -o ${sealed_key} -z $(cat ${pcr_list}) 2>&1)
-        sealerr=$?
+    pcr_params=""
+    for p in ${pcr_selection}; do
+        pcr_params="${pcr_params} -p ${p}"
+    done
+
+    if ! tpm_seal -a "${hashalg}" ${pcr_params} "${config_key}" "${sealed_key}"; then
+        err "failed to seal against PCRs."
     fi
 
-    if [ -e ${sealed_key} ]; then
-        file_exists=0
-    elif [ -e ${sealed_key}.sha256 ]; then
-        file_exists=0
-    else
-        file_exists=1
-    fi
+    rm -f "${bad_pcrs}"
+    tpm_list_pcrs > "${good_pcrs}"
 
-    if [ $sealerr -eq 0 ] && [ -e ${sealed_key} ]; then
-        # store PCR hints for recovery
-        if [ -d "${TPM_DEV}" ]; then
-            [ -f "${bad_pcrs}" ] && rm "${bad_pcrs}"
-            if [ "${tpm2}" -eq 0 ]; then
-                tpm2_pcrlist > "${good_pcrs}"
-            else
-                cat "${TPM_DEV}/pcrs" > "${good_pcrs}"
-            fi
-        fi
-
-        exit 0
-    fi
+    exit 0
 ;;
 forward)
-    [ "${tpm2}" -eq 0 ] && hashalg="sha256"
-
     # PCR4 holds the hashes of OpenXT's EFI applications: shim, xen and dom0 kernel.
     # PCR8 holds the hashes of the other critical components of OpenXT's boot:
     #  openxt.cfg, the initrd and the XSM policy.
     # If PCR8 is all 0 we were not booting with UEFI
-    if [ "${tpm2}" -eq 0 ]; then
-        pcr8=$(tpm2_pcrlist -L sha256:8 | cut -f2 -d: | tr -d ' ' | tail -n1)
-        pcr17=$(tpm2_pcrlist -L sha256:17 | cut -f2 -d: | tr -d ' ' | tail -n1)
-    else
-        pcr8=$(grep PCR-08 ${TPM_DEV}/pcrs | cut -f2 -d: | tr -d ' ')
-        pcr17=$(grep PCR-17 ${TPM_DEV}/pcrs | cut -f2 -d: | tr -d ' ' | tr '[:upper:]' '[:lower:]')
-    fi
+    pcr8="$(tpm_get_pcr 8)"
+    pcr17="$(tpm_get_pcr 17)"
 
     pcr_forward=()
-    if ! contains_only "${pcr8}" 0; then
+    if ! contains_only "${pcr8}" "0"; then
         # PCR4 is first extended with the digest of EV_SEPARATOR
         # See TCG EFI Protocol Specification 5.2 Crypto Agile Log Entry Format
-        ev_separator=""
-        if [ "${tpm2}" -ne 0 ]; then
-            # Read the currently used separator from tpm0 sysfs.
-            if [ -e "/sys/kernel/security/tpm0/ascii_bios_measurements" ]; then
-                ev_separator="$(awk '$1 == 4 && $3 == 04 { print $2 }' /sys/kernel/security/tpm0/ascii_bios_measurements)"
-            fi
-            # Pick `printf "\xff\xff\xff\xff" | sha1sum` as it looks popular.
-            ev_separator=${ev_separator:-"d9be6524a5f5047db5866813acf3277892a7a30a"}
-        else
-            ev_separator="df3f619804a92fdb4057192dc43dd748ea778adc52bc498ce80524c014b81119"
-        fi
+        ev_separator="$(tpm_get_ev_separator)"
 
         pcr4=$(hash_extend 0 "${ev_separator}" "${hashalg}")
 
-        hash=$(pesign -h -d ${hashalg} -i "${pcr4_objs[0]}" | awk '{ print $2 }')
-        pcr4=$(hash_extend $pcr4 $hash $hashalg) ||
+        hash=$(pesign -h -d "${hashalg}" -i "${pcr4_objs[0]}" | awk '{ print $2 }')
+        pcr4=$(hash_extend "${pcr4}" "${hash}" "${hashalg}") ||
             err "failed to calculate pcr4"
 
         for o in ${pcr4_objs[@]:1}; do
             hash=$(${hashalg}sum "${o}" | awk '{ print $1 }')
-            pcr4=$(hash_extend $pcr4 $hash $hashalg) ||
+            pcr4=$(hash_extend "${pcr4}" "${hash}" "${hashalg}") ||
                 err "failed to calculate pcr4"
         done
 
@@ -233,14 +174,14 @@ forward)
 
         for o in ${pcr8_objs[@]}; do
             hash=$(${hashalg}sum "${o}" | awk '{ print $1 }')
-            pcr8=$(hash_extend $pcr8 $hash $hashalg) ||
+            pcr8=$(hash_extend "${pcr8}" "${hash}" "${hashalg}") ||
                 err "failed to calculate pcr8"
         done
 
         modules=$(cat /usr/share/xenclient/bootloader/openxt.cfg | grep "sinit" | awk -F'=' '{print $2}')
         for module in $modules; do
             hash=$(${hashalg}sum /boot/$module | awk '{ print $1 }')
-            pcr8=$(hash_extend $pcr8 $hash $hashalg) ||
+            pcr8=$(hash_extend "${pcr8}" "${hash}" "${hashalg}") ||
                 err "failed to calculate pcr8"
         done
 
@@ -249,7 +190,7 @@ forward)
     fi
 
     if pcr_in_selection 15 ; then
-        [ -r ${root_dev} ] || err "cannot read root_dev ${root_dev}"
+        [ -r "${root_dev}" ] || err "cannot read root_dev ${root_dev}"
         # During early init, rootfs is hashed and is given to
         # tpm_extend which for tpm1.2 hashes the rootfs hash again and
         # hands that value to the TPM to be extended into PCR 15
@@ -261,8 +202,8 @@ forward)
         # correct predict PCR15 during forward seal.
         root_hash=$(dd status=none if=${root_dev} iflag=direct bs=8M | \
                         ${hashalg}sum|cut -f1 -d' ')
-        [ "${tpm2}" -ne 0 ] && root_hash=$(echo -n ${root_hash} | \
-                                               ${hashalg}sum|cut -f1 -d' ')
+        [ "${tpm_ver}" = "1.2" ] && root_hash=$(echo -n ${root_hash} | \
+                                                ${hashalg}sum|cut -f1 -d' ')
         pcr15=$(hash_extend 0 ${root_hash} ${hashalg}) ||
                 err "failed to hash root device"
 
@@ -288,39 +229,36 @@ forward)
         pcr_forward[19]=":${pcr19}"
     fi
 
+    rm -f /boot/system/tpm/forward_pcr.lst
     for p in ${pcr_selection}; do
         pcr_params="${pcr_params} -p ${p}${pcr_forward[${p}]}"
+        if [ -n "${pcr_forward[${p}]}" ]; then
+            echo "${p}${pcr_forward[${p}]}" >> /boot/system/tpm/forward_pcr.lst
+        fi
     done
 
-    echo "$pcr_params" > /boot/system/tpm/forward_pcr.lst
-
-    if [ -e "${sealed_key}" ]; then
-        mv ${sealed_key} ${sealed_key}.old
+    if ! tpm_seal -a "${hashalg}" ${pcr_params} "${config_key}" "${sealed_key}"; then
+        err "forward seal of key failed"
     fi
-    if [ -e "${sealed_key}.sha1" ]; then
-        mv ${sealed_key}.sha1 ${sealed_key}.sha1.old
-    fi
-    if [ -e "${sealed_key}.sha256" ]; then
-        mv ${sealed_key}.sha256 ${sealed_key}.sha256.old
-    fi
-
-    tpm_forward_seal -a ${hashalg} ${pcr_params} ${config_key} ${sealed_key}
-    [ $? -eq 0 ] || err "forward seal of key failed"
 
     exit 0
 ;;
 unseal)
-    for p in ${pcr_selection}; do
-        pcr_params="${pcr_params} -p ${p}"
-    done
+    if [ ! -e "${sealed_key}.${hashalg}" ]; then
+        err "sealed key file missing"
+    fi
 
-    [ -e "${sealed_key}.${hashalg}" ] || err "sealed key file missing"
-    [ "${tpm2}" -eq 0 ] && [ -e "${sealed_key}.pub.${hashalg}" ] ||
+    if [ "${tpm_ver}" = "2.0" -a ! -e "${sealed_key}.pub.${hashalg}" ]; then
         err "sealed pub key file missing"
+    fi
 
-    tpm_unseal -a ${hashalg} ${pcr_params} ${sealed_key}
-    [ $? -eq 0 ] || err "unseal failed"
+    if ! tpm_unseal -a "${hashalg}" "${sealed_key}"; then
+        err "unseal failed"
+    fi
+
+    exit 0
+;;
+*)
+    err "Unknown operation \"${operation}\""
 ;;
 esac
-
-err "unexpectedly finsihed"
