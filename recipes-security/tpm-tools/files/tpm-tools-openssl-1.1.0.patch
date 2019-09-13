@@ -1,0 +1,75 @@
+--- a/lib/tpm_unseal.c
++++ b/lib/tpm_unseal.c
+@@ -408,8 +408,9 @@ int tpmUnsealFile( char* fname, unsigned
+ 	}
+ 
+ 	/* Decode and decrypt the encrypted data */
+-	EVP_CIPHER_CTX ctx;
+-	EVP_DecryptInit(&ctx, EVP_aes_256_cbc(), symKey, (unsigned char *)TPMSEAL_IV);
++	EVP_CIPHER_CTX *ctx;
++	ctx = EVP_CIPHER_CTX_new();
++	EVP_DecryptInit(ctx, EVP_aes_256_cbc(), symKey, (unsigned char *)TPMSEAL_IV);
+ 
+ 	/* Create a base64 BIO to decode the encrypted data */
+ 	if ((b64 = BIO_new(BIO_f_base64())) == NULL) {
+@@ -420,11 +421,12 @@ int tpmUnsealFile( char* fname, unsigned
+ 
+ 	bmem = BIO_push( b64, bmem );
+ 	while ((rcLen = BIO_read(bmem, data, sizeof(data))) > 0) {
+-		EVP_DecryptUpdate(&ctx, res_data+res_size,
++		EVP_DecryptUpdate(ctx, res_data+res_size,
+ 					&rcLen, (unsigned char *)data, rcLen);
+ 		res_size += rcLen;
+ 	}
+-	EVP_DecryptFinal(&ctx, res_data+res_size, &rcLen);
++	EVP_DecryptFinal(ctx, res_data+res_size, &rcLen);
++	EVP_CIPHER_CTX_free(ctx);
+ 	res_size += rcLen;
+ 	bmem = BIO_pop(b64);
+ 	BIO_free(b64);
+--- a/src/cmds/tpm_sealdata.c
++++ b/src/cmds/tpm_sealdata.c
+@@ -375,16 +375,19 @@ int main(int argc, char **argv)
+ 	BIO_puts(bdata, TPMSEAL_ENC_STRING); 
+ 	bdata = BIO_push(b64, bdata);
+ 
+-	EVP_CIPHER_CTX ctx;
+-	EVP_EncryptInit(&ctx, EVP_aes_256_cbc(), randKey, (unsigned char *)TPMSEAL_IV);
++	EVP_CIPHER_CTX *ctx;
++	ctx = EVP_CIPHER_CTX_new();
++
++	EVP_EncryptInit(ctx, EVP_aes_256_cbc(), randKey, (unsigned char *)TPMSEAL_IV);
+ 
+ 	while ((lineLen = BIO_read(bin, line, sizeof(line))) > 0) {
+-		EVP_EncryptUpdate(&ctx, encData, &encDataLen,
++		EVP_EncryptUpdate(ctx, encData, &encDataLen,
+ 				  line, lineLen);
+ 		BIO_write(bdata, encData, encDataLen);
+ 	}
+ 
+-	EVP_EncryptFinal(&ctx, encData, &encDataLen);
++	EVP_EncryptFinal(ctx, encData, &encDataLen);
++	EVP_CIPHER_CTX_free(ctx);
+ 	BIO_write(bdata, encData, encDataLen);
+ 	if (BIO_flush(bdata) != 1) {
+ 		logError(_("Unable to flush output\n"));
+--- a/src/cmds/tpm_extendpcr.c
++++ b/src/cmds/tpm_extendpcr.c
+@@ -136,11 +136,13 @@ int main(int argc, char **argv)
+ 
+ 		unsigned char msg[EVP_MAX_MD_SIZE];
+ 		unsigned int msglen;
+-		EVP_MD_CTX ctx;
+-		EVP_DigestInit(&ctx, EVP_sha1());
++		EVP_MD_CTX *ctx;
++		ctx = EVP_MD_CTX_new();
++		EVP_DigestInit(ctx, EVP_sha1());
+ 		while ((lineLen = BIO_read(bin, line, sizeof(line))) > 0)
+-			EVP_DigestUpdate(&ctx, line, lineLen);
+-		EVP_DigestFinal(&ctx, msg, &msglen);
++			EVP_DigestUpdate(ctx, line, lineLen);
++		EVP_DigestFinal(ctx, msg, &msglen);
++		EVP_MD_CTX_free(ctx);
+ 
+ 		if (contextCreateObject(hContext, TSS_OBJECT_TYPE_PCRS, initFlag,
+ 					&hPcrs) != TSS_SUCCESS)
