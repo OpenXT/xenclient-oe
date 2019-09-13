@@ -20,6 +20,7 @@ SRC_URI = " \
     file://0012-Find-e820-regions-that-include-the-limit.patch \
     file://0013-Add-support-for-launching-64-bit-PE-kernels.patch \
     file://0014-safestringlib-Attend-GCC-warnings.patch \
+    file://gcc9.patch \
 "
 
 SRC_URI[md5sum] = "b5b235ddcecceb3663975e28be16d0d9"
