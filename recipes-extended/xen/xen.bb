@@ -8,6 +8,8 @@ XEN_TARGET_ARCH = "x86_64"
 SRC_URI_append = "\
     file://xenconsoled.initscript \
     file://xenstored.initscript \
+    file://xen-vbd3-backend.rules \
+    file://block-vbd3 \
 "
 
 PACKAGES += " \
@@ -98,6 +100,14 @@ INITSCRIPT_PARAMS_${PN}-xenstored-c = "defaults 05"
 FILES_${PN}-misc += " \
     ${sbindir}/xen-diag \
     "
+
+FILES_${PN}-scripts-block += " \
+    ${sysconfdir}/udev/rules.d/xen-vbd3-backend.rules \
+    ${sysconfdir}/xen/scripts/block-vbd3 \
+"
+RDEPENDS_${PN}-scripts-block += " \
+    udev \
+"
 
 EXTRA_OEMAKE += "ETHERBOOT_ROMS=${STAGING_DIR_HOST}/usr/share/firmware/intel.rom"
 
@@ -197,6 +207,12 @@ do_install() {
             echo "d $i 0755 root root - -"  >> ${D}${sysconfdir}/tmpfiles.d/xen.conf
         done
     fi
+
+    # install vbd3 work-around block script and udev rule.
+    install -d ${D}${sysconfdir}/udev/rules.d
+    install -m 0755 ${WORKDIR}/xen-vbd3-backend.rules ${D}${sysconfdir}/udev/rules.d/xen-vbd3-backend.rules
+    install -m 0755 ${WORKDIR}/block-vbd3 ${D}${sysconfdir}/xen/scripts/block-vbd3
+
     rm -rf ${D}/${sbindir}/xen-livepatch
     rm -rf ${D}/${bindir}/xen-cpuid
     rm -rf ${D}/${sysconfdir}/init.d/xencommons
