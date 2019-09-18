@@ -15,8 +15,6 @@ SRC_URI_append = "\
 PACKAGES += " \
     ${PN}-toolstack-headers \
     ${PN}-xenstored-c \
-    ${PN}-libxentoolcore \
-    ${PN}-libxentoolcore-dev \
     ${PN}-xen-shim \
     "
 
@@ -77,12 +75,6 @@ FILES_${PN}-xenstored-c = " \
     ${sysconfdir}/xen/xenstored.conf \
     "
 
-FILES_${PN}-libxentoolcore = "${libdir}/libxentoolcore.so.*"
-FILES_${PN}-libxentoolcore-dev = " \
-    ${libdir}/libxentoolcore.so \
-    ${datadir}/pkgconfig/xentoolcore.pc \
-    "
-
 FILES_${PN}-xen-shim = "\
     ${libdir}/xen/boot/xen-shim \
     "
@@ -123,6 +115,8 @@ pkg_prerm_${PN}-xenstored-c () {
     update-alternatives --remove xenstored xenstored.${PN}-xenstored-c
     update-alternatives --remove xenstored-initscript xenstored.${PN}-xenstored-c
 }
+
+addtask stubs after do_configure before do_compile
 
 do_compile() {
     unset CFLAGS
