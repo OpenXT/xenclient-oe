@@ -20,6 +20,7 @@ SRC_URI = "git://github.com/xapi-project/blktap.git;protocol=https \
     file://add-missing-files-to-gitignore.patch \
     file://blktap3-vhd-icbinn-support.patch \
     file://Revert-CP-9798-Update-cgroups-path.patch \
+    file://fix-encryption.patch \
 "
 
 S = "${WORKDIR}/git"
@@ -29,7 +30,7 @@ inherit autotools-brokensep xenclient update-rc.d
 INITSCRIPT_NAME = "tapback-daemon"
 INITSCRIPT_PARAMS = "defaults 61"
 
-TARGET_CPPFLAGS += "-DTAP_CTL_NO_DEFAULT_CGROUP_SLICE"
+TARGET_CPPFLAGS += "-DTAP_CTL_NO_DEFAULT_CGROUP_SLICE -DOPEN_XT"
 
 do_configure_prepend() {
 	touch ${S}/EXTRAVERSION

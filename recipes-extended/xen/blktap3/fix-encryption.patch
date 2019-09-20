@@ -1,0 +1,116 @@
+################################################################################
+SHORT DESCRIPTION:
+################################################################################
+Fix vhd-encryption failures caused by upstream blktap3 changes
+
+################################################################################
+LONG DESCRIPTION:
+################################################################################
+After upstreaming the OpenXT blktap encryption logic, several changes were
+merged into the upstream blktap repository that broke vhd encryption on OpenXT.
+These commits were 032df683d4d86502e2193337d9546e5b07429e77 and
+63e7784aaa05f8c2f96a09af50f6131af11f26b9
+A summary of the problems are as follows:
+
+ 1. The find key logic was if-def'd out. We now set this in blktap3.bb
+ 2. Because of 1, the redefinition of key causes a variable redefine error when
+    we turn on the if-def. Rename the var in function def to avoid this.
+ 3. 63e7784 only loads libblockcrypto if -E is set when calling tap-ctl-open.
+    OpenXT uses tap-ctl-create and always wants crypto on, so use the existing 
+    ifdef to set an always true conditional that loads crypto no matter what
+    cmdline tool invokes the encryption based tap routines.
+ 4. findkey() sets keysize to 512 or 256, but an xts case deals with bytes,
+    better name the variables to indicate whether they contain keysize in bytes
+    or bits, and make sure we convert chain_find_keyed_vhd to bytes before
+    calling xts_aes_setkey()
+
+################################################################################
+CHANGELOG
+################################################################################
+Authors:
+Chris Rogers <rogersc@ainfosec.com>
+
+################################################################################
+REMOVAL
+################################################################################
+When upstreamed.
+
+################################################################################
+UPSTREAM PLAN
+################################################################################
+Should be upstreamed back to xapi project, but will take more time to update our
+implementation to fit their design changes. This needs to be in our tree ASAP
+so we patch here first, and upstream later.
+
+################################################################################
+INTERNAL DEPENDENCIES
+################################################################################
+
+################################################################################
+PATCHES
+################################################################################
+--- a/drivers/block-crypto.c
++++ b/drivers/block-crypto.c
+@@ -344,25 +344,27 @@ out:
+ #endif
+ 
+ int
+-vhd_open_crypto(vhd_context_t *vhd, const uint8_t *key, size_t key_bytes, const char *name)
++vhd_open_crypto(vhd_context_t *vhd, const uint8_t *keyin, size_t key_bytes, const char *name)
+ {
+ 	struct vhd_keyhash keyhash;
+ 	int err;
+ #ifdef OPEN_XT
+ 	uint8_t key[MAX_AES_XTS_PLAIN_KEYSIZE / sizeof(uint8_t)] = { 0 };
+-	int keysize = 0;
++	int key_bits = 0;
+ #endif
+ 
+ 	if (vhd->xts_tfm)
+ 		return 0;
+ 
+ #ifdef OPEN_XT
+-	err = chain_find_keyed_vhd(vhd, key, &keysize, &keyhash);
++	err = chain_find_keyed_vhd(vhd, key, &key_bits, &keyhash);
+ 	if (err) {
+ 	    DPRINTF("error in vhd chain: %d\n", err);
+ 	    return err;
+ 	}
+ 
++	key_bytes = key_bits / 8;
++
+ 	if (keyhash.cookie == 0) {
+ 		return 0;
+ 	}
+--- a/drivers/block-vhd.c
++++ b/drivers/block-vhd.c
+@@ -79,7 +79,7 @@
+ 
+ unsigned int SPB;
+ 
+-#define LIBBLOCKCRYPTO_NAME "libblockcrypto.so"
++#define LIBBLOCKCRYPTO_NAME "libblockcrypto.so.0"
+ 
+ #define DEBUGGING   2
+ #define MICROSOFT_COMPAT
+@@ -689,13 +689,19 @@ static int dummy_open_crypto(
+ static int
+ __load_crypto(struct td_vbd_encryption *encryption)
+ {
++	int load_crypto = 0;
+ 	crypto_interface = malloc(sizeof(struct crypto_interface));
+ 	if (!crypto_interface) {
+ 		EPRINTF("Failed to allocate memory\n");
+ 		return -ENOMEM;
+ 	}
+ 
+-	if (encryption->encryption_key == NULL) {
++	load_crypto = encryption->encryption_key != NULL;
++#ifdef OPEN_XT
++	load_crypto = 1;
++#endif
++
++	if (!load_crypto) {
+ 		crypto_interface->vhd_open_crypto = dummy_open_crypto;
+ 		crypto_interface->vhd_crypto_encrypt = NULL;
+ 		crypto_interface->vhd_crypto_decrypt = NULL;
