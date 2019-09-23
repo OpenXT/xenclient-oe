@@ -7,9 +7,6 @@ SRC_URI += " \
 "
 # Openxt additional modules.
 SRC_URI += " \
-    file://policy/modules/admin/getedid.fc \
-    file://policy/modules/admin/getedid.if \
-    file://policy/modules/admin/getedid.te \
     file://policy/modules/admin/statusreport.fc \
     file://policy/modules/admin/statusreport.if \
     file://policy/modules/admin/statusreport.te \
@@ -147,7 +144,6 @@ SRC_URI += " \
     file://patches/blktap-interfaces.diff \
     file://patches/db-cmd-interfaces.diff \
     file://patches/dbd-interfaces.diff \
-    file://patches/getedid-interfaces.diff \
     file://patches/input-server-interfaces.diff \
     file://patches/network-daemon-interfaces.diff \
     file://patches/statusreport-interfaces.diff \
