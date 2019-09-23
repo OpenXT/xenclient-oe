@@ -80,3 +80,6 @@ remove_nonessential_initscripts() {
     fi
 }
 ROOTFS_POSTPROCESS_COMMAND += "remove_nonessential_initscripts; "
+
+# Bats test suite inclusion.
+IMAGE_FEATURES[validitems] += "bats"

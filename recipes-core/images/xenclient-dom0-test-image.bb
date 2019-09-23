@@ -1,4 +1,4 @@
-# XenClient dom0 image.
+# XenClient dom0 test image.
 
 LICENSE = "GPLv2 & MIT"
 LIC_FILES_CHKSUM = " \
@@ -17,10 +17,15 @@ IMAGE_FEATURES += " \
     read-only-rootfs \
     root-bash-shell \
     wildcard-sshd-argo \
+    bats \
 "
 IMAGE_FSTYPES = "ext3.gz"
-export IMAGE_BASENAME = "xenclient-dom0-image"
+export IMAGE_BASENAME = "xenclient-dom0-test-image"
 
 COMPATIBLE_MACHINE = "(xenclient-dom0)"
 
 require xenclient-dom0-image.inc
+
+IMAGE_INSTALL += " \
+    packagegroup-openxt-test \
+"

@@ -32,6 +32,9 @@ RDEPENDS_${PN} = " \
     e2fsprogs-tune2fs \
     e2fsprogs-resize2fs \
     kernel-modules \
+    txt-info-module \
+    argo-module \
+    modules-dom0 \
     libargo \
     libargo-bin \
     libedid \
@@ -118,6 +121,9 @@ RDEPENDS_${PN} = " \
     ${@bb.utils.contains('DISTRO_FEATURES', 'blktap2', 'xen-blktap xen-libblktapctl xen-libvhd', 'blktap3 tapback', d)} \
     pesign \
     ipxe \
+    initscripts \
+    linux-firmware-i915 \
+    devicemodel-stubdom \
 "
 
 # OE upgrade - temporarly disabled:
