@@ -16,9 +16,6 @@ SRC_URI += " \
     file://policy/modules/admin/tpmsetup.fc \
     file://policy/modules/admin/tpmsetup.if \
     file://policy/modules/admin/tpmsetup.te \
-    file://policy/modules/admin/txtstat.fc \
-    file://policy/modules/admin/txtstat.if \
-    file://policy/modules/admin/txtstat.te \
     file://policy/modules/admin/vhdutils.fc \
     file://policy/modules/admin/vhdutils.if \
     file://policy/modules/admin/vhdutils.te \
@@ -150,7 +147,6 @@ SRC_URI += " \
     file://patches/sysutils-interfaces.diff \
     file://patches/tcs-interfaces.diff \
     file://patches/tpmsetup-interfaces.diff \
-    file://patches/txtstat-interfaces.diff \
     file://patches/uid-interfaces.diff \
     file://patches/updatemgr-interfaces.diff \
     file://patches/vhdutils-interfaces.diff \
