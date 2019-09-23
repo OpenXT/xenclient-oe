@@ -183,19 +183,6 @@ SRC_URI += " \
     file://patches/add-missing-dbusd-permissions.patch \
     file://patches/xl-sysadm-interfaces.patch \
 "
-#file://patches/upstream-add-binder-security-class.patch
-#file://patches/upstream-update-netlink-classes.patch
-#file://patches/upstream-contrib-networkmanager.patch
-
-# This got reverted with:
-# bc14741 Revert "dbus: allow system, and session bus clients to answer to dbus unconfined domains"
-#file://patches/openxt-dbus-deny-send-unconfined.patch
-
-# This file is maintained in the layer, no need to patch.
-#file://patches/tpm2util.patch
-
-# Should not be required.
-#file://patches/lvmetad-add-rules.patch
 
 S = "${WORKDIR}/refpolicy"
 
