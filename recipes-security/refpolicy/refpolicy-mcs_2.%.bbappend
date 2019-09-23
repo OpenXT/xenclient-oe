@@ -97,7 +97,6 @@ SRC_URI += " \
 "
 # Patches.
 SRC_URI += " \
-    file://patches/policy.booleans.diff \
     file://patches/remove-xml-doc-gen.patch \
     file://patches/Makefile.diff \
     file://patches/build.conf.diff \
@@ -201,18 +200,27 @@ POLICY_MLS_CATS = "256"
 EXTRA_OEMAKE += "PKGNAME=${POLICY_NAME}-${PV}"
 
 do_srctree_copy() {
-        cp -r ${WORKDIR}/policy ${S}/
+        cp -r "${WORKDIR}/policy/modules" "${S}/policy"
 }
 addtask do_srctree_copy after do_unpack before do_patch
 do_srctree_copy[doc] = "Copy layer provided policy files in work directory."
 do_srctree_copy[dirs] = "${B}"
 
-do_modules_copy() {
-        cat ${S}/policy/modules-upstream.conf ${S}/policy/modules-openxt.conf > ${S}/policy/modules.conf
+do_policy_conf() {
+    for conf in modules booleans; do
+        rm -f "${S}/policy/${conf}.conf"
+        for e in ${WORKDIR}/policy/${conf}*.conf; do
+            if [ -e "${e}" ]; then
+                cat "${e}" >> "${S}/policy/${conf}.conf"
+            fi
+        done
+    done
 }
-addtask do_modules_copy after do_srctree_copy before do_compile
-do_modules_copy[doc] = "Create modules.conf from layer provided configuration files."
-do_modules_copy[dirs] = "${B}"
+addtask do_policy_conf after do_srctree_copy before do_configure
+do_policy_conf[doc] = "Generate configuration files (booleans.conf, \
+modules.conf) from the configuration elements passed by the layer. \
+See 'make conf' of the refpolicy for more information."
+do_policy_conf[dirs] = "${B}"
 
 do_install_append() {
         install -d ${D}/etc/selinux
