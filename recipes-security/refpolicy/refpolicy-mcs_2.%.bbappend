@@ -85,9 +85,6 @@ SRC_URI += " \
     file://policy/modules/system/stubdom-helpers.fc \
     file://policy/modules/system/stubdom-helpers.if \
     file://policy/modules/system/stubdom-helpers.te \
-    file://policy/modules/system/vgmch.fc \
-    file://policy/modules/system/vgmch.if \
-    file://policy/modules/system/vgmch.te \
     file://policy/modules/system/xc-files.fc \
     file://policy/modules/system/xc-files.if \
     file://policy/modules/system/xc-files.te \
@@ -162,7 +159,6 @@ SRC_URI += " \
     file://patches/txtstat-interfaces.diff \
     file://patches/uid-interfaces.diff \
     file://patches/updatemgr-interfaces.diff \
-    file://patches/vgmch-interfaces.diff \
     file://patches/vhdutils-interfaces.diff \
     file://patches/xc-files-interfaces.patch \
     file://patches/xc-installer-interfaces.diff \
