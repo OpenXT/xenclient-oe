@@ -99,7 +99,6 @@ SRC_URI += " \
 SRC_URI += " \
     file://patches/remove-xml-doc-gen.patch \
     file://patches/Makefile.diff \
-    file://patches/build.conf.diff \
     file://patches/virtual_domain_context.diff \
     file://patches/policy.modules.contrib.alsa.diff \
     file://patches/policy.modules.contrib.apm.diff \
