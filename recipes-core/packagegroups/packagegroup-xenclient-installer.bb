@@ -36,7 +36,7 @@ RDEPENDS_${PN} = " \
     parted \
     pciutils-ids \
     read-edid \
-    refpolicy-mcs \
+    refpolicy-mcs-openxt \
     rsyslog \
     rsyslog-conf-dom0 \
     shim \

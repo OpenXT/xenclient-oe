@@ -9,7 +9,7 @@ IMAGE_INSTALL_append += " \
     policycoreutils-semodule \
     policycoreutils-sestatus \
     policycoreutils-setfiles \
-    refpolicy-mcs \
+    refpolicy-mcs-openxt \
 "
 
 #inherit selinux-image
