@@ -1,8 +1,6 @@
 FILESEXTRAPATHS_prepend := "${THISDIR}/files:${THISDIR}/${BPN}:${THISDIR}/${BPN}-7:"
 
 SRC_URI += " \
-    file://fix-parallel-make.patch \
-    file://nostrip.patch \
     file://sshd_config \
     file://sshd_config_argo \
     file://ssh_config \
