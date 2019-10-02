@@ -171,7 +171,6 @@ SRC_URI += " \
     file://patches/xec-interfaces.diff \
     file://patches/xsmutils-interfaces.diff \
     file://patches/vusb-interfaces.diff \
-    file://patches/qemu1.4_wrapper_file_context.patch \
     file://patches/openxt_system_unconfined_readonly_neverallow_fixes.patch \
     file://patches/openxt-sysadm-lsusb.patch \
     file://patches/xen4.6-uprev.patch \
