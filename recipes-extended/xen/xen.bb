@@ -8,6 +8,8 @@ XEN_TARGET_ARCH = "x86_64"
 SRC_URI_append = "\
     file://xenconsoled.initscript \
     file://xenstored.initscript \
+    file://xen-vbd3-backend.rules \
+    file://block-vbd3 \
 "
 
 PACKAGES += " \
@@ -85,6 +87,10 @@ FILES_${PN}-xen-shim = "\
     ${libdir}/xen/boot/xen-shim \
     "
 
+RDEPENDS_${PN}-scripts-common += " \
+    perl \
+"
+
 INITSCRIPT_PACKAGES =+ "${PN}-console ${PN}-xenstored-c"
 INITSCRIPT_NAME_${PN}-console = "xenconsoled"
 INITSCRIPT_PARAMS_${PN}-console = "defaults 20"
@@ -94,6 +100,14 @@ INITSCRIPT_PARAMS_${PN}-xenstored-c = "defaults 05"
 FILES_${PN}-misc += " \
     ${sbindir}/xen-diag \
     "
+
+FILES_${PN}-scripts-block += " \
+    ${sysconfdir}/udev/rules.d/xen-vbd3-backend.rules \
+    ${sysconfdir}/xen/scripts/block-vbd3 \
+"
+RDEPENDS_${PN}-scripts-block += " \
+    udev \
+"
 
 EXTRA_OEMAKE += "ETHERBOOT_ROMS=${STAGING_DIR_HOST}/usr/share/firmware/intel.rom"
 
@@ -166,7 +180,39 @@ do_install() {
         -i ${D}${sysconfdir}/init.d/xenstored.${PN}-xenstored-c
 
     # These files are not packaged, removing them to silence QA warnings
-    #   sbindir == /usr/sbin, bindir == /usr/bin, sysconfig == /etc
+    VOLATILE_DIRS=" \
+        ${localstatedir}/run/xenstored \
+        ${localstatedir}/run/xend \
+        ${localstatedir}/run/xend/boot \
+        ${localstatedir}/run/xen \
+        ${localstatedir}/log/xen \
+        ${localstatedir}/lock/xen \
+        ${localstatedir}/lock/subsys \
+        ${localstatedir}/lib/xen \
+        "
+
+    # install volatiles using populate_volatiles mechanism
+    install -d ${D}${sysconfdir}/default/volatiles
+    for i in $VOLATILE_DIRS; do
+        echo "d root root 0755 $i none"  >> ${D}${sysconfdir}/default/volatiles/99_xen
+    done
+
+    # workaround for xendomains script which searchs sysconfig if directory exists
+    install -d ${D}${sysconfdir}/sysconfig
+    ln -sf ${sysconfdir}/default/xendomains ${D}${sysconfdir}/sysconfig/xendomains
+
+    if ${@bb.utils.contains(DISTRO_FEATURES, 'systemd', 'true', 'false', d)}; then
+        install -d ${D}${sysconfdir}/tmpfiles.d
+        for i in $VOLATILE_DIRS; do
+            echo "d $i 0755 root root - -"  >> ${D}${sysconfdir}/tmpfiles.d/xen.conf
+        done
+    fi
+
+    # install vbd3 work-around block script and udev rule.
+    install -d ${D}${sysconfdir}/udev/rules.d
+    install -m 0755 ${WORKDIR}/xen-vbd3-backend.rules ${D}${sysconfdir}/udev/rules.d/xen-vbd3-backend.rules
+    install -m 0755 ${WORKDIR}/block-vbd3 ${D}${sysconfdir}/xen/scripts/block-vbd3
+
     rm -rf ${D}/${sbindir}/xen-livepatch
     rm -rf ${D}/${bindir}/xen-cpuid
     rm -rf ${D}/${sysconfdir}/init.d/xencommons

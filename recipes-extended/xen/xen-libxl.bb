@@ -42,6 +42,10 @@ RDEPENDS_${PN}-base_remove = " \
     ${@bb.utils.contains('DISTRO_FEATURES', 'blktap2', '', '${PN}-blktap ${PN}-libblktapctl ${PN}-libvhd', d)} \
     "
 
+RDEPENDS_xen-xl += " \
+    xen-scripts-block \
+"
+
 RRECOMMENDS_${PN}-base_remove = " \
     ${@bb.utils.contains('DISTRO_FEATURES', 'blktap2', '', '${PN}-libblktap', d)} \
     "
@@ -49,7 +53,6 @@ RRECOMMENDS_${PN}-base_remove = " \
 SRC_URI_append = " \
     file://xen-init-dom0.initscript \
     file://xl.conf \
-    file://volatiles.99_xen \
     "
 
 PACKAGES = " \
@@ -67,9 +70,6 @@ PACKAGES_remove = " \
     ${@bb.utils.contains('DISTRO_FEATURES', 'blktap2', '', '${PN}-blktap ${PN}-libblktap ${PN}-libblktapctl ${PN}-libblktapctl-dev ${PN}-libblktap-dev', d)} \
     "
 
-FILES_${PN}-xl += " \
-    ${sysconfdir}/default/volatiles \
-"
 FILES_${PN}-staticdev = " \
     ${libdir}/libxlutil.a \
     ${libdir}/libxenlight.a \
@@ -160,8 +160,4 @@ do_install() {
     # Since we don't have a xenstore stubdomain, remove the
     # xenstore stubdomain init program (libdir == /usr/lib)
     rm -f ${D}/${libdir}/xen/bin/init-xenstore-domain
-
-    install -d ${D}${sysconfdir}/default/volatiles
-    install -m 0644 ${WORKDIR}/volatiles.99_xen \
-        ${D}${sysconfdir}/default/volatiles/99_xen
 }
