@@ -73,9 +73,13 @@ PACKAGES =+ "${PN}-utils"
 EXTRA_OECONF += " \
     --target-list=i386-softmmu \
     --disable-bluez \
+    --disable-bochs \
     --disable-bzip2 \
+    --disable-capstone \
+    --disable-cloop \
     --disable-curl \
     --disable-curses \
+    --disable-dmg \
     --disable-docs \
     --disable-fdt \
     --disable-gcrypt \
@@ -84,13 +88,19 @@ EXTRA_OECONF += " \
     --disable-iconv \
     --disable-kvm \
     --disable-libusb \
+    --disable-live-block-migration \
     --disable-lzo \
     --disable-nettle \
     --disable-opengl \
+    --disable-parallels \
     --disable-pvrdma \
+    --disable-qcow1 \
+    --disable-qed \
     --disable-qom-cast-debug \
     --disable-rdma \
+    --disable-replication \
     --disable-sdl \
+    --disable-sheepdog \
     --disable-slirp \
     --disable-spice \
     --disable-strip \
@@ -99,6 +109,7 @@ EXTRA_OECONF += " \
     --disable-tools \
     --disable-tpm \
     --disable-usb-redir \
+    --disable-vdi \
     --disable-vhost-crypto \
     --disable-vhost-net \
     --disable-vhost-scsi \
@@ -106,6 +117,7 @@ EXTRA_OECONF += " \
     --disable-vhost-vsock \
     --disable-virtfs \
     --disable-vnc \
+    --disable-vvfat \
     --enable-atapi-pt \
     --enable-atapi-pt-argo \
     --enable-debug-info \
