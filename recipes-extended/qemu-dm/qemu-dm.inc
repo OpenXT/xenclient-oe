@@ -72,9 +72,11 @@ PACKAGES =+ "${PN}-utils"
 
 EXTRA_OECONF += " \
     --target-list=i386-softmmu \
+    --disable-auth-pam \
     --disable-bluez \
     --disable-bochs \
     --disable-bzip2 \
+    --disable-cap-ng \
     --disable-capstone \
     --disable-cloop \
     --disable-curl \
