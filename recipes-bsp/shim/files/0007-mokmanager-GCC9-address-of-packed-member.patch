@@ -1,0 +1,97 @@
+From 026fefd22a56a8375f27c1740c96fa81844493ce Mon Sep 17 00:00:00 2001
+From: Eric Chanudet <chanudete@ainfosec.com>
+Date: Mon, 7 Oct 2019 17:17:21 -0400
+Subject: [PATCH] mokmanager: GCC9 address of packed member.
+
+MokListNode is a packed structure, so guaranties have to be given on
+pointer alignment. In this case, the EFI_GUID field is, at least, 4-byte
+aligned (preceding fields: uint32 and uint8*).
+
+Signed-off-by: Eric Chanudet <chanudete@ainfosec.com>
+---
+ MokManager.c | 19 ++++++++++++++-----
+ 1 file changed, 14 insertions(+), 5 deletions(-)
+
+diff --git a/MokManager.c b/MokManager.c
+index 55af321..da88c65 100644
+--- a/MokManager.c
++++ b/MokManager.c
+@@ -1104,6 +1104,7 @@ static EFI_STATUS write_back_mok_list (MokListNode *list, INTN key_num,
+ {
+ 	EFI_GUID shim_lock_guid = SHIM_LOCK_GUID;
+ 	EFI_GUID CertType = X509_GUID;
++	EFI_GUID *Type;
+ 	EFI_STATUS efi_status;
+ 	EFI_SIGNATURE_LIST *CertList;
+ 	EFI_SIGNATURE_DATA *CertData;
+@@ -1121,8 +1122,9 @@ static EFI_STATUS write_back_mok_list (MokListNode *list, INTN key_num,
+ 		if (list[i].Mok == NULL)
+ 			continue;
+ 
++		Type = __builtin_assume_aligned(&(list[i].Type), 4);
+ 		DataSize += sizeof(EFI_SIGNATURE_LIST);
+-		if (CompareGuid(&(list[i].Type), &CertType) == 0)
++		if (CompareGuid(Type, &CertType) == 0)
+ 			DataSize += sizeof(EFI_GUID);
+ 		DataSize += list[i].MokSize;
+ 	}
+@@ -1144,7 +1146,8 @@ static EFI_STATUS write_back_mok_list (MokListNode *list, INTN key_num,
+ 		CertList->SignatureType = list[i].Type;
+ 		CertList->SignatureHeaderSize = 0;
+ 
+-		if (CompareGuid(&(list[i].Type), &CertType) == 0) {
++		Type = __builtin_assume_aligned(&(list[i].Type), 4);
++		if (CompareGuid(Type, &CertType) == 0) {
+ 			CertList->SignatureListSize = list[i].MokSize +
+ 						      sizeof(EFI_SIGNATURE_LIST) +
+ 						      sizeof(EFI_GUID);
+@@ -1182,10 +1185,12 @@ static void delete_cert (void *key, UINT32 key_size,
+ 			 MokListNode *mok, INTN mok_num)
+ {
+ 	EFI_GUID CertType = X509_GUID;
++	EFI_GUID *mok_type;
+ 	int i;
+ 
+ 	for (i = 0; i < mok_num; i++) {
+-		if (CompareGuid(&(mok[i].Type), &CertType) != 0)
++		mok_type = __builtin_assume_aligned(&(mok[i].Type), 4);
++		if (CompareGuid(mok_type, &CertType) != 0)
+ 			continue;
+ 
+ 		if (mok[i].MokSize == key_size &&
+@@ -1232,11 +1237,13 @@ static void delete_hash_in_list (EFI_GUID Type, UINT8 *hash, UINT32 hash_size,
+ 	int i, del_ind;
+ 	void *start, *end;
+ 	UINT32 remain;
++	EFI_GUID *mok_type;
+ 
+ 	sig_size = hash_size + sizeof(EFI_GUID);
+ 
+ 	for (i = 0; i < mok_num; i++) {
+-		if ((CompareGuid(&(mok[i].Type), &Type) != 0) ||
++		mok_type = __builtin_assume_aligned(&(mok[i].Type), 4);
++		if ((CompareGuid(mok_type, &Type) != 0) ||
+ 		    (mok[i].MokSize < sig_size))
+ 			continue;
+ 
+@@ -1294,6 +1301,7 @@ static EFI_STATUS delete_keys (void *MokDel, UINTN MokDelSize, BOOLEAN MokX)
+ {
+ 	EFI_GUID shim_lock_guid = SHIM_LOCK_GUID;
+ 	EFI_GUID CertType = X509_GUID;
++	EFI_GUID *key_type;
+ 	EFI_STATUS efi_status;
+ 	CHAR16 *db_name;
+ 	CHAR16 *auth_name;
+@@ -1407,7 +1415,8 @@ static EFI_STATUS delete_keys (void *MokDel, UINTN MokDelSize, BOOLEAN MokX)
+ 
+ 	/* Search and destroy */
+ 	for (i = 0; i < del_num; i++) {
+-		if (CompareGuid(&(del_key[i].Type), &CertType) == 0) {
++		key_type = __builtin_assume_aligned(&(del_key[i].Type), 4);
++		if (CompareGuid(key_type, &CertType) == 0) {
+ 			delete_cert(del_key[i].Mok, del_key[i].MokSize,
+ 				    mok, mok_num);
+ 		} else if (is_sha2_hash(del_key[i].Type)) {
+-- 
+2.23.0
+
