@@ -21,6 +21,8 @@ SRC_URI = "git://github.com/xapi-project/blktap.git;protocol=https \
     file://blktap3-vhd-icbinn-support.patch \
     file://Revert-CP-9798-Update-cgroups-path.patch \
     file://fix-encryption.patch \
+    file://gcc9-compilation.patch \
+    file://openssl-1.1.x.patch \
 "
 
 S = "${WORKDIR}/git"
