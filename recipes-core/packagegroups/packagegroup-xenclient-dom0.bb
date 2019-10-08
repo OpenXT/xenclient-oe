@@ -80,7 +80,6 @@ RDEPENDS_${PN} = " \
     rsyslog \
     rsyslog-conf-dom0 \
     logrotate \
-    qemu-wrappers \
     dialog \
     xenclient-udev-force-discreet-net-to-eth0 \
     xenclient-nwd \
