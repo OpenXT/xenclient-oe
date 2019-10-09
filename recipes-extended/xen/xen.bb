@@ -88,7 +88,7 @@ FILES_${PN}-xen-shim = "\
     "
 
 RDEPENDS_${PN}-scripts-common += " \
-    perl \
+    ${PN}-cmp-fd-file-inode \
 "
 
 INITSCRIPT_PACKAGES =+ "${PN}-console ${PN}-xenstored-c"
