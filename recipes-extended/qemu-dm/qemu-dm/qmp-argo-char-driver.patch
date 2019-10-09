@@ -7,7 +7,7 @@
 +chardev-obj-$(CONFIG_XEN) += char-argo.o
 --- /dev/null
 +++ b/chardev/char-argo.c
-@@ -0,0 +1,345 @@
+@@ -0,0 +1,354 @@
 +/*
 + * QEMU System Emulator
 + *
@@ -88,6 +88,11 @@
 +    int write_len = len;
 +    int ret;
 +
++    if (!s->connected) {
++        /* This is important to drop events when not connected. */
++        return len;
++    }
++
 + again:
 +    if (s->stream) {
 +        ret = argo_send(s->fd, buf, write_len, 0);
@@ -167,6 +172,9 @@
 +    if (!s->stream) {
 +        if (s->connected == 0 && !strncmp((char*)(s->buf), ARGO_MAGIC_CONNECT, 4)) {
 +            fprintf(stderr, "argo_recvfrom() returned ARGO_MAGIC_CONNECT, connecting.\n");
++            /* update "connected" first since qemu_chr_be_event calls monitor
++               code which can call back into argo_chr_write to send data. */
++            s->connected = 1;
 +            argo_chr_update_read_handler(chr);
 +            qemu_chr_be_event(chr, CHR_EVENT_OPENED);
 +            if (!chr->gsource) {
@@ -174,10 +182,12 @@
 +                                                 argo_chr_read_poll,
 +                                                 argo_chr_read, chr, chr->gcontext);
 +            }
-+            s->connected = 1;
 +            return FALSE;
 +        }
 +        if (s->connected == 1 && !strncmp((char*)(s->buf), ARGO_MAGIC_DISCONNECT, 4)) {
++            /* update "connected" first since qemu_chr_be_event calls monitor
++               code which can call back into argo_chr_write to send data. */
++            s->connected = 0;
 +            argo_chr_update_read_handler(chr);
 +            qemu_chr_be_event(chr, CHR_EVENT_CLOSED);
 +            if (!chr->gsource) {
@@ -186,7 +196,6 @@
 +                                                 argo_chr_read, chr, chr->gcontext);
 +            }
 +            fprintf(stderr, "argo_recvfrom() returned ARGO_MAGIC_DISCONNECT, closing.\n");
-+            s->connected = 0;
 +            return FALSE;
 +        }
 +    }
