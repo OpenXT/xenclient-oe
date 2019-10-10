@@ -22,15 +22,6 @@ S = "${WORKDIR}/git/dbd"
 
 inherit xenclient ocaml findlib xc-rpcgen
 
-DEB_SUITE = "wheezy"
-DEB_ARCH = "i386"
-
-DEB_NAME = "xenclient-dbtools"
-DEB_DESC="Tools to access the XenClient database from a service VM"
-DEB_DESC_EXT="This package provides a set of tools to access the XenClient database from a service VM."
-DEB_SECTION="misc"
-DEB_PKG_MAINTAINER = "Citrix Systems <customerservice@citrix.com>"
-
 do_configure_append() {
 	mkdir -p ${S}/autogen
 	xc-rpcgen --camel --templates-dir=${STAGING_RPCGENDATADIR_NATIVE} -c -o ${S}/autogen ${STAGING_IDLDATADIR}/db.xml

@@ -13,15 +13,6 @@ SRC_URI = "git://${OPENXT_GIT_MIRROR}/xenfb2.git;protocol=${OPENXT_GIT_PROTOCOL}
 
 S = "${WORKDIR}/git/linux"
 
-DEB_SUITE = "wheezy"
-DEB_ARCH = "i386"
-
-DEB_NAME = "xenfb2-kernel-module"
-DEB_DESC="Linux Framebuffer PV driver"
-DEB_DESC_EXT="This package provides a Linux PV framebuffer driver."
-DEB_SECTION="misc"
-DEB_PKG_MAINTAINER = "Citrix Systems <customerservice@citrix.com>"
-
 MAKE_TARGETS += "modules"
 
 FILES_${PN}-dev = " /usr/include "

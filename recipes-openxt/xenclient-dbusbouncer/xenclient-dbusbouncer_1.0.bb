@@ -17,15 +17,6 @@ S = "${WORKDIR}"
 
 inherit update-rc.d xenclient
 
-DEB_SUITE = "wheezy"
-DEB_ARCH = "i386"
-
-DEB_NAME = "xenclient-dbusbouncer"
-DEB_DESC="Argo - UNIX socket proxy"
-DEB_DESC_EXT="This package provides a proxy for remote socket access using Argo."
-DEB_SECTION="misc"
-DEB_PKG_MAINTAINER = "Citrix Systems <customerservice@citrix.com>"
-
 LDFLAGS += "-largo -lxenstore"
 
 ASNEEDED = ""
