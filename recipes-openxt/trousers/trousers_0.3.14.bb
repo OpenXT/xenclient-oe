@@ -6,7 +6,7 @@ LIC_FILES_CHKSUM = "file://LICENSE;md5=8031b2ae48ededc9b982c08620573426"
 
 PR = "r0"
 
-SRC_URI = "http://downloads.sourceforge.net/${PN}/${PN}-${PV}.tar.gz;subdir=${PN}-${PV} \
+SRC_URI = "http://downloads.sourceforge.net/${BPN}/${BPN}-${PV}.tar.gz;subdir=${BPN}-${PV} \
            file://trousers-tcsd-conf.patch;patch=1 \
            file://trousers-standalone.patch;patch=1 \
            file://trousers-tcsd-dont-pthread-exit.patch;patch=1 \
@@ -14,7 +14,7 @@ SRC_URI = "http://downloads.sourceforge.net/${PN}/${PN}-${PV}.tar.gz;subdir=${PN
            file://45-trousers.rules \
 "
 
-S = "${WORKDIR}/${PN}-${PV}"
+S = "${WORKDIR}/${BPN}-${PV}"
 
 EXTRA_OECONF += " --disable-usercheck"
 CFLAGS_append = " -Wno-error=unused-parameter -Wno-error=strict-aliasing -std=gnu89"
