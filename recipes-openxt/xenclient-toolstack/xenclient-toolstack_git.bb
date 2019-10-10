@@ -5,10 +5,7 @@ DEPENDS += "ocaml-dbus camomile xen xz"
 RDEPENDS_${PN} = "xen-xenstore xen-xenstored"
 RDEPENDS_${PN}_xenclient-ndvm += " db-tools"
 
-DEPENDS_append_xenclient-nilfvm += " ${@deb_bootstrap_deps(d)} "
-
 inherit autotools-brokensep ocaml findlib
-inherit ${@"xenclient-simple-deb"if(d.getVar("MACHINE",1)=="xenclient-nilfvm")else("null")}
 
 PACKAGES = "${PN}-dbg ${PN}-doc ${PN}-locale ${PN}-dev ${PN}-staticdev ${PN}-block-scripts ${PN} \
             ${PN}-libs-dbg ${PN}-libs-staticdev ${PN}-libs-dev ${PN}-libs \
@@ -47,14 +44,6 @@ FILES_${PN}-libs-dbg = " \
 DEB_SUITE = "wheezy"
 DEB_ARCH = "i386"
 
-DEB_NAME = "nilfvm-xenclient-toolstack"
-DEB_DESC="The nilfvm XenClient toolstack package"
-DEB_DESC_EXT="This package provides the  nilfvm XenClient toolstack scrips."
-DEB_SECTION="misc"
-DEB_PKG_MAINTAINER = "Citrix Systems <customerservice@citrix.com>"
-
-
-
 PV = "0+git${SRCPV}"
 
 SRCREV = "${AUTOREV}"
@@ -82,14 +71,6 @@ OCAML_INSTALL_LIBS = " \
     libs/common \
     "
 
-do_configure_xenclient-nilfvm() {
-        :
-}
-
-do_compile_xenclient-nilfvm() {
-        :
-}
-
 do_install() {
         oe_runmake DESTDIR=${D} V=1 install
         rm -f ${D}/etc/xen/scripts/vif
@@ -102,10 +83,4 @@ do_install() {
             # root Makefile sur $(DESTDIR)/usr/bin while libs use $(DESTDIR)/$(ocamlfind printconf destdir)
                 oe_runmake -C $ocaml_lib V=1 install
         done
-}
-
-do_install_append_xenclient-nilfvm() {
-	## to generate deb package
-	DEB_DO_NOT_INCLUDE="usr/bin/ usr/lib/"
-	do_simple_deb_package
 }
