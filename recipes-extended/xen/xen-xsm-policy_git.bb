@@ -27,5 +27,3 @@ do_install(){
 	touch ${D}/etc/xen/xenrefpolicy/users/local.users
 	oe_runmake DESTDIR=${D} BINDIR=${STAGING_BINDIR_NATIVE} install
 }
-
-inherit xenclient

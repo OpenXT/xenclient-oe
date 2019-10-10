@@ -14,4 +14,3 @@ S = "${WORKDIR}/git/libicbinn_resolved"
 inherit autotools
 inherit pkgconfig
 inherit lib_package
-inherit xenclient

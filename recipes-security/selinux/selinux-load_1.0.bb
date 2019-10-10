@@ -11,8 +11,6 @@ S = "${WORKDIR}"
 
 ASNEEDED = ""
 
-inherit xenclient
-
 do_install() {
 	     install -d ${D}/sbin
              install -m 0755 ${WORKDIR}/selinux-load.sh ${D}/sbin

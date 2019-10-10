@@ -20,7 +20,7 @@ SRC_URI += " file://db-exists-dom0 \
 
 S = "${WORKDIR}/git/dbd"
 
-inherit xenclient ocaml findlib xc-rpcgen
+inherit ocaml findlib xc-rpcgen
 
 do_configure_append() {
 	mkdir -p ${S}/autogen

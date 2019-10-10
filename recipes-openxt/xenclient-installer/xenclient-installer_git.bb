@@ -10,7 +10,7 @@ SRC_URI = "git://${OPENXT_GIT_MIRROR}/installer.git;protocol=${OPENXT_GIT_PROTOC
 
 S = "${WORKDIR}/git"
 
-inherit xenclient allarch
+inherit allarch
 
 PACKAGES += "${PN}-part2"
 

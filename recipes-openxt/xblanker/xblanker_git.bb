@@ -11,7 +11,7 @@ SRC_URI = "git://${OPENXT_GIT_MIRROR}/xblanker.git;protocol=${OPENXT_GIT_PROTOCO
 
 S = "${WORKDIR}/git"
 
-inherit autotools xenclient pkgconfig
+inherit autotools pkgconfig
 
 do_configure_prepend() {
 #  cp ${WORKDIR}/xs.h ${S}/src/

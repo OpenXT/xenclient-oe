@@ -1,5 +1,4 @@
 inherit module-compat
-inherit xenclient
 
 DESCRIPTION = "Linux Framebuffer PV driver"
 LICENSE = "GPLv2"

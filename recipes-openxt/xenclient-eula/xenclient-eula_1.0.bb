@@ -6,8 +6,6 @@ SRC_URI = "file://EULA-en-us"
 
 FILES_${PN} = "${datadir}/xenclient"
 
-inherit xenclient
-
 # Check the en-us version of the EULA doesn't contain non-ASCII characters -
 # the installer can't display them.
 do_compile() {

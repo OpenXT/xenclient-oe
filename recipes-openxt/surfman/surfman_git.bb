@@ -18,7 +18,7 @@ S = "${WORKDIR}/git/surfman"
 
 ASNEEDED = ""
 
-inherit autotools xenclient update-rc.d pkgconfig
+inherit autotools update-rc.d pkgconfig
 
 INITSCRIPT_NAME = "surfman"
 INITSCRIPT_PARAMS = "start 72 5 . stop 72 0 1 2 3 4 6 ."

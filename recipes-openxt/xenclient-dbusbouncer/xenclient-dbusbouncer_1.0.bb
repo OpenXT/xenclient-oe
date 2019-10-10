@@ -15,7 +15,7 @@ INITSCRIPT_PARAMS = "defaults 29"
 
 S = "${WORKDIR}"
 
-inherit update-rc.d xenclient
+inherit update-rc.d
 
 LDFLAGS += "-largo -lxenstore"
 

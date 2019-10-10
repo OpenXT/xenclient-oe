@@ -20,7 +20,7 @@ ASNEEDED = ""
 
 LDFLAGS += "-lm -lcrypto"
 
-inherit autotools xenclient update-rc.d pkgconfig xc-rpcgen-c
+inherit autotools update-rc.d pkgconfig xc-rpcgen-c
 
 
 INITSCRIPT_NAME = "xenclient-input"

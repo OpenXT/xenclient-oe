@@ -10,7 +10,7 @@ INITSCRIPT_PARAMS = "start 32 S ."
 
 S = "${WORKDIR}"
 
-inherit update-rc.d xenclient
+inherit update-rc.d
 
 do_install() {
 	install -d ${D}${sysconfdir}/init.d

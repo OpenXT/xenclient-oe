@@ -22,7 +22,6 @@ FILES_${PN} = ""
 
 inherit autotools
 inherit pkgconfig
-inherit xenclient
 
 do_install() {
 :

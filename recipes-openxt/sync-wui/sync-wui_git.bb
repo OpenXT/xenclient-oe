@@ -16,7 +16,6 @@ SRC_URI = "git://${OPENXT_GIT_MIRROR}/sync-wui.git;protocol=${OPENXT_GIT_PROTOCO
 
 S = "${WORKDIR}/git"
 
-inherit xenclient
 inherit package_tar
 
 do_configure() {

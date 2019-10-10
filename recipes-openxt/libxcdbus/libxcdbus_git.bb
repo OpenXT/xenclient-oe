@@ -13,4 +13,4 @@ SRC_URI = "git://${OPENXT_GIT_MIRROR}/libxcdbus.git;protocol=${OPENXT_GIT_PROTOC
 
 S = "${WORKDIR}/git"
 
-inherit autotools-brokensep pkgconfig lib_package xenclient xc-rpcgen-c
+inherit autotools-brokensep pkgconfig lib_package xc-rpcgen-c

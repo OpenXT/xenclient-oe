@@ -17,7 +17,6 @@ ASNEEDED = ""
 
 inherit autotools
 inherit pkgconfig
-inherit xenclient
 
 do_install(){
         install -d ${D}/usr/lib/xen/bin

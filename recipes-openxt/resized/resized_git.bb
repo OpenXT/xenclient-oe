@@ -11,5 +11,5 @@ SRC_URI = "git://${OPENXT_GIT_MIRROR}/resized.git;protocol=${OPENXT_GIT_PROTOCOL
 
 S = "${WORKDIR}/git"
 
-inherit autotools xenclient pkgconfig
+inherit autotools pkgconfig
 

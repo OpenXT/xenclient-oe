@@ -12,7 +12,7 @@ SRC_URI = "file://xenclient-boot-sound.initscript \
 PACKAGES = "${PN}"
 FILES_${PN} = "/"
 
-inherit update-rc.d xenclient
+inherit update-rc.d
 
 INITSCRIPT_NAME = "xenclient-boot-sound"
 INITSCRIPT_PARAMS = "defaults 75"
