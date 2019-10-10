@@ -43,6 +43,11 @@ do_install () {
 	install -m 0755    ${WORKDIR}/mountearly.sh	${D}${sysconfdir}/init.d
 	install -m 0755    ${WORKDIR}/udev-volatiles.sh	${D}${sysconfdir}/init.d
 
+	if ${@bb.utils.contains('DISTRO_FEATURES','selinux','true','false',d)}; then
+		install -d ${D}/${base_sbindir}
+		install -m 0755 ${WORKDIR}/sushell ${D}/${base_sbindir}
+	fi
+
 #
 # Install device dependent scripts
 #
