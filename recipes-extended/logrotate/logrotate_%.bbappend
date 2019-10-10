@@ -16,3 +16,4 @@ do_install_append() {
     install -p -m 755 ${WORKDIR}/logrotate-wrapper ${D}${sbindir}/logrotate-wrapper
 }
 
+INSANE_SKIP_${PN} = "src-uri-bad"

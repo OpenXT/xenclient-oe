@@ -15,3 +15,5 @@ do_configure() {
     cp "${WORKDIR}/defconfig" ${B}/.config
     oe_runmake oldconfig
 }
+
+INSANE_SKIP_${PN} = "src-uri-bad"
