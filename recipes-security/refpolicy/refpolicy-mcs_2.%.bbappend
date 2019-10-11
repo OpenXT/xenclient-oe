@@ -7,9 +7,6 @@ SRC_URI += " \
 "
 # Openxt additional modules.
 SRC_URI += " \
-    file://policy/modules/admin/getedid.fc \
-    file://policy/modules/admin/getedid.if \
-    file://policy/modules/admin/getedid.te \
     file://policy/modules/admin/statusreport.fc \
     file://policy/modules/admin/statusreport.if \
     file://policy/modules/admin/statusreport.te \
@@ -19,9 +16,6 @@ SRC_URI += " \
     file://policy/modules/admin/tpmsetup.fc \
     file://policy/modules/admin/tpmsetup.if \
     file://policy/modules/admin/tpmsetup.te \
-    file://policy/modules/admin/txtstat.fc \
-    file://policy/modules/admin/txtstat.if \
-    file://policy/modules/admin/txtstat.te \
     file://policy/modules/admin/vhdutils.fc \
     file://policy/modules/admin/vhdutils.if \
     file://policy/modules/admin/vhdutils.te \
@@ -85,9 +79,6 @@ SRC_URI += " \
     file://policy/modules/system/stubdom-helpers.fc \
     file://policy/modules/system/stubdom-helpers.if \
     file://policy/modules/system/stubdom-helpers.te \
-    file://policy/modules/system/vgmch.fc \
-    file://policy/modules/system/vgmch.if \
-    file://policy/modules/system/vgmch.te \
     file://policy/modules/system/xc-files.fc \
     file://policy/modules/system/xc-files.if \
     file://policy/modules/system/xc-files.te \
@@ -97,10 +88,6 @@ SRC_URI += " \
 "
 # Patches.
 SRC_URI += " \
-    file://patches/policy.booleans.diff \
-    file://patches/remove-xml-doc-gen.patch \
-    file://patches/Makefile.diff \
-    file://patches/build.conf.diff \
     file://patches/virtual_domain_context.diff \
     file://patches/policy.modules.contrib.alsa.diff \
     file://patches/policy.modules.contrib.apm.diff \
@@ -152,7 +139,6 @@ SRC_URI += " \
     file://patches/blktap-interfaces.diff \
     file://patches/db-cmd-interfaces.diff \
     file://patches/dbd-interfaces.diff \
-    file://patches/getedid-interfaces.diff \
     file://patches/input-server-interfaces.diff \
     file://patches/network-daemon-interfaces.diff \
     file://patches/statusreport-interfaces.diff \
@@ -161,10 +147,8 @@ SRC_URI += " \
     file://patches/sysutils-interfaces.diff \
     file://patches/tcs-interfaces.diff \
     file://patches/tpmsetup-interfaces.diff \
-    file://patches/txtstat-interfaces.diff \
     file://patches/uid-interfaces.diff \
     file://patches/updatemgr-interfaces.diff \
-    file://patches/vgmch-interfaces.diff \
     file://patches/vhdutils-interfaces.diff \
     file://patches/xc-files-interfaces.patch \
     file://patches/xc-installer-interfaces.diff \
@@ -183,19 +167,6 @@ SRC_URI += " \
     file://patches/add-missing-dbusd-permissions.patch \
     file://patches/xl-sysadm-interfaces.patch \
 "
-#file://patches/upstream-add-binder-security-class.patch
-#file://patches/upstream-update-netlink-classes.patch
-#file://patches/upstream-contrib-networkmanager.patch
-
-# This got reverted with:
-# bc14741 Revert "dbus: allow system, and session bus clients to answer to dbus unconfined domains"
-#file://patches/openxt-dbus-deny-send-unconfined.patch
-
-# This file is maintained in the layer, no need to patch.
-#file://patches/tpm2util.patch
-
-# Should not be required.
-#file://patches/lvmetad-add-rules.patch
 
 S = "${WORKDIR}/refpolicy"
 
@@ -214,18 +185,27 @@ POLICY_MLS_CATS = "256"
 EXTRA_OEMAKE += "PKGNAME=${POLICY_NAME}-${PV}"
 
 do_srctree_copy() {
-        cp -r ${WORKDIR}/policy ${S}/
+        cp -r "${WORKDIR}/policy/modules" "${S}/policy"
 }
 addtask do_srctree_copy after do_unpack before do_patch
 do_srctree_copy[doc] = "Copy layer provided policy files in work directory."
 do_srctree_copy[dirs] = "${B}"
 
-do_modules_copy() {
-        cat ${S}/policy/modules-upstream.conf ${S}/policy/modules-openxt.conf > ${S}/policy/modules.conf
+do_policy_conf() {
+    for conf in modules booleans; do
+        rm -f "${S}/policy/${conf}.conf"
+        for e in ${WORKDIR}/policy/${conf}*.conf; do
+            if [ -e "${e}" ]; then
+                cat "${e}" >> "${S}/policy/${conf}.conf"
+            fi
+        done
+    done
 }
-addtask do_modules_copy after do_srctree_copy before do_compile
-do_modules_copy[doc] = "Create modules.conf from layer provided configuration files."
-do_modules_copy[dirs] = "${B}"
+addtask do_policy_conf after do_srctree_copy before do_configure
+do_policy_conf[doc] = "Generate configuration files (booleans.conf, \
+modules.conf) from the configuration elements passed by the layer. \
+See 'make conf' of the refpolicy for more information."
+do_policy_conf[dirs] = "${B}"
 
 do_install_append() {
         install -d ${D}/etc/selinux
