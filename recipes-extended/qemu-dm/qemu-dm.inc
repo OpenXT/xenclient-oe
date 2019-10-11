@@ -92,8 +92,6 @@ EXTRA_OECONF += " \
     --disable-kvm \
     --disable-tools \
     --disable-fdt \
-    --disable-uuid \
-    --disable-vhdx \
     --disable-qom-cast-debug \
     --disable-tcg-interpreter \
     --disable-tcg \
