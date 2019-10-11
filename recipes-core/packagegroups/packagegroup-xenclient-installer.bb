@@ -36,7 +36,6 @@ RDEPENDS_${PN} = " \
     parted \
     pciutils-ids \
     read-edid \
-    refpolicy-mcs-openxt \
     rsyslog \
     rsyslog-conf-dom0 \
     shim \
@@ -75,4 +74,5 @@ RDEPENDS_${PN} = " \
     xen-xenstat \
     xen-xl \
     ${@bb.utils.contains('DISTRO_FEATURES', 'blktap2', 'xen-blktap xen-libblktapctl xen-libvhd', 'blktap3', d)} \
+    ${@bb.utils.contains('IMAGE_FEATURES', 'bats', 'refpolicy-mcs-openxt-test', 'refpolicy-mcs-openxt', d)} \
 "

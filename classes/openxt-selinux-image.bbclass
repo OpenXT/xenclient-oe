@@ -9,7 +9,7 @@ IMAGE_INSTALL_append += " \
     policycoreutils-semodule \
     policycoreutils-sestatus \
     policycoreutils-setfiles \
-    refpolicy-mcs-openxt \
+    ${@bb.utils.contains('IMAGE_FEATURES', 'bats', 'refpolicy-mcs-openxt-test', 'refpolicy-mcs-openxt', d)} \
 "
 
 #inherit selinux-image
