@@ -59,7 +59,7 @@ ROOTFS_POSTPROCESS_COMMAND += '${@bb.utils.contains("IMAGE_FEATURES", "debug-twe
 # Forcibly remove packages disregarding if it creates a broken dependency
 force_package_removal() {
     if [ -n "${PACKAGE_REMOVE}" ]; then
-        opkg -f "${IPKGCONF_TARGET}" -o "${IMAGE_ROOTFS}" ${OPKG_ARGS} -force-depends remove ${PACKAGE_REMOVE};
+        opkg -f "${IPKGCONF_TARGET}" -o "${IMAGE_ROOTFS}" ${OPKG_ARGS} --force-depends remove ${PACKAGE_REMOVE};
     fi
 }
 ROOTFS_POSTPROCESS_COMMAND += "force_package_removal; "
