@@ -9,7 +9,6 @@ SRC_URI = " \
     file://xfwm4.xml \
     file://helpers.rc \
     file://workspaces.xml \
-    file://config \
     file://framebuffer.conf \
     file://Xdefaults \
     file://default \
