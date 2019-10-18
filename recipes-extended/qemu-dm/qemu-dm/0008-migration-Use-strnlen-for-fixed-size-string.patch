@@ -1,0 +1,78 @@
+From 4fe28e707e21814cf85937451855676bf22c5832 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Philippe=20Mathieu-Daud=C3=A9?= <philmd@redhat.com>
+Date: Thu, 3 Jan 2019 09:56:38 +0100
+Subject: [PATCH 08/17] migration: Use strnlen() for fixed-size string
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+GCC 8 introduced the -Wstringop-overflow, which detect buffer overflow
+by string-modifying functions declared in <string.h>, such strncpy(),
+used in global_state_store_running().
+
+GCC indeed found an incorrect use of strlen(), because this array
+is loaded by VMSTATE_BUFFER(runstate, GlobalState) then parsed
+using qapi_enum_parse which does not get the buffer length.
+
+Use strnlen() which returns sizeof(s->runstate) if the array is not
+NUL-terminated, assert the size is within range, and enforce the array
+to be NUL-terminated to avoid an overflow in qapi_enum_parse().
+
+This fixes:
+
+    CC      migration/global_state.o
+  qemu/migration/global_state.c: In function 'global_state_pre_save':
+  qemu/migration/global_state.c:109:15: error: 'strlen' argument 1 declared attribute 'nonstring' [-Werror=stringop-overflow=]
+       s->size = strlen((char *)s->runstate) + 1;
+                 ^~~~~~~~~~~~~~~~~~~~~~~~~~~
+  qemu/migration/global_state.c:24:13: note: argument 'runstate' declared here
+       uint8_t runstate[100] QEMU_NONSTRING;
+               ^~~~~~~~
+  cc1: all warnings being treated as errors
+  make: *** [qemu/rules.mak:69: migration/global_state.o] Error 1
+
+Suggested-by: Michael S. Tsirkin <mst@redhat.com>
+Reviewed-by: Richard Henderson <richard.henderson@linaro.org>
+Reviewed-by: Dr. David Alan Gilbert <dgilbert@redhat.com>
+Signed-off-by: Philippe Mathieu-Daudé <philmd@redhat.com>
+Acked-by: Michael S. Tsirkin <mst@redhat.com>
+Signed-off-by: Michael S. Tsirkin <mst@redhat.com>
+---
+ migration/global_state.c | 14 +++++++++++++-
+ 1 file changed, 13 insertions(+), 1 deletion(-)
+
+diff --git a/migration/global_state.c b/migration/global_state.c
+index 01805c567a..2c8c447239 100644
+--- a/migration/global_state.c
++++ b/migration/global_state.c
+@@ -89,6 +89,17 @@ static int global_state_post_load(void *opaque, int version_id)
+     s->received = true;
+     trace_migrate_global_state_post_load(runstate);
+ 
++    if (strnlen((char *)s->runstate,
++                sizeof(s->runstate)) == sizeof(s->runstate)) {
++        /*
++         * This condition should never happen during migration, because
++         * all runstate names are shorter than 100 bytes (the size of
++         * s->runstate). However, a malicious stream could overflow
++         * the qapi_enum_parse() call, so we force the last character
++         * to a NUL byte.
++         */
++        s->runstate[sizeof(s->runstate) - 1] = '\0';
++    }
+     r = qapi_enum_parse(&RunState_lookup, runstate, -1, &local_err);
+ 
+     if (r == -1) {
+@@ -107,7 +118,8 @@ static int global_state_pre_save(void *opaque)
+     GlobalState *s = opaque;
+ 
+     trace_migrate_global_state_pre_save((char *)s->runstate);
+-    s->size = strlen((char *)s->runstate) + 1;
++    s->size = strnlen((char *)s->runstate, sizeof(s->runstate)) + 1;
++    assert(s->size <= sizeof(s->runstate));
+ 
+     return 0;
+ }
+-- 
+2.23.0
+

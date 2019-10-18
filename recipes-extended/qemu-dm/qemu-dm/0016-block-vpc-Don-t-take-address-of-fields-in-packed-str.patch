@@ -1,0 +1,44 @@
+From 866c0b2268f6da24d76bc09701600f8f5a7ccf21 Mon Sep 17 00:00:00 2001
+From: Peter Maydell <peter.maydell@linaro.org>
+Date: Mon, 10 Dec 2018 11:26:47 +0000
+Subject: [PATCH 16/17] block/vpc: Don't take address of fields in packed
+ structs
+
+Taking the address of a field in a packed struct is a bad idea, because
+it might not be actually aligned enough for that pointer type (and
+thus cause a crash on dereference on some host architectures). Newer
+versions of clang warn about this. Avoid the bug by generating the
+UUID into a local variable which is definitely safely aligned and
+then copying it into place.
+
+Signed-off-by: Peter Maydell <peter.maydell@linaro.org>
+Signed-off-by: Kevin Wolf <kwolf@redhat.com>
+---
+ block/vpc.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/block/vpc.c b/block/vpc.c
+index 80c5b2b197..968d80ae46 100644
+--- a/block/vpc.c
++++ b/block/vpc.c
+@@ -979,6 +979,7 @@ static int coroutine_fn vpc_co_create(BlockdevCreateOptions *opts,
+     int64_t total_size;
+     int disk_type;
+     int ret = -EIO;
++    QemuUUID uuid;
+ 
+     assert(opts->driver == BLOCKDEV_DRIVER_VPC);
+     vpc_opts = &opts->u.vpc;
+@@ -1062,7 +1063,8 @@ static int coroutine_fn vpc_co_create(BlockdevCreateOptions *opts,
+ 
+     footer->type = cpu_to_be32(disk_type);
+ 
+-    qemu_uuid_generate(&footer->uuid);
++    qemu_uuid_generate(&uuid);
++    footer->uuid = uuid;
+ 
+     footer->checksum = cpu_to_be32(vpc_checksum(buf, HEADER_SIZE));
+ 
+-- 
+2.23.0
+

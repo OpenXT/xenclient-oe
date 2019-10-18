@@ -1,0 +1,55 @@
+From acda6d3a461f1981ad1783bb09c107d2fee9ab2b Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Marc-Andr=C3=A9=20Lureau?= <marcandre.lureau@redhat.com>
+Date: Thu, 3 Jan 2019 09:56:37 +0100
+Subject: [PATCH 07/17] migration: Fix stringop-truncation warning
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+GCC 8 added a -Wstringop-truncation warning:
+
+  The -Wstringop-truncation warning added in GCC 8.0 via r254630 for
+  bug 81117 is specifically intended to highlight likely unintended
+  uses of the strncpy function that truncate the terminating NUL
+  character from the source string.
+
+This new warning leads to compilation failures:
+
+    CC      migration/global_state.o
+  qemu/migration/global_state.c: In function 'global_state_store_running':
+  qemu/migration/global_state.c:45:5: error: 'strncpy' specified bound 100 equals destination size [-Werror=stringop-truncation]
+       strncpy((char *)global_state.runstate, state, sizeof(global_state.runstate));
+       ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  make: *** [qemu/rules.mak:69: migration/global_state.o] Error 1
+
+Adding an assert is enough to silence GCC.
+
+(alternatively, we could hard-code "running")
+
+Signed-off-by: Marc-André Lureau <marcandre.lureau@redhat.com>
+Reviewed-by: Eric Blake <eblake@redhat.com>
+Reviewed-by: Dr. David Alan Gilbert <dgilbert@redhat.com>
+Reviewed-by: Philippe Mathieu-Daudé <philmd@redhat.com>
+[PMD: More verbose commit message]
+Signed-off-by: Philippe Mathieu-Daudé <philmd@redhat.com>
+Acked-by: Michael S. Tsirkin <mst@redhat.com>
+Signed-off-by: Michael S. Tsirkin <mst@redhat.com>
+---
+ migration/global_state.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/migration/global_state.c b/migration/global_state.c
+index 8e8ab5c51e..01805c567a 100644
+--- a/migration/global_state.c
++++ b/migration/global_state.c
+@@ -42,6 +42,7 @@ int global_state_store(void)
+ void global_state_store_running(void)
+ {
+     const char *state = RunState_str(RUN_STATE_RUNNING);
++    assert(strlen(state) < sizeof(global_state.runstate));
+     strncpy((char *)global_state.runstate,
+            state, sizeof(global_state.runstate));
+ }
+-- 
+2.23.0
+

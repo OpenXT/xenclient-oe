@@ -1,0 +1,58 @@
+From be177391d5e51e13812cae84bc3c033bbd2727a2 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Daniel=20P=2E=20Berrang=C3=A9?= <berrange@redhat.com>
+Date: Mon, 15 Apr 2019 16:45:03 +0100
+Subject: [PATCH 12/17] usb-mtp: fix alignment of access of ObjectInfo filename
+ field
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The ObjectInfo struct's "filename" field is following a uint8_t
+field in a packed struct and thus has bad alignment for a 16-bit
+field. Switch the field to to uint8_t and use the helper function
+for accessing unaligned 16-bit data.
+
+Note that although the MTP spec specifies big endian, when transported
+over the USB protocol, data is little endian.
+
+Signed-off-by: Daniel P. Berrangé <berrange@redhat.com>
+Message-id: 20190415154503.6758-4-berrange@redhat.com
+Signed-off-by: Gerd Hoffmann <kraxel@redhat.com>
+---
+ hw/usb/dev-mtp.c | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/hw/usb/dev-mtp.c b/hw/usb/dev-mtp.c
+index 36c43b8c20..507738d941 100644
+--- a/hw/usb/dev-mtp.c
++++ b/hw/usb/dev-mtp.c
+@@ -224,7 +224,7 @@ typedef struct {
+     uint32_t assoc_desc;
+     uint32_t seq_no; /*unused*/
+     uint8_t length; /*part of filename field*/
+-    uint16_t filename[0];
++    uint8_t filename[0]; /* UTF-16 encoded */
+     char date_created[0]; /*unused*/
+     char date_modified[0]; /*unused*/
+     char keywords[0]; /*unused*/
+@@ -1598,7 +1598,7 @@ static void usb_mtp_cancel_packet(USBDevice *dev, USBPacket *p)
+     fprintf(stderr, "%s\n", __func__);
+ }
+ 
+-static char *utf16_to_str(uint8_t len, uint16_t *arr)
++static char *utf16_to_str(uint8_t len, uint8_t *str16)
+ {
+     wchar_t *wstr = g_new0(wchar_t, len + 1);
+     int count, dlen;
+@@ -1606,7 +1606,7 @@ static char *utf16_to_str(uint8_t len, uint16_t *arr)
+ 
+     for (count = 0; count < len; count++) {
+         /* FIXME: not working for surrogate pairs */
+-        wstr[count] = (wchar_t)arr[count];
++        wstr[count] = lduw_le_p(str16 + (count * 2));
+     }
+     wstr[count] = 0;
+ 
+-- 
+2.23.0
+

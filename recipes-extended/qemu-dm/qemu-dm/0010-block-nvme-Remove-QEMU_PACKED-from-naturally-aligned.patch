@@ -1,0 +1,48 @@
+From 3178b08c245f5aa70b3b9f054eb3b5d90491e945 Mon Sep 17 00:00:00 2001
+From: Thomas Huth <thuth@redhat.com>
+Date: Mon, 25 Feb 2019 12:59:30 +0100
+Subject: [PATCH 10/17] block/nvme: Remove QEMU_PACKED from naturally aligned
+ NVMeRegs struct
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The QEMU_PACKED is causing a compiler warning/error with GCC 9:
+
+  CC      block/nvme.o
+block/nvme.c: In function ‘nvme_create_queue_pair’:
+block/nvme.c:209:22: error: taking address of packed member of
+ ‘struct <anonymous>’ may result in an unaligned pointer value
+ [-Werror=address-of-packed-member]
+  209 |     q->sq.doorbell = &s->regs->doorbells[idx * 2 * s->doorbell_scale];
+
+All members of the struct are naturally aligned, so there should
+not be the need for QEMU_PACKED here, and the following QEMU_BUILD_BUG_ON
+also ensures that there is no padding. Thus simply remove the QEMU_PACKED
+here.
+
+Buglink: https://bugs.launchpad.net/qemu/+bug/1817525
+Reported-by: Satheesh Rajendran <sathnaga@linux.vnet.ibm.com>
+Signed-off-by: Thomas Huth <thuth@redhat.com>
+Reviewed-by: Peter Maydell <peter.maydell@linaro.org>
+Signed-off-by: Kevin Wolf <kwolf@redhat.com>
+---
+ block/nvme.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/block/nvme.c b/block/nvme.c
+index 36779fdd3d..74f61315e7 100644
+--- a/block/nvme.c
++++ b/block/nvme.c
+@@ -82,7 +82,7 @@ typedef volatile struct {
+     uint8_t  reserved1[0xec0];
+     uint8_t  cmd_set_specfic[0x100];
+     uint32_t doorbells[];
+-} QEMU_PACKED NVMeRegs;
++} NVMeRegs;
+ 
+ QEMU_BUILD_BUG_ON(offsetof(NVMeRegs, doorbells) != 0x1000);
+ 
+-- 
+2.23.0
+
