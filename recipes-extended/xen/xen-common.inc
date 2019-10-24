@@ -104,6 +104,7 @@ SRC_URI_append = " \
     file://memory-scrub-on-domain-shutdown.patch \
     file://0001-tools-helpers-Introduce-cmp-fd-file-inode-utility.patch \
     file://0002-Linux-locking.sh-Use-cmp-fd-file-inode-for-lock-chec.patch \
+    file://ocamlfind-static.patch \
 "
 
 COMPATIBLE_HOST = 'i686-oe-linux|(x86_64.*).*-linux|aarch64.*-linux'
