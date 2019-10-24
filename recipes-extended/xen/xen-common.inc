@@ -14,8 +14,6 @@ require ${@bb.utils.contains('DISTRO_FEATURES', 'blktap2', 'xen-blktap2.inc', 'x
 
 SRC_URI_append = " \
     file://defconfig \
-    file://config.patch \
-    file://disable-xen-root-check.patch \
     file://kconfig-grant-table.patch \
     file://kconfig-grant-table-v2-interface.patch \
     file://kconfig-grant-table-exotic.patch \
