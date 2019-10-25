@@ -65,7 +65,6 @@ IMAGE_INSTALL = " \
     argo-module \
     xen-libxenstore \
     xen-xenstore \
-    xen-ocaml-libs \
     wget \
     ethtool \
     carrier-detect \
