@@ -7,4 +7,8 @@ SRC_URI += " \
     file://no-multiboot-display-reset.patch \
 "
 
-PACKAGECONFIG = "device-mapper"
+PACKAGECONFIG_append = "device-mapper"
+
+# PACKAGECONFIG seems to not append the RDEPENDS_${PN}-*... not sure why yet.
+RDEPENDS_${PN}-editenv += "libdevmapper"
+RDEPENDS_${PN}-common += "libdevmapper"
