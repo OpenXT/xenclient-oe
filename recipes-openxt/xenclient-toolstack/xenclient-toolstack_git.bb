@@ -81,3 +81,6 @@ do_install() {
                 oe_runmake -C $ocaml_lib V=1 install
         done
 }
+
+# .cma/.cmi files require the runtime environment.
+INSANE_SKIP_${PN}-dev = "file-rdeps"
