@@ -85,6 +85,10 @@ FILES_${PN}-xen-shim = "\
     ${libdir}/xen/boot/xen-shim \
     "
 
+FILES_${PN}-xenmon += "\
+    ${sbindir}/xenmon \
+    "
+
 INITSCRIPT_PACKAGES =+ "${PN}-console ${PN}-xenstored-c"
 INITSCRIPT_NAME_${PN}-console = "xenconsoled"
 INITSCRIPT_PARAMS_${PN}-console = "defaults 20"
