@@ -28,8 +28,6 @@ python () {
     d.appendVar("FILES_xen-xl", " /etc/init.d/xen-init-dom0")
 }
 
-FLASK_POLICY_FILE = "xenpolicy-${XEN_PV}"
-
 DEPENDS += " \
     util-linux \
     xen \
