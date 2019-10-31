@@ -21,7 +21,7 @@ PROVIDES += "${PN}-client"
 
 S = "${WORKDIR}/git/libicbinn"
 
-inherit autotools-brokensep pkgconfig lib_package xenclient xc-rpcgen-c
+inherit autotools-brokensep pkgconfig lib_package xc-rpcgen-c
 
 INITSCRIPT_NAME = "icbinn_svc"
 INITSCRIPT_PARAMS = "defaults 76"

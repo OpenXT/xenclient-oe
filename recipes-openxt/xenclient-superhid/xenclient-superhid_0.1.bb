@@ -1,5 +1,4 @@
 inherit module-compat
-inherit xenclient
 
 DESCRIPTION = "Superhid kernel module"
 LICENSE = "LGPLv2.1"

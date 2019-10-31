@@ -33,7 +33,6 @@ INITSCRIPT_PARAMS = "defaults 85"
 S = "${WORKDIR}/git"
 
 inherit distutils
-inherit xenclient
 inherit update-rc.d
 
 FILES_${PN} += "/etc/init.d/${INITSCRIPT_NAME}"

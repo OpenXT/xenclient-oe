@@ -14,4 +14,3 @@ DEPENDS = "swig-native libicbinn-resolved xenclient-rpcgen-native"
 RDEPENDS_${PN} += "python-lang python-importlib"
 
 inherit distutils
-inherit xenclient

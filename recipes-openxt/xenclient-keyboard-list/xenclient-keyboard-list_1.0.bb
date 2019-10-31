@@ -10,8 +10,6 @@ FILES_${PN} = "${datadir}/xenclient/keyboards"
 
 S = "${WORKDIR}/src"
 
-inherit xenclient
-
 do_compile() {
     perl ${WORKDIR}/generate-keyboard-list \
         ${STAGING_DATADIR}/X11/xkb/rules/evdev.lst \

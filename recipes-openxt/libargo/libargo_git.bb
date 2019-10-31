@@ -10,6 +10,6 @@ SRC_URI = "git://${OPENXT_GIT_MIRROR}/linux-xen-argo.git;protocol=${OPENXT_GIT_P
 
 S = "${WORKDIR}/git/libargo"
 
-inherit autotools-brokensep pkgconfig lib_package xenclient
+inherit autotools-brokensep pkgconfig lib_package
 
 EXTRA_OECONF += "--with-pic"

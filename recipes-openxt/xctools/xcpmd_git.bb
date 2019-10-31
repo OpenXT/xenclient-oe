@@ -18,7 +18,7 @@ S = "${WORKDIR}/git/xcpmd"
 
 ASNEEDED = ""
 
-inherit autotools xenclient update-rc.d pkgconfig xc-rpcgen-c
+inherit autotools update-rc.d pkgconfig xc-rpcgen-c
 
 INITSCRIPT_NAME = "xcpmd"
 INITSCRIPT_PARAMS = "defaults 60"

@@ -4,8 +4,6 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/GPL-2.0;md5=801f80980d171dd6425
 DEPENDS = "libargo"
 RDEPENDS_${PN} += "xen-libxenstore"
 
-DEPENDS_append_xenclient-nilfvm += " ${@deb_bootstrap_deps(d)} "
-
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 SRC_URI = "file://dbusbouncer.c \
@@ -17,17 +15,7 @@ INITSCRIPT_PARAMS = "defaults 29"
 
 S = "${WORKDIR}"
 
-inherit update-rc.d xenclient
-inherit ${@"xenclient-simple-deb"if(d.getVar("MACHINE",1)=="xenclient-nilfvm")else("null")}
-
-DEB_SUITE = "wheezy"
-DEB_ARCH = "i386"
-
-DEB_NAME = "xenclient-dbusbouncer"
-DEB_DESC="Argo - UNIX socket proxy"
-DEB_DESC_EXT="This package provides a proxy for remote socket access using Argo."
-DEB_SECTION="misc"
-DEB_PKG_MAINTAINER = "Citrix Systems <customerservice@citrix.com>"
+inherit update-rc.d
 
 LDFLAGS += "-largo -lxenstore"
 
@@ -43,19 +31,6 @@ do_install() {
 	install -m 0755 ${WORKDIR}/dbusbouncer ${D}${sbindir}
 	install -d ${D}${sysconfdir}/init.d
 	install -m 0755 ${WORKDIR}/dbusbouncer.initscript ${D}${sysconfdir}/init.d/dbusbouncer
-}
-
-# Had to duplicate, can't _append as xenclient-deb overrides it
-do_install_xenclient-nilfvm() {
-        install -d ${D}${sbindir}
-        install -m 0755 ${WORKDIR}/dbusbouncer ${D}${sbindir}
-        install -d ${D}${sysconfdir}/init.d
-        install -m 0755 ${WORKDIR}/dbusbouncer.initscript ${D}${sysconfdir}/init.d/dbusbouncer
-
-	${STRIP} ${D}${sbindir}/dbusbouncer
-
-        ## to generate deb package
-        do_simple_deb_package
 }
 
 DEBUG_BUILD = "1"

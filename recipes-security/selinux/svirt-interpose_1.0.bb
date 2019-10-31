@@ -7,8 +7,6 @@ SRC_URI = "file://svirt-interpose.c"
 
 S = "${WORKDIR}"
 
-inherit xenclient
-
 LDFLAGS += "-lxenstore -lselinux"
 
 ASNEEDED = ""

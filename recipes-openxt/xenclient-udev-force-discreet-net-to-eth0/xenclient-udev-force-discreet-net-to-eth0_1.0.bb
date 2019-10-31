@@ -10,8 +10,6 @@ RDEPENDS_${PN} += "udev"
 SRC_URI = "file://xenclient-udev-force-discreet-net-to-eth0.rules"
 FILES_${PN} = "/"
 
-inherit xenclient
-
 do_install () {
         install -D -m 0755 ${WORKDIR}/xenclient-udev-force-discreet-net-to-eth0.rules \
                 ${D}/etc/udev/rules.d/96-xenclient-udev-force-discreet-net-to-eth0.rules

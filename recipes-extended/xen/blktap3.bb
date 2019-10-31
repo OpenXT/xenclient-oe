@@ -25,7 +25,7 @@ SRC_URI = "git://github.com/xapi-project/blktap.git;protocol=https \
 
 S = "${WORKDIR}/git"
 
-inherit autotools-brokensep xenclient update-rc.d
+inherit autotools-brokensep update-rc.d
 
 PACKAGES =+ "tapback"
 

@@ -10,7 +10,6 @@ DEPENDS = "virtual/kernel argo-module"
 
 S = "${WORKDIR}/git/xc-audio"
 
-inherit xenclient 
 inherit module
 
 do_compile() {

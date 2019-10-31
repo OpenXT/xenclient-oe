@@ -9,8 +9,6 @@ SRC_URI = "file://vhd-copy \
 
 S = "${WORKDIR}"
 
-inherit xenclient
-
 do_install() {
 	install -d ${D}${bindir}
 	install -m 0755 ${WORKDIR}/vhd-copy ${D}${bindir}

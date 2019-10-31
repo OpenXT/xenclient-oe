@@ -12,4 +12,4 @@ SRC_URI = "git://${OPENXT_GIT_MIRROR}/xctools.git;protocol=${OPENXT_GIT_PROTOCOL
 
 S = "${WORKDIR}/git/carrier-detect"
 
-inherit autotools xenclient pkgconfig
+inherit autotools pkgconfig

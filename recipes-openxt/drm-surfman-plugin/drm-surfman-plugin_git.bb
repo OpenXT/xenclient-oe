@@ -19,4 +19,3 @@ FILES_${PN} += " /usr/lib/surfman/* "
 
 inherit autotools
 inherit pkgconfig
-inherit xenclient

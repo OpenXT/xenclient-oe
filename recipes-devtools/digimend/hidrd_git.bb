@@ -1,6 +1,5 @@
 DESCRIPTION = "HID report descriptor I/O library and conversion tool"
 
-inherit xenclient
 inherit autotools pkgconfig lib_package
 
 LICENSE = "GPLv2"
