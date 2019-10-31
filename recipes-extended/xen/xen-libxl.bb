@@ -21,9 +21,7 @@ python () {
                 'libxlutil',
                 'libxlutil-dev',
                 'libxenlight',
-                'libxenlight-dev'
-                'cmp-fd-file-inode',
-                ]:
+                'libxenlight-dev']:
         d.renameVar("FILES_xen-libxl-" + PKG, "FILES_xen-" + PKG)
 
     # After renaming a variable, it is simpler to append to it here:
