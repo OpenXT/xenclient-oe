@@ -15,7 +15,8 @@ do_install_append() {
     # functions
     install -m 0755 ${WORKDIR}/functions ${D}/init.d/00-functions
 
-    # lvm
+    # lvm (override oe-core do_install step)
+    rm ${D}/init.d/09-lvm
     install -m 0755 ${WORKDIR}/lvm ${D}/init.d/89-lvm
 
     # bootfs
@@ -33,7 +34,6 @@ do_install_append() {
 
 PACKAGES += " \
             initramfs-module-functions \
-            initramfs-module-lvm \
             initramfs-module-bootfs \
             initramfs-module-tpm \
             initramfs-module-tpm2 \
