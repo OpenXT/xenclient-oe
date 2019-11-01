@@ -9,7 +9,6 @@ DEPENDS += " \
     dbus-glib \
     dbus-glib-native \
     udev \
-    wireless-tools \
     nss \
     gnutls \
     util-linux \
@@ -157,7 +156,6 @@ RDEPENDS_${PN} = " \
     dhcp-client \
     ${@bb.utils.contains('COMBINED_FEATURES', '3gmodem', 'ppp', '', d)} \
     libgudev \
-    wireless-tools \
     dnsmasq \
     iproute2 \
     networkmanager-certs \

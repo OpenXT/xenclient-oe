@@ -10,7 +10,6 @@ DEPENDS = " \
     dbus-glib \
     dbus-glib-native \
     udev \
-    wireless-tools \
     nss \
     util-linux \
     ppp \
