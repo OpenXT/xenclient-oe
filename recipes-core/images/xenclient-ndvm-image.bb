@@ -59,7 +59,6 @@ IMAGE_INSTALL = " \
     bridge-utils \
     iptables \
     xenclient-ndvm-tweaks \
-    ipsec-tools \
     rsyslog \
     xenclient-udev-force-discreet-net-to-eth0 \
     argo-module \
