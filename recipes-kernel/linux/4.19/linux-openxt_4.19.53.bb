@@ -44,6 +44,7 @@ SRC_URI += "${KERNELORG_MIRROR}/linux/kernel/v${PV_MAJOR}.x/linux-${PV}.tar.xz;n
     file://xsa-155-qsb-023-xen-netfront-add-range-check-for-Tx-response-id.patch \
     file://xsa-155-qsb-023-xen-netfront-copy-response-out-of-shared-buffer-befo.patch \
     file://xsa-155-qsb-023-xen-netfront-do-not-use-data-already-exposed-to-back.patch \
+    file://xsa300-linux-5.2.patch \
     file://defconfig \
     "
 SRC_URI_append_xenclient-dom0 = "file://efi-tables-for-dom0.patch \
