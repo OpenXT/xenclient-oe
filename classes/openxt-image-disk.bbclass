@@ -78,7 +78,7 @@ build_boot_dd() {
 	mcopy -i $HDDIMG -s $HDDDIR/* ::/
 
 	if [ "${PCBIOS}" = "1" ]; then
-		syslinux_hdddirect_install $HDDIMG
+		syslinux $HDDIMG
 	fi
 	chmod 644 $HDDIMG
 
