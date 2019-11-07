@@ -13,6 +13,7 @@ DEPENDS = " \
     libgnome-keyring \
     iso-codes \
     intltool-native \
+    gtk+ \
 "
 
 inherit gnomebase gtk-icon-cache gobject-introspection
