@@ -3,7 +3,7 @@ FILESEXTRAPATHS_prepend := "${THISDIR}/ovmf:"
 SRC_URI = "git://github.com/tianocore/edk2.git;branch=master \
     file://0002-ovmf-update-path-to-native-BaseTools.patch \
     file://0003-BaseTools-makefile-adjust-to-build-in-under-bitbake.patch \
-    http://downloadmirror.intel.com/19186/eng/PREBOOT.EXE;unpack=0;name=PREBOOT \
+    https://downloadmirror.intel.com/29137/eng/PREBOOT.EXE;unpack=0;name=PREBOOT \
     "
 
 SRCREV="dd4cae4d82c7477273f3da455084844db5cca0c0"
