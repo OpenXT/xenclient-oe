@@ -98,7 +98,6 @@ IMAGE_INSTALL += "\
     uim-common \
     uim-gtk2.0 \
     anthy \
-    uim-gtk2.0 \
     matchbox-keyboard \
     matchbox-keyboard-im \
 "
