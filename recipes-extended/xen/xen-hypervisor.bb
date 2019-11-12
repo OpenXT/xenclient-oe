@@ -90,6 +90,7 @@ do_compile() {
     export CPP="${HOST_PREFIX}cpp ${TOOLCHAIN_OPTIONS}"
 
     oe_runmake -C xen olddefconfig
+    oe_runmake -C xen
 }
 
 do_install() {
