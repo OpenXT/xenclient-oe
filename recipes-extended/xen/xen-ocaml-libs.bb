@@ -99,6 +99,7 @@ EOF
 
     oe_runmake V=1 \
        CC="${B}/ocaml-cc.sh" \
+       OCAMLOPT="ocamlopt.opt" \
        LDLIBS_libxenctrl='-lxenctrl' \
        LDLIBS_libxenstore='-lxenstore' \
        LDLIBS_libblktapctl='-lblktapctl' \
@@ -119,3 +120,5 @@ do_install() {
     install -m 0644 ${WORKDIR}/oxenstored.conf \
                     ${D}${sysconfdir}/xen/oxenstored.conf
 }
+
+INSANE_SKIP_${PN}-dev = "file-rdeps"
