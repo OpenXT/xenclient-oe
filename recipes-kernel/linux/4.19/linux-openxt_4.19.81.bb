@@ -46,8 +46,6 @@ SRC_URI += "${KERNELORG_MIRROR}/linux/kernel/v${PV_MAJOR}.x/linux-${PV}.tar.xz;n
     file://xsa-155-qsb-023-xen-netfront-do-not-use-data-already-exposed-to-back.patch \
     file://defconfig \
     "
-SRC_URI_append_xenclient-dom0 = "file://efi-tables-for-dom0.patch \
-	"
 
 LIC_FILES_CHKSUM = "file://COPYING;md5=bbea815ee2795b2f4230826c0c6b8814"
 SRC_URI[kernel.md5sum] = "bf96b6783a2d11178a2aaa3cf376f975"
