@@ -8,7 +8,7 @@ S = "${WORKDIR}/git"
 
 require xen-version.inc
 
-PV = "${XEN_PV}+git${SRCPV}"
+PV = "${XEN_REL}+git${SRCPV}"
 
 SRCREV = "${AUTOREV}"
 SRC_URI = "git://${OPENXT_GIT_MIRROR}/xsm-policy.git;protocol=${OPENXT_GIT_PROTOCOL};branch=${OPENXT_BRANCH}"

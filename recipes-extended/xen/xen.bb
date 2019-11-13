@@ -87,6 +87,10 @@ FILES_${PN}-xen-shim = "\
     ${libdir}/xen/boot/xen-shim \
     "
 
+FILES_${PN}-xenmon += "\
+    ${sbindir}/xenmon \
+    "
+
 RDEPENDS_${PN}-scripts-common += " \
     ${PN}-cmp-fd-file-inode \
 "
