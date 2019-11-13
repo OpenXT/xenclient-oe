@@ -9,10 +9,28 @@ SRC_URI = "git://xenbits.xen.org/xen.git;branch=${XEN_BRANCH}"
 # XSA patches take precedence and belong at the head of the queue.
 # This ensures that any collisions with other patches get addressed
 # by modifying the OpenXT-specific patches, not the XSA patches.
+FILESEXTRAPATHS_prepend := "${THISDIR}/files/xsa:"
 
 require ${@bb.utils.contains('DISTRO_FEATURES', 'blktap2', 'xen-blktap2.inc', 'xen-blktap3.inc', d)}
 
 SRC_URI_append = " \
+    file://xsa296.patch \
+    file://xsa298.patch \
+    file://xsa299-0001-x86-mm-L1TF-checks-don-t-leave-a-partial-entry.patch \
+    file://xsa299-0002-x86-mm-Don-t-re-set-PGT_pinned-on-a-partially-de-val.patch \
+    file://xsa299-0003-x86-mm-Separate-out-partial_pte-tristate-into-indivi.patch \
+    file://xsa299-0004-x86-mm-Use-flags-for-_put_page_type-rather-than-a-bo.patch \
+    file://xsa299-0005-x86-mm-Rework-get_page_and_type_from_mfn-conditional.patch \
+    file://xsa299-0006-x86-mm-Have-alloc_l-23-_table-clear-partial_flags-wh.patch \
+    file://xsa299-0007-x86-mm-Always-retain-a-general-ref-on-partial.patch \
+    file://xsa299-0008-x86-mm-Collapse-PTF_partial_set-and-PTF_partial_gene.patch \
+    file://xsa299-0009-x86-mm-Properly-handle-linear-pagetable-promotion-fa.patch \
+    file://xsa299-0010-x86-mm-Fix-nested-de-validation-on-error.patch \
+    file://xsa299-0011-x86-mm-Don-t-drop-a-type-ref-unless-you-held-a-ref-t.patch \
+    file://xsa301-master-1.patch \
+    file://xsa301-master-2.patch \
+    file://xsa301-master-3.patch \
+    file://xsa302-0002-passthrough-quarantine-PCI-devices.patch \
     file://defconfig \
     file://config.patch \
     file://disable-xen-root-check.patch \
@@ -94,10 +112,7 @@ SRC_URI_append = " \
     file://efi-require-shim.patch \
     file://tboot-measure-and-launch-from-xen-efi.patch \
     file://efi-load-options-no-default-image-name.patch \
-    file://argo-suppress-debug-messages.patch \
     file://argo-add-viptables.patch \
-    file://argo-fix-full-ring-write-bug.patch \
-    file://argo-fix-requeue-msg-len-bug.patch \
     file://libxl-seabios-ipxe.patch \
     file://memory-scrub-on-domain-shutdown.patch \
 "
