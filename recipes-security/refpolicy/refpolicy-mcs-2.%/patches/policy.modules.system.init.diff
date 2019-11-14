@@ -1,16 +1,7 @@
 --- a/policy/modules/system/init.fc
 +++ b/policy/modules/system/init.fc
-@@ -32,6 +32,8 @@ ifdef(`distro_gentoo', `
- # /sbin
- #
- /sbin/init(ng)?		--	gen_context(system_u:object_r:init_exec_t,s0)
-+/sbin/init(ng)?\.sysvinit              --      gen_context(system_u:object_r:init_exec_t,s0)
-+/sbin/init\.root-ro                    --      gen_context(system_u:object_r:init_exec_t,s0)
- /sbin/init\.sysvinit	--	gen_context(system_u:object_r:init_exec_t,s0)
- # because nowadays, /sbin/init is often a symlink to /sbin/upstart
- /sbin/upstart		--	gen_context(system_u:object_r:init_exec_t,s0)
-@@ -76,6 +78,10 @@ ifdef(`distro_debian',`
- /run/kdm/.*		--	gen_context(system_u:object_r:initrc_var_run_t,s0)
+@@ -77,6 +77,10 @@ ifdef(`distro_debian',`
+ /etc/network/if-post-down\.d/.* -- gen_context(system_u:object_r:initrc_exec_t,s0)
  ')
  
 +#
@@ -20,11 +11,21 @@
  ifdef(`distro_gentoo', `
  /var/lib/init\.d(/.*)?		gen_context(system_u:object_r:initrc_state_t,s0)
  /run/svscan\.pid	--	gen_context(system_u:object_r:initrc_var_run_t,s0)
+@@ -89,3 +93,9 @@ ifdef(`distro_suse', `
+ /run/setleds-on	--	gen_context(system_u:object_r:initrc_var_run_t,s0)
+ /run/sysconfig(/.*)?	gen_context(system_u:object_r:initrc_var_run_t,s0)
+ ')
++
++#
++# /sbin
++#
++/usr/sbin/init(ng)?\.sysvinit	--	gen_context(system_u:object_r:init_exec_t,s0)
++/usr/sbin/init\.root-ro	--	gen_context(system_u:object_r:init_exec_t,s0)
 --- a/policy/modules/system/init.if
 +++ b/policy/modules/system/init.if
-@@ -2504,3 +2504,39 @@ interface(`init_reload_all_units',`
+@@ -3204,3 +3204,39 @@ interface(`init_getrlimit',`
  
- 	allow $1 systemdunit:service reload;
+ 	allow $1 init_t:process getrlimit;
  ')
 +
 +#####################################
@@ -64,7 +65,7 @@
 +')
 --- a/policy/modules/system/init.te
 +++ b/policy/modules/system/init.te
-@@ -90,6 +90,13 @@ logging_log_file(initrc_var_log_t)
+@@ -96,6 +96,13 @@ logging_log_file(initrc_var_log_t)
  
  type initrc_var_run_t;
  files_pid_file(initrc_var_run_t)
@@ -78,7 +79,7 @@
  
  type systemd_unit_t;
  init_unit_file(systemd_unit_t)
-@@ -134,6 +141,8 @@ dev_filetrans(init_t, initctl_t, fifo_fi
+@@ -150,6 +157,8 @@ files_pid_filetrans(init_t, initctl_t, f
  # Modify utmp.
  allow init_t initrc_var_run_t:file { rw_file_perms setattr };
  
@@ -87,7 +88,7 @@
  kernel_read_system_state(init_t)
  kernel_share_state(init_t)
  kernel_dontaudit_search_unlabeled(init_t)
-@@ -431,6 +440,9 @@ files_pid_filetrans_lock_dir(initrc_t, "
+@@ -602,6 +611,9 @@ files_pid_filetrans_lock_dir(initrc_t, "
  files_read_kernel_symbol_table(initrc_t)
  files_setattr_lock_dirs(initrc_t)
  
@@ -97,7 +98,7 @@
  corecmd_exec_all_executables(initrc_t)
  
  corenet_all_recvfrom_unlabeled(initrc_t)
-@@ -489,12 +501,15 @@ files_getattr_all_files(initrc_t)
+@@ -663,6 +675,9 @@ files_getattr_all_files(initrc_t)
  files_getattr_all_symlinks(initrc_t)
  files_getattr_all_pipes(initrc_t)
  files_getattr_all_sockets(initrc_t)
@@ -105,8 +106,10 @@
 +files_setattr_all_pid_dirs(initrc_t)
 +files_setattr_all_pids(initrc_t)
  files_purge_tmp(initrc_t)
- files_delete_all_locks(initrc_t)
- files_read_all_pids(initrc_t)
+ files_manage_all_locks(initrc_t)
+ files_manage_boot_files(initrc_t)
+@@ -670,7 +685,7 @@ files_read_all_pids(initrc_t)
+ files_delete_root_files(initrc_t)
  files_delete_all_pids(initrc_t)
  files_delete_all_pid_dirs(initrc_t)
 -files_read_etc_files(initrc_t)
@@ -114,7 +117,7 @@
  files_manage_etc_runtime_files(initrc_t)
  files_etc_filetrans_etc_runtime(initrc_t, file)
  files_exec_etc_files(initrc_t)
-@@ -542,6 +557,7 @@ auth_rw_login_records(initrc_t)
+@@ -727,6 +742,7 @@ auth_rw_login_records(initrc_t)
  auth_setattr_login_records(initrc_t)
  auth_rw_lastlog(initrc_t)
  auth_read_pam_pid(initrc_t)
@@ -122,9 +125,9 @@
  auth_delete_pam_pid(initrc_t)
  auth_delete_pam_console_data(initrc_t)
  auth_use_nsswitch(initrc_t)
-@@ -572,14 +588,31 @@ userdom_read_user_home_content_files(ini
+@@ -759,13 +775,30 @@ userdom_read_user_home_content_files(ini
  # started from init should be placed in their own domain.
- userdom_use_user_terminals(initrc_t)
+ userdom_use_inherited_user_terminals(initrc_t)
  
 +# volatiles
 +files_create_pid_dirs(initrc_t)
@@ -143,7 +146,6 @@
  	kernel_getattr_core_if(initrc_t)
  
  	dev_getattr_generic_blk_files(initrc_t)
- 	dev_setattr_generic_dirs(initrc_t)
  
 +	allow initrc_t initrc_var_run_t:dir manage_dir_perms;
  	fs_tmpfs_filetrans(initrc_t, initrc_var_run_t, dir)
@@ -154,7 +156,7 @@
  	# for storing state under /dev/shm
  	fs_setattr_tmpfs_dirs(initrc_t)
  	storage_manage_fixed_disk(initrc_t)
-@@ -600,6 +633,12 @@ ifdef(`distro_debian',`
+@@ -786,6 +819,12 @@ ifdef(`distro_debian',`
  	')
  ')
  
@@ -167,15 +169,15 @@
  ifdef(`distro_gentoo',`
  	kernel_dontaudit_getattr_core_if(initrc_t)
  
-@@ -852,6 +891,7 @@ optional_policy(`
- 	dbus_connect_system_bus(initrc_t)
+@@ -1081,6 +1120,7 @@ optional_policy(`
  	dbus_system_bus_client(initrc_t)
  	dbus_read_config(initrc_t)
-+	dbus_mange_var_lib(initrc_t)
+ 	dbus_manage_lib_files(initrc_t)
++	dbus_manage_var_lib(initrc_t)
  
- 	optional_policy(`
- 		consolekit_dbus_chat(initrc_t)
-@@ -867,6 +907,10 @@ optional_policy(`
+ 	init_dbus_chat(initrc_t)
+ 
+@@ -1099,6 +1139,10 @@ optional_policy(`
  ')
  
  optional_policy(`
@@ -186,7 +188,7 @@
  	# /var/run/dovecot/login/ssl-parameters.dat is a hard link to
  	# /var/lib/dovecot/ssl-parameters.dat and init tries to clean up
  	# the directory. But we do not want to allow this.
-@@ -900,6 +944,10 @@ optional_policy(`
+@@ -1130,6 +1174,10 @@ optional_policy(`
  ')
  
  optional_policy(`
@@ -197,15 +199,7 @@
  	ipsec_read_config(initrc_t)
  	ipsec_manage_pid(initrc_t)
  ')
-@@ -945,6 +993,7 @@ optional_policy(`
- 	dev_create_generic_chr_files(initrc_t)
- 
- 	lvm_read_config(initrc_t)
-+	lvm_setattr_metadata_dirs(initrc_t)
- ')
- 
- optional_policy(`
-@@ -1056,6 +1105,11 @@ optional_policy(`
+@@ -1294,6 +1342,11 @@ optional_policy(`
  ')
  
  optional_policy(`
@@ -214,10 +208,10 @@
 +')
 +
 +optional_policy(`
- 	udev_rw_db(initrc_t)
  	udev_manage_pid_files(initrc_t)
  	udev_manage_pid_dirs(initrc_t)
-@@ -1090,6 +1144,10 @@ optional_policy(`
+ 	udev_manage_rules_files(initrc_t)
+@@ -1333,6 +1386,10 @@ optional_policy(`
  ')
  
  optional_policy(`
@@ -228,10 +222,3 @@
  	miscfiles_manage_fonts(initrc_t)
  
  	# cjp: is this really needed?
-@@ -1111,4 +1169,4 @@ optional_policy(`
- # systemd related allow rules
- allow kernel_t init_t:process dyntransition;
- allow devpts_t device_t:filesystem associate;
--allow init_t self:capability2 block_suspend;
-\ No newline at end of file
-+allow init_t self:capability2 block_suspend;
