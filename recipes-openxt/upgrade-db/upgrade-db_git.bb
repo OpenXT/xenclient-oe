@@ -11,6 +11,7 @@ DEPENDS = " \
 "
 RDEPENDS_${PN} += " \
     glibc-gconv-utf-32 \
+    openssl-bin \
 "
 
 PV = "0+git${SRCPV}"
