@@ -1,3 +1,22 @@
+FILESEXTRAPATHS_prepend := "${THISDIR}/files:"
+
+SRC_URI += " \
+    file://archive.cfg \
+    file://console.cfg \
+    file://coreutils.cfg \
+    file://editors.cfg \
+    file://find.cfg \
+    file://general.cfg \
+    file://login.cfg \
+    file://misc.cfg \
+    file://netutils.cfg \
+    file://process.cfg \
+    file://shells.cfg \
+    file://syslog.cfg \
+    file://sysutils.cfg \
+    file://tftp.cfg \
+"
+
 # We should use sh wrappers instead of links so the commands could get correct
 # security labels
 python create_sh_wrapper_reset_alternative_vars_openxt () {
