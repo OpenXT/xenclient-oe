@@ -11,6 +11,7 @@ IMAGE_FSTYPES = "cpio.gz"
 IMAGE_INSTALL = " \
     busybox \
     lvm2 \
+    lvm2-conf-initramfs \
     tpm-tools-sa \
     tpm2-tss \
     tpm2-tools \
