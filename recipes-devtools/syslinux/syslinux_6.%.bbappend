@@ -24,7 +24,13 @@ INSANE_SKIP_${PN}-mboot = "arch"
 inherit deploy
 
 do_deploy() {
-   install -m 644 ${S}/efi64/mbr/isohdpfx.bin ${DEPLOYDIR}/
+    install -m 644 "${S}/efi64/mbr/isohdpfx.bin" "${DEPLOYDIR}/isohdpfx.bin"
 }
+# Only target binaries should be deployed on the iso, even though in this case
+# it does not matter.
+do_deploy_class-native() {
+    :
+}
+do_deploy[cleandirs] = "${DEPLOYDIR}"
 
 addtask do_deploy after do_compile before do_build
