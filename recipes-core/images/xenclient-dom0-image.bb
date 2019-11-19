@@ -116,3 +116,4 @@ rw_config_partition() {
     fi
 }
 ROOTFS_POSTPROCESS_COMMAND += "rw_config_partition; "
+ROOTFS_POSTPROCESS_COMMAND += "start_tty_on_hvc0;"

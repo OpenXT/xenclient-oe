@@ -52,7 +52,7 @@ IMAGE_FEATURES[validitems] += "wildcard-sshd-argo"
 
 # Add and entry to /etc/inittab to start a tty on hvc0 (debug).
 start_tty_on_hvc0() {
-	echo 'hvc0:12345:respawn:/bin/start_getty 115200 hvc0 vt102' >> "${IMAGE_ROOTFS}/etc/inittab"
+	echo 'hvc0:12345:respawn:/bin/su - root -c "/sbin/getty 115200 hvc0 vt102"' >> "${IMAGE_ROOTFS}/etc/inittab"
 }
 ROOTFS_POSTPROCESS_COMMAND += '${@bb.utils.contains("IMAGE_FEATURES", "debug-tweaks", "start_tty_on_hvc0; ", "",d)}'
 
