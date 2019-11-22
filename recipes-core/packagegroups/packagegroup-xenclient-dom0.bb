@@ -15,10 +15,6 @@ RDEPENDS_${PN} = " \
     xen-hypervisor \
     xen-efi \
     xen-flask-tools \
-    xen-libxenguest \
-    xen-libxenlight \
-    xen-libxenstat \
-    xen-libxlutil \
     xen-xenstat \
     xen-xenstored \
     xen-xl \
@@ -30,9 +26,7 @@ RDEPENDS_${PN} = " \
     e2fsprogs-tune2fs \
     e2fsprogs-resize2fs \
     kernel-modules \
-    libargo \
     libargo-bin \
-    libedid \
     lvm2 \
     bridge-utils \
     iptables \
