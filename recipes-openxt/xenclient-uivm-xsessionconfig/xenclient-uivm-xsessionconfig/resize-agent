@@ -1,0 +1,106 @@
+#! /bin/bash
+
+if [ -f /usr/lib/openxt/ui-functions ];  then
+    . /usr/lib/openxt/ui-functions
+fi
+
+if ! command -v "xenstore-watch" >/dev/null; then
+    echo "XenStore utilities could not be found. Is xen-xenstore installed?" >&2
+    exit 1
+fi
+
+if ! command -v "xrandr" >/dev/null; then
+    echo "XRandR utility could not be found. Is xrandr installed?" >&2
+    exit 1
+fi
+
+DISPLAY="${DISPLAY:-:0}"
+export DISPLAY
+
+# Usage: makeup modeline NAME WIDTH HEIGHT
+#   Assemble a fake, but valid, modeline to be passed to xrandr and print it on
+#   stdout.
+makeup_modeline() {
+    local name="$1"
+    local width="$2"
+    local height="$3"
+    local clock="60"
+    local hsync="0 0"
+    local vsync="0 0"
+
+    echo "${name} ${clock} ${width} ${hsync} ${width} ${height} ${vsync} ${height}"
+}
+
+# Usage: wait_xenfb ID
+#   Watch the XenStore node reporting frontend state for VFB ID and wait for it
+#   to report "4" (Connected).
+wait_xenfb() {
+    local id="$1"
+    local path="device/vfb/${id}/state"
+    local key=""
+
+    # Note: xenstore-watch will always return the watched key once initialy.
+    while read key; do
+        entry=$(xenstore-read "${key}")
+        if [ "${entry}" = "4" ]; then
+            echo "vfb ${id} is ready."
+            break
+        fi
+    done < <( xenstore-watch "${path}" )
+}
+
+# Usage: xrandr_mode_exists NAME
+#   Returns 0 if the mode NAME already exist in `xrandr --current` modes,
+#   returns 1 otherwise.
+xrandr_mode_exists() {
+    local name="$1"
+
+    xrandr --current | grep -q "${name}"
+}
+
+# Usage: monitor_display_size
+#   Watch the XenStore node that reports current display size.
+#   This node is updated by Surfman.
+monitor_display_size() {
+    local path="/xc_tools/switcher/current_display_size"
+    local key
+    local output="FBDev"
+    local entry=""
+    local width=""
+    local height=""
+    local name=""
+    local current_name=""
+
+    while read key; do
+        entry=($(xenstore-read "${key}"))
+        if [ -z "${entry}" ]; then
+            echo "Invalid display size recorded in \`${key}'." >&2
+            continue
+        fi
+
+        width="${entry[0]}"
+        height="${entry[1]}"
+        name="${width}x${height}"
+
+        if [ "${name}" = "${current_name}" ]; then
+            # This should not happen.
+            continue
+        fi
+
+        if ! xrandr_mode_exists "${name}"; then
+            xrandr --newmode $(makeup_modeline "${name}" "${width}" "${height}")
+        fi
+        xrandr --addmode "${output}" "${name}"
+        xrandr --output "${output}" --mode "${name}"
+
+        if [ -n "${current_name}" ]; then
+            xrandr --delmode "${output}" "${current_name}"
+            xrandr --rmmode "${current_name}"
+        fi
+        current_name="${name}"
+
+    done < <( xenstore-watch "${path}" )
+}
+
+wait_xenfb "0"
+monitor_display_size

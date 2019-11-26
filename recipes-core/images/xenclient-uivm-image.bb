@@ -92,7 +92,6 @@ IMAGE_INSTALL += "\
     xblanker \
     xenclient-uivm-xsessionconfig \
     setxkbmap \
-    resized \
     libx11-locale \
     rsyslog \
     glibc-gconv-libjis \
