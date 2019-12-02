@@ -154,7 +154,6 @@ SRC_URI += " \
     file://patches/vusb-interfaces.diff \
     file://patches/openxt_system_unconfined_readonly_neverallow_fixes.patch \
     file://patches/openxt-sysadm-lsusb.patch \
-    file://patches/xen4.6-uprev.patch \
     file://patches/openxt-init-spec-domtrans.patch \
     file://patches/busybox-mmap-read-execute-checks-from-new-domain.patch \
     file://patches/policy.modules.admin.su.patch \
