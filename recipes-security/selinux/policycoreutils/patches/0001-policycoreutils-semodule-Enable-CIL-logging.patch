@@ -1,0 +1,68 @@
+From 06040cdc54ca25bc4c3f851cd7c5640904e17917 Mon Sep 17 00:00:00 2001
+From: Jason Zaman <jason@perfinion.com>
+Date: Mon, 21 Oct 2019 13:55:05 +0800
+Subject: [PATCH] policycoreutils: semodule: Enable CIL logging
+
+semodule -v will turn on semodule's own verbose logging but not logging
+from CIL. This change makes the verbose flag also set cil's log level.
+
+By default (ie no -v flag), this will enable CIL_ERR, and each -v will
+increase the level from there.
+
+Tested with a duplicated fcontext in the policy.
+Before this change:
+    # semodule -v -B
+    Committing changes:
+    Problems processing filecon rules
+    Failed post db handling
+    semodule:  Failed!
+
+After this change:
+    # semodule -v -B
+    [ ... snip ... ]
+    Found conflicting filecon rules
+      at /var/lib/selinux/mcs/tmp/modules/400/mycustom/cil:159
+      at /var/lib/selinux/mcs/tmp/modules/400/mycustom/cil:158
+    Problems processing filecon rules
+    Failed post db handling
+    semodule:  Failed!
+
+Closes: https://github.com/SELinuxProject/selinux/issues/176
+Signed-off-by: Jason Zaman <jason@perfinion.com>
+---
+ policycoreutils/semodule/semodule.c | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/policycoreutils/semodule/semodule.c b/policycoreutils/semodule/semodule.c
+index a76797f5..a1f75e16 100644
+--- a/policycoreutils/semodule/semodule.c
++++ b/policycoreutils/semodule/semodule.c
+@@ -22,6 +22,7 @@
+ #include <libgen.h>
+ #include <limits.h>
+ 
++#include <sepol/cil/cil.h>
+ #include <semanage/modules.h>
+ 
+ enum client_modes {
+@@ -238,7 +239,7 @@ static void parse_command_line(int argc, char **argv)
+ 			set_mode(LIST_M, optarg);
+ 			break;
+ 		case 'v':
+-			verbose = 1;
++			verbose++;
+ 			break;
+ 		case 'r':
+ 			set_mode(REMOVE_M, optarg);
+@@ -350,6 +351,8 @@ int main(int argc, char *argv[])
+ 	}
+ 	parse_command_line(argc, argv);
+ 
++	cil_set_log_level(CIL_ERR + verbose);
++
+ 	if (build)
+ 		commit = 1;
+ 
+-- 
+2.24.0
+
