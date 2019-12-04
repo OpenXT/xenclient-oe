@@ -53,6 +53,7 @@ SRC_URI_append = " \
     file://libxl-disable-vnc-query-when-disabled.patch \
     file://libxl-allow-save-vnuma.patch \
     file://libxl-block-scripts-log-to-syslog.patch \
+    file://0001-convert-block-tap-for-shared.patch \
     file://domain-reboot.patch \
     file://enable-blktap3-within-tree.patch \
     file://blktap3-build-integration.patch \
