@@ -46,40 +46,7 @@ PATCHES
  int libxl_domain_sleep(libxl_ctx *ctx, uint32_t domid);
 --- a/tools/libxl/libxl_create.c
 +++ b/tools/libxl/libxl_create.c
-@@ -676,11 +676,30 @@ retry_transaction:
-                     roperm, ARRAY_SIZE(roperm));
-     libxl__xs_mknod(gc, t,
-                     GCSPRINTF("%s/control", dom_path),
--                    roperm, ARRAY_SIZE(roperm));
--    if (info->type == LIBXL_DOMAIN_TYPE_HVM)
-+                    rwperm, ARRAY_SIZE(rwperm));
-+    libxl__xs_mknod(gc, t,
-+                    GCSPRINTF("%s/error", dom_path),
-+                    rwperm, ARRAY_SIZE(rwperm));
-+    libxl__xs_mknod(gc, t,
-+                    GCSPRINTF("%s/drivers", dom_path),
-+                    rwperm, ARRAY_SIZE(rwperm));
-+    libxl__xs_mknod(gc, t,
-+                    GCSPRINTF("%s/attr", dom_path),
-+                    rwperm, ARRAY_SIZE(rwperm));
-+    libxl__xs_mknod(gc, t,
-+                    GCSPRINTF("%s/data", dom_path),
-+                    rwperm, ARRAY_SIZE(rwperm));
-+    libxl__xs_mknod(gc, t,
-+                    GCSPRINTF("%s/messages", dom_path),
-+                    rwperm, ARRAY_SIZE(rwperm));
-+    if (info->type == LIBXL_DOMAIN_TYPE_HVM) {
-         libxl__xs_mknod(gc, t,
-                         GCSPRINTF("%s/hvmloader", dom_path),
-                         roperm, ARRAY_SIZE(roperm));
-+        libxl__xs_printf(gc, t,
-+                        GCSPRINTF("%s/hvmloader/seabios-legacy-load-roms", dom_path),
-+                        "1");
-+    }
- 
-     libxl__xs_mknod(gc, t,
-                     GCSPRINTF("%s/control/shutdown", dom_path),
-@@ -750,6 +769,11 @@ retry_transaction:
+@@ -750,6 +750,11 @@ retry_transaction:
      libxl__xs_writev(gc, t, dom_path, info->xsdata);
      libxl__xs_writev(gc, t, GCSPRINTF("%s/platform", dom_path), info->platformdata);
  
@@ -91,7 +58,7 @@ PATCHES
      xs_write(ctx->xsh, t, GCSPRINTF("%s/control/platform-feature-multiprocessor-suspend", dom_path), "1", 1);
      xs_write(ctx->xsh, t, GCSPRINTF("%s/control/platform-feature-xs_reset_watches", dom_path), "1", 1);
  
-@@ -1435,17 +1459,12 @@ static void domcreate_launch_dm(libxl__e
+@@ -1435,17 +1440,12 @@ static void domcreate_launch_dm(libxl__e
      {
          libxl__device_console console;
          libxl__device device;
@@ -109,22 +76,7 @@ PATCHES
          dcs->sdss.dm.guest_domid = domid;
          if (libxl_defbool_val(d_config->b_info.device_model_stubdomain))
              libxl__spawn_stub_dm(egc, &dcs->sdss);
-@@ -1468,7 +1487,14 @@ static void domcreate_launch_dm(libxl__e
-         libxl__device_console console, vuart;
-         libxl__device device;
- 
-+        fprintf(stderr, "WARNING: before adding vkb device.\n");
-+        for (i = 0; i < d_config->num_vkbs; i++) {
-+            fprintf(stderr, "WARNING: adding vkb device.\n");
-+            libxl__device_add(gc, domid, &libxl__vkb_devtype, &d_config->vkbs[i]);
-+        }
-+
-         for (i = 0; i < d_config->num_vfbs; i++) {
-+            fprintf(stderr, "WARNING: adding vfb device.\n");
-             libxl__device_add(gc, domid, &libxl__vfb_devtype,
-                               &d_config->vfbs[i]);
-         }
-@@ -1485,23 +1511,17 @@ static void domcreate_launch_dm(libxl__e
+@@ -1485,23 +1485,17 @@ static void domcreate_launch_dm(libxl__e
              libxl__device_console_dispose(&vuart);
          }
  
