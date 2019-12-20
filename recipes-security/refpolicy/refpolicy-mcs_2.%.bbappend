@@ -99,7 +99,6 @@ SRC_URI += " \
     file://patches/policy.modules.admin.firstboot.diff \
     file://patches/policy.modules.admin.logrotate.diff \
     file://patches/policy.modules.apps.qemu.diff \
-    file://patches/policy.modules.kernel.corecommands.diff \
     file://patches/policy.modules.kernel.corenetwork.diff \
     file://patches/policy.modules.kernel.devices.diff \
     file://patches/policy.modules.kernel.domain.diff \
