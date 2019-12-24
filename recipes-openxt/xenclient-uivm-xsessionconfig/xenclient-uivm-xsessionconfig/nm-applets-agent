@@ -67,33 +67,40 @@ nm_applet_pidfile() {
 #   reccord a pidfile for process management.
 start_nm_applet() {
     local dbus_path="$1"
-    local uuid="$(networkdomain_config_get_string ${dbus_path} uuid)"
-    local domid="$(networkdomain_config_get_uint32 ${dbus_path} domid)"
-    local name="$(networkdomain_config_get_string ${dbus_path} name)"
-    local pidfile="$(nm_applet_pidfile ${dbus_path})"
-    local locale="$(xenmgr_get_locale)"
+    local uuid
+    local domid
+    local name
+    local pidfile
+    local locale
 
+
+    uuid="$(networkdomain_config_get_string "${dbus_path}" uuid)"
     if [ -z "${uuid}" ]; then
         echo "Invalid UUID:${uuid} for nm-applet." >&2
         return 1
     fi
+    domid="$(networkdomain_config_get_uint32 "${dbus_path}" domid)"
     if [ -z "${domid}" ]; then
         echo "Invalid domid:${domid} for nm-applet." >&2
         return 1
     fi
+    name="$(networkdomain_config_get_string "${dbus_path}" name)"
     if [ -z "${name}" ]; then
         echo "Invalid name:${name} for nm-applet." >&2
         return 1
     fi
+    pidfile="$(nm_applet_pidfile "${dbus_path}")"
     if [ -e "${pidfile}" ]; then
         if pgrep -F "${pidfile}" >/dev/null; then
             echo "nm-applet already running for UUID:${uuid}" >&2
             return 1
         else
             echo "Spurious pidfile found for nm-applet UUID:${uuid}" >&2
-            rm -f ${pidfile}
+            rm -f "${pidfile}"
         fi
     fi
+
+    locale="$(xenmgr_get_locale)"
 
     INET_IS_ARGO=1 \
     DBUS_SYSTEM_BUS_ADDRESS="tcp:host=1.0.0.${domid},port=5555" \
@@ -116,7 +123,9 @@ _stop_nm_applet() {
 #   Stop nm-applet running for the Network backend refered to by dbus-path.
 stop_nm_applet() {
     local dbus_path="$1"
-    local pidfile="$(nm_applet_pidfile ${dbus_path})"
+    local pidfile
+
+    pidfile="$(nm_applet_pidfile "${dbus_path}")"
 
     _stop_nm_applet "${pidfile}"
 }
@@ -169,14 +178,18 @@ monitor_nm_applets() {
     # NetworkDomain change.
     local nwd_notify_intf="com.citrix.xenclient.networkdomain.notify"
     local nwd_state_member="backend_state_changed"
-    local nwd_watch="$(dbus_watch_expression signal ${nwd_notify_intf} ${nwd_state_member})"
+    local nwd_watch
     # Locale.
     local xgr_intf="com.citrix.xenclient.xenmgr"
     local xgr_lang_member="language_changed"
-    local xgr_watch="$(dbus_watch_expression signal ${xgr_intf} ${xgr_lang_member})"
+    local xgr_watch
+    local path intf member
+
+    nwd_watch="$(dbus_watch_expression signal ${nwd_notify_intf} ${nwd_state_member})"
+    xgr_watch="$(dbus_watch_expression signal ${xgr_intf} ${xgr_lang_member})"
 
     # Monitor dbus watches, use "interface.member"
-    while read type _ _ _ _ path intf member ; do
+    while read -r _ _ _ _ _ path intf member ; do
         case "${intf}.${member}" in
             "${nwd_notify_intf}.${nwd_state_member}") nm_applet_event "${path}" ;;
             "${xgr_intf}.${xgr_lang_member}") language_event ;;
