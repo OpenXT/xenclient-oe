@@ -1,0 +1,127 @@
+#OpenXT:Update the routing tables for different bridges as setup by network-slave.
+#       These routing tables are reffered when routing packets for different networks.
+--- a/src/nm-policy.c
++++ b/src/nm-policy.c
+@@ -472,9 +472,6 @@ update_ip4_routing (NMPolicy *self, gboo
+ 	}
+ 	g_assert ((best || vpn) && best_ac);
+ 
+-	if (!force_update && best && (best == priv->default_device4))
+-		return;
+-
+ 	if (best) {
+ 		const GSList *connections, *iter;
+ 
+--- a/src/platform/nm-linux-platform.c
++++ b/src/platform/nm-linux-platform.c
+@@ -2284,6 +2284,7 @@ _nl_msg_new_route (int nlmsg_type,
+                    int nlmsg_flags,
+                    int family,
+                    int ifindex,
++                   int table,
+                    NMIPConfigSource source,
+                    unsigned char scope,
+                    gconstpointer network,
+@@ -2297,7 +2298,7 @@ _nl_msg_new_route (int nlmsg_type,
+ 	struct rtmsg rtmsg = {
+ 		.rtm_family = family,
+ 		.rtm_tos = 0,
+-		.rtm_table = RT_TABLE_MAIN, /* omit setting RTA_TABLE attribute */
++		.rtm_table = table,
+ 		.rtm_protocol = nmp_utils_ip_config_source_coerce_to_rtprot (source),
+ 		.rtm_scope = scope,
+ 		.rtm_type = RTN_UNICAST,
+@@ -5756,11 +5757,37 @@ ip4_route_add (NMPlatform *platform, int
+ {
+ 	NMPObject obj_id;
+ 	nm_auto_nlmsg struct nl_msg *nlmsg = NULL;
++	const char *iface = NULL;
++
++	iface = nm_platform_link_get_name(platform, ifindex);
++	if (iface) {
++		int table = 30 + ifindex;
++		NMPObject oxt_obj_id;
++		nm_auto_nlmsg struct nl_msg *oxt_nlmsg = NULL;
++
++		oxt_nlmsg = _nl_msg_new_route (RTM_NEWROUTE,
++		                           NLM_F_CREATE | NLM_F_REPLACE,
++		                           AF_INET,
++		                           ifindex,
++					   table,
++		                           source,
++		                           gateway ? RT_SCOPE_UNIVERSE : RT_SCOPE_LINK,
++		                           &network,
++		                           plen,
++		                           &gateway,
++		                           metric,
++		                           mss,
++		                           pref_src ? &pref_src : NULL);
++
++		nmp_object_stackinit_id_ip4_route (&oxt_obj_id, ifindex, network, plen, metric);
++		do_add_addrroute (platform, &oxt_obj_id, oxt_nlmsg);
++	}
+ 
+ 	nlmsg = _nl_msg_new_route (RTM_NEWROUTE,
+ 	                           NLM_F_CREATE | NLM_F_REPLACE,
+ 	                           AF_INET,
+ 	                           ifindex,
++				   RT_TABLE_MAIN,
+ 	                           source,
+ 	                           gateway ? RT_SCOPE_UNIVERSE : RT_SCOPE_LINK,
+ 	                           &network,
+@@ -5786,6 +5813,7 @@ ip6_route_add (NMPlatform *platform, int
+ 	                           NLM_F_CREATE | NLM_F_REPLACE,
+ 	                           AF_INET6,
+ 	                           ifindex,
++				   RT_TABLE_MAIN,
+ 	                           source,
+ 	                           !IN6_IS_ADDR_UNSPECIFIED (&gateway) ? RT_SCOPE_UNIVERSE : RT_SCOPE_LINK,
+ 	                           &network,
+@@ -5808,6 +5836,31 @@ ip4_route_delete (NMPlatform *platform,
+ 
+ 	nmp_object_stackinit_id_ip4_route (&obj_id, ifindex, network, plen, metric);
+ 
++	const char *iface = NULL;
++	iface = nm_platform_link_get_name(platform, ifindex);
++	if (iface) {
++		int table = 30 + ifindex;
++		NMPObject oxt_obj_id;
++		nm_auto_nlmsg struct nl_msg *oxt_nlmsg = NULL;
++
++		nmp_object_stackinit_id_ip4_route (&oxt_obj_id, ifindex, network, plen, metric);
++		oxt_nlmsg = _nl_msg_new_route (RTM_DELROUTE,
++		                           0,
++		                           AF_INET,
++		                           ifindex,
++					   table,
++		                           NM_IP_CONFIG_SOURCE_UNKNOWN,
++		                           RT_SCOPE_NOWHERE,
++		                           &network,
++		                           plen,
++		                           NULL,
++		                           metric,
++		                           0,
++		                           NULL);
++		if (oxt_nlmsg)
++			do_delete_object (platform, &oxt_obj_id, oxt_nlmsg);
++	}
++
+ 	if (metric == 0) {
+ 		/* Deleting an IPv4 route with metric 0 does not only delete an exectly matching route.
+ 		 * If no route with metric 0 exists, it might delete another route to the same destination.
+@@ -5841,6 +5894,7 @@ ip4_route_delete (NMPlatform *platform,
+ 	                           0,
+ 	                           AF_INET,
+ 	                           ifindex,
++				   RT_TABLE_MAIN,
+ 	                           NM_IP_CONFIG_SOURCE_UNKNOWN,
+ 	                           RT_SCOPE_NOWHERE,
+ 	                           &network,
+@@ -5867,6 +5921,7 @@ ip6_route_delete (NMPlatform *platform,
+ 	                           0,
+ 	                           AF_INET6,
+ 	                           ifindex,
++				   RT_TABLE_MAIN,
+ 	                           NM_IP_CONFIG_SOURCE_UNKNOWN,
+ 	                           RT_SCOPE_NOWHERE,
+ 	                           &network,
