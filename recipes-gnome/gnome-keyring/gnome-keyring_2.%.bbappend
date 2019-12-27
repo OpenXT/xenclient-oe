@@ -1,1 +1,0 @@
-PNBLACKLIST[gnome-keyring] = ""

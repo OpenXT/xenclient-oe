@@ -25,7 +25,6 @@ RDEPENDS_${PN} = " \
     intel-microcode \
     kernel-modules \
     lvm2 \
-    lvm2-conf-installer \
     ncurses \
     netcat \
     openssh \

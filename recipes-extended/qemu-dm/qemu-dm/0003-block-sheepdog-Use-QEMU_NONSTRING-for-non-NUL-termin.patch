@@ -1,0 +1,62 @@
+From 0a5a7cc9e3ea2cf5f5c3e47eb2e53924965a1ce2 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Philippe=20Mathieu-Daud=C3=A9?= <philmd@redhat.com>
+Date: Thu, 3 Jan 2019 09:56:35 +0100
+Subject: [PATCH 03/17] block/sheepdog: Use QEMU_NONSTRING for non
+ NUL-terminated arrays
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+GCC 8 added a -Wstringop-truncation warning:
+
+  The -Wstringop-truncation warning added in GCC 8.0 via r254630 for
+  bug 81117 is specifically intended to highlight likely unintended
+  uses of the strncpy function that truncate the terminating NUL
+  character from the source string.
+
+This new warning leads to compilation failures:
+
+    CC      block/sheepdog.o
+  qemu/block/sheepdog.c: In function 'find_vdi_name':
+  qemu/block/sheepdog.c:1239:5: error: 'strncpy' specified bound 256 equals destination size [-Werror=stringop-truncation]
+       strncpy(buf + SD_MAX_VDI_LEN, tag, SD_MAX_VDI_TAG_LEN);
+       ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  make: *** [qemu/rules.mak:69: block/sheepdog.o] Error 1
+
+As described previous to the strncpy() calls, the use of strncpy() is
+correct here:
+
+    /* This pair of strncpy calls ensures that the buffer is zero-filled,
+     * which is desirable since we'll soon be sending those bytes, and
+     * don't want the send_req to read uninitialized data.
+     */
+    strncpy(buf, filename, SD_MAX_VDI_LEN);
+    strncpy(buf + SD_MAX_VDI_LEN, tag, SD_MAX_VDI_TAG_LEN);
+
+Use the QEMU_NONSTRING attribute, since this array is intended to store
+character arrays that do not necessarily contain a terminating NUL.
+
+Suggested-by: Michael S. Tsirkin <mst@redhat.com>
+Reviewed-by: Eric Blake <eblake@redhat.com>
+Reviewed-by: Michael S. Tsirkin <mst@redhat.com>
+Signed-off-by: Philippe Mathieu-Daudé <philmd@redhat.com>
+---
+ block/sheepdog.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/block/sheepdog.c b/block/sheepdog.c
+index 0125df9d49..5cd9618432 100644
+--- a/block/sheepdog.c
++++ b/block/sheepdog.c
+@@ -1224,7 +1224,7 @@ static int find_vdi_name(BDRVSheepdogState *s, const char *filename,
+     SheepdogVdiReq hdr;
+     SheepdogVdiRsp *rsp = (SheepdogVdiRsp *)&hdr;
+     unsigned int wlen, rlen = 0;
+-    char buf[SD_MAX_VDI_LEN + SD_MAX_VDI_TAG_LEN];
++    char buf[SD_MAX_VDI_LEN + SD_MAX_VDI_TAG_LEN] QEMU_NONSTRING;
+ 
+     fd = connect_to_sdog(s, errp);
+     if (fd < 0) {
+-- 
+2.23.0
+

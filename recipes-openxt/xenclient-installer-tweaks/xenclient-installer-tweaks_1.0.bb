@@ -32,3 +32,7 @@ do_install () {
     install -d ${D}/etc/init.d
     install -m 0755 ${WORKDIR}/console-bell.initscript ${D}/etc/init.d/console-bell
 }
+
+RDEPENDS_${PN} = " \
+    busybox \
+"

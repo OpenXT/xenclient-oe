@@ -17,7 +17,7 @@ remove_initscript() {
 }
 
 #zap any empty root passwords for release images
-ROOTFS_POSTPROCESS_COMMAND += '${@base_conditional("DISTRO_TYPE", "release", "zap_empty_root_password; ", "",d)}'
+ROOTFS_POSTPROCESS_COMMAND += '${@oe.utils.conditional("DISTRO_TYPE", "release", "zap_empty_root_password; ", "",d)}'
 
 # Make sysvinit verbose if debug-tweaks is enabled
 activate_verbose_sysvinit() {
@@ -52,14 +52,14 @@ IMAGE_FEATURES[validitems] += "wildcard-sshd-argo"
 
 # Add and entry to /etc/inittab to start a tty on hvc0 (debug).
 start_tty_on_hvc0() {
-	echo 'hvc0:12345:respawn:/bin/start_getty 115200 hvc0 vt102' >> "${IMAGE_ROOTFS}/etc/inittab"
+	echo 'hvc0:12345:respawn:/bin/su - root -c "/sbin/getty 115200 hvc0 vt102"' >> "${IMAGE_ROOTFS}/etc/inittab"
 }
 ROOTFS_POSTPROCESS_COMMAND += '${@bb.utils.contains("IMAGE_FEATURES", "debug-tweaks", "start_tty_on_hvc0; ", "",d)}'
 
 # Forcibly remove packages disregarding if it creates a broken dependency
 force_package_removal() {
     if [ -n "${PACKAGE_REMOVE}" ]; then
-        opkg -f "${IPKGCONF_TARGET}" -o "${IMAGE_ROOTFS}" ${OPKG_ARGS} -force-depends remove ${PACKAGE_REMOVE};
+        opkg -f "${IPKGCONF_TARGET}" -o "${IMAGE_ROOTFS}" ${OPKG_ARGS} --force-depends remove ${PACKAGE_REMOVE};
     fi
 }
 ROOTFS_POSTPROCESS_COMMAND += "force_package_removal; "

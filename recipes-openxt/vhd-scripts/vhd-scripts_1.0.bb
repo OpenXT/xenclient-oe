@@ -15,3 +15,5 @@ do_install() {
 	install -m 0755 ${WORKDIR}/vhd-dm-create ${D}${bindir}
 	install -m 0755 ${WORKDIR}/vhd-dm-remove ${D}${bindir}
 }
+
+RDEPENDS_${PN} += "bash"

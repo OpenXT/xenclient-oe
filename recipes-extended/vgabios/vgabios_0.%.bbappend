@@ -11,11 +11,11 @@ SRC_URI += " \
     file://vga-spinlock.patch \
     file://vga-shadow-bda.patch \
     file://xen-log-to-ioport-0xe9.patch \
-    file://vbe-extended-edid-modes.patch                        \
-    file://vbe-xenvesa.patch                                    \
+    file://vbe-extended-edid-modes.patch \
+    file://vbe-xenvesa.patch \
 "
 
 do_install_append() {
-    install -m 0644 VGABIOS-lgpl-latest.debug.bin ${D}/usr/share/firmware/${PN}-${PV}.debug.bin
-    install -m 0644 VGABIOS-lgpl-latest.cirrus.debug.bin ${D}/usr/share/firmware/${PN}-${PV}.cirrus.debug.bin
+    install -m 0644 VGABIOS-lgpl-latest.debug.bin ${D}${datadir}/firmware/${BPN}-${PV}.debug.bin
+    install -m 0644 VGABIOS-lgpl-latest.cirrus.debug.bin ${D}${datadir}/firmware/${BPN}-${PV}.cirrus.debug.bin
 }

@@ -1,213 +1,24 @@
---- a/policy/modules/system/lvm.fc
-+++ b/policy/modules/system/lvm.fc
-@@ -24,6 +24,19 @@ ifdef(`distro_gentoo',`
- /etc/lvmtab\.d(/.*)?		gen_context(system_u:object_r:lvm_metadata_t,s0)
- 
- #
-+# /config/etc
-+#
-+/config/etc/lvm(/.*)?			gen_context(system_u:object_r:lvm_etc_t,s0)
-+/config/etc/lvm/\.cache	--	gen_context(system_u:object_r:lvm_metadata_t,s0)
-+/config/etc/lvm/cache(/.*)?		gen_context(system_u:object_r:lvm_metadata_t,s0)
-+/config/etc/lvm/archive(/.*)?		gen_context(system_u:object_r:lvm_metadata_t,s0)
-+/config/etc/lvm/backup(/.*)?		gen_context(system_u:object_r:lvm_metadata_t,s0)
-+/config/etc/lvm/lock(/.*)?		gen_context(system_u:object_r:lvm_lock_t,s0)
-+
-+/config/etc/lvmtab(/.*)?		gen_context(system_u:object_r:lvm_metadata_t,s0)
-+/config/etc/lvmtab\.d(/.*)?		gen_context(system_u:object_r:lvm_metadata_t,s0)
-+
-+#
- # /lib
- #
- /lib/lvm-10/.*		--	gen_context(system_u:object_r:lvm_exec_t,s0)
-@@ -43,6 +56,7 @@ ifdef(`distro_gentoo',`
- /sbin/lvdisplay		--	gen_context(system_u:object_r:lvm_exec_t,s0)
- /sbin/lvextend		--	gen_context(system_u:object_r:lvm_exec_t,s0)
- /sbin/lvm		--	gen_context(system_u:object_r:lvm_exec_t,s0)
-+/sbin/lvmetad		--	gen_context(system_u:object_r:lvm_exec_t,s0)
- /sbin/lvm\.static	--	gen_context(system_u:object_r:lvm_exec_t,s0)
- /sbin/lvmchange		--	gen_context(system_u:object_r:lvm_exec_t,s0)
- /sbin/lvmdiskscan	--	gen_context(system_u:object_r:lvm_exec_t,s0)
-@@ -108,6 +122,7 @@ ifdef(`distro_gentoo',`
- /usr/sbin/lvdisplay		--	gen_context(system_u:object_r:lvm_exec_t,s0)
- /usr/sbin/lvextend		--	gen_context(system_u:object_r:lvm_exec_t,s0)
- /usr/sbin/lvm			--	gen_context(system_u:object_r:lvm_exec_t,s0)
-+/usr/sbin/lvmetad		--	gen_context(system_u:object_r:lvm_exec_t,s0)
- /usr/sbin/lvm\.static		--	gen_context(system_u:object_r:lvm_exec_t,s0)
- /usr/sbin/lvmchange		--	gen_context(system_u:object_r:lvm_exec_t,s0)
- /usr/sbin/lvmdiskscan		--	gen_context(system_u:object_r:lvm_exec_t,s0)
-@@ -159,3 +174,4 @@ ifdef(`distro_gentoo',`
- /var/lock/lvm(/.*)?		gen_context(system_u:object_r:lvm_lock_t,s0)
- /run/multipathd\.sock -s	gen_context(system_u:object_r:lvm_var_run_t,s0)
- /run/dmevent.*		gen_context(system_u:object_r:lvm_var_run_t,s0)
-+/run/lvm(/.*)?		gen_context(system_u:object_r:lvm_var_run_t,s0)
---- a/policy/modules/system/lvm.if
-+++ b/policy/modules/system/lvm.if
-@@ -125,6 +125,45 @@ interface(`lvm_create_lock_dirs',`
- 	files_add_entry_lock_dirs($1)
- ')
- 
-+########################################
-+## <summary>
-+##	Search LVM metadata directories.
-+## </summary>
-+## <param name="domain">
-+##	<summary>
-+##	Domain allowed access.
-+##	</summary>
-+## </param>
-+## <rolecap/>
-+#
-+interface(`lvm_search_metadata_dirs',`
-+	gen_require(`
-+		type lvm_metadata_t;
-+	')
-+
-+	allow $1 lvm_metadata_t:lnk_file read_lnk_file_perms;
-+	search_dirs_pattern($1, lvm_metadata_t, lvm_metadata_t)
-+')
-+
-+########################################
-+## <summary>
-+##	setattr on LVM metadata files.
-+## </summary>
-+## <param name="domain">
-+##	<summary>
-+##	Domain allowed access.
-+##	</summary>
-+## </param>
-+## <rolecap/>
-+#
-+interface(`lvm_setattr_metadata_dirs',`
-+	gen_require(`
-+		type lvm_metadata_t;
-+	')
-+
-+	setattr_dirs_pattern($1, lvm_metadata_t, lvm_metadata_t)
-+')
-+
- ######################################
- ## <summary>
- ##	Execute a domain transition to run clvmd.
 --- a/policy/modules/system/lvm.te
 +++ b/policy/modules/system/lvm.te
-@@ -100,6 +100,7 @@ dev_dontaudit_getattr_all_blk_files(clvm
- dev_dontaudit_getattr_all_chr_files(clvmd_t)
- dev_create_generic_dirs(clvmd_t)
- dev_delete_generic_dirs(clvmd_t)
-+dev_getattr_fs(lvm_t)
- 
- files_read_etc_files(clvmd_t)
- files_list_usr(clvmd_t)
-@@ -173,7 +174,7 @@ allow lvm_t self:capability { dac_overri
- dontaudit lvm_t self:capability sys_tty_config;
- allow lvm_t self:process { sigchld sigkill sigstop signull signal setfscreate };
- # LVM will complain a lot if it cannot set its priority.
--allow lvm_t self:process setsched;
-+allow lvm_t self:process { setfscreate setsched };
- allow lvm_t self:file rw_file_perms;
- allow lvm_t self:fifo_file manage_fifo_file_perms;
- allow lvm_t self:unix_dgram_socket create_socket_perms;
-@@ -185,6 +186,9 @@ allow lvm_t self:socket create_stream_so
- allow lvm_t self:unix_stream_socket { connectto create_stream_socket_perms };
- allow lvm_t clvmd_t:unix_stream_socket { connectto rw_socket_perms };
- 
-+allow lvm_t self:socket create_socket_perms;
-+allow lvm_t lvm_t:socket { accept };
-+
- manage_dirs_pattern(lvm_t, lvm_tmp_t, lvm_tmp_t)
- manage_files_pattern(lvm_t, lvm_tmp_t, lvm_tmp_t)
- files_tmp_filetrans(lvm_t, lvm_tmp_t, { file dir })
-@@ -197,9 +201,10 @@ read_lnk_files_pattern(lvm_t, lvm_exec_t
- can_exec(lvm_t, lvm_exec_t)
- 
- # Creating lock files
-+manage_dirs_pattern(lvm_t, lvm_lock_t, lvm_lock_t)
- manage_files_pattern(lvm_t, lvm_lock_t, lvm_lock_t)
- create_dirs_pattern(lvm_t, lvm_lock_t, lvm_lock_t)
--files_lock_filetrans(lvm_t, lvm_lock_t, file)
-+files_lock_filetrans(lvm_t, lvm_lock_t, { file dir })
- files_lock_filetrans(lvm_t, lvm_lock_t, dir, "lvm")
- 
- manage_dirs_pattern(lvm_t, lvm_var_lib_t, lvm_var_lib_t)
-@@ -211,11 +216,18 @@ manage_files_pattern(lvm_t, lvm_var_run_
+@@ -209,6 +209,7 @@ manage_dirs_pattern(lvm_t, lvm_var_run_t
+ manage_files_pattern(lvm_t, lvm_var_run_t, lvm_var_run_t)
  manage_sock_files_pattern(lvm_t, lvm_var_run_t, lvm_var_run_t)
  files_pid_filetrans(lvm_t, lvm_var_run_t, { file sock_file })
++files_pid_filetrans(lvm_t, lvm_var_run_t, dir, "cryptsetup")
  
--read_files_pattern(lvm_t, lvm_etc_t, lvm_etc_t)
-+files_var_filetrans(lvm_t, lvm_var_run_t, { file dir })
-+dev_read_lnk_xen(lvm_t)
-+
-+lvm_read_config(lvm_t)
- read_lnk_files_pattern(lvm_t, lvm_etc_t, lvm_etc_t)
+ read_files_pattern(lvm_t, lvm_etc_t, lvm_etc_t)
+ allow lvm_t lvm_etc_t:file map;
+@@ -218,7 +219,8 @@ read_lnk_files_pattern(lvm_t, lvm_etc_t,
+ allow lvm_t lvm_metadata_t:file map;
  # Write to /etc/lvm, /etc/lvmtab, /etc/lvmtab.d
  manage_files_pattern(lvm_t, lvm_metadata_t, lvm_metadata_t)
-+manage_dirs_pattern(lvm_t, lvm_metadata_t, lvm_metadata_t)
- filetrans_pattern(lvm_t, lvm_etc_t, lvm_metadata_t, file)
-+filetrans_pattern(lvm_t, lvm_etc_t, lvm_metadata_t, dir)
-+read_lnk_files_pattern(lvm_t, lvm_metadata_t, lvm_metadata_t)
-+
+-filetrans_pattern(lvm_t, lvm_etc_t, lvm_metadata_t, file)
++create_dirs_pattern(lvm_t, lvm_metadata_t, lvm_metadata_t)
++filetrans_pattern(lvm_t, lvm_etc_t, lvm_metadata_t, { file dir })
  files_etc_filetrans(lvm_t, lvm_metadata_t, file)
  files_search_mnt(lvm_t)
  
-@@ -223,12 +235,15 @@ kernel_get_sysvipc_info(lvm_t)
- kernel_read_system_state(lvm_t)
- # Read system variables in /proc/sys
- kernel_read_kernel_sysctls(lvm_t)
-+kernel_read_crypto_sysctls(lvm_t)
- # for when /usr is not mounted:
- kernel_dontaudit_search_unlabeled(lvm_t)
- # it has no reason to need this
- kernel_dontaudit_getattr_core_if(lvm_t)
- kernel_use_fds(lvm_t)
- kernel_search_debugfs(lvm_t)
-+kernel_request_load_module(lvm_t)
-+kernel_get_sysvipc_info(lvm_t)
- 
- corecmd_exec_bin(lvm_t)
- corecmd_exec_shell(lvm_t)
-@@ -255,8 +270,6 @@ dev_dontaudit_getattr_generic_chr_files(
- dev_dontaudit_getattr_generic_blk_files(lvm_t)
- dev_dontaudit_getattr_generic_pipes(lvm_t)
- dev_create_generic_dirs(lvm_t)
--# the following one is needed by cryptsetup
--dev_getattr_fs(lvm_t)
- 
- domain_use_interactive_fds(lvm_t)
- domain_read_all_domains_state(lvm_t)
-@@ -267,6 +280,7 @@ files_read_etc_runtime_files(lvm_t)
- 
- fs_getattr_xattr_fs(lvm_t)
- fs_search_auto_mountpoints(lvm_t)
-+fs_getattr_tmpfs(lvm_t)
- fs_list_tmpfs(lvm_t)
- fs_read_tmpfs_symlinks(lvm_t)
- fs_dontaudit_read_removable_files(lvm_t)
-@@ -301,6 +315,10 @@ init_dontaudit_getattr_initctl(lvm_t)
- init_use_script_ptys(lvm_t)
- init_read_script_state(lvm_t)
- 
-+initrc_rw_semaphores(lvm_t)
-+xend_rw_semaphores(lvm_t)
-+xen_write_tmp(lvm_t)
-+
- logging_send_syslog_msg(lvm_t)
- 
- miscfiles_read_localization(lvm_t)
-@@ -347,6 +365,12 @@ optional_policy(`
- 	')
- ')
- 
-+# dontaudit FDs leaked by input-server
-+optional_policy(`
-+	kernel_dontaudit_read_xen_state(lvm_t)
-+	kernel_dontaudit_write_xen_state(lvm_t)
-+')
-+
- optional_policy(`
- 	modutils_domtrans_insmod(lvm_t)
- ')
-@@ -367,4 +391,11 @@ optional_policy(`
+@@ -382,4 +384,11 @@ optional_policy(`
  optional_policy(`
  	xen_append_log(lvm_t)
  	xen_dontaudit_rw_unix_stream_sockets(lvm_t)

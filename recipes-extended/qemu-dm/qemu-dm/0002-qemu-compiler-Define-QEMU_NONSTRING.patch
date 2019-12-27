@@ -1,0 +1,67 @@
+From 36f2ccdc9a49d2d6e2be38df83b5a05dc4f43658 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Philippe=20Mathieu-Daud=C3=A9?= <philmd@redhat.com>
+Date: Thu, 3 Jan 2019 09:56:34 +0100
+Subject: [PATCH 02/17] qemu/compiler: Define QEMU_NONSTRING
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+GCC 8 introduced the -Wstringop-truncation checker to detect truncation by
+the strncat and strncpy functions (closely related to -Wstringop-overflow,
+which detect buffer overflow by string-modifying functions declared in
+<string.h>).
+
+In tandem of -Wstringop-truncation, the "nonstring" attribute was added:
+
+  The nonstring variable attribute specifies that an object or member
+  declaration with type array of char, signed char, or unsigned char,
+  or pointer to such a type is intended to store character arrays that
+  do not necessarily contain a terminating NUL. This is useful in detecting
+  uses of such arrays or pointers with functions that expect NUL-terminated
+  strings, and to avoid warnings when such an array or pointer is used as
+  an argument to a bounded string manipulation function such as strncpy.
+
+  From the GCC manual: https://gcc.gnu.org/onlinedocs/gcc/Common-Variable-Attributes.html#index-nonstring-variable-attribute
+
+Add the QEMU_NONSTRING macro which checks if the compiler supports this
+attribute.
+
+Suggested-by: Michael S. Tsirkin <mst@redhat.com>
+Reviewed-by: Eric Blake <eblake@redhat.com>
+Reviewed-by: Michael S. Tsirkin <mst@redhat.com>
+Reviewed-by: Richard Henderson <richard.henderson@linaro.org>
+Reviewed-by: Thomas Huth <thuth@redhat.com>
+Signed-off-by: Philippe Mathieu-Daudé <philmd@redhat.com>
+---
+ include/qemu/compiler.h | 15 +++++++++++++++
+ 1 file changed, 15 insertions(+)
+
+diff --git a/include/qemu/compiler.h b/include/qemu/compiler.h
+index 6b92710487..7cb1795ff7 100644
+--- a/include/qemu/compiler.h
++++ b/include/qemu/compiler.h
+@@ -157,6 +157,21 @@
+ # define QEMU_ERROR(X)
+ #endif
+ 
++/*
++ * The nonstring variable attribute specifies that an object or member
++ * declaration with type array of char or pointer to char is intended
++ * to store character arrays that do not necessarily contain a terminating
++ * NUL character. This is useful in detecting uses of such arrays or pointers
++ * with functions that expect NUL-terminated strings, and to avoid warnings
++ * when such an array or pointer is used as an argument to a bounded string
++ * manipulation function such as strncpy.
++ */
++#if __has_attribute(nonstring)
++# define QEMU_NONSTRING __attribute__((nonstring))
++#else
++# define QEMU_NONSTRING
++#endif
++
+ /* Implement C11 _Generic via GCC builtins.  Example:
+  *
+  *    QEMU_GENERIC(x, (float, sinf), (long double, sinl), sin) (x)
+-- 
+2.23.0
+

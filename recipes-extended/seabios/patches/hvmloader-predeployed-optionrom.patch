@@ -1,0 +1,89 @@
+################################################################################
+DESCRIPTION: 
+################################################################################
+Assume the vgabios is copied in memory before seabios runs.
+This used to be patched in under CONFIG_OPTIONROMS_DEPLOYED compilation option.
+This is not warranted anymore as SeaBIOS will read the VGA device BAR that
+holds the vgabios and copy it in memory. It does require QEMU to access the ROM
+file and handle access to it through MMIO access, which is easy enough to
+configure with QEMU 3.x (and likely earlier).
+
+################################################################################
+REMOVAL 
+################################################################################
+Removing this requires some changes in the toolstack to give the necessary
+information to QEMU so that it can find the vgabios ROM file. It also requires
+the file to be embedded in the stubdomain initramfs.
+
+################################################################################
+UPSTREAM PLAN 
+################################################################################
+None, this can be handled using upstream paths.
+
+################################################################################
+INTERNAL DEPENDENCIES 
+################################################################################
+No direct dependency.
+Changes in hvmloader are directly related to this and could be removed.
+
+################################################################################
+PATCHES
+################################################################################
+--- a/src/optionroms.c
++++ b/src/optionroms.c
+@@ -354,24 +354,23 @@ optionrom_setup(void)
+     u64 sources[(BUILD_BIOS_ADDR - BUILD_ROM_START) / OPTION_ROM_ALIGN];
+     memset(sources, 0, sizeof(sources));
+     u32 post_vga = rom_get_last();
++    u32 pos = rom_get_last();
+ 
+-    // Find and deploy PCI roms.
+-    struct pci_device *pci;
+-    foreachpci(pci) {
+-        if (pci->class == PCI_CLASS_DISPLAY_VGA ||
+-            pci->class == PCI_CLASS_DISPLAY_OTHER ||
+-            pci->have_driver)
+-            continue;
+-        init_pcirom(pci, 0, sources);
++    // Find and initialize already deployed roms.
++    // Ignores PCI ROMs to avoid overrides from the ones that may be available
++    // from PT devices/QEMU.
++    while (pos < rom_get_max()) {
++        struct rom_header *rom = (void*)pos;
++        if (init_optionrom(rom, 0, 0) < 0)
++            pos += OPTION_ROM_ALIGN;
++        else
++            pos = rom_get_last();
+     }
+-
+-    // Find and deploy CBFS roms not associated with a device.
+-    run_file_roms("genroms/", 0, sources);
+     rom_reserve(0);
+ 
+     // All option roms found and deployed - now build BEV/BCV vectors.
+ 
+-    u32 pos = post_vga;
++    pos = post_vga;
+     while (pos < rom_get_last()) {
+         struct rom_header *rom = (void*)pos;
+         if (! is_valid_rom(rom)) {
+@@ -447,17 +446,15 @@ vgarom_setup(void)
+     RunPCIroms = romfile_loadint("etc/pci-optionrom-exec", 2);
+     ScreenAndDebug = romfile_loadint("etc/screen-and-debug", 1);
+ 
+-    // Clear option rom memory
+-    memset((void*)BUILD_ROM_START, 0, rom_get_max() - BUILD_ROM_START);
+-
+     // Find and deploy PCI VGA rom.
+     struct pci_device *pci;
+     foreachpci(pci) {
+         if (!is_pci_vga(pci))
+             continue;
+         vgahook_setup(pci);
+-        init_pcirom(pci, 1, NULL);
+         have_vga = 1;
++        // VGABIOS already deployed in memory by hvmloader.
++        init_optionrom((void*)BUILD_ROM_START, 0, 1);
+         break;
+     }
+     if (!have_vga)

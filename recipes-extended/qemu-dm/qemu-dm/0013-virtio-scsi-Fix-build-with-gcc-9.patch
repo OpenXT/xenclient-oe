@@ -1,0 +1,52 @@
+From 1eabd4bdac47660222589a37c40b906df692a38b Mon Sep 17 00:00:00 2001
+From: Greg Kurz <groug@kaod.org>
+Date: Thu, 28 Feb 2019 18:59:42 +0100
+Subject: [PATCH 13/17] virtio-scsi: Fix build with gcc 9
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Build fails with gcc 9:
+
+  CC      ppc64-softmmu/hw/scsi/virtio-scsi.o
+hw/scsi/virtio-scsi.c: In function â€˜virtio_scsi_do_tmfâ€™:
+hw/scsi/virtio-scsi.c:265:39: error: taking address of packed member of â€˜struct virtio_scsi_ctrl_tmf_reqâ€™ may result in an unaligned pointer value [-Werror=address-of-packed-member]
+  265 |     virtio_tswap32s(VIRTIO_DEVICE(s), &req->req.tmf.subtype);
+      |                                       ^~~~~~~~~~~~~~~~~~~~~
+cc1: all warnings being treated as errors
+
+All the fields in struct virtio_scsi_ctrl_tmf_req are naturally aligned,
+so we could in theory drop QEMU_PACKED. Unfortunately, the header file
+is imported from linux which already has the packed attribute. Trying to
+fix that in the update-linux-headers.sh script is likely to produce
+ugliness. Turn the call to virtio_tswap32s() into an assignment instead.
+
+Signed-off-by: Greg Kurz <groug@kaod.org>
+Message-Id: <155137678223.44753.5438092367451176318.stgit@bahia.lan>
+Signed-off-by: Paolo Bonzini <pbonzini@redhat.com>
+---
+ hw/scsi/virtio-scsi.c | 8 +++++++-
+ 1 file changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/hw/scsi/virtio-scsi.c b/hw/scsi/virtio-scsi.c
+index 3aa99717e2..eb4d54ffa7 100644
+--- a/hw/scsi/virtio-scsi.c
++++ b/hw/scsi/virtio-scsi.c
+@@ -262,7 +262,13 @@ static int virtio_scsi_do_tmf(VirtIOSCSI *s, VirtIOSCSIReq *req)
+     /* Here VIRTIO_SCSI_S_OK means "FUNCTION COMPLETE".  */
+     req->resp.tmf.response = VIRTIO_SCSI_S_OK;
+ 
+-    virtio_tswap32s(VIRTIO_DEVICE(s), &req->req.tmf.subtype);
++    /*
++     * req->req.tmf has the QEMU_PACKED attribute. Don't use virtio_tswap32s()
++     * to avoid compiler errors.
++     */
++    req->req.tmf.subtype =
++        virtio_tswap32(VIRTIO_DEVICE(s), req->req.tmf.subtype);
++
+     switch (req->req.tmf.subtype) {
+     case VIRTIO_SCSI_T_TMF_ABORT_TASK:
+     case VIRTIO_SCSI_T_TMF_QUERY_TASK:
+-- 
+2.23.0
+

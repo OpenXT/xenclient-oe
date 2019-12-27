@@ -1,0 +1,595 @@
+--- a/tboot/common/cmdline.c
++++ b/tboot/common/cmdline.c
+@@ -307,10 +307,12 @@ static bool parse_pci_bdf(const char **b
+ bool g_psbdf_enabled = false;
+ static bool parse_com_psbdf(const char **bdf)
+ {
+-    g_psbdf_enabled = parse_pci_bdf(bdf,
+-                  &g_com_port.comc_psbdf.bus,
+-                  &g_com_port.comc_psbdf.slot,
+-                  &g_com_port.comc_psbdf.func);
++    uint32_t b, d, f;
++
++    g_psbdf_enabled = parse_pci_bdf(bdf, &b, &d, &f);
++    g_com_port.comc_psbdf.bus = b;
++    g_com_port.comc_psbdf.slot = d;
++    g_com_port.comc_psbdf.func = f;
+ 
+     return g_psbdf_enabled;
+ }
+@@ -318,10 +320,12 @@ static bool parse_com_psbdf(const char *
+ bool g_pbbdf_enabled = false;
+ static bool parse_com_pbbdf(const char **bdf)
+ {
+-    g_pbbdf_enabled = parse_pci_bdf(bdf,
+-                  &g_com_port.comc_pbbdf.bus,
+-                  &g_com_port.comc_pbbdf.slot,
+-                  &g_com_port.comc_pbbdf.func);
++    uint32_t b, d, f;
++
++    g_pbbdf_enabled = parse_pci_bdf(bdf, &b, &d, &f);
++    g_com_port.comc_pbbdf.bus = b;
++    g_com_port.comc_pbbdf.slot = d;
++    g_com_port.comc_pbbdf.func = f;
+ 
+     return g_pbbdf_enabled;
+ }
+--- a/tboot/common/acpi.c
++++ b/tboot/common/acpi.c
+@@ -183,12 +183,11 @@ static struct acpi_table_header *find_ta
+     struct acpi_table_header *table = NULL;
+     struct acpi_xsdt *xsdt = get_xsdt(); /* it is ok even on 1.0 tables */
+                                          /* because value will be ignored */
++    unsigned int i;
+ 
+     if ( rsdp->rsdp1.revision >= 2 && xsdt != NULL ) { /*  ACPI 2.0+ */
+-        for ( uint64_t *curr_table = xsdt->table_offsets;
+-              curr_table < (uint64_t *)((void *)xsdt + xsdt->hdr.length);
+-              curr_table++ ) {
+-            table = (struct acpi_table_header *)(uintptr_t)*curr_table;
++        for ( i = 0; i < xsdt->hdr.length; ++i ) {
++            table = (void*)(uintptr_t)xsdt->table_offsets[i];
+             if ( tb_memcmp(table->signature, table_name,
+                         sizeof(table->signature)) == 0 )
+                 return table;
+@@ -202,10 +201,8 @@ static struct acpi_table_header *find_ta
+             return NULL;
+         }
+ 
+-        for ( uint32_t *curr_table = rsdt->table_offsets;
+-              curr_table < (uint32_t *)((void *)rsdt + rsdt->hdr.length);
+-              curr_table++ ) {
+-            table = (struct acpi_table_header *)(uintptr_t)*curr_table;
++        for ( i = 0; i < rsdt->hdr.length; ++i ) {
++            table = (void*)(uintptr_t)xsdt->table_offsets[i];
+             if ( tb_memcmp(table->signature, table_name,
+                         sizeof(table->signature)) == 0 )
+                 return table;
+--- a/tboot/common/tboot.c
++++ b/tboot/common/tboot.c
+@@ -271,8 +271,12 @@ static void post_launch(void)
+     /*
+      * export tpm event log
+      */
+-    export_evtlog(&_tboot_shared.evt_log_region, &_tboot_shared.evt_log_size,
+-                  &_tboot_shared.evt_log_format);
++    uint64_t evtlog_region, evtlog_size;
++    uint8_t evtlog_format;
++    export_evtlog(&evtlog_region, &evtlog_size, &evtlog_format);
++    _tboot_shared.evt_log_region = evtlog_region;
++    _tboot_shared.evt_log_size = evtlog_size;
++    _tboot_shared.evt_log_format = evtlog_format;
+ 
+     /* replace map in loader context with copy */
+     replace_e820_map(g_ldr_ctx);
+@@ -579,7 +583,9 @@ void shutdown(void)
+ {
+     struct tpm_if *tpm = get_tpm();
+     const struct tpm_if_fp *tpm_fp = get_tpm_fp();
+-   
++    uint32_t *num_in_wfs =
++        __builtin_assume_aligned(&_tboot_shared.num_in_wfs, 4);
++
+     /* wait-for-sipi only invoked for APs, so skip all BSP shutdown code */
+     if ( _tboot_shared.shutdown_type == TB_SHUTDOWN_WFS ) {
+         atomic_inc(&ap_wfs_count);
+@@ -594,7 +600,7 @@ void shutdown(void)
+     }
+ 
+     printk(TBOOT_INFO"wait until all APs ready for txt shutdown\n");
+-    while( atomic_read(&_tboot_shared.num_in_wfs)
++    while( atomic_read(num_in_wfs)
+            < atomic_read(&ap_wfs_count) )
+         cpu_relax();
+ 
+--- a/tboot/txt/verify.c
++++ b/tboot/txt/verify.c
+@@ -400,9 +400,11 @@ tb_error_t txt_verify_platform(void)
+ static bool verify_saved_mtrrs(txt_heap_t *txt_heap)
+ {
+     os_mle_data_t *os_mle_data;
++    mtrr_state_t saved_mtrr_state;
+     os_mle_data = get_os_mle_data_start(txt_heap);
++    saved_mtrr_state = os_mle_data->saved_mtrr_state;
+ 
+-    return validate_mtrrs(&(os_mle_data->saved_mtrr_state));
++    return validate_mtrrs(&(saved_mtrr_state));
+ }
+ 
+ tb_error_t txt_post_launch_verify_platform(void)
+--- a/lcptools/readpol.c
++++ b/lcptools/readpol.c
+@@ -147,6 +147,8 @@ static void print_policy(unsigned char*
+                                       "LCP_POLTYPE_UNSIGNED",
+                                       "LCP_POLTYPE_SIGNED", "LCP_POLTYPE_ANY",
+                                       "LCP_POLTYPE_FORCEOWNERPOLICY"};
++    uint32_t policy_control;
++    uint16_t res;
+ 
+     if ( buf_len < (offsetof(lcp_policy_t, policy_hash) +
+                     sizeof(pol.policy_hash.sha1) + 1) ) {
+@@ -157,10 +159,11 @@ static void print_policy(unsigned char*
+     lcp_unloaddata_byte(&pol.hash_alg, &pdata);
+     lcp_unloaddata_byte(&pol.policy_type, &pdata);
+     lcp_unloaddata_byte(&pol.sinit_revocation_counter, &pdata);
+-    lcp_unloaddata_uint32(&pol.policy_control, &pdata, 1);
+-    lcp_unloaddata_uint16(&pol.reserved[0], &pdata, 1);
+-    lcp_unloaddata_uint16(&pol.reserved[1], &pdata, 1);
+-    lcp_unloaddata_uint16(&pol.reserved[2], &pdata, 1);
++    lcp_unloaddata_uint32(&policy_control, &pdata, 1);
++    pol.policy_control = policy_control;
++    lcp_unloaddata_uint16(&res, &pdata, 1); pol.reserved[0] = res;
++    lcp_unloaddata_uint16(&res, &pdata, 1); pol.reserved[1] = res;
++    lcp_unloaddata_uint16(&res, &pdata, 1); pol.reserved[2] = res;
+     lcp_unloaddata(sizeof(pol.policy_hash.sha1), &pdata,
+ 		   (unsigned char *)&pol.policy_hash);
+ 
+--- a/safestringlib/safeclib/mem_primitives_lib.c
++++ b/safestringlib/safeclib/mem_primitives_lib.c
+@@ -108,21 +108,21 @@ mem_prim_set (void *dest, uint32_t len,
+             lcount -= 16;
+             break;
+ 
+-        case 15:  *lp++ = value32;
+-        case 14:  *lp++ = value32;
+-        case 13:  *lp++ = value32;
+-        case 12:  *lp++ = value32;
+-        case 11:  *lp++ = value32;
+-        case 10:  *lp++ = value32;
+-        case 9:  *lp++ = value32;
+-        case 8:  *lp++ = value32;
+-
+-        case 7:  *lp++ = value32;
+-        case 6:  *lp++ = value32;
+-        case 5:  *lp++ = value32;
+-        case 4:  *lp++ = value32;
+-        case 3:  *lp++ = value32;
+-        case 2:  *lp++ = value32;
++        case 15:  *lp++ = value32; __attribute__ ((fallthrough));
++        case 14:  *lp++ = value32; __attribute__ ((fallthrough));
++        case 13:  *lp++ = value32; __attribute__ ((fallthrough));
++        case 12:  *lp++ = value32; __attribute__ ((fallthrough));
++        case 11:  *lp++ = value32; __attribute__ ((fallthrough));
++        case 10:  *lp++ = value32; __attribute__ ((fallthrough));
++        case 9:  *lp++ = value32; __attribute__ ((fallthrough));
++        case 8:  *lp++ = value32; __attribute__ ((fallthrough));
++
++        case 7:  *lp++ = value32; __attribute__ ((fallthrough));
++        case 6:  *lp++ = value32; __attribute__ ((fallthrough));
++        case 5:  *lp++ = value32; __attribute__ ((fallthrough));
++        case 4:  *lp++ = value32; __attribute__ ((fallthrough));
++        case 3:  *lp++ = value32; __attribute__ ((fallthrough));
++        case 2:  *lp++ = value32; __attribute__ ((fallthrough));
+         case 1:  *lp++ = value32;
+             lcount = 0;
+             break;
+@@ -194,21 +194,21 @@ mem_prim_set16 (uint16_t *dp, uint32_t l
+             len -= 16;
+             break;
+ 
+-        case 15:  *dp++ = value;
+-        case 14:  *dp++ = value;
+-        case 13:  *dp++ = value;
+-        case 12:  *dp++ = value;
+-        case 11:  *dp++ = value;
+-        case 10:  *dp++ = value;
+-        case 9:  *dp++ = value;
+-        case 8:  *dp++ = value;
+-
+-        case 7:  *dp++ = value;
+-        case 6:  *dp++ = value;
+-        case 5:  *dp++ = value;
+-        case 4:  *dp++ = value;
+-        case 3:  *dp++ = value;
+-        case 2:  *dp++ = value;
++        case 15:  *dp++ = value; __attribute__ ((fallthrough));
++        case 14:  *dp++ = value; __attribute__ ((fallthrough));
++        case 13:  *dp++ = value; __attribute__ ((fallthrough));
++        case 12:  *dp++ = value; __attribute__ ((fallthrough));
++        case 11:  *dp++ = value; __attribute__ ((fallthrough));
++        case 10:  *dp++ = value; __attribute__ ((fallthrough));
++        case 9:  *dp++ = value; __attribute__ ((fallthrough));
++        case 8:  *dp++ = value; __attribute__ ((fallthrough));
++
++        case 7:  *dp++ = value; __attribute__ ((fallthrough));
++        case 6:  *dp++ = value; __attribute__ ((fallthrough));
++        case 5:  *dp++ = value; __attribute__ ((fallthrough));
++        case 4:  *dp++ = value; __attribute__ ((fallthrough));
++        case 3:  *dp++ = value; __attribute__ ((fallthrough));
++        case 2:  *dp++ = value; __attribute__ ((fallthrough));
+         case 1:  *dp++ = value;
+             len = 0;
+             break;
+@@ -265,21 +265,21 @@ mem_prim_set32 (uint32_t *dp, uint32_t l
+             len -= 16;
+             break;
+ 
+-        case 15:  *dp++ = value;
+-        case 14:  *dp++ = value;
+-        case 13:  *dp++ = value;
+-        case 12:  *dp++ = value;
+-        case 11:  *dp++ = value;
+-        case 10:  *dp++ = value;
+-        case 9:  *dp++ = value;
+-        case 8:  *dp++ = value;
+-
+-        case 7:  *dp++ = value;
+-        case 6:  *dp++ = value;
+-        case 5:  *dp++ = value;
+-        case 4:  *dp++ = value;
+-        case 3:  *dp++ = value;
+-        case 2:  *dp++ = value;
++        case 15:  *dp++ = value; __attribute__ ((fallthrough));
++        case 14:  *dp++ = value; __attribute__ ((fallthrough));
++        case 13:  *dp++ = value; __attribute__ ((fallthrough));
++        case 12:  *dp++ = value; __attribute__ ((fallthrough));
++        case 11:  *dp++ = value; __attribute__ ((fallthrough));
++        case 10:  *dp++ = value; __attribute__ ((fallthrough));
++        case 9:  *dp++ = value; __attribute__ ((fallthrough));
++        case 8:  *dp++ = value; __attribute__ ((fallthrough));
++
++        case 7:  *dp++ = value; __attribute__ ((fallthrough));
++        case 6:  *dp++ = value; __attribute__ ((fallthrough));
++        case 5:  *dp++ = value; __attribute__ ((fallthrough));
++        case 4:  *dp++ = value; __attribute__ ((fallthrough));
++        case 3:  *dp++ = value; __attribute__ ((fallthrough));
++        case 2:  *dp++ = value; __attribute__ ((fallthrough));
+         case 1:  *dp++ = value;
+             len = 0;
+             break;
+@@ -518,21 +518,21 @@ mem_prim_move8 (uint8_t *dp, const uint8
+                   len -= 16;
+                   break;
+ 
+-             case 15:  *dp++ = *sp++;
+-             case 14:  *dp++ = *sp++;
+-             case 13:  *dp++ = *sp++;
+-             case 12:  *dp++ = *sp++;
+-             case 11:  *dp++ = *sp++;
+-             case 10:  *dp++ = *sp++;
+-             case 9:  *dp++ = *sp++;
+-             case 8:  *dp++ = *sp++;
+-
+-             case 7:  *dp++ = *sp++;
+-             case 6:  *dp++ = *sp++;
+-             case 5:  *dp++ = *sp++;
+-             case 4:  *dp++ = *sp++;
+-             case 3:  *dp++ = *sp++;
+-             case 2:  *dp++ = *sp++;
++             case 15:  *dp++ = *sp++; __attribute__ ((fallthrough));
++             case 14:  *dp++ = *sp++; __attribute__ ((fallthrough));
++             case 13:  *dp++ = *sp++; __attribute__ ((fallthrough));
++             case 12:  *dp++ = *sp++; __attribute__ ((fallthrough));
++             case 11:  *dp++ = *sp++; __attribute__ ((fallthrough));
++             case 10:  *dp++ = *sp++; __attribute__ ((fallthrough));
++             case 9:  *dp++ = *sp++; __attribute__ ((fallthrough));
++             case 8:  *dp++ = *sp++; __attribute__ ((fallthrough));
++
++             case 7:  *dp++ = *sp++; __attribute__ ((fallthrough));
++             case 6:  *dp++ = *sp++; __attribute__ ((fallthrough));
++             case 5:  *dp++ = *sp++; __attribute__ ((fallthrough));
++             case 4:  *dp++ = *sp++; __attribute__ ((fallthrough));
++             case 3:  *dp++ = *sp++; __attribute__ ((fallthrough));
++             case 2:  *dp++ = *sp++; __attribute__ ((fallthrough));
+              case 1:  *dp++ = *sp++;
+                  len = 0;
+                  break;
+@@ -568,21 +568,21 @@ mem_prim_move8 (uint8_t *dp, const uint8
+                  len -= 16;
+                  break;
+ 
+-            case 15:  *--dp = *--sp;
+-            case 14:  *--dp = *--sp;
+-            case 13:  *--dp = *--sp;
+-            case 12:  *--dp = *--sp;
+-            case 11:  *--dp = *--sp;
+-            case 10:  *--dp = *--sp;
+-            case 9:  *--dp = *--sp;
+-            case 8:  *--dp = *--sp;
+-
+-            case 7:  *--dp = *--sp;
+-            case 6:  *--dp = *--sp;
+-            case 5:  *--dp = *--sp;
+-            case 4:  *--dp = *--sp;
+-            case 3:  *--dp = *--sp;
+-            case 2:  *--dp = *--sp;
++            case 15:  *--dp = *--sp; __attribute__ ((fallthrough));
++            case 14:  *--dp = *--sp; __attribute__ ((fallthrough));
++            case 13:  *--dp = *--sp; __attribute__ ((fallthrough));
++            case 12:  *--dp = *--sp; __attribute__ ((fallthrough));
++            case 11:  *--dp = *--sp; __attribute__ ((fallthrough));
++            case 10:  *--dp = *--sp; __attribute__ ((fallthrough));
++            case 9:  *--dp = *--sp; __attribute__ ((fallthrough));
++            case 8:  *--dp = *--sp; __attribute__ ((fallthrough));
++
++            case 7:  *--dp = *--sp; __attribute__ ((fallthrough));
++            case 6:  *--dp = *--sp; __attribute__ ((fallthrough));
++            case 5:  *--dp = *--sp; __attribute__ ((fallthrough));
++            case 4:  *--dp = *--sp; __attribute__ ((fallthrough));
++            case 3:  *--dp = *--sp; __attribute__ ((fallthrough));
++            case 2:  *--dp = *--sp; __attribute__ ((fallthrough));
+             case 1:  *--dp = *--sp;
+                 len = 0;
+                 break;
+@@ -649,21 +649,21 @@ mem_prim_move16 (uint16_t *dp, const uin
+                   len -= 16;
+                   break;
+ 
+-             case 15:  *dp++ = *sp++;
+-             case 14:  *dp++ = *sp++;
+-             case 13:  *dp++ = *sp++;
+-             case 12:  *dp++ = *sp++;
+-             case 11:  *dp++ = *sp++;
+-             case 10:  *dp++ = *sp++;
+-             case 9:  *dp++ = *sp++;
+-             case 8:  *dp++ = *sp++;
+-
+-             case 7:  *dp++ = *sp++;
+-             case 6:  *dp++ = *sp++;
+-             case 5:  *dp++ = *sp++;
+-             case 4:  *dp++ = *sp++;
+-             case 3:  *dp++ = *sp++;
+-             case 2:  *dp++ = *sp++;
++             case 15:  *dp++ = *sp++; __attribute__ ((fallthrough));
++             case 14:  *dp++ = *sp++; __attribute__ ((fallthrough));
++             case 13:  *dp++ = *sp++; __attribute__ ((fallthrough));
++             case 12:  *dp++ = *sp++; __attribute__ ((fallthrough));
++             case 11:  *dp++ = *sp++; __attribute__ ((fallthrough));
++             case 10:  *dp++ = *sp++; __attribute__ ((fallthrough));
++             case 9:  *dp++ = *sp++; __attribute__ ((fallthrough));
++             case 8:  *dp++ = *sp++; __attribute__ ((fallthrough));
++
++             case 7:  *dp++ = *sp++; __attribute__ ((fallthrough));
++             case 6:  *dp++ = *sp++; __attribute__ ((fallthrough));
++             case 5:  *dp++ = *sp++; __attribute__ ((fallthrough));
++             case 4:  *dp++ = *sp++; __attribute__ ((fallthrough));
++             case 3:  *dp++ = *sp++; __attribute__ ((fallthrough));
++             case 2:  *dp++ = *sp++; __attribute__ ((fallthrough));
+              case 1:  *dp++ = *sp++;
+                  len = 0;
+                  break;
+@@ -698,21 +698,21 @@ mem_prim_move16 (uint16_t *dp, const uin
+                  len -= 16;
+                  break;
+ 
+-            case 15:  *--dp = *--sp;
+-            case 14:  *--dp = *--sp;
+-            case 13:  *--dp = *--sp;
+-            case 12:  *--dp = *--sp;
+-            case 11:  *--dp = *--sp;
+-            case 10:  *--dp = *--sp;
+-            case 9:  *--dp = *--sp;
+-            case 8:  *--dp = *--sp;
+-
+-            case 7:  *--dp = *--sp;
+-            case 6:  *--dp = *--sp;
+-            case 5:  *--dp = *--sp;
+-            case 4:  *--dp = *--sp;
+-            case 3:  *--dp = *--sp;
+-            case 2:  *--dp = *--sp;
++            case 15:  *--dp = *--sp; __attribute__ ((fallthrough));
++            case 14:  *--dp = *--sp; __attribute__ ((fallthrough));
++            case 13:  *--dp = *--sp; __attribute__ ((fallthrough));
++            case 12:  *--dp = *--sp; __attribute__ ((fallthrough));
++            case 11:  *--dp = *--sp; __attribute__ ((fallthrough));
++            case 10:  *--dp = *--sp; __attribute__ ((fallthrough));
++            case 9:  *--dp = *--sp; __attribute__ ((fallthrough));
++            case 8:  *--dp = *--sp; __attribute__ ((fallthrough));
++
++            case 7:  *--dp = *--sp; __attribute__ ((fallthrough));
++            case 6:  *--dp = *--sp; __attribute__ ((fallthrough));
++            case 5:  *--dp = *--sp; __attribute__ ((fallthrough));
++            case 4:  *--dp = *--sp; __attribute__ ((fallthrough));
++            case 3:  *--dp = *--sp; __attribute__ ((fallthrough));
++            case 2:  *--dp = *--sp; __attribute__ ((fallthrough));
+             case 1:  *--dp = *--sp;
+                 len = 0;
+                 break;
+@@ -779,21 +779,21 @@ mem_prim_move32 (uint32_t *dp, const uin
+                   len -= 16;
+                   break;
+ 
+-             case 15:  *dp++ = *sp++;
+-             case 14:  *dp++ = *sp++;
+-             case 13:  *dp++ = *sp++;
+-             case 12:  *dp++ = *sp++;
+-             case 11:  *dp++ = *sp++;
+-             case 10:  *dp++ = *sp++;
+-             case 9:  *dp++ = *sp++;
+-             case 8:  *dp++ = *sp++;
+-
+-             case 7:  *dp++ = *sp++;
+-             case 6:  *dp++ = *sp++;
+-             case 5:  *dp++ = *sp++;
+-             case 4:  *dp++ = *sp++;
+-             case 3:  *dp++ = *sp++;
+-             case 2:  *dp++ = *sp++;
++             case 15:  *dp++ = *sp++; __attribute__ ((fallthrough));
++             case 14:  *dp++ = *sp++; __attribute__ ((fallthrough));
++             case 13:  *dp++ = *sp++; __attribute__ ((fallthrough));
++             case 12:  *dp++ = *sp++; __attribute__ ((fallthrough));
++             case 11:  *dp++ = *sp++; __attribute__ ((fallthrough));
++             case 10:  *dp++ = *sp++; __attribute__ ((fallthrough));
++             case 9:  *dp++ = *sp++; __attribute__ ((fallthrough));
++             case 8:  *dp++ = *sp++; __attribute__ ((fallthrough));
++
++             case 7:  *dp++ = *sp++; __attribute__ ((fallthrough));
++             case 6:  *dp++ = *sp++; __attribute__ ((fallthrough));
++             case 5:  *dp++ = *sp++; __attribute__ ((fallthrough));
++             case 4:  *dp++ = *sp++; __attribute__ ((fallthrough));
++             case 3:  *dp++ = *sp++; __attribute__ ((fallthrough));
++             case 2:  *dp++ = *sp++; __attribute__ ((fallthrough));
+              case 1:  *dp++ = *sp++;
+                  len = 0;
+                  break;
+@@ -827,21 +827,21 @@ mem_prim_move32 (uint32_t *dp, const uin
+                  len -= 16;
+                  break;
+ 
+-            case 15:  *--dp = *--sp;
+-            case 14:  *--dp = *--sp;
+-            case 13:  *--dp = *--sp;
+-            case 12:  *--dp = *--sp;
+-            case 11:  *--dp = *--sp;
+-            case 10:  *--dp = *--sp;
+-            case 9:  *--dp = *--sp;
+-            case 8:  *--dp = *--sp;
+-
+-            case 7:  *--dp = *--sp;
+-            case 6:  *--dp = *--sp;
+-            case 5:  *--dp = *--sp;
+-            case 4:  *--dp = *--sp;
+-            case 3:  *--dp = *--sp;
+-            case 2:  *--dp = *--sp;
++            case 15:  *--dp = *--sp; __attribute__ ((fallthrough));
++            case 14:  *--dp = *--sp; __attribute__ ((fallthrough));
++            case 13:  *--dp = *--sp; __attribute__ ((fallthrough));
++            case 12:  *--dp = *--sp; __attribute__ ((fallthrough));
++            case 11:  *--dp = *--sp; __attribute__ ((fallthrough));
++            case 10:  *--dp = *--sp; __attribute__ ((fallthrough));
++            case 9:  *--dp = *--sp; __attribute__ ((fallthrough));
++            case 8:  *--dp = *--sp; __attribute__ ((fallthrough));
++
++            case 7:  *--dp = *--sp; __attribute__ ((fallthrough));
++            case 6:  *--dp = *--sp; __attribute__ ((fallthrough));
++            case 5:  *--dp = *--sp; __attribute__ ((fallthrough));
++            case 4:  *--dp = *--sp; __attribute__ ((fallthrough));
++            case 3:  *--dp = *--sp; __attribute__ ((fallthrough));
++            case 2:  *--dp = *--sp; __attribute__ ((fallthrough));
+             case 1:  *--dp = *--sp;
+                 len = 0;
+                 break;
+--- a/tboot/txt/txt.c
++++ b/tboot/txt/txt.c
+@@ -992,7 +992,9 @@ tb_error_t txt_launch_environment(loader
+ 
+     /* save MTRRs before we alter them for SINIT launch */
+     os_mle_data = get_os_mle_data_start(txt_heap);
+-    save_mtrrs(&(os_mle_data->saved_mtrr_state));
++    mtrr_state_t saved_mtrr_state = os_mle_data->saved_mtrr_state;
++    save_mtrrs(&saved_mtrr_state);
++    os_mle_data->saved_mtrr_state = saved_mtrr_state;
+ 
+     /* set MTRRs properly for AC module (SINIT); if this fails the MTRRs may
+        not be in a good state to continue a launch, so return TB_ERR_FATAL */
+@@ -1241,7 +1243,8 @@ void txt_post_launch(void)
+     }
+ 
+     /* restore pre-SENTER MTRRs that were overwritten for SINIT launch */
+-    restore_mtrrs(&(os_mle_data->saved_mtrr_state));
++    mtrr_state_t saved_mtrr_state = os_mle_data->saved_mtrr_state;
++    restore_mtrrs(&saved_mtrr_state);
+ 
+     /* now, if there was an error, apply policy */
+     apply_policy(err);
+@@ -1272,8 +1275,10 @@ void ap_wait(unsigned int cpuid)
+     misc |= MSR_IA32_MISC_ENABLE_MONITOR_FSM;
+     wrmsr(MSR_IA32_MISC_ENABLE, misc);
+ 
++    uint32_t *num_in_wfs =
++        __builtin_assume_aligned(&_tboot_shared.num_in_wfs, 4);
+     /* this is close enough to entering monitor/mwait loop, so inc counter */
+-    atomic_inc((atomic_t *)&_tboot_shared.num_in_wfs);
++    atomic_inc((atomic_t *)num_in_wfs);
+     mtx_leave(&ap_lock);
+ 
+     printk(TBOOT_INFO"cpu %u mwait'ing\n", cpuid);
+@@ -1287,7 +1292,7 @@ void ap_wait(unsigned int cpuid)
+ 
+     uint32_t sipi_vec = (uint32_t)_tboot_shared.ap_wake_addr;
+     atomic_dec(&ap_wfs_count);
+-    atomic_dec((atomic_t *)&_tboot_shared.num_in_wfs);
++    atomic_dec((atomic_t *)num_in_wfs);
+     cpu_wakeup(cpuid, sipi_vec);
+ }
+ 
+@@ -1325,7 +1330,8 @@ void txt_cpu_wakeup(void)
+     os_mle_data = get_os_mle_data_start(txt_heap);
+ 
+     /* apply (validated) (pre-SENTER) MTRRs from BSP to each AP */
+-    restore_mtrrs(&(os_mle_data->saved_mtrr_state));
++    mtrr_state_t saved_mtrr_state = os_mle_data->saved_mtrr_state;
++    restore_mtrrs(&saved_mtrr_state);
+ 
+     /* restore pre-SENTER IA32_MISC_ENABLE_MSR */
+     wrmsr(MSR_IA32_MISC_ENABLE, os_mle_data->saved_misc_enable_msr);
+--- a/tboot/txt/vmcs.c
++++ b/tboot/txt/vmcs.c
+@@ -441,17 +441,19 @@ static bool vmx_create_vmcs(unsigned int
+ static void launch_mini_guest(unsigned int cpuid)
+ {
+     unsigned long error;
++    uint32_t *num_in_wfs =
++        __builtin_assume_aligned(&_tboot_shared.num_in_wfs, 4);
+ 
+     printk(TBOOT_DETA"launching mini-guest for cpu %u\n", cpuid);
+ 
+     /* this is close enough to entering wait-for-sipi, so inc counter */
+-    atomic_inc((atomic_t *)&_tboot_shared.num_in_wfs);
++    atomic_inc((atomic_t *)num_in_wfs);
+ 
+     __vmlaunch();
+ 
+     /* should not reach here */
+     atomic_dec(&ap_wfs_count);
+-    atomic_dec((atomic_t *)&_tboot_shared.num_in_wfs);
++    atomic_dec((atomic_t *)num_in_wfs);
+     error = __vmread(VM_INSTRUCTION_ERROR);
+     printk(TBOOT_ERR"vmlaunch failed for cpu %u, error code %lx\n", cpuid, error);
+     apply_policy(TB_ERR_FATAL);
+@@ -488,6 +490,8 @@ static void print_failed_vmentry_reason(
+ void vmx_vmexit_handler(void)
+ {
+     unsigned int apicid = get_apicid();
++    uint32_t *num_in_wfs =
++        __builtin_assume_aligned(&_tboot_shared.num_in_wfs, 4);
+ 
+     unsigned int exit_reason = __vmread(VM_EXIT_REASON);
+     /*printk("vmx_vmexit_handler, cpu= %d,  exit_reason=%x.\n", apicid, exit_reason);*/
+@@ -496,7 +500,7 @@ void vmx_vmexit_handler(void)
+         print_failed_vmentry_reason(exit_reason);
+         stop_vmx(apicid);
+         atomic_dec(&ap_wfs_count);
+-        atomic_dec((atomic_t *)&_tboot_shared.num_in_wfs);
++        atomic_dec((atomic_t *)num_in_wfs);
+         apply_policy(TB_ERR_FATAL);
+     }
+     else if ( exit_reason == EXIT_REASON_INIT ) {
+@@ -514,7 +518,7 @@ void vmx_vmexit_handler(void)
+         /*printk("exiting due to SIPI: vector=%x\n", sipi_vec); */
+         stop_vmx(apicid);
+         atomic_dec(&ap_wfs_count);
+-        atomic_dec((atomic_t *)&_tboot_shared.num_in_wfs);
++        atomic_dec((atomic_t *)num_in_wfs);
+         cpu_wakeup(apicid, sipi_vec);
+ 
+         /* cpu_wakeup() doesn't return, so we should never get here */
+@@ -524,7 +528,7 @@ void vmx_vmexit_handler(void)
+     else if ( exit_reason == EXIT_REASON_VMCALL ) {
+         stop_vmx(apicid);
+         atomic_dec(&ap_wfs_count);
+-        atomic_dec((atomic_t *)&_tboot_shared.num_in_wfs);
++        atomic_dec((atomic_t *)num_in_wfs);
+         /* spin */
+         while ( true )
+             __asm__ __volatile__("cli; hlt;");

@@ -28,9 +28,9 @@ SRC_URI += " \
     file://policy/modules/apps/xec.fc \
     file://policy/modules/apps/xec.if \
     file://policy/modules/apps/xec.te \
-    file://policy/modules/contrib/tpmutil.fc \
-    file://policy/modules/contrib/tpmutil.if \
-    file://policy/modules/contrib/tpmutil.te \
+    file://policy/modules/apps/tpmutil.fc \
+    file://policy/modules/apps/tpmutil.if \
+    file://policy/modules/apps/tpmutil.te \
     file://policy/modules/services/blktap.fc \
     file://policy/modules/services/blktap.if \
     file://policy/modules/services/blktap.te \
@@ -89,15 +89,16 @@ SRC_URI += " \
 # Patches.
 SRC_URI += " \
     file://patches/virtual_domain_context.diff \
-    file://patches/policy.modules.contrib.alsa.diff \
-    file://patches/policy.modules.contrib.apm.diff \
-    file://patches/policy.modules.contrib.brctl.diff \
-    file://patches/policy.modules.contrib.dmidecode.diff \
-    file://patches/policy.modules.contrib.dpkg.diff \
-    file://patches/policy.modules.contrib.firstboot.diff \
-    file://patches/policy.modules.contrib.logrotate.diff \
-    file://patches/policy.modules.contrib.qemu.diff \
-    file://patches/policy.modules.kernel.corecommands.diff \
+    file://patches/fc-subs-busybox-aliases.patch \
+    file://patches/fc-subs-config-aliases.patch \
+    file://patches/policy.modules.admin.alsa.diff \
+    file://patches/policy.modules.services.acpi.diff \
+    file://patches/policy.modules.admin.brctl.diff \
+    file://patches/policy.modules.admin.dmidecode.diff \
+    file://patches/policy.modules.admin.dpkg.diff \
+    file://patches/policy.modules.admin.firstboot.diff \
+    file://patches/policy.modules.admin.logrotate.diff \
+    file://patches/policy.modules.apps.qemu.diff \
     file://patches/policy.modules.kernel.corenetwork.diff \
     file://patches/policy.modules.kernel.devices.diff \
     file://patches/policy.modules.kernel.domain.diff \
@@ -105,25 +106,22 @@ SRC_URI += " \
     file://patches/policy.modules.kernel.kernel.diff \
     file://patches/policy.modules.kernel.files.diff \
     file://patches/policy.modules.kernel.storage.diff \
-    file://patches/policy.modules.kernel.terminal.diff \
     file://patches/policy.modules.roles.staff.diff \
     file://patches/policy.modules.roles.sysadm.diff \
-    file://patches/policy.modules.contrib.cron.diff \
-    file://patches/policy.modules.contrib.dbus.diff \
-    file://patches/policy.modules.contrib.dnsmasq.diff \
-    file://patches/policy.modules.contrib.hal.diff \
-    file://patches/policy.modules.contrib.networkmanager.diff \
+    file://patches/policy.modules.services.cron.diff \
+    file://patches/policy.modules.services.dbus.diff \
+    file://patches/policy.modules.services.dnsmasq.diff \
+    file://patches/policy.modules.services.hal.diff \
+    file://patches/policy.modules.services.networkmanager.diff \
     file://patches/policy.modules.services.ssh.diff \
-    file://patches/policy.modules.contrib.virt.diff \
+    file://patches/policy.modules.services.virt.diff \
     file://patches/policy.modules.system.authlogin.diff \
     file://patches/policy.modules.system.fstools.diff \
-    file://patches/policy.modules.system.getty.diff \
     file://patches/policy.modules.system.init.diff \
     file://patches/policy.modules.system.libraries.diff \
     file://patches/policy.modules.system.logging.diff \
     file://patches/policy.modules.system.lvm.diff \
     file://patches/policy.modules.system.miscfiles.diff \
-    file://patches/policy.modules.system.iptables.diff \
     file://patches/policy.modules.system.modutils.diff \
     file://patches/policy.modules.system.mount.diff \
     file://patches/policy.modules.system.selinuxutil.diff \
@@ -132,9 +130,9 @@ SRC_URI += " \
     file://patches/policy.modules.system.unconfined.diff \
     file://patches/policy.modules.system.userdomain.diff \
     file://patches/policy.support.misc_patterns.spt.diff \
-    file://patches/policy.modules.contrib.xen.diff \
-    file://patches/policy.modules.contrib.tcsd.patch \
-    file://patches/policy.modules.contrib.networkmanager_xt.diff \
+    file://patches/policy.modules.system.xen.diff \
+    file://patches/policy.modules.services.tcsd.patch \
+    file://patches/policy.modules.services.networkmanager_xt.diff \
     file://patches/policy.modules.system.init_xt.diff \
     file://patches/blktap-interfaces.diff \
     file://patches/db-cmd-interfaces.diff \
@@ -157,15 +155,17 @@ SRC_URI += " \
     file://patches/vusb-interfaces.diff \
     file://patches/openxt_system_unconfined_readonly_neverallow_fixes.patch \
     file://patches/openxt-sysadm-lsusb.patch \
-    file://patches/xen4.6-uprev.patch \
     file://patches/openxt-init-spec-domtrans.patch \
     file://patches/busybox-mmap-read-execute-checks-from-new-domain.patch \
-    file://patches/dev-xen-privcmd.patch \
     file://patches/policy.modules.admin.su.patch \
-    file://patches/storage-Add-fcontexts-for-NVMe-disks.patch \
     file://patches/signed-kernel-modprobe.patch \
     file://patches/add-missing-dbusd-permissions.patch \
     file://patches/xl-sysadm-interfaces.patch \
+    file://patches/policy.modules.admin.bootloader.diff \
+"
+
+DEPENDS_append += " \
+    strace-native \
 "
 
 S = "${WORKDIR}/refpolicy"
@@ -185,7 +185,7 @@ POLICY_MLS_CATS = "256"
 EXTRA_OEMAKE += "PKGNAME=${POLICY_NAME}-${PV}"
 
 do_srctree_copy() {
-        cp -r "${WORKDIR}/policy/modules" "${S}/policy"
+    cp -r "${WORKDIR}/policy/modules" "${S}/policy"
 }
 addtask do_srctree_copy after do_unpack before do_patch
 do_srctree_copy[doc] = "Copy layer provided policy files in work directory."
@@ -208,8 +208,8 @@ See 'make conf' of the refpolicy for more information."
 do_policy_conf[dirs] = "${B}"
 
 do_install_append() {
-        install -d ${D}/etc/selinux
-        install -m 644 ${WORKDIR}/config ${D}/etc/selinux/config
+    install -d ${D}/etc/selinux
+    install -m 644 ${WORKDIR}/config ${D}/etc/selinux/config
 }
 
 sysroot_stage_all_append () {

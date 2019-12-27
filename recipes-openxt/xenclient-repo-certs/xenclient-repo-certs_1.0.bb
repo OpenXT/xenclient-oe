@@ -23,3 +23,7 @@ do_install() {
     install -d ${D}${bindir}
     install -m 0755 ${WORKDIR}/verify-repo-metadata ${D}${bindir}/
 }
+
+RDEPENDS_${PN} += " \
+    openssl-bin \
+"

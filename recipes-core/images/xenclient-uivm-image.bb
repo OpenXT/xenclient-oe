@@ -37,14 +37,8 @@ INITSCRIPT_REMOVE = " \
 # filesystem construction process.
 # http://www.yoctoproject.org/docs/current/ref-manual/ref-manual.html#var-IMAGE_LINGUAS
 IMAGE_LINGUAS = " \
-    de-de \
     en-us \
-    es-es \
-    fr-fr \
-    ja-jp \
-    zh-cn \
 "
-
 
 # Refine xserver packages installed by packagegroup-core-x11-xserver.
 XSERVER = " \
@@ -102,8 +96,8 @@ IMAGE_INSTALL += "\
     ttf-dejavu-sans-mono \
     uim \
     uim-common \
-    anthy \
     uim-gtk2.0 \
+    anthy \
     matchbox-keyboard \
     matchbox-keyboard-im \
 "

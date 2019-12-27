@@ -22,7 +22,24 @@ PV = "3.1.0"
 SRC_URI = "http://wiki.qemu-project.org/download/qemu-${PV}.tar.bz2"
 
 # QEMU Patch Queue
-SRC_URI += "file://compile-time-stubdom-flag.patch \
+SRC_URI += "file://0001-configure-use-valid-args-testing-sem_timedwait.patch \
+            file://0002-qemu-compiler-Define-QEMU_NONSTRING.patch \
+            file://0003-block-sheepdog-Use-QEMU_NONSTRING-for-non-NUL-termin.patch \
+            file://0004-sockets-avoid-string-truncation-warnings-when-copyin.patch \
+            file://0005-hw-usb-avoid-format-truncation-warning-when-formatti.patch \
+            file://0006-spice-set-device-address-and-device-display-ID-in-QX.patch \
+            file://0007-migration-Fix-stringop-truncation-warning.patch \
+            file://0008-migration-Use-strnlen-for-fixed-size-string.patch \
+            file://0009-crypto-block-remove-redundant-struct-packing-to-fix-.patch \
+            file://0010-block-nvme-Remove-QEMU_PACKED-from-naturally-aligned.patch \
+            file://0011-qxl-avoid-unaligned-pointer-reads-writes.patch \
+            file://0012-usb-mtp-fix-alignment-of-access-of-ObjectInfo-filena.patch \
+            file://0013-virtio-scsi-Fix-build-with-gcc-9.patch \
+            file://0014-block-vdi-Don-t-take-address-of-fields-in-packed-str.patch \
+            file://0015-uuid-Make-qemu_uuid_bswap-take-and-return-a-QemuUUID.patch \
+            file://0016-block-vpc-Don-t-take-address-of-fields-in-packed-str.patch \
+            file://0017-hw-acpi-Use-QEMU_NONSTRING-for-non-NUL-terminated-ar.patch \
+            file://compile-time-stubdom-flag.patch \
             file://generic-xenstore-extensions.patch \
             file://readonly-ide.patch \
             file://hvm-param-dm-domain.patch \
@@ -92,8 +109,6 @@ EXTRA_OECONF += " \
     --disable-kvm \
     --disable-tools \
     --disable-fdt \
-    --disable-uuid \
-    --disable-vhdx \
     --disable-qom-cast-debug \
     --disable-tcg-interpreter \
     --disable-tcg \

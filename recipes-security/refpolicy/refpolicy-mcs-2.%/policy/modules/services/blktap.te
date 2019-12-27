@@ -33,6 +33,13 @@ files_type(tapdisk_exec_t)
 domain_entry_file(tapdisk_t, tapdisk_exec_t)
 role system_r types tapdisk_t;
 
+# tapdisk uses regular files as shared-mem, which it creates in /dev/shm and
+# mmap().
+# Create a domain to somewhat limit the scope of permissions.
+type tapdisk_tmpfs_t;
+files_tmpfs_file(tapdisk_tmpfs_t)
+fs_tmpfs_filetrans(tapdisk_t, tapdisk_tmpfs_t, { dir file })
+
 type tapctl_t;
 type tapctl_exec_t;
 
@@ -76,6 +83,7 @@ logging_send_syslog_msg(tapback_t)
 
 allow tapdisk_t self:capability { ipc_lock sys_resource sys_nice };
 allow tapdisk_t self:process { setrlimit setsched };
+allow tapdisk_t self:unix_stream_socket create_stream_socket_perms;
 
 # For opening xc-tools.iso with O_RDWR; see if we can patch tapdisk2
 # to only open it O_RDONLY.
@@ -93,6 +101,7 @@ manage_sock_files_pattern(tapdisk_t, tapdisk_var_run_t, tapdisk_var_run_t)
 dev_search_xen(tapdisk_t)
 dev_rw_xen(tapdisk_t)
 dev_read_sysfs(tapdisk_t)
+dev_rwx_zero(tapdisk_t)
 fs_read_anon_inodefs_files(tapdisk_t)
 miscfiles_read_localization(tapdisk_t)
 seutil_use_newrole_fds(tapdisk_t)
@@ -141,6 +150,7 @@ optional_policy(`
 
 fs_manage_tmpfs_files(tapdisk_t)
 fs_manage_tmpfs_dirs(tapdisk_t)
+tapdisk_manage_tmpfs_files(tapdisk_t)
 # tapdisk sometimes inherits an initrc_t file descriptor on /dev/null
 # allowing it to use it should have a similar effect than dontaudit-ing it
 # replace the following line with `init_use_script_fds(tapdisk_t)` to allow

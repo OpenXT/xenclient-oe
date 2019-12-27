@@ -1,0 +1,68 @@
+From bfad62db69d4e30e42d7e8576d4440ebebccf816 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Daniel=20P=2E=20Berrang=C3=A9?= <berrange@redhat.com>
+Date: Fri, 12 Apr 2019 13:16:25 +0100
+Subject: [PATCH 05/17] hw/usb: avoid format truncation warning when formatting
+ port name
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+hw/usb/hcd-xhci.c: In function ‘usb_xhci_realize’:
+hw/usb/hcd-xhci.c:3339:66: warning: ‘%d’ directive output may be truncated writing between 1 and 10 bytes into a region of size 5 [-Wformat-trunca\
+tion=]
+ 3339 |             snprintf(port->name, sizeof(port->name), "usb2 port #%d", i+1);
+      |                                                                  ^~
+hw/usb/hcd-xhci.c:3339:54: note: directive argument in the range [1, 2147483647]
+ 3339 |             snprintf(port->name, sizeof(port->name), "usb2 port #%d", i+1);
+      |                                                      ^~~~~~~~~~~~~~~
+
+The xhci code formats the port name into a fixed length
+buffer which is only large enough to hold port numbers
+upto 5 digits in decimal representation. We're never
+going to have a port number that large, so aserting the
+port number is sensible is sufficient to tell GCC the
+formatted string won't be truncated.
+
+Signed-off-by: Daniel P. Berrangé <berrange@redhat.com>
+Message-Id: <20190412121626.19829-5-berrange@redhat.com>
+
+[ kraxel: also s/int/unsigned int/ to tell gcc they can't
+          go negative. ]
+
+Signed-off-by: Gerd Hoffmann <kraxel@redhat.com>
+---
+ hw/usb/hcd-xhci.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/hw/usb/hcd-xhci.c b/hw/usb/hcd-xhci.c
+index 8f1a01a405..db3e519842 100644
+--- a/hw/usb/hcd-xhci.c
++++ b/hw/usb/hcd-xhci.c
+@@ -3286,7 +3286,7 @@ static void usb_xhci_init(XHCIState *xhci)
+ {
+     DeviceState *dev = DEVICE(xhci);
+     XHCIPort *port;
+-    int i, usbports, speedmask;
++    unsigned int i, usbports, speedmask;
+ 
+     xhci->usbsts = USBSTS_HCH;
+ 
+@@ -3316,6 +3316,7 @@ static void usb_xhci_init(XHCIState *xhci)
+                 USB_SPEED_MASK_LOW  |
+                 USB_SPEED_MASK_FULL |
+                 USB_SPEED_MASK_HIGH;
++            assert(i < MAXPORTS);
+             snprintf(port->name, sizeof(port->name), "usb2 port #%d", i+1);
+             speedmask |= port->speedmask;
+         }
+@@ -3329,6 +3330,7 @@ static void usb_xhci_init(XHCIState *xhci)
+             }
+             port->uport = &xhci->uports[i];
+             port->speedmask = USB_SPEED_MASK_SUPER;
++            assert(i < MAXPORTS);
+             snprintf(port->name, sizeof(port->name), "usb3 port #%d", i+1);
+             speedmask |= port->speedmask;
+         }
+-- 
+2.23.0
+

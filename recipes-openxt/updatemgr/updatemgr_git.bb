@@ -24,7 +24,10 @@ DEPENDS = " \
     hkg-transformers-base \
     hkg-monad-loops \
 "
-RDEPENDS_${PN} += "glibc-gconv-utf-32"
+RDEPENDS_${PN} += " \
+    glibc-gconv-utf-32 \
+    openssl-bin \
+"
 
 PV = "0+git${SRCPV}"
 SRCREV = "${AUTOREV}"

@@ -18,7 +18,7 @@ DEPENDS = " \
 "
 
 GNOME_COMPRESS_TYPE = "bz2"
-inherit gnome gtk-icon-cache gobject-introspection
+inherit gnomebase gtk-icon-cache gobject-introspection
 
 FILESEXTRAPATHS_prepend := "${THISDIR}/${BPN}-${PV}:"
 SRC_URI += " \

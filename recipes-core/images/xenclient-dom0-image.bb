@@ -17,6 +17,7 @@ IMAGE_FEATURES += " \
     read-only-rootfs \
     root-bash-shell \
     wildcard-sshd-argo \
+    allow-root-login \
 "
 IMAGE_FSTYPES = "ext3.gz"
 export IMAGE_BASENAME = "xenclient-dom0-image"
@@ -99,13 +100,6 @@ activate_xenstored_initscript() {
 }
 ROOTFS_POSTPROCESS_COMMAND += "activate_xenstored_initscript; "
 
-# packagegroup-xenclient-dom0 provides lvm2, so have lvmetad running as lvm2
-# utilities try to use it and warn in its absence.
-activate_lvmetad_initscript() {
-    update-rc.d -r ${IMAGE_ROOTFS} lvm2-lvmetad defaults 06
-}
-ROOTFS_POSTPROCESS_COMMAND += "activate_lvmetad_initscript; "
-
 # Handle required configuration of the rootfs to store persistent files on
 # encripted /config partition.
 rw_config_partition() {
@@ -123,3 +117,4 @@ rw_config_partition() {
     fi
 }
 ROOTFS_POSTPROCESS_COMMAND += "rw_config_partition; "
+ROOTFS_POSTPROCESS_COMMAND += "start_tty_on_hvc0;"

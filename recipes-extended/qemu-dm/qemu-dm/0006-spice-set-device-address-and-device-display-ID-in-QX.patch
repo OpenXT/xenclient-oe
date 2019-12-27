@@ -1,0 +1,165 @@
+From a28832433a76cc61b4a3084ba0e249106004c308 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Luk=C3=A1=C5=A1=20Hr=C3=A1zk=C3=BD?= <lhrazky@redhat.com>
+Date: Fri, 15 Feb 2019 16:09:19 +0100
+Subject: [PATCH 06/17] spice: set device address and device display ID in QXL
+ interface
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Calls the new SPICE QXL interface function spice_qxl_set_device_info to
+set the hardware address of the graphics device represented by the QXL
+interface (e.g. a PCI path) and the device display IDs (the IDs of the
+device's monitors that belong to this QXL interface).
+
+Also stops using the deprecated spice_qxl_set_max_monitors, the new
+interface function replaces it.
+
+Signed-off-by: Lukáš Hrázký <lhrazky@redhat.com>
+Message-Id: <20190215150919.8263-1-lhrazky@redhat.com>
+Signed-off-by: Gerd Hoffmann <kraxel@redhat.com>
+---
+ hw/display/qxl.c           | 14 ++++++++++-
+ include/ui/spice-display.h |  4 +++
+ ui/spice-core.c            | 51 ++++++++++++++++++++++++++++++++++++++
+ ui/spice-display.c         | 11 ++++++++
+ 4 files changed, 79 insertions(+), 1 deletion(-)
+
+diff --git a/hw/display/qxl.c b/hw/display/qxl.c
+index 5ea862baf0..58d1ab8320 100644
+--- a/hw/display/qxl.c
++++ b/hw/display/qxl.c
+@@ -276,7 +276,8 @@ static void qxl_spice_monitors_config_async(PCIQXLDevice *qxl, int replay)
+                     QXL_COOKIE_TYPE_POST_LOAD_MONITORS_CONFIG,
+                     0));
+     } else {
+-#if SPICE_SERVER_VERSION >= 0x000c06 /* release 0.12.6 */
++/* >= release 0.12.6, < release 0.14.2 */
++#if SPICE_SERVER_VERSION >= 0x000c06 && SPICE_SERVER_VERSION < 0x000e02
+         if (qxl->max_outputs) {
+             spice_qxl_set_max_monitors(&qxl->ssd.qxl, qxl->max_outputs);
+         }
+@@ -2187,6 +2188,17 @@ static void qxl_realize_common(PCIQXLDevice *qxl, Error **errp)
+                    SPICE_INTERFACE_QXL_MAJOR, SPICE_INTERFACE_QXL_MINOR);
+         return;
+     }
++
++#if SPICE_SERVER_VERSION >= 0x000e02 /* release 0.14.2 */
++    char device_address[256] = "";
++    if (qemu_spice_fill_device_address(qxl->vga.con, device_address, 256)) {
++        spice_qxl_set_device_info(&qxl->ssd.qxl,
++                                  device_address,
++                                  0,
++                                  qxl->max_outputs);
++    }
++#endif
++
+     qemu_add_vm_change_state_handler(qxl_vm_change_state_handler, qxl);
+ 
+     qxl->update_irq = qemu_bh_new(qxl_update_irq_bh, qxl);
+diff --git a/include/ui/spice-display.h b/include/ui/spice-display.h
+index 87a84a59d4..53c3612c32 100644
+--- a/include/ui/spice-display.h
++++ b/include/ui/spice-display.h
+@@ -179,3 +179,7 @@ void qemu_spice_wakeup(SimpleSpiceDisplay *ssd);
+ void qemu_spice_display_start(void);
+ void qemu_spice_display_stop(void);
+ int qemu_spice_display_is_running(SimpleSpiceDisplay *ssd);
++
++bool qemu_spice_fill_device_address(QemuConsole *con,
++                                    char *device_address,
++                                    size_t size);
+diff --git a/ui/spice-core.c b/ui/spice-core.c
+index ebaae24643..87aed697f7 100644
+--- a/ui/spice-core.c
++++ b/ui/spice-core.c
+@@ -35,6 +35,7 @@
+ #include "qemu/option.h"
+ #include "migration/misc.h"
+ #include "hw/hw.h"
++#include "hw/pci/pci_bus.h"
+ #include "ui/spice-display.h"
+ 
+ /* core bits */
+@@ -872,6 +873,56 @@ bool qemu_spice_have_display_interface(QemuConsole *con)
+     return false;
+ }
+ 
++/*
++ * Recursively (in reverse order) appends addresses of PCI devices as it moves
++ * up in the PCI hierarchy.
++ *
++ * @returns true on success, false when the buffer wasn't large enough
++ */
++static bool append_pci_address(char *buf, size_t buf_size, const PCIDevice *pci)
++{
++    PCIBus *bus = pci_get_bus(pci);
++    /*
++     * equivalent to if (!pci_bus_is_root(bus)), but the function is not built
++     * with PCI_CONFIG=n, avoid using an #ifdef by checking directly
++     */
++    if (bus->parent_dev != NULL) {
++        append_pci_address(buf, buf_size, bus->parent_dev);
++    }
++
++    size_t len = strlen(buf);
++    ssize_t written = snprintf(buf + len, buf_size - len, "/%02x.%x",
++        PCI_SLOT(pci->devfn), PCI_FUNC(pci->devfn));
++
++    return written > 0 && written < buf_size - len;
++}
++
++bool qemu_spice_fill_device_address(QemuConsole *con,
++                                    char *device_address,
++                                    size_t size)
++{
++    DeviceState *dev = DEVICE(object_property_get_link(OBJECT(con),
++                                                       "device",
++                                                       &error_abort));
++    PCIDevice *pci = (PCIDevice *) object_dynamic_cast(OBJECT(dev),
++                                                       TYPE_PCI_DEVICE);
++
++    if (pci == NULL) {
++        warn_report("Setting device address of a display device to SPICE: "
++                    "Not a PCI device.");
++        return false;
++    }
++
++    strncpy(device_address, "pci/0000", size);
++    if (!append_pci_address(device_address, size, pci)) {
++        warn_report("Setting device address of a display device to SPICE: "
++            "Too many PCI devices in the chain.");
++        return false;
++    }
++
++    return true;
++}
++
+ int qemu_spice_add_display_interface(QXLInstance *qxlin, QemuConsole *con)
+ {
+     if (g_slist_find(spice_consoles, con)) {
+diff --git a/ui/spice-display.c b/ui/spice-display.c
+index 52f8cb5ae1..c1605b3bc9 100644
+--- a/ui/spice-display.c
++++ b/ui/spice-display.c
+@@ -1147,6 +1147,17 @@ static void qemu_spice_display_init_one(QemuConsole *con)
+ 
+     ssd->qxl.base.sif = &dpy_interface.base;
+     qemu_spice_add_display_interface(&ssd->qxl, con);
++
++#if SPICE_SERVER_VERSION >= 0x000e02 /* release 0.14.2 */
++    char device_address[256] = "";
++    if (qemu_spice_fill_device_address(con, device_address, 256)) {
++        spice_qxl_set_device_info(&ssd->qxl,
++                                  device_address,
++                                  qemu_console_get_head(con),
++                                  1);
++    }
++#endif
++
+     qemu_spice_create_host_memslot(ssd);
+ 
+     register_displaychangelistener(&ssd->dcl);
+-- 
+2.23.0
+

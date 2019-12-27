@@ -1,16 +1,15 @@
 --- a/policy/modules/kernel/files.fc
 +++ b/policy/modules/kernel/files.fc
-@@ -46,6 +46,9 @@ ifdef(`distro_suse',`
+@@ -46,6 +46,8 @@ ifdef(`distro_suse',`
  #
  /etc			-d	gen_context(system_u:object_r:etc_t,s0)
  /etc/.*				gen_context(system_u:object_r:etc_t,s0)
 +/var/volatile/etc	-d	gen_context(system_u:object_r:etc_t,s0)
 +/var/volatile/etc/.*		gen_context(system_u:object_r:etc_t,s0)
-+/config/system/iproute2	-d	gen_context(system_u:object_r:etc_t,s0)
  /etc/\.fstab\.hal\..+	--	gen_context(system_u:object_r:etc_runtime_t,s0)
  /etc/blkid(/.*)?		gen_context(system_u:object_r:etc_runtime_t,s0)
  /etc/cmtab		--	gen_context(system_u:object_r:etc_runtime_t,s0)
-@@ -65,6 +68,8 @@ ifdef(`distro_suse',`
+@@ -65,6 +67,8 @@ ifdef(`distro_suse',`
  /etc/ipsec\.d/examples(/.*)?	gen_context(system_u:object_r:etc_t,s0)
  
  /etc/network/ifstate	--	gen_context(system_u:object_r:etc_runtime_t,s0)
@@ -19,43 +18,32 @@
  
  /etc/ptal/ptal-printd-like -- 	gen_context(system_u:object_r:etc_runtime_t,s0)
  
-@@ -87,6 +92,10 @@ ifdef(`distro_suse',`
+@@ -89,6 +93,8 @@ ifdef(`distro_suse',`
  /etc/rc\.d/init\.d/\.depend.* -- gen_context(system_u:object_r:etc_runtime_t,s0)
  ')
  
-+/config/etc(/.*)		gen_context(system_u:object_r:etc_t,s0)
-+/config/passwd.*	--	gen_context(system_u:object_r:etc_t,s0)
 +/var/volatile/system-connections(/.*)?	gen_context(system_u:object_r:etc_t,s0)
 +
  #
  # HOME_ROOT
  # expanded by genhomedircon
-@@ -255,6 +264,7 @@ ifndef(`distro_redhat',`
- /var/lib/nfs/rpc_pipefs(/.*)?	<<none>>
- 
- /var/lock(/.*)?			gen_context(system_u:object_r:var_lock_t,s0)
-+/var/volatile/lock(/.*)?	gen_context(system_u:object_r:var_lock_t,s0)
- 
- /var/log/lost\+found	-d	gen_context(system_u:object_r:lost_found_t,mls_systemhigh)
- /var/log/lost\+found/.*		<<none>>
-@@ -280,6 +290,17 @@ ifndef(`distro_redhat',`
+@@ -271,3 +277,16 @@ ifndef(`distro_redhat',`
  /var/tmp/systemd-private-[^/]+/tmp	-d	gen_context(system_u:object_r:tmp_t,s0-mls_systemhigh)
  /var/tmp/systemd-private-[^/]+/tmp/.*	<<none>>
  /var/tmp/vi\.recover	-d	gen_context(system_u:object_r:tmp_t,s0)
-+/var/volatile/tmp      -d      gen_context(system_u:object_r:tmp_t,s0)
-+/var/volatile/tmp/.*                   <<none>>
-+/var/volatile/tmp/lost\+found  -d      gen_context(system_u:object_r:lost_found_t,mls_systemhigh)
-+/var/volatile/tmp/lost\+found/.*               <<none>>
-+/var/volatile/tmp/vi\.recover  -d      gen_context(system_u:object_r:tmp_t,s0)
-+/var/volatile/run                      -d      gen_context(system_u:object_r:var_run_t,s0-mls_systemhigh)
-+/var/volatile/run/.*                   gen_context(system_u:object_r:var_run_t,s0)
-+/var/volatile/run/.*\.*pid             <<none>>
++
++/var/volatile/lock(/.*)?		gen_context(system_u:object_r:var_lock_t,s0)
++/var/volatile/tmp		-d	gen_context(system_u:object_r:tmp_t,s0)
++/var/volatile/tmp/.*			<<none>>
++/var/volatile/tmp/lost\+found	-d	gen_context(system_u:object_r:lost_found_t,mls_systemhigh)
++/var/volatile/tmp/lost\+found/.*	<<none>>
++/var/volatile/tmp/vi\.recover	-d	gen_context(system_u:object_r:tmp_t,s0)
++/var/volatile/run		-d	gen_context(system_u:object_r:var_run_t,s0-mls_systemhigh)
++/var/volatile/run/.*			gen_context(system_u:object_r:var_run_t,s0)
++/var/volatile/run/.*\.*pid		<<none>>
 +
 +/var/cores		-d	gen_context(system_u:object_r:var_core_t,s0)
 +/var/cores/*		--	gen_context(system_u:object_r:var_core_t,s0)
- 
- ifdef(`distro_debian',`
- /run/motd		--	gen_context(system_u:object_r:initrc_var_run_t,s0)
 --- a/policy/modules/kernel/files.if
 +++ b/policy/modules/kernel/files.if
 @@ -1234,6 +1234,7 @@ interface(`files_list_all',`
@@ -66,7 +54,7 @@
  ')
  
  ########################################
-@@ -1617,6 +1618,7 @@ interface(`files_mounton_all_mountpoints
+@@ -1637,6 +1638,7 @@ interface(`files_mounton_all_mountpoints
  
  	allow $1 mountpoint:dir { search_dir_perms mounton };
  	allow $1 mountpoint:file { getattr mounton };
@@ -74,7 +62,7 @@
  ')
  
  ########################################
-@@ -2688,6 +2690,25 @@ interface(`files_read_default_symlinks',
+@@ -2708,6 +2710,25 @@ interface(`files_read_default_symlinks',
  
  ########################################
  ## <summary>
@@ -100,7 +88,15 @@
  ##	Read sockets with the default file type.
  ## </summary>
  ## <param name="domain">
-@@ -3123,6 +3144,36 @@ interface(`files_create_boot_flag',`
+@@ -2939,6 +2960,7 @@ interface(`files_read_etc_files',`
+ 
+ 	allow $1 etc_t:dir list_dir_perms;
+ 	read_files_pattern($1, etc_t, etc_t)
++	allow $1 etc_t:file map;
+ 	read_lnk_files_pattern($1, etc_t, etc_t)
+ ')
+ 
+@@ -3246,6 +3268,36 @@ interface(`files_create_boot_flag',`
  
  ########################################
  ## <summary>
@@ -137,59 +133,7 @@
  ##	Delete a boot flag.
  ## </summary>
  ## <desc>
-@@ -3370,6 +3421,25 @@ interface(`files_getattr_isid_type_dirs'
- 
- ########################################
- ## <summary>
-+##	Search directories on new filesystems
-+##	that have not yet been labeled.
-+## </summary>
-+## <param name="domain">
-+##	<summary>
-+##	Domain allowed access.
-+##	</summary>
-+## </param>
-+#
-+interface(`files_search_isid_type_dirs',`
-+	gen_require(`
-+		type file_t;
-+	')
-+
-+	allow $1 file_t:dir search_dir_perms;
-+')
-+
-+########################################
-+## <summary>
- ##	Do not audit attempts to search directories on new filesystems
- ##	that have not yet been labeled.  (Deprecated)
- ## </summary>
-@@ -3610,6 +3680,25 @@ interface(`files_manage_isid_type_files'
- 
- ########################################
- ## <summary>
-+##	Read symbolic links on new filesystems that have
-+##	not yet been labeled.
-+## </summary>
-+## <param name="domain">
-+##	<summary>
-+##	Domain allowed access.
-+##	</summary>
-+## </param>
-+#
-+interface(`files_read_isid_type_symlinks',`
-+	gen_require(`
-+		type file_t;
-+	')
-+
-+	allow $1 file_t:lnk_file read_lnk_file_perms;
-+')
-+
-+########################################
-+## <summary>
- ##	Create, read, write, and delete symbolic links
- ##	on new filesystems that have not yet been labeled.  (Deprecated)
- ## </summary>
-@@ -4086,6 +4175,24 @@ interface(`files_read_mnt_symlinks',`
+@@ -3962,6 +4014,24 @@ interface(`files_read_mnt_symlinks',`
  
  ########################################
  ## <summary>
@@ -214,7 +158,7 @@
  ##	Create, read, write, and delete symbolic links in /mnt.
  ## </summary>
  ## <param name="domain">
-@@ -4435,6 +4542,7 @@ interface(`files_getattr_tmp_dirs',`
+@@ -4312,6 +4382,7 @@ interface(`files_getattr_tmp_dirs',`
  		type tmp_t;
  	')
  
@@ -222,7 +166,7 @@
  	allow $1 tmp_t:dir getattr;
  ')
  
-@@ -4454,6 +4562,7 @@ interface(`files_dontaudit_getattr_tmp_d
+@@ -4331,6 +4402,7 @@ interface(`files_dontaudit_getattr_tmp_d
  		type tmp_t;
  	')
  
@@ -230,15 +174,7 @@
  	dontaudit $1 tmp_t:dir getattr;
  ')
  
-@@ -4472,6 +4581,7 @@ interface(`files_search_tmp',`
- 		type tmp_t;
- 	')
- 
-+	allow $1 tmp_t:lnk_file read_lnk_file_perms;
- 	allow $1 tmp_t:dir search_dir_perms;
- 	allow $1 tmp_t:lnk_file read_lnk_file_perms;
- ')
-@@ -4491,6 +4601,7 @@ interface(`files_dontaudit_search_tmp',`
+@@ -4368,6 +4440,7 @@ interface(`files_dontaudit_search_tmp',`
  		type tmp_t;
  	')
  
@@ -246,15 +182,7 @@
  	dontaudit $1 tmp_t:dir search_dir_perms;
  ')
  
-@@ -4509,6 +4620,7 @@ interface(`files_list_tmp',`
- 		type tmp_t;
- 	')
- 
-+	allow $1 tmp_t:lnk_file read_lnk_file_perms;
- 	allow $1 tmp_t:dir list_dir_perms;
- 	allow $1 tmp_t:lnk_file read_lnk_file_perms;
- ')
-@@ -4528,6 +4640,7 @@ interface(`files_dontaudit_list_tmp',`
+@@ -4405,6 +4478,7 @@ interface(`files_dontaudit_list_tmp',`
  		type tmp_t;
  	')
  
@@ -262,39 +190,7 @@
  	dontaudit $1 tmp_t:dir list_dir_perms;
  ')
  
-@@ -4546,6 +4659,7 @@ interface(`files_delete_tmp_dir_entry',`
- 		type tmp_t;
- 	')
- 
-+	allow $1 tmp_t:lnk_file read_lnk_file_perms;
- 	allow $1 tmp_t:dir del_entry_dir_perms;
- 	allow $1 tmp_t:lnk_file read_lnk_file_perms;
- ')
-@@ -4565,6 +4679,7 @@ interface(`files_read_generic_tmp_files'
- 		type tmp_t;
- 	')
- 
-+	allow $1 tmp_t:lnk_file read_lnk_file_perms;
- 	read_files_pattern($1, tmp_t, tmp_t)
- 	allow $1 tmp_t:lnk_file read_lnk_file_perms;
- ')
-@@ -4584,6 +4699,7 @@ interface(`files_manage_generic_tmp_dirs
- 		type tmp_t;
- 	')
- 
-+	allow $1 tmp_t:lnk_file read_lnk_file_perms;
- 	manage_dirs_pattern($1, tmp_t, tmp_t)
- 	allow $1 tmp_t:lnk_file read_lnk_file_perms;
- ')
-@@ -4603,6 +4719,7 @@ interface(`files_manage_generic_tmp_file
- 		type tmp_t;
- 	')
- 
-+	allow $1 tmp_t:lnk_file read_lnk_file_perms;
- 	manage_files_pattern($1, tmp_t, tmp_t)
- 	allow $1 tmp_t:lnk_file read_lnk_file_perms;
- ')
-@@ -4622,6 +4739,7 @@ interface(`files_read_generic_tmp_symlin
+@@ -4499,6 +4573,7 @@ interface(`files_read_generic_tmp_symlin
  		type tmp_t;
  	')
  
@@ -302,15 +198,7 @@
  	read_lnk_files_pattern($1, tmp_t, tmp_t)
  ')
  
-@@ -4640,6 +4758,7 @@ interface(`files_rw_generic_tmp_sockets'
- 		type tmp_t;
- 	')
- 
-+	allow $1 tmp_t:lnk_file read_lnk_file_perms;
- 	rw_sock_files_pattern($1, tmp_t, tmp_t)
- 	allow $1 tmp_t:lnk_file read_lnk_file_perms;
- ')
-@@ -4677,6 +4796,7 @@ interface(`files_setattr_all_tmp_dirs',`
+@@ -4554,6 +4629,7 @@ interface(`files_setattr_all_tmp_dirs',`
  		attribute tmpfile;
  	')
  
@@ -318,7 +206,7 @@
  	allow $1 tmpfile:dir { search_dir_perms setattr };
  ')
  
-@@ -4695,6 +4815,7 @@ interface(`files_list_all_tmp',`
+@@ -4572,6 +4648,7 @@ interface(`files_list_all_tmp',`
  		attribute tmpfile;
  	')
  
@@ -326,7 +214,7 @@
  	allow $1 tmpfile:dir list_dir_perms;
  ')
  
-@@ -4776,6 +4897,7 @@ interface(`files_relabel_all_tmp_files',
+@@ -4653,6 +4730,7 @@ interface(`files_relabel_all_tmp_files',
  		type var_t;
  	')
  
@@ -334,7 +222,7 @@
  	allow $1 var_t:dir search_dir_perms;
  	relabel_files_pattern($1, tmpfile, tmpfile)
  ')
-@@ -4867,6 +4989,7 @@ interface(`files_purge_tmp',`
+@@ -4744,6 +4822,7 @@ interface(`files_purge_tmp',`
  		attribute tmpfile;
  	')
  
@@ -342,7 +230,7 @@
  	allow $1 tmpfile:dir list_dir_perms;
  	delete_dirs_pattern($1, tmpfile, tmpfile)
  	delete_files_pattern($1, tmpfile, tmpfile)
-@@ -5387,9 +5510,10 @@ interface(`files_delete_kernel_symbol_ta
+@@ -5283,9 +5362,10 @@ interface(`files_delete_kernel_symbol_ta
  #
  interface(`files_search_var',`
  	gen_require(`
@@ -354,7 +242,7 @@
  	allow $1 var_t:dir search_dir_perms;
  ')
  
-@@ -5413,6 +5537,24 @@ interface(`files_dontaudit_write_var_dir
+@@ -5309,6 +5389,24 @@ interface(`files_dontaudit_write_var_dir
  
  ########################################
  ## <summary>
@@ -379,7 +267,7 @@
  ##	Allow attempts to write to /var.dirs
  ## </summary>
  ## <param name="domain">
-@@ -5798,9 +5940,10 @@ interface(`files_rw_var_lib_dirs',`
+@@ -5750,9 +5848,10 @@ interface(`files_relabel_var_lib_dirs',`
  #
  interface(`files_var_lib_filetrans',`
  	gen_require(`
@@ -391,7 +279,7 @@
  	allow $1 var_t:dir search_dir_perms;
  	filetrans_pattern($1, var_lib_t, $2, $3, $4)
  ')
-@@ -5858,9 +6001,10 @@ interface(`files_read_var_lib_symlinks',
+@@ -5810,9 +5909,10 @@ interface(`files_read_var_lib_symlinks',
  #
  interface(`files_manage_urandom_seed',`
  	gen_require(`
@@ -403,7 +291,7 @@
  	allow $1 var_t:dir search_dir_perms;
  	manage_files_pattern($1, var_lib_t, var_lib_t)
  ')
-@@ -6234,6 +6378,69 @@ interface(`files_lock_filetrans',`
+@@ -6205,6 +6305,69 @@ interface(`files_lock_filetrans',`
  
  ########################################
  ## <summary>
@@ -473,7 +361,7 @@
  ##	Do not audit attempts to get the attributes
  ##	of the /var/run directory.
  ## </summary>
-@@ -6254,6 +6461,25 @@ interface(`files_dontaudit_getattr_pid_d
+@@ -6243,6 +6406,25 @@ interface(`files_mounton_pid_dirs',`
  
  ########################################
  ## <summary>
@@ -499,7 +387,7 @@
  ##	Set the attributes of the /var/run directory.
  ## </summary>
  ## <param name="domain">
-@@ -6289,6 +6515,7 @@ interface(`files_search_pids',`
+@@ -6278,6 +6460,7 @@ interface(`files_search_pids',`
  
  	allow $1 var_run_t:lnk_file read_lnk_file_perms;
  	search_dirs_pattern($1, var_t, var_run_t)
@@ -507,7 +395,7 @@
  ')
  
  ########################################
-@@ -6509,6 +6736,7 @@ interface(`files_dontaudit_getattr_all_p
+@@ -6534,6 +6717,7 @@ interface(`files_dontaudit_getattr_all_p
  interface(`files_dontaudit_write_all_pids',`
  	gen_require(`
  		attribute pidfile;
@@ -515,7 +403,7 @@
  	')
  
  	dontaudit $1 var_run_t:lnk_file read_lnk_file_perms;
-@@ -6517,6 +6745,42 @@ interface(`files_dontaudit_write_all_pid
+@@ -6542,6 +6726,42 @@ interface(`files_dontaudit_write_all_pid
  
  ########################################
  ## <summary>
@@ -558,32 +446,7 @@
  ##	Do not audit attempts to ioctl daemon runtime data files.
  ## </summary>
  ## <param name="domain">
-@@ -6585,6 +6849,24 @@ interface(`files_delete_all_pids',`
- 
- ########################################
- ## <summary>
-+##	Create process ID directories.
-+## </summary>
-+## <param name="domain">
-+##	<summary>
-+##	Domain allowed access.
-+##	</summary>
-+## </param>
-+#
-+interface(`files_create_pid_dirs',`
-+	gen_require(`
-+		type var_run_t;
-+	')
-+
-+	create_dirs_pattern($1, var_run_t, var_run_t)
-+')
-+
-+########################################
-+## <summary>
- ##	Delete all process ID directories.
- ## </summary>
- ## <param name="domain">
-@@ -6906,3 +7188,21 @@ interface(`files_unconfined',`
+@@ -7076,3 +7296,21 @@ interface(`files_unconfined',`
  
  	typeattribute $1 files_unconfined_type;
  ')
@@ -607,7 +470,7 @@
 +')
 --- a/policy/modules/kernel/files.te
 +++ b/policy/modules/kernel/files.te
-@@ -6,6 +6,7 @@ policy_module(files, 1.23.0)
+@@ -6,6 +6,7 @@ policy_module(files, 1.27.0)
  #
  
  attribute file_type;
@@ -615,7 +478,7 @@
  attribute files_unconfined_type;
  attribute lockfile;
  attribute mountpoint;
-@@ -60,6 +61,9 @@ files_mountpoint(default_t)
+@@ -63,6 +64,9 @@ files_mountpoint(default_t)
  #
  type etc_t, configfile;
  files_type(etc_t)
@@ -625,8 +488,8 @@
  # compatibility aliases for removed types:
  typealias etc_t alias automount_etc_t;
  typealias etc_t alias snmpd_etc_t;
-@@ -172,6 +176,13 @@ files_pid_file(var_run_t)
- files_mountpoint(var_run_t)
+@@ -179,6 +183,13 @@ optional_policy(`
+ ')
  
  #
 +# var_core_t is the type of /var/cores, used
@@ -639,7 +502,7 @@
  # var_spool_t is the type of /var/spool
  #
  type var_spool_t;
-@@ -221,3 +232,14 @@ allow files_unconfined_type file_type:fi
+@@ -233,3 +244,14 @@ allow files_unconfined_type file_type:fi
  tunable_policy(`allow_execmod',`
  	allow files_unconfined_type file_type:file execmod;
  ')

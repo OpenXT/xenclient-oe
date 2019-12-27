@@ -14,6 +14,7 @@ DEPENDS = " \
 SRC_URI = " \
     http://dl.suckless.org/surf/surf-${PV}.tar.gz \
     file://config.mk \
+    file://volatiles.99_surf \
 "
 SRC_URI[md5sum] = "11713901fa83c536f3ddfacfc28c3acc"
 SRC_URI[sha256sum] = "faee4c7a62c38fc9791eff1ad06787c3c9b2b79f338806827f5152a7bc54951d"
@@ -27,4 +28,8 @@ do_configure_prepend() {
 
 do_install() {
     oe_runmake DESTDIR=${D} install
+
+    install -d ${D}${sysconfdir}/default
+    install -d ${D}${sysconfdir}/default/volatiles
+    install -m 0644 ${WORKDIR}/volatiles.99_surf ${D}${sysconfdir}/default/volatiles/99_surf
 }

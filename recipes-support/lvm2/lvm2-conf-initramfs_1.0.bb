@@ -1,4 +1,6 @@
-DESCRIPTION = "LVM configuration for the initramfs image."
+SUMMARY = "LVM configuration for the initramfs image."
+DESCRIPTION = "LVM configuration for the initramfs image. OpenXT's initramfs \
+does not rely on udev."
 LICENSE = "MIT"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302"
 

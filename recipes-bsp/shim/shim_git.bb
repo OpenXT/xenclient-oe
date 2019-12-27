@@ -27,6 +27,7 @@ SRC_URI = " \
     file://0004-Don-t-overwrite-LoadOptions-if-NULL.patch \
     file://0005-Allow-32-bit-images-for-measurement-verification-via.patch \
     file://0006-Don-t-measure-with-Authenticode.patch \
+    file://0007-mokmanager-GCC9-address-of-packed-member.patch \
 "
 
 SRCREV = "6c8d08c0af4768c715b79c8ec25141d56e34f8b4"

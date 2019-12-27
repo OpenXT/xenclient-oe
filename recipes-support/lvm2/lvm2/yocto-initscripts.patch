@@ -1,9 +1,7 @@
-Index: LVM2.2.02.125/scripts/Makefile.in
-===================================================================
---- LVM2.2.02.125.orig/scripts/Makefile.in
-+++ LVM2.2.02.125/scripts/Makefile.in
-@@ -88,6 +88,19 @@ ifeq ("@BLKDEACTIVATE@", "yes")
- 	$(INSTALL_SCRIPT) blk_availability_init_red_hat $(initdir)/blk-availability
+--- a/scripts/Makefile.in
++++ b/scripts/Makefile.in
+@@ -74,6 +74,16 @@ ifeq ("@BLKDEACTIVATE@", "yes")
+ 	$(Q) $(INSTALL_SCRIPT) blk_availability_init_red_hat $(initdir)/blk-availability
  endif
  
 +# FIXME Some are not ported yet.
@@ -12,106 +10,15 @@ Index: LVM2.2.02.125/scripts/Makefile.in
 +ifeq ("@BUILD_DMEVENTD@", "yes")
 +	$(INSTALL_SCRIPT) lvm2_monitoring_init_yocto $(initdir)/lvm2-monitor
 +endif
-+ifeq ("@BUILD_LVMETAD@", "yes")
-+	$(INSTALL_SCRIPT) lvm2_lvmetad_init_yocto $(initdir)/lvm2-lvmetad
-+endif
 +ifeq ("@BUILD_LVMPOLLD@", "yes")
 +	$(INSTALL_SCRIPT) lvm2_lvmpolld_init_yocto $(initdir)/lvm2-lvmpolld
 +endif
 +
  CFLAGS_lvm2_activation_generator_systemd_red_hat.o += $(EXTRA_EXEC_CFLAGS)
  
- lvm2_activation_generator_systemd_red_hat: $(OBJECTS) $(DEPLIBS)
-Index: LVM2.2.02.125/scripts/lvm2_lvmetad_init_yocto.in
-===================================================================
+ lvm2_activation_generator_systemd_red_hat: $(OBJECTS) $(LVMINTERNAL_LIBS)
 --- /dev/null
-+++ LVM2.2.02.125/scripts/lvm2_lvmetad_init_yocto.in
-@@ -0,0 +1,81 @@
-+#!/bin/bash
-+#
-+# Copyright (C) 2017 Assured Information Security, Inc. All rights reserved.
-+#
-+# This copyrighted material is made available to anyone wishing to use,
-+# modify, copy, or redistribute it subject to the terms and conditions
-+# of the GNU General Public License v.2.
-+#
-+# You should have received a copy of the GNU General Public License
-+# along with this program; if not, write to the Free Software Foundation,
-+# Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
-+#
-+# This file is part of LVM2.
-+# It is required for the proper handling of failures of LVM2 mirror
-+# devices that were created using the -m option of lvcreate.
-+# chkconfig: 12345 02 99
-+# description: Starts and stops LVM metadata daemon
-+#
-+### BEGIN INIT INFO
-+# Provides: lvm2-lvmetad
-+# Required-Start: $local_fs
-+# Required-Stop: $local_fs
-+# Default-Start: 1 2 3 4 5
-+# Default-Stop: 0 6
-+# Short-Description: A daemon that maintains LVM metadata state for improved
-+#                    performance by avoiding further scans while running
-+#                    subsequent LVM commands or while using lvm2app library.
-+### END INIT INFO
-+
-+. /etc/init.d/functions
-+
-+DAEMON=lvmetad
-+PID_FILE="@LVMETAD_PIDFILE@"
-+
-+usage()
-+{
-+    echo "Usage: /etc/init.d/lvm2-lvmetad {start|stop|status}"
-+}
-+
-+do_status()
-+{
-+    if start-stop-daemon -K --test --quiet --pidfile $PID_FILE ; then
-+        pid=`cat $PID_FILE`
-+        echo "$DAEMON (pid $pid) is running."
-+    elif [ -e "$PID_FILE" ]; then
-+        pid=`cat $PID_FILE`
-+        echo "$DAEMON died (pid was $pid)."
-+    else
-+        echo "$DAEMON is stopped."
-+    fi
-+}
-+
-+if [ $# != 1 ]; then
-+    usage
-+    exit 1
-+fi
-+
-+rc=0
-+case "$1" in
-+   start)
-+        mkdir -p /run/lvm
-+        start-stop-daemon -S --oknodo --pidfile $PID_FILE --exec $DAEMON
-+        rc=$?
-+        ;;
-+    stop|force-stop)
-+        start-stop-daemon -K --oknodo --pidfile $PID_FILE
-+        rm -f $PID_FILE
-+        ;;
-+    status)
-+        do_status
-+        exit 0
-+        ;;
-+    *)
-+        usage
-+        exit 1
-+        ;;
-+esac
-+
-+do_status
-+
-+exit $rc
-Index: LVM2.2.02.125/scripts/lvm2_lvmpolld_init_yocto.in
-===================================================================
---- /dev/null
-+++ LVM2.2.02.125/scripts/lvm2_lvmpolld_init_yocto.in
++++ b/scripts/lvm2_lvmpolld_init_yocto.in
 @@ -0,0 +1,84 @@
 +#!/bin/bash
 +#
@@ -197,10 +104,8 @@ Index: LVM2.2.02.125/scripts/lvm2_lvmpolld_init_yocto.in
 +do_status
 +
 +exit $rc
-Index: LVM2.2.02.125/scripts/lvm2_monitoring_init_yocto.in
-===================================================================
 --- /dev/null
-+++ LVM2.2.02.125/scripts/lvm2_monitoring_init_yocto.in
++++ b/scripts/lvm2_monitoring_init_yocto.in
 @@ -0,0 +1,82 @@
 +#!/bin/bash
 +#
@@ -284,12 +189,10 @@ Index: LVM2.2.02.125/scripts/lvm2_monitoring_init_yocto.in
 +do_status
 +
 +exit $rc
-Index: LVM2.2.02.125/Makefile.in
-===================================================================
---- LVM2.2.02.125.orig/Makefile.in
-+++ LVM2.2.02.125/Makefile.in
-@@ -143,6 +143,9 @@ install_system_dirs:
- install_initscripts: 
+--- a/Makefile.in
++++ b/Makefile.in
+@@ -141,6 +141,9 @@ install_system_dirs:
+ install_initscripts:
  	$(MAKE) -C scripts install_initscripts
  
 +install_initscripts_yocto:
@@ -298,25 +201,19 @@ Index: LVM2.2.02.125/Makefile.in
  install_systemd_generators:
  	$(MAKE) -C scripts install_systemd_generators
  	$(MAKE) -C man install_systemd_generators
-Index: LVM2.2.02.125/configure.in
-===================================================================
---- LVM2.2.02.125.orig/configure.in
-+++ LVM2.2.02.125/configure.in
-@@ -2067,14 +2067,17 @@ scripts/lvm2_cluster_activation_systemd_
- scripts/lvm2_clvmd_systemd_red_hat.service
+--- a/configure.ac
++++ b/configure.ac
+@@ -1822,11 +1822,13 @@ scripts/dm_event_systemd_red_hat.socket
  scripts/lvm2_cmirrord_systemd_red_hat.service
- scripts/lvm2_lvmetad_init_red_hat
-+scripts/lvm2_lvmetad_init_yocto
- scripts/lvm2_lvmetad_systemd_red_hat.service
- scripts/lvm2_lvmetad_systemd_red_hat.socket
+ scripts/lvm2_lvmdbusd_systemd_red_hat.service
  scripts/lvm2_lvmpolld_init_red_hat
 +scripts/lvm2_lvmpolld_init_yocto
  scripts/lvm2_lvmpolld_systemd_red_hat.service
  scripts/lvm2_lvmpolld_systemd_red_hat.socket
- scripts/lvm2_lvmlockd_systemd_red_hat.service
- scripts/lvm2_lvmlocking_systemd_red_hat.service
+ scripts/lvmlockd.service
+ scripts/lvmlocks.service
  scripts/lvm2_monitoring_init_red_hat
 +scripts/lvm2_monitoring_init_yocto
  scripts/lvm2_monitoring_systemd_red_hat.service
- scripts/lvm2_pvscan_systemd_red_hat@.service
  scripts/lvm2_tmpfiles_red_hat.conf
+ scripts/lvmdump.sh

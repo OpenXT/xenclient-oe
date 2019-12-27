@@ -21,7 +21,6 @@ IMAGE_INSTALL = " \
     initramfs-module-tpm \
     initramfs-module-tpm2 \
     initramfs-module-selinux \
-    xenclient-initramfs-shared-libs \
     kernel-module-tpm \
     kernel-module-tpm-tis \
     kernel-module-tpm-tis-core \

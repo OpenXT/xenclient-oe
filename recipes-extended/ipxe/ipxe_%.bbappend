@@ -5,14 +5,11 @@ DEPENDS += " \
 "
 
 SRC_URI += " \
+    file://0001-build-Workaround-compilation-error-with-gcc-9.1.patch;striplevel=2 \
+    file://0002-efi-Fix-sanity-check-in-dbg_efi_protocols.patch;striplevel=2 \
     file://early-debug.patch \
     file://xen-debug-output-driver.patch \
 "
-# Upstream (meta-virt) uses 8c43891db4eb131d019360ccfb619f235b17eb58.
-# While Xen stable-4.9 uses 827dd1bfee67daa683935ce65316f7e0f057fe1c
-# Use the later. Upgrading should be painless, and we might as well use Xen
-# upstream default version to match test coverage.
-SRCREV = "827dd1bfee67daa683935ce65316f7e0f057fe1c"
 
 LIC_FILES_CHKSUM = "file://../COPYING;md5=92be9bced83819c46c5ab272173c4aa7"
 

@@ -28,6 +28,7 @@ RDEPENDS_${PN} += " \
     xenclient-caps \
     heimdallr \
     bash \
+    openssl-bin \
 "
 
 PV = "0+git${SRCPV}"

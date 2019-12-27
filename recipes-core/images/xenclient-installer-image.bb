@@ -102,6 +102,7 @@ post_rootfs_shell_commands() {
     touch ${IMAGE_ROOTFS}/etc/xenclient-host-installer;
 }
 ROOTFS_POSTPROCESS_COMMAND += "post_rootfs_shell_commands; "
+ROOTFS_POSTPROCESS_COMMAND += "start_tty_on_hvc0; "
 
 # Copy syslinux modules and configuration files.
 syslinux_install_files() {

@@ -1,0 +1,64 @@
+From 950564360686473f678be9abc2ae726710ec8758 Mon Sep 17 00:00:00 2001
+From: Greg Kurz <groug@kaod.org>
+Date: Thu, 28 Feb 2019 16:06:06 +0100
+Subject: [PATCH 09/17] crypto/block: remove redundant struct packing to fix
+ build with gcc 9
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Build fails with gcc 9:
+
+crypto/block-luks.c:689:18: error: taking address of packed member of ‘struct QCryptoBlockLUKSHeader’ may result in an unaligned pointer value [-Werror=address-of-packed-member]
+  689 |     be32_to_cpus(&luks->header.payload_offset);
+      |                  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~
+crypto/block-luks.c:690:18: error: taking address of packed member of ‘struct QCryptoBlockLUKSHeader’ may result in an unaligned pointer value [-Werror=address-of-packed-member]
+  690 |     be32_to_cpus(&luks->header.key_bytes);
+      |                  ^~~~~~~~~~~~~~~~~~~~~~~
+crypto/block-luks.c:691:18: error: taking address of packed member of ‘struct QCryptoBlockLUKSHeader’ may result in an unaligned pointer value [-Werror=address-of-packed-member]
+  691 |     be32_to_cpus(&luks->header.master_key_iterations);
+      |                  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+... a bunch of similar errors...
+
+crypto/block-luks.c:1288:22: error: taking address of packed member of ‘struct QCryptoBlockLUKSKeySlot’ may result in an unaligned pointer value [-Werror=address-of-packed-member]
+ 1288 |         be32_to_cpus(&luks->header.key_slots[i].stripes);
+      |                      ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+cc1: all warnings being treated as errors
+
+All members of the QCryptoBlockLUKSKeySlot and QCryptoBlockLUKSHeader are
+naturally aligned and we already check at build time there isn't any
+unwanted padding. Drop the QEMU_PACKED attribute.
+
+Reviewed-by: Eric Blake <eblake@redhat.com>
+Signed-off-by: Greg Kurz <groug@kaod.org>
+Signed-off-by: Daniel P. Berrangé <berrange@redhat.com>
+---
+ crypto/block-luks.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/crypto/block-luks.c b/crypto/block-luks.c
+index 5738124773..9184b22d52 100644
+--- a/crypto/block-luks.c
++++ b/crypto/block-luks.c
+@@ -146,7 +146,7 @@ struct QCryptoBlockLUKSKeySlot {
+     uint32_t key_offset;
+     /* number of anti-forensic stripes */
+     uint32_t stripes;
+-} QEMU_PACKED;
++};
+ 
+ QEMU_BUILD_BUG_ON(sizeof(struct QCryptoBlockLUKSKeySlot) != 48);
+ 
+@@ -191,7 +191,7 @@ struct QCryptoBlockLUKSHeader {
+ 
+     /* key slots */
+     QCryptoBlockLUKSKeySlot key_slots[QCRYPTO_BLOCK_LUKS_NUM_KEY_SLOTS];
+-} QEMU_PACKED;
++};
+ 
+ QEMU_BUILD_BUG_ON(sizeof(struct QCryptoBlockLUKSHeader) != 592);
+ 
+-- 
+2.23.0
+

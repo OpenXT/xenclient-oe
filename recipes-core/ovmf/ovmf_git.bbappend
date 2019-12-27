@@ -1,61 +1,41 @@
-FILESEXTRAPATHS_prepend := "${THISDIR}/ovmf:"
-
-SRC_URI = "git://github.com/tianocore/edk2.git;branch=master \
-    file://0002-ovmf-update-path-to-native-BaseTools.patch \
-    file://0003-BaseTools-makefile-adjust-to-build-in-under-bitbake.patch \
+SRC_URI += " \
     https://downloadmirror.intel.com/29137/eng/PREBOOT.EXE;unpack=0;name=PREBOOT \
-    "
-
-SRCREV="dd4cae4d82c7477273f3da455084844db5cca0c0"
+"
+DEPENDS_append += " \
+    unzip-native \
+"
 
 # PREBOOT.EXE, OS independent, latest version (currently 24.3).
 SRC_URI[PREBOOT.md5sum] = "8660641e184dafdeb78b8ca1fbd837f7"
 SRC_URI[PREBOOT.sha256sum] = "83dac749d74a6a54d7451bee79f9e1d605c4e2775d6b524d39030b248989092a"
 
-FILES_${PN} += "\
-    /usr/share/firmware/ovmf.bin \
-    "
+do_extract_bootutil() {
+    mkdir -p "${S}/Intel3.5/EFIX64"
+    unzip -q -p "${WORKDIR}/PREBOOT.EXE" "APPS/EFI/EFIx64/E3522X2.EFI" > "${S}/Intel3.5/EFIX64/E3522X2.EFI"
+}
+addtask do_extract_bootutil before do_configure after do_unpack
+do_extract_bootutil[doc] = "Extract Intel's proprietary E1000 NIC driver to be embedded in OVMF image."
+do_extract_bootutil[depends] = "${PN}:do_prepare_recipe_sysroot"
+do_extract_bootutil[dirs] = "${B}"
 
-# This is mostly a copy-paste from the upstream recipe but we need to force
-# OVMF_ARCH to be X64 and there is no easier way to do that. We omit a bunch
-# of symlinks and SecureBoot related logic that are just not applicable.
-do_compile_class-target() {
-    export LFLAGS="${LDFLAGS}"
-    OVMF_ARCH="X64"
-
-    mkdir -p ${S}/Intel3.5/EFIX64/
-    /usr/bin/unzip -p ${WORKDIR}/PREBOOT.EXE APPS/EFI/EFIx64/E3522X2.EFI > ${S}/Intel3.5/EFIX64/E3522X2.EFI
-
-    # The build for the target uses BaseTools/Conf/tools_def.template
-    # from ovmf-native to find the compiler, which depends on
-    # exporting HOST_PREFIX.
-    export HOST_PREFIX="${HOST_PREFIX}"
-
-    # BaseTools/Conf gets copied to Conf, but only if that does not
-    # exist yet. To ensure that an updated template gets used during
-    # incremental builds, we need to remove the copy before we start.
-    rm -f `ls ${S}/Conf/*.txt | grep -v ReadMe.txt`
-
-    # ${WORKDIR}/ovmf is a well-known location where do_install and
-    # do_deploy will be able to find the files.
-    rm -rf ${WORKDIR}/ovmf
-    mkdir ${WORKDIR}/ovmf
-    OVMF_DIR_SUFFIX="X64"
-    FIXED_GCCVER=$(fixup_target_tools ${GCC_VER})
-    bbnote FIXED_GCCVER is ${FIXED_GCCVER}
-    build_dir="${S}/Build/Ovmf$OVMF_DIR_SUFFIX/RELEASE_${FIXED_GCCVER}"
-
-    bbnote "Building without Secure Boot."
+do_compile_class-target_append() {
+    bbnote "Building with E1000 (support for netboot)."
     rm -rf ${S}/Build/Ovmf$OVMF_DIR_SUFFIX
     ${S}/OvmfPkg/build.sh $PARALLEL_JOBS -a $OVMF_ARCH -b RELEASE -t ${FIXED_GCCVER} -D E1000_ENABLE
-    ln ${build_dir}/FV/OVMF.fd ${WORKDIR}/ovmf/ovmf.fd
+    ln ${build_dir}/FV/OVMF.fd ${WORKDIR}/ovmf/ovmf.e1000.fd
+    ln ${build_dir}/FV/OVMF_CODE.fd ${WORKDIR}/ovmf/ovmf.e1000.code.fd
 }
 
-do_install_class-target() {
-    install -d ${D}/usr/share/firmware/
-    install -m 0600 ${WORKDIR}/ovmf/ovmf.fd ${D}/usr/share/firmware/ovmf.bin
+do_install_class-target_append() {
+    install -d ${D}${datadir}/firmware
+    install -m 0600 ${WORKDIR}/ovmf/ovmf.e1000.fd ${D}${datadir}/firmware/ovmf.e1000.bin
+    ln -sf ovmf.e1000.bin ${D}${datadir}/firmware/ovmf.bin
 }
 
-do_deploy_class-target() {
-    :
-}
+PACKAGES += " \
+    ${PN}-firmware \
+"
+
+FILES_${PN}-firmware += " \
+    ${datadir}/firmware \
+"
