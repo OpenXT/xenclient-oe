@@ -30,7 +30,6 @@ SRC_URI_append = " \
     file://openxt-xci-cpuid-signature.patch;patch=1 \
     file://allow-mwait-cstate.patch;patch=1 \
     file://xen-translate.patch;patch=1 \
-    file://local-pxe-rom.patch;patch=1 \
     file://unmap-shared-info.patch;patch=1 \
     file://foreign-batch-cacheattr.patch;patch=1 \
     file://allow-pat-cacheattrs-for-all-domains.patch;patch=1 \
