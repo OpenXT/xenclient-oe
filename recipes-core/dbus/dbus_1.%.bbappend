@@ -5,10 +5,10 @@ DEPENDS_append_class-native += " \
 # DBus will not link with libargo in the native case.
 # The argo kernel headers cannot be expected in the native environment since
 # libargo depends on Xen, and the hypervisor headers are not separated from the
-# main recipe.
+# main recipe. Limit dependency to argo header.
 DEPENDS_append_class-target += " \
     libselinux \
-    libargo \
+    argo-module-headers \
 "
 FILESEXTRAPATHS_prepend := "${THISDIR}/patches:"
 
