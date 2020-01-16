@@ -1,14 +1,3 @@
-# LibSELinux does not extend nativesdk.
-DEPENDS_append_class-native += " \
-    libselinux \
-"
-# DBus will not link with libargo in the native case.
-# The argo kernel headers cannot be expected in the native environment since
-# libargo depends on Xen, and the hypervisor headers are not separated from the
-# main recipe.
-DEPENDS_append_class-target += " \
-    libselinux \
-"
 FILESEXTRAPATHS_prepend := "${THISDIR}/patches:"
 
 SRC_URI += " \
