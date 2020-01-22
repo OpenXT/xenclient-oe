@@ -1,0 +1,76 @@
+#OpenXT:
+#       Don't disconnect eth0 from brbridged when ethernet cable is unplugged.
+#       NetworkManager disconnects the slave (eth0) from its master (brbridged) when ethernet cable is unplugged.
+#       Disconnecting eth0 causes problem to bring network back up when cable is plugged back.
+#
+#       Don't create default 'Wired connection %d' ethernet connection.
+#       Initially on boot up this connection is created, but not used at alle. When ethernet cable is
+#       unplugged and plugged back, eth0 assumes this existing connection instead of being a slave.
+--- a/src/devices/nm-device.c
++++ b/src/devices/nm-device.c
+@@ -1632,7 +1632,7 @@ carrier_changed (NMDevice *self, gboolea
+ 			nm_device_activate_stage3_ip6_start (self);
+ 
+ 		return;
+-	} else if (nm_device_get_enslaved (self) && !carrier) {
++	} else if (nm_device_get_enslaved (self) && !carrier && strncmp(priv->iface, "eth", 3)) {
+ 		/* Slaves don't deactivate when they lose carrier; for
+ 		 * bonds/teams in particular that would be actively
+ 		 * counterproductive.
+@@ -1659,7 +1659,11 @@ carrier_changed (NMDevice *self, gboolea
+ 			nm_device_update_dynamic_ip_setup (self);
+ 		}
+ 	} else {
+-		if (priv->state == NM_DEVICE_STATE_UNAVAILABLE) {
++		if (strncmp (priv->iface, "eth", 3) == 0) {
++			nm_device_queue_state (self, NM_DEVICE_STATE_DISCONNECTED,
++		        	               NM_DEVICE_STATE_REASON_CARRIER);
++		}
++		else if (priv->state == NM_DEVICE_STATE_UNAVAILABLE) {
+ 			if (nm_device_queued_state_peek (self) >= NM_DEVICE_STATE_DISCONNECTED)
+ 				nm_device_queued_state_clear (self);
+ 		} else {
+@@ -2622,6 +2626,7 @@ slave_state_changed (NMDevice *slave,
+ 	NMDevicePrivate *priv = NM_DEVICE_GET_PRIVATE (self);
+ 	gboolean release = FALSE;
+ 	gboolean configure = TRUE;
++	const char *iface = nm_device_get_iface (slave);
+ 
+ 	_LOGD (LOGD_DEVICE, "slave %s state change %d (%s) -> %d (%s)",
+ 	       nm_device_get_iface (slave),
+@@ -2648,7 +2653,7 @@ slave_state_changed (NMDevice *slave,
+ 	if (reason == NM_DEVICE_STATE_REASON_CONNECTION_ASSUMED)
+ 		configure = FALSE;
+ 
+-	if (release) {
++	if (release && strncmp (iface, "eth", 3)) {
+ 		nm_device_master_release_one_slave (self, slave, configure, reason);
+ 		/* Bridge/bond/team interfaces are left up until manually deactivated */
+ 		if (priv->slaves == NULL && priv->state == NM_DEVICE_STATE_ACTIVATED)
+--- a/src/devices/nm-device-ethernet-utils.c
++++ b/src/devices/nm-device-ethernet-utils.c
+@@ -27,24 +27,5 @@
+ char *
+ nm_device_ethernet_utils_get_default_wired_name (NMConnection *const *connections)
+ {
+-	char *temp;
+-	guint j;
+-	int i;
+-
+-	/* Find the next available unique connection name */
+-	for (i = 1; i <= 10000; i++) {
+-		temp = g_strdup_printf (_("Wired connection %d"), i);
+-		for (j = 0; connections[j]; j++) {
+-			if (nm_streq0 (nm_connection_get_id (connections[j]), temp)) {
+-				g_free (temp);
+-				goto next;
+-			}
+-		}
+-		return temp;
+-next:
+-		;
+-	}
+-
+ 	return NULL;
+ }
+-

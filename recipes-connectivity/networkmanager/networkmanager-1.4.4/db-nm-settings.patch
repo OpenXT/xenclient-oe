@@ -1,0 +1,72 @@
+#OpenXT:Writing connection settings to database to avoid creating them everytime on boot.
+#       Instead of creating, the connections are read from database on boot by network-slave.
+--- a/src/settings/plugins/keyfile/utils.c
++++ b/src/settings/plugins/keyfile/utils.c
+@@ -22,6 +22,8 @@
+ 
+ #include <stdlib.h>
+ #include <string.h>
++#include <errno.h>
++#include <sys/wait.h>
+ 
+ #include "utils.h"
+ #include "nm-setting-wired.h"
+@@ -110,6 +112,27 @@ nm_keyfile_plugin_utils_should_ignore_fi
+ 	return FALSE;
+ }
+ 
++void
++xc_connections_update (char *path)
++{
++       char *argv[6] = { "/usr/bin/nm_sync.sh", "-n", "nm-connections", "-w", path, NULL };
++       int err, stat_loc;
++
++       err = fork();
++       if (err == -1) {
++               g_warning("%s.%d: cannot fork to nm_sync.sh: %d", __FILE__, __LINE__, errno);
++
++       } else if (err) {
++               while ((waitpid(err, &stat_loc, 0) == -1) && (errno == EINTR))
++                       ;
++               err = WEXITSTATUS(stat_loc);
++               if (err)
++                       g_warning("%s.%d: nm_sync.sh failed with code: %d", __FILE__, __LINE__, err);
++       } else {
++               _exit(execvp(argv[0], argv));
++       }
++}
++
+ char *
+ nm_keyfile_plugin_utils_escape_filename (const char *filename)
+ {
+--- a/src/settings/plugins/keyfile/utils.h
++++ b/src/settings/plugins/keyfile/utils.h
+@@ -33,6 +33,7 @@
+ #define NM_KEYFILE_CONNECTION_LOG_ARGD(con)   NM_KEYFILE_CONNECTION_LOG_PATH (nm_settings_connection_get_filename ((NMSettingsConnection *) (con))), nm_connection_get_uuid ((NMConnection *) (con)), nm_connection_get_id ((NMConnection *) (con)), (con)
+ 
+ gboolean nm_keyfile_plugin_utils_should_ignore_file (const char *filename);
++void xc_connections_update (char *path);
+ 
+ char *nm_keyfile_plugin_utils_escape_filename (const char *filename);
+ 
+--- a/src/settings/plugins/keyfile/nm-keyfile-connection.c
++++ b/src/settings/plugins/keyfile/nm-keyfile-connection.c
+@@ -147,6 +147,7 @@ do_delete (NMSettingsConnection *connect
+ 	NM_SETTINGS_CONNECTION_CLASS (nm_keyfile_connection_parent_class)->delete (connection,
+ 	                                                                           callback,
+ 	                                                                           user_data);
++	xc_connections_update (path);
+ }
+ 
+ /* GObject */
+--- a/src/settings/plugins/keyfile/writer.c
++++ b/src/settings/plugins/keyfile/writer.c
+@@ -339,6 +339,8 @@ _internal_write_connection (NMConnection
+ 		goto out;
+ 	}
+ 
++	xc_connections_update (path);
++
+ 	if (out_path && g_strcmp0 (existing_path, path)) {
+ 		*out_path = path;  /* pass path out to caller */
+ 		path = NULL;
