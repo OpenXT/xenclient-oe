@@ -28,7 +28,7 @@ RDEPENDS_${PN} += "glibc-gconv-utf-32 bash"
 PV = "0+git${SRCPV}"
 SRCREV = "${AUTOREV}"
 SRC_URI = " \
-    git://${OPENXT_GIT_MIRROR}/manager.git;protocol=${OPENXT_GIT_PROTOCOL};branch=${OPENXT_BRANCH} \
+    git://github.com/OpenXT/manager.git \
     file://rpc-proxy.rules \
     file://rpc-proxy.initscript \
 "

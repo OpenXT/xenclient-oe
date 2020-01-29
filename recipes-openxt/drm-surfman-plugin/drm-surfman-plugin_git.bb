@@ -7,7 +7,7 @@ INSANE_SKIP_${PN} = "dev-so"
 PV = "0+git${SRCPV}"
 
 SRCREV = "${AUTOREV}"
-SRC_URI = "git://${OPENXT_GIT_MIRROR}/surfman.git;protocol=${OPENXT_GIT_PROTOCOL};branch=${OPENXT_BRANCH}"
+SRC_URI = "git://github.com/OpenXT/surfman.git"
 
 S = "${WORKDIR}/git/plugins/drm/"
 

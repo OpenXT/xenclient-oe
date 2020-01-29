@@ -2,7 +2,7 @@ DESCRIPTION = "device which can allocate memory and can be abused e. g. to provi
 LICENSE = "GPLv2"
 LIC_FILES_CHKSUM = "file://COPYING;md5=4641e94ec96f98fabc56ff9cc48be14b"
 
-SRC_URI = "git://${OPENXT_GIT_MIRROR}/fbtap.git;protocol=${OPENXT_GIT_PROTOCOL};branch=${OPENXT_BRANCH}"
+SRC_URI = "git://github.com/OpenXT/fbtap.git"
 SRCREV = "${AUTOREV}"
 
 S = "${WORKDIR}/git"

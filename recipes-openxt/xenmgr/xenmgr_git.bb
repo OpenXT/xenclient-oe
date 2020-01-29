@@ -35,7 +35,7 @@ PV = "0+git${SRCPV}"
 
 SRCREV = "${AUTOREV}"
 SRC_URI = " \
-    git://${OPENXT_GIT_MIRROR}/manager.git;protocol=${OPENXT_GIT_PROTOCOL};branch=${OPENXT_BRANCH} \
+    git://github.com/OpenXT/manager.git \
     file://xenmgr_dbus.conf \
     file://xenstore-init-extra \
     file://xenmgr.initscript \

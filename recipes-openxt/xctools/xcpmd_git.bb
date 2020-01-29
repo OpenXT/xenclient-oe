@@ -6,7 +6,7 @@ DEPENDS = "dbus xen pciutils libxcdbus libxcxenstore udev libnl yajl"
 PV = "0+git${SRCPV}"
 
 SRCREV = "${AUTOREV}"
-SRC_URI = "git://${OPENXT_GIT_MIRROR}/xctools.git;protocol=${OPENXT_GIT_PROTOCOL};branch=${OPENXT_BRANCH} \
+SRC_URI = "git://github.com/OpenXT/xctools.git \
 	   file://xcpmd.initscript \
 "
 

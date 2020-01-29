@@ -20,7 +20,7 @@ DEPENDS = "dojosdk-native"
 PV = "0+git${SRCPV}"
 
 SRCREV = "${AUTOREV}"
-SRC_URI = "git://${OPENXT_GIT_MIRROR}/toolstack-data.git;protocol=${OPENXT_GIT_PROTOCOL};branch=${OPENXT_BRANCH}"
+SRC_URI = "git://github.com/OpenXT/toolstack-data.git"
 
 S = "${WORKDIR}/git"
 

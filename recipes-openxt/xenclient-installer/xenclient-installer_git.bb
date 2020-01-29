@@ -6,7 +6,7 @@ PV = "0+git${SRCPV}"
 
 SRCREV = "${AUTOREV}"
 SRC_URI = " \
-    git://${OPENXT_GIT_MIRROR}/installer.git;protocol=${OPENXT_GIT_PROTOCOL};branch=${OPENXT_BRANCH} \
+    git://github.com/OpenXT/installer.git \
     file://network.ans \
     file://network_download_win.ans \
     file://network_manual.ans \

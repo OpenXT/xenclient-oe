@@ -12,9 +12,7 @@ DEPENDS += " \
 
 PV = "0+git${SRCPV}"
 
-SRC_URI = " \
-    git://${OPENXT_GIT_MIRROR}/toolstack.git;protocol=${OPENXT_GIT_PROTOCOL};branch=${OPENXT_BRANCH} \
-"
+SRC_URI = "git://github.com/OpenXT/toolstack.git"
 SRCREV = "${AUTOREV}"
 
 S = "${WORKDIR}/git"

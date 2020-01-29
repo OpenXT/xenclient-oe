@@ -8,7 +8,7 @@ PV = "0+git${SRCPV}"
 PR = "r1"
 
 SRCREV = "${AUTOREV}"
-SRC_URI = "git://${OPENXT_GIT_MIRROR}/xclibs.git;protocol=${OPENXT_GIT_PROTOCOL};branch=${OPENXT_BRANCH} \
+SRC_URI = "git://github.com/OpenXT/xclibs.git \
            "
 
 S = "${WORKDIR}/git/xcxenstore"
