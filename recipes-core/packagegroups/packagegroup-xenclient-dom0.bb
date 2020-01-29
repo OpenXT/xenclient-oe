@@ -95,6 +95,7 @@ RDEPENDS_${PN} = " \
     xenclient-pcrdiff \
     eject \
     linux-input \
+    argo-input-receiver \
     iputils-ping \
     vusb-daemon \
     xenmgr-data \
