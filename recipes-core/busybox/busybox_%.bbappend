@@ -10,6 +10,7 @@ SRC_URI += " \
     file://login.cfg \
     file://misc.cfg \
     file://netutils.cfg \
+    file://poweroff.cfg \
     file://process.cfg \
     file://shells.cfg \
     file://syslog.cfg \
