@@ -47,3 +47,12 @@ IMAGE_PREPROCESS_COMMAND += " \
 
 # prevent ldconfig from being run
 LDCONFIGDEPEND = ""
+
+# With ${IMAGE_ROOTFS}/etc removed, prelink_image will fail, so bracket it
+# to provide a temporary etc directory:
+prelink_image_prepend() {
+    mkdir ${IMAGE_ROOTFS}/etc
+}
+prelink_image_append() {
+    rmdir ${IMAGE_ROOTFS}/etc
+}
