@@ -13,5 +13,5 @@ inherit allarch
 
 do_install() {
     install -m 0755 -d ${D}${idldatadir}
-    install -m 0644 ${WORKDIR}/git/interfaces/* ${D}${idldatadir}
+    install -m 0644 ${S}/interfaces/* ${D}${idldatadir}
 }
