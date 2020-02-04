@@ -1,4 +1,4 @@
-FILESEXTRAPATHS_prepend := "${THISDIR}/files-openxt:"
+FILESEXTRAPATHS_prepend := "${THISDIR}/files:"
 
 GRUB_BUILDIN = " \
     all_video boot btrfs cat chain configfile echo \
