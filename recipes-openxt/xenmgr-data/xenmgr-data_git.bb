@@ -32,11 +32,11 @@ inherit xc-rpcgen
 do_configure[noexec] = "1"
 
 do_compile() {
-    make
+    oe_runmake
 }
 
 do_install() {
-    make DESTDIR=${D} install
+    oe_runmake DESTDIR=${D} install
 }
 
 FILES_${PN} = " \
