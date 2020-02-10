@@ -83,7 +83,6 @@ IMAGE_INSTALL += "\
     iso-codes-locale-zh-cn \
     xterm \
     gconf \
-    xblanker \
     xenclient-uivm-xsessionconfig \
     setxkbmap \
     libx11-locale \
