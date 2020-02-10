@@ -37,10 +37,10 @@ makeup_modeline() {
 wait_xenfb() {
     local id="$1"
     local path="device/vfb/${id}/state"
-    local key=""
+    local key
 
     # Note: xenstore-watch will always return the watched key once initialy.
-    while read key; do
+    while read -r key; do
         entry=$(xenstore-read "${key}")
         if [ "${entry}" = "4" ]; then
             echo "vfb ${id} is ready."
@@ -65,15 +65,16 @@ monitor_display_size() {
     local path="/xc_tools/switcher/current_display_size"
     local key
     local output="FBDev"
-    local entry=""
-    local width=""
-    local height=""
-    local name=""
-    local current_name=""
+    local entry
+    local width
+    local height
+    local name
+    local current_name
+    local modeline
 
-    while read key; do
-        entry=($(xenstore-read "${key}"))
-        if [ -z "${entry}" ]; then
+    while read -r key; do
+        read -r -a entry <<< "$(xenstore-read "${key}")"
+        if [ -z "${entry[*]}" ]; then
             echo "Invalid display size recorded in \`${key}'." >&2
             continue
         fi
@@ -88,7 +89,8 @@ monitor_display_size() {
         fi
 
         if ! xrandr_mode_exists "${name}"; then
-            xrandr --newmode $(makeup_modeline "${name}" "${width}" "${height}")
+            read -r -a modeline <<< "$(makeup_modeline "${name}" "${width}" "${height}")"
+            xrandr --newmode "${modeline[@]}"
         fi
         xrandr --addmode "${output}" "${name}"
         xrandr --output "${output}" --mode "${name}"
