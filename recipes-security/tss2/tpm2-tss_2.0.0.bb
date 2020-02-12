@@ -28,7 +28,7 @@ FILES_resourcemgr = " \
 do_configure_prepend () {
     # Creates the src_vars.mk file used by automake to handle source-files for
     # each component. Modified to not call autotools and let OE handle that.
-    pushd ${S}
+    cd ${S}
     AUTORECONF=true ./bootstrap
-    popd
+    cd -
 }
