@@ -9,4 +9,6 @@ BLKTAP_PATCHQUEUE = " \
     file://blktap2-vhd-encryption-support.patch \
     file://blktap2-vhd-icbinn-support.patch \
     file://blktap2-libxl-crypto-key-dir.patch \
+    file://blktap2-fix-warnings.patch \
+    file://blktap2-newer-openssl.patch \
 "
