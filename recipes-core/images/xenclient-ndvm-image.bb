@@ -71,6 +71,7 @@ IMAGE_INSTALL = " \
     modemmanager \
     ppp \
     iputils-ping \
+    dbd-tools-vm \
 "
 
 require xenclient-version.inc
