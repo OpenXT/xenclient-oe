@@ -1,0 +1,140 @@
+From 660d2dd863802ef464c90b32f187cb65861f8185 Mon Sep 17 00:00:00 2001
+From: Wei Liu <wei.liu2@citrix.com>
+Date: Thu, 7 Mar 2019 12:33:38 +0000
+Subject: [PATCH] libxl: make python scripts work with python 2.6 and up
+
+Go through transformations suggested by 2to3 and pick the necessary
+ones.
+
+Signed-off-by: Wei Liu <wei.liu2@citrix.com>
+Reviewed-by: Andrew Cooper <andrew.cooper3@citrix.com>
+---
+ tools/libxl/gentest.py  |  4 +++-
+ tools/libxl/gentypes.py | 12 +++++++-----
+ tools/libxl/idl.py      | 15 ++++++++-------
+ 3 files changed, 18 insertions(+), 13 deletions(-)
+
+diff --git a/tools/libxl/gentest.py b/tools/libxl/gentest.py
+index 989959fc68..1cc7eebc82 100644
+--- a/tools/libxl/gentest.py
++++ b/tools/libxl/gentest.py
+@@ -1,5 +1,7 @@
+ #!/usr/bin/python
+ 
++from __future__ import print_function
++
+ import os
+ import sys
+ import re
+@@ -86,7 +88,7 @@ def gen_rand_init(ty, v, indent = "    ", parent = None):
+ 
+ if __name__ == '__main__':
+     if len(sys.argv) < 3:
+-        print >>sys.stderr, "Usage: gentest.py <idl> <implementation>"
++        print("Usage: gentest.py <idl> <implementation>", file=sys.stderr)
+         sys.exit(1)
+ 
+     random.seed(os.getenv('LIBXL_TESTIDL_SEED'))
+diff --git a/tools/libxl/gentypes.py b/tools/libxl/gentypes.py
+index 88e5c5f30e..6417c9dd8c 100644
+--- a/tools/libxl/gentypes.py
++++ b/tools/libxl/gentypes.py
+@@ -1,5 +1,7 @@
+ #!/usr/bin/python
+ 
++from __future__ import print_function
++
+ import sys
+ import re
+ 
+@@ -576,14 +578,14 @@ def libxl_C_enum_from_string(ty, str, e, indent = "    "):
+ 
+ if __name__ == '__main__':
+     if len(sys.argv) != 6:
+-        print >>sys.stderr, "Usage: gentypes.py <idl> <header> <header-private> <header-json> <implementation>"
++        print("Usage: gentypes.py <idl> <header> <header-private> <header-json> <implementation>", file=sys.stderr)
+         sys.exit(1)
+ 
+     (_, idlname, header, header_private, header_json, impl) = sys.argv
+ 
+     (builtins,types) = idl.parse(idlname)
+ 
+-    print "outputting libxl type definitions to %s" % header
++    print("outputting libxl type definitions to %s" % header)
+ 
+     f = open(header, "w")
+ 
+@@ -633,7 +635,7 @@ if __name__ == '__main__':
+     f.write("""#endif /* %s */\n""" % (header_define))
+     f.close()
+ 
+-    print "outputting libxl JSON definitions to %s" % header_json
++    print("outputting libxl JSON definitions to %s" % header_json)
+ 
+     f = open(header_json, "w")
+ 
+@@ -657,7 +659,7 @@ if __name__ == '__main__':
+     f.write("""#endif /* %s */\n""" % header_json_define)
+     f.close()
+ 
+-    print "outputting libxl type internal definitions to %s" % header_private
++    print("outputting libxl type internal definitions to %s" % header_private)
+ 
+     f = open(header_private, "w")
+ 
+@@ -683,7 +685,7 @@ if __name__ == '__main__':
+     f.write("""#endif /* %s */\n""" % header_json_define)
+     f.close()
+ 
+-    print "outputting libxl type implementations to %s" % impl
++    print("outputting libxl type implementations to %s" % impl)
+ 
+     f = open(impl, "w")
+     f.write("""
+diff --git a/tools/libxl/idl.py b/tools/libxl/idl.py
+index 2a7f3c44fe..d7367503b4 100644
+--- a/tools/libxl/idl.py
++++ b/tools/libxl/idl.py
+@@ -1,3 +1,5 @@
++from __future__ import print_function
++
+ import sys
+ 
+ PASS_BY_VALUE = 1
+@@ -11,7 +13,7 @@ DIR_BOTH = 3
+ _default_namespace = ""
+ def namespace(s):
+     if type(s) != str:
+-        raise TypeError, "Require a string for the default namespace."
++        raise TypeError("Require a string for the default namespace.")
+     global _default_namespace
+     _default_namespace = s
+ 
+@@ -346,7 +348,7 @@ class OrderedDict(dict):
+         return [(x,self[x]) for x in self.__ordered]
+ 
+ def parse(f):
+-    print >>sys.stderr, "Parsing %s" % f
++    print("Parsing %s" % f, file=sys.stderr)
+ 
+     globs = {}
+     locs = OrderedDict()
+@@ -362,11 +364,10 @@ def parse(f):
+             globs[n] = t
+ 
+     try:
+-        execfile(f, globs, locs)
+-    except SyntaxError,e:
+-        raise SyntaxError, \
+-              "Errors were found at line %d while processing %s:\n\t%s"\
+-              %(e.lineno,f,e.text)
++        exec(compile(open(f).read(), f, 'exec'), globs, locs)
++    except SyntaxError as e:
++        raise SyntaxError("Errors were found at line %d while processing %s:\n\t%s"
++                          % (e.lineno, f, e.text))
+ 
+     types = [t for t in locs.ordered_values() if isinstance(t,Type)]
+ 
+-- 
+2.17.1
+

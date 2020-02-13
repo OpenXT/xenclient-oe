@@ -1,0 +1,140 @@
+From a9047a722ba5de38e7c1d762ffcfb74c36725fe2 Mon Sep 17 00:00:00 2001
+From: Andrew Cooper <andrew.cooper3@citrix.com>
+Date: Mon, 11 Mar 2019 19:18:40 +0000
+Subject: [PATCH] tools/xen-foreign: Update python scripts to be Py3 compatible
+
+The issues are:
+ * dict.has_key() was completely removed in Py3
+ * dict.keys() is an iterable rather than list in Py3, so .sort() doesn't work.
+ * list.sort(cmp=) was deprecated in Py2.4 and removed in Py3.
+
+The has_key() issue is trivially fixed by switching to using the in keyword.
+The sorting issue could be trivially fixed, but take the opportunity to
+improve the code.
+
+The reason for the sorting is to ensure that "unsigned long" gets replaced
+before "long", and the only reason sorting is necessary is because
+inttypes[arch] is needlessly a dictionary.  Update inttypes[arch] to be a list
+of tuples rather than a dictionary, and process them in list order.
+
+Reported-by: George Dunlap <george.dunlap@eu.citrix.com>
+Signed-off-by: Andrew Cooper <andrew.cooper3@citrix.com>
+Acked-by: Wei Liu <wei.liu2@citrix.com>
+---
+ tools/include/xen-foreign/mkchecker.py |  2 +-
+ tools/include/xen-foreign/mkheader.py  | 58 +++++++++++++-------------
+ 2 files changed, 29 insertions(+), 31 deletions(-)
+
+diff --git a/tools/include/xen-foreign/mkchecker.py b/tools/include/xen-foreign/mkchecker.py
+index fdad869a91..199b0eebbc 100644
+--- a/tools/include/xen-foreign/mkchecker.py
++++ b/tools/include/xen-foreign/mkchecker.py
+@@ -37,7 +37,7 @@ for struct in structs:
+     f.write('\tprintf("%%-25s |", "%s");\n' % struct);
+     for a in archs:
+         s = struct + "_" + a;
+-        if compat_arches.has_key(a):
++        if a in compat_arches:
+             compat = compat_arches[a]
+             c = struct + "_" + compat;
+         else:
+diff --git a/tools/include/xen-foreign/mkheader.py b/tools/include/xen-foreign/mkheader.py
+index 97e0c7a984..fb268f0dce 100644
+--- a/tools/include/xen-foreign/mkheader.py
++++ b/tools/include/xen-foreign/mkheader.py
+@@ -17,13 +17,13 @@ header = {};
+ footer = {};
+ 
+ #arm
+-inttypes["arm32"] = {
+-    "unsigned long" : "__danger_unsigned_long_on_arm32",
+-    "long"          : "__danger_long_on_arm32",
+-    "xen_pfn_t"     : "uint64_t",
+-    "xen_ulong_t"   : "uint64_t",
+-    "uint64_t"      : "__align8__ uint64_t",
+-};
++inttypes["arm32"] = [
++    ("unsigned long", "__danger_unsigned_long_on_arm32"),
++    ("long",          "__danger_long_on_arm32"),
++    ("xen_pfn_t",     "uint64_t"),
++    ("xen_ulong_t",   "uint64_t"),
++    ("uint64_t",      "__align8__ uint64_t"),
++]
+ header["arm32"] = """
+ #define __arm___ARM32 1
+ #if defined(__GNUC__) && !defined(__STRICT_ANSI__)
+@@ -38,13 +38,13 @@ footer["arm32"] = """
+ #undef __DECL_REG
+ """
+ 
+-inttypes["arm64"] = {
+-    "unsigned long" : "__danger_unsigned_long_on_arm64",
+-    "long"          : "__danger_long_on_arm64",
+-    "xen_pfn_t"     : "uint64_t",
+-    "xen_ulong_t"   : "uint64_t",
+-    "uint64_t"      : "__align8__ uint64_t",
+-};
++inttypes["arm64"] = [
++    ("unsigned long", "__danger_unsigned_long_on_arm64"),
++    ("long",          "__danger_long_on_arm64"),
++    ("xen_pfn_t",     "uint64_t"),
++    ("xen_ulong_t",   "uint64_t"),
++    ("uint64_t",      "__align8__ uint64_t"),
++]
+ header["arm64"] = """
+ #define __aarch64___ARM64 1
+ #if defined(__GNUC__) && !defined(__STRICT_ANSI__)
+@@ -60,12 +60,12 @@ footer["arm64"] = """
+ """
+ 
+ # x86_32
+-inttypes["x86_32"] = {
+-    "unsigned long" : "uint32_t",
+-    "long"          : "uint32_t",
+-    "xen_pfn_t"     : "uint32_t",
+-    "xen_ulong_t"   : "uint32_t",
+-};
++inttypes["x86_32"] = [
++    ("unsigned long", "uint32_t"),
++    ("long",          "uint32_t"),
++    ("xen_pfn_t",     "uint32_t"),
++    ("xen_ulong_t",   "uint32_t"),
++]
+ header["x86_32"] = """
+ #define __DECL_REG_LO8(which) uint32_t e ## which ## x
+ #define __DECL_REG_LO16(name) uint32_t e ## name
+@@ -79,12 +79,12 @@ footer["x86_32"] = """
+ """;
+ 
+ # x86_64
+-inttypes["x86_64"] = {
+-    "unsigned long" : "__align8__ uint64_t",
+-    "long"          : "__align8__ uint64_t",
+-    "xen_pfn_t"     : "__align8__ uint64_t",
+-    "xen_ulong_t"   : "__align8__ uint64_t",
+-};
++inttypes["x86_64"] = [
++    ("unsigned long", "__align8__ uint64_t"),
++    ("long",          "__align8__ uint64_t"),
++    ("xen_pfn_t",     "__align8__ uint64_t"),
++    ("xen_ulong_t",   "__align8__ uint64_t"),
++]
+ header["x86_64"] = """
+ #if defined(__GNUC__) && !defined(__STRICT_ANSI__)
+ # define __DECL_REG(name) union { uint64_t r ## name, e ## name; }
+@@ -205,10 +205,8 @@ for struct in structs:
+     output = re.sub("\\b(%s)_t\\b" % struct, "\\1_%s_t" % arch, output);
+ 
+ # replace: integer types
+-integers = inttypes[arch].keys();
+-integers.sort(lambda a, b: cmp(len(b),len(a)));
+-for type in integers:
+-    output = re.sub("\\b%s\\b" % type, inttypes[arch][type], output);
++for old, new in inttypes[arch]:
++    output = re.sub("\\b%s\\b" % old, new, output)
+ 
+ # print results
+ f = open(outfile, "w");
+-- 
+2.17.1
+

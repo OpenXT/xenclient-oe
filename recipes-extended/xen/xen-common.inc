@@ -14,6 +14,14 @@ require ${@bb.utils.contains('DISTRO_FEATURES', 'blktap2', 'xen-blktap2.inc', 'x
 
 SRC_URI_append = " \
     file://defconfig \
+    file://0001-python-pygrub-pass-DISTUTILS-xen.4.12.patch \
+    file://xen-tools-update-python-scripts-to-py3.patch \
+    file://xen-tools-libxl-gentypes-py3.patch \
+    file://xen-tools-python-fix-Wsign-compare-warnings.patch \
+    file://xen-tools-ocaml-make-python-scripts-2-and-3-compatible.patch \
+    file://xen-tools-pygrub-change-tabs-into-spaces.patch \
+    file://xen-tools-pygrub-py3.patch \
+    file://xen-tools-pygrub-fsimage-drop-unused-struct.patch \
     file://kconfig-grant-table.patch \
     file://kconfig-grant-table-v2-interface.patch \
     file://kconfig-grant-table-exotic.patch \
