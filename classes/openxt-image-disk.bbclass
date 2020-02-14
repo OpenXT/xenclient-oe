@@ -118,7 +118,7 @@ validate_disk_signature() {
 		fi
 	fi
 
-        bb_fatal "DISK_SIGNATURE ${DISK_SIGNATURE} must be an 8 digit hex string"
+        bbfatal "DISK_SIGNATURE ${DISK_SIGNATURE} must be an 8 digit hex string"
 }
 
 CONVERSION_CMD_disk() {
