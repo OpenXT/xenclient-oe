@@ -1,6 +1,7 @@
-DESCRIPTION = "XenClient database daemon"
+DESCRIPTION = "XenClient database daemon and tools."
 LICENSE = "GPLv2"
 LIC_FILES_CHKSUM = "file://../COPYING;md5=4641e94ec96f98fabc56ff9cc48be14b"
+
 DEPENDS = " \
     ocaml-dbus \
     xen-ocaml-libs \
@@ -9,48 +10,102 @@ DEPENDS = " \
 
 PV = "0+git${SRCPV}"
 
-SRCREV = "${AUTOREV}"
 SRC_URI = " \
     git://${OPENXT_GIT_MIRROR}/manager.git;protocol=${OPENXT_GIT_PROTOCOL};branch=${OPENXT_BRANCH} \
     file://dbd.initscript \
     file://db.default \
+    file://db-exists-dom0 \
+    file://db-ls-dom0 \
+    file://db-nodes-dom0 \
+    file://db-read-dom0 \
+    file://db-rm-dom0 \
+    file://db-write-dom0 \
+    file://db-cat-dom0 \
 "
-
-RDEPENDS_${PN} += "bash"
+SRCREV = "${AUTOREV}"
 
 S = "${WORKDIR}/git/dbd"
+# brokensep.
+B = "${S}"
 
-inherit update-rc.d haskell ocaml findlib xc-rpcgen
+inherit update-rc.d ocaml findlib xc-rpcgen
 
-INITSCRIPT_NAME = "dbd"
-INITSCRIPT_PARAMS = "defaults 25"
+do_configure() {
+    # generate rpc stubs
+    mkdir -p ${B}/autogen
+    # Server objects
+    xc-rpcgen --camel --templates-dir=${STAGING_RPCGENDATADIR_NATIVE} -s -o ${B}/autogen ${STAGING_IDLDATADIR}/db.xml
+    # Client objects
+    xc-rpcgen --camel --templates-dir=${STAGING_RPCGENDATADIR_NATIVE} -c -o ${B}/autogen ${STAGING_IDLDATADIR}/db.xml
+    xc-rpcgen --camel --templates-dir=${STAGING_RPCGENDATADIR_NATIVE} -c -o ${B}/autogen ${STAGING_IDLDATADIR}/dbus.xml
+}
+
+PARALLEL_MAKE=""
+
+do_install() {
+    oe_runmake DESTDIR="${D}" install
+
+    # findlib.bbclass will create ${D}${sitelibdir} for generic ocamlfind
+    # compliance with bitbake. This does not ship any library though.
+    rm -rf ${D}${libdir}
+
+    # dbd
+    install -m 0755 -d ${D}${sysconfdir}/init.d
+    install -m 0755 ${WORKDIR}/dbd.initscript ${D}${sysconfdir}/init.d/dbd
+    install -m 0755 -d ${D}${datadir}/xenclient
+    install -m 0644 ${WORKDIR}/db.default ${D}${datadir}/xenclient/db.default
+
+    # dbd-tools
+    for bin in \
+        db-exists db-ls db-nodes db-read db-rm db-write db-cat
+    do
+        install -m 0755 ${S}/${bin} ${D}${bindir}/${bin}
+    done
+
+    # dbd-tools-vm
+    for bin in \
+        db-exists-dom0 db-ls-dom0 db-nodes-dom0 db-read-dom0 db-rm-dom0 \
+        db-write-dom0 db-cat-dom0
+    do
+        install -m 0755 ${WORKDIR}/${bin} ${D}${bindir}/${bin}
+    done
+}
+
+PACKAGES =+ " \
+    ${PN}-tools \
+    ${PN}-tools-vm \
+"
+INITSCRIPT_PACKAGES = "${PN}"
+INITSCRIPT_NAME_${PN} = "dbd"
+INITSCRIPT_PARAMS_${PN} = "defaults 25"
 
 FILES_${PN} += " \
     ${datadir}/xenclient/db.default \
     ${sysconfdir}/init.d/* \
 "
+RDEPENDS_${PN} += "bash"
 
-do_configure() {
-    # generate rpc stubs
-    mkdir -p autogen
-    # Server objects
-    xc-rpcgen --camel --templates-dir=${STAGING_RPCGENDATADIR_NATIVE} -s -o autogen ${STAGING_IDLDATADIR}/db.xml
-    # Client objects
-    xc-rpcgen --camel --templates-dir=${STAGING_RPCGENDATADIR_NATIVE} -c -o autogen ${STAGING_IDLDATADIR}/db.xml
-    xc-rpcgen --camel --templates-dir=${STAGING_RPCGENDATADIR_NATIVE} -c -o autogen ${STAGING_IDLDATADIR}/dbus.xml
-}
+FILES_${PN}-tools = " \
+    ${bindir}/db-cmd \
+    ${bindir}/db-exists \
+    ${bindir}/db-ls \
+    ${bindir}/db-nodes \
+    ${bindir}/db-read \
+    ${bindir}/db-rm \
+    ${bindir}/db-write \
+    ${bindir}/db-cat \
+"
 
-do_compile() {
-    make V=1 XEN_DIST_ROOT="${STAGING_DIR}" TARGET_PREFIX="${TARGET_PREFIX}" STAGING_DIR="${STAGING_DIR}" STAGING_BINDIR_CROSS="${STAGING_BINDIR_CROSS}" STAGING_LIBDIR="${STAGING_LIBDIR}" STAGING_INCDIR="${STAGING_INCDIR}" all
-}
-
-do_install() {
-    # findlib.bbclass will create ${D}${sitelibdir} for generic ocamlfind
-    # compliance with bitbake. This does not ship any library though.
-    rm -rf ${D}${libdir}
-    make DESTDIR=${D} V=1 install
-    install -m 0755 -d ${D}${sysconfdir}/init.d
-    install -m 0755 ${WORKDIR}/dbd.initscript ${D}${sysconfdir}/init.d/dbd
-    install -m 0755 -d ${D}/usr/share/xenclient
-    install -m 0644 ${WORKDIR}/db.default ${D}/usr/share/xenclient/db.default
-}
+FILES_${PN}-tools-vm = " \
+    ${bindir}/db-exists-dom0 \
+    ${bindir}/db-ls-dom0 \
+    ${bindir}/db-nodes-dom0 \
+    ${bindir}/db-read-dom0 \
+    ${bindir}/db-rm-dom0 \
+    ${bindir}/db-write-dom0 \
+    ${bindir}/db-cat-dom0 \
+"
+RDEPENDS_${PN}-tools-vm += " \
+    libargo \
+    ${PN}-tools \
+"
