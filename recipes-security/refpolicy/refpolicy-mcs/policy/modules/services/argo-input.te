@@ -1,0 +1,68 @@
+policy_module(argo-input, 0.1)
+
+########################################
+#
+# Declarations
+#
+type argo_input_sender_t;
+type argo_input_sender_exec_t;
+init_daemon_domain(argo_input_sender_t, argo_input_sender_exec_t)
+
+#######################################
+#
+# argo-input-sender Local Policy
+#
+
+# We are a shell script
+corecmd_exec_shell(argo_input_sender_t)
+corecmd_exec_bin(argo_input_sender_t)
+
+# Reading input events and writing for LEDs
+dev_rw_input_dev(argo_input_sender_t)
+# And sending them over argo
+xc_files_rw_argo_chr(argo_input_sender_t)
+# With logging through /bin/logger
+corecmd_exec_bin(argo_input_sender_t)
+logging_send_syslog_msg(argo_input_sender_t)
+
+# Read /etc/nsswitch.conf
+files_read_etc_files(argo_input_sender_t)
+
+# Pipes between argo-exec and logger
+allow argo_input_sender_t self:fifo_file rw_fifo_file_perms;
+allow argo_input_sender_t self:process { signal };
+
+optional_policy(`
+	gen_require(`
+		type udev_t;
+	')
+	argo_input_sender_domtrans(udev_t)
+')
+#
+########################################
+#
+# Declarations
+#
+type argo_input_receiver_t;
+type argo_input_receiver_exec_t;
+init_daemon_domain(argo_input_receiver_t, argo_input_receiver_exec_t)
+
+#######################################
+#
+# argo-input-receiver Local Policy
+#
+
+# We are a shell script
+corecmd_exec_shell(argo_input_receiver_t)
+
+# Injecting input events...
+dev_rw_input_dev(argo_input_receiver_t)
+# And sending them over argo
+xc_files_rw_argo_chr(argo_input_receiver_t)
+# Launching input-proxy-receiver
+corecmd_exec_bin(argo_input_receiver_t)
+logging_send_syslog_msg(argo_input_receiver_t)
+
+# Pipes between argo-exec and logger
+allow argo_input_receiver_t self:fifo_file rw_fifo_file_perms;
+allow argo_input_receiver_t self:process { signal };

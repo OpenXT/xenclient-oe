@@ -31,6 +31,9 @@ SRC_URI += " \
     file://policy/modules/apps/tpmutil.fc \
     file://policy/modules/apps/tpmutil.if \
     file://policy/modules/apps/tpmutil.te \
+    file://policy/modules/services/argo-input.fc \
+    file://policy/modules/services/argo-input.if \
+    file://policy/modules/services/argo-input.te \
     file://policy/modules/services/blktap.fc \
     file://policy/modules/services/blktap.if \
     file://policy/modules/services/blktap.te \
