@@ -1,0 +1,76 @@
+--- a/policy/modules/system/xen.if
++++ b/policy/modules/system/xen.if
+@@ -237,6 +237,23 @@ interface(`xen_stream_connect_xenstore',
+ 
+ ########################################
+ ## <summary>
++##	Connect to xenstore through unix
++##	domain stream socket or over
++##	/dev/xen/xenbus
++## </summary>
++## <param name="domain">
++##	<summary>
++##	Domain allowed access.
++##	</summary>
++## </param>
++#
++interface(`xen_rw_xenstore',`
++	xen_stream_connect_xenstore($1)
++	dev_rw_xenstore($1)
++')
++
++########################################
++## <summary>
+ ##	Connect to xend with a unix
+ ##	domain stream socket.
+ ## </summary>
+--- a/policy/modules/kernel/devices.fc
++++ b/policy/modules/kernel/devices.fc
+@@ -187,7 +187,7 @@ ifdef(`distro_suse', `
+ /dev/xen/gntdev		-c	gen_context(system_u:object_r:xen_device_t,s0)
+ /dev/xen/gntalloc	-c	gen_context(system_u:object_r:xen_device_t,s0)
+ /dev/xen/privcmd	-c	gen_context(system_u:object_r:xen_device_t,s0)
+-/dev/xen/xenbus		-c	gen_context(system_u:object_r:xen_device_t,s0)
++/dev/xen/xenbus		-c	gen_context(system_u:object_r:xenstore_dev_t,s0)
+ /dev/xen/xenbus_backend	-c	gen_context(system_u:object_r:xen_device_t,s0)
+ /dev/xen/hypercall	-c	gen_context(system_u:object_r:xen_device_t,s0)
+ 
+--- a/policy/modules/kernel/devices.if
++++ b/policy/modules/kernel/devices.if
+@@ -5025,6 +5025,24 @@ interface(`dev_rw_xen',`
+ 
+ ########################################
+ ## <summary>
++##	Read and write Xenstore/xenbus devices.
++## </summary>
++## <param name="domain">
++##	<summary>
++##	Domain allowed access.
++##	</summary>
++## </param>
++#
++interface(`dev_rw_xenstore',`
++	gen_require(`
++		type device_t, xenstore_dev_t;
++	')
++
++	rw_chr_files_pattern($1, device_t, xenstore_dev_t)
++')
++
++########################################
++## <summary>
+ ##	Create, read, write, and delete Xen devices.
+ ## </summary>
+ ## <param name="domain">
+--- a/policy/modules/kernel/devices.te
++++ b/policy/modules/kernel/devices.te
+@@ -309,6 +309,9 @@ dev_node(wireless_device_t)
+ type xen_device_t;
+ dev_node(xen_device_t)
+ 
++type xenstore_dev_t;
++dev_node(xenstore_dev_t)
++
+ type xserver_misc_device_t;
+ dev_node(xserver_misc_device_t)
+ 

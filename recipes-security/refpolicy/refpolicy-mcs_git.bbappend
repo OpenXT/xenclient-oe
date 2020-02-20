@@ -164,6 +164,7 @@ SRC_URI += " \
     file://patches/xl-sysadm-interfaces.patch \
     file://patches/policy.modules.admin.bootloader.diff \
     file://patches/monit-volatiles.patch \
+    file://patches/xenstore-labeling.patch \
 "
 
 DEPENDS_append += " \
