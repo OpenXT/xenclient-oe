@@ -65,6 +65,8 @@ PR = "r3"
 
 S = "${WORKDIR}"
 
+inherit deploy
+
 do_install() {
     install -d ${D}/boot
     for i in `find "${WORKDIR}" -iname '*DEBUG*' -prune -o -iname '*NPW*' -prune -o -iname "*.bin" -print`
@@ -76,5 +78,23 @@ do_install() {
     # the most recent Coffee Lake license is sufficient to cover all:
     install -m 444 8th_gen_i5_i7-SINIT_76/license.txt ${D}/boot/license-SINIT-ACMs.txt
 }
+
+do_deploy() {
+    install -m 0644 "${D}/boot/GM45_GS45_PM45_SINIT_51.BIN" "${DEPLOYDIR}/gm45.acm"
+    install -m 0644 "${D}/boot/4th_gen_i5_i7_SINIT_75.BIN" "${DEPLOYDIR}/hsw.acm"
+    install -m 0644 "${D}/boot/i5_i7_DUAL_SINIT_51.BIN" "${DEPLOYDIR}/duali.acm"
+    install -m 0644 "${D}/boot/i7_QUAD_SINIT_51.BIN" "${DEPLOYDIR}/quadi.acm"
+    install -m 0644 "${D}/boot/Q35_SINIT_51.BIN" "${DEPLOYDIR}/q35.acm"
+    install -m 0644 "${D}/boot/Q45_Q43_SINIT_51.BIN" "${DEPLOYDIR}/q45q43.acm"
+    install -m 0644 "${D}/boot/Xeon-5600-3500-SINIT-v1.1.bin" "${DEPLOYDIR}/xeon56.acm"
+    install -m 0644 "${D}/boot/Xeon-E7-8800-4800-2800-SINIT-v1.1.bin" "${DEPLOYDIR}/xeone7.acm"
+    install -m 0644 "${D}/boot/3rd_gen_i5_i7_SINIT_67.BIN" "${DEPLOYDIR}/ivb_snb.acm"
+    install -m 0644 "${D}/boot/5th_gen_i5_i7_SINIT_79.BIN" "${DEPLOYDIR}/bdw.acm"
+    install -m 0644 "${D}/boot/6th_gen_i5_i7_SINIT_71.BIN" "${DEPLOYDIR}/skl.acm"
+    install -m 0644 "${D}/boot/7th_gen_i5_i7-SINIT_74.bin" "${DEPLOYDIR}/kbl.acm"
+    install -m 0644 "${D}/boot/8th_gen_i5_i7-SINIT_76.bin" "${DEPLOYDIR}/cfl.acm"
+    install -m 0644 "${D}/boot/license-SINIT-ACMs.txt" "${DEPLOYDIR}/license-SINIT-ACMs.txt"
+}
+addtask do_deploy after do_install before do_build
 
 FILES_${PN} = "/boot"

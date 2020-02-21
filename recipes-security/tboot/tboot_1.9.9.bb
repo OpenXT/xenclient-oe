@@ -26,6 +26,8 @@ SRC_URI = " \
 SRC_URI[md5sum] = "b5b235ddcecceb3663975e28be16d0d9"
 SRC_URI[sha256sum] = "ae6edcb3f7dcc86993e297108886ae2b2808fab29d1fd29678eafd10bc181185"
 
+inherit deploy
+
 do_compile() {
     oe_runmake SUBDIRS="tboot" CC="${HOST_PREFIX}gcc ${TOOLCHAIN_OPTIONS}" CPP="${HOST_PREFIX}cpp ${TOOLCHAIN_OPTIONS}"
     if [ "${TBOOT_TARGET_ARCH}" != "x86_32" ]; then
@@ -36,3 +38,8 @@ do_compile() {
     fi
     oe_runmake SUBDIRS="safestringlib lcptools lcptools-v2 tb_polgen utils pcr-calc" TARGET_ARCH="${TBOOT_TARGET_ARCH}"
 }
+
+do_deploy() {
+    install -m 0644 "${D}/boot/tboot.gz" "${DEPLOYDIR}/tboot.gz"
+}
+addtask do_deploy after do_install before do_build

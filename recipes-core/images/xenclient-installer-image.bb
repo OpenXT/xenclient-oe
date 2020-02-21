@@ -10,19 +10,7 @@ LIC_FILES_CHKSUM = " \
     file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302 \
 "
 
-PR = "r15"
-
-SRC_URI += " \
-    file://network.ans \
-    file://network_upgrade.ans \
-    file://network_manual.ans \
-    file://network_download_win.ans \
-    file://network_manual_download_win.ans \
-    file://pxelinux.cfg \
-    file://isolinux.cfg \
-    file://bootmsg.txt \
-    file://grub.cfg \
-"
+PR = "r16"
 
 IMAGE_FSTYPES = "cpio.gz"
 export IMAGE_BASENAME = "xenclient-installer-image"
@@ -104,47 +92,6 @@ post_rootfs_shell_commands() {
 ROOTFS_POSTPROCESS_COMMAND += "post_rootfs_shell_commands; "
 ROOTFS_POSTPROCESS_COMMAND += "start_tty_on_hvc0; "
 
-# Copy syslinux modules and configuration files.
-syslinux_install_files() {
-    # Netboot.
-    mkdir -p ${DEPLOY_DIR_IMAGE}/${IMAGE_LINK_NAME}/netboot
-    cp -f ${IMAGE_ROOTFS}/${datadir}/syslinux/ldlinux.c32 ${DEPLOY_DIR_IMAGE}/${IMAGE_LINK_NAME}/netboot/
-    cp -f ${IMAGE_ROOTFS}/${datadir}/syslinux/mboot.c32 ${DEPLOY_DIR_IMAGE}/${IMAGE_LINK_NAME}/netboot/
-    cp -f ${IMAGE_ROOTFS}/${datadir}/syslinux/libcom32.c32 ${DEPLOY_DIR_IMAGE}/${IMAGE_LINK_NAME}/netboot/
-    cp -f ${WORKDIR}/pxelinux.cfg ${DEPLOY_DIR_IMAGE}/${IMAGE_LINK_NAME}/netboot/
-
-    # Iso.
-    mkdir -p ${DEPLOY_DIR_IMAGE}/${IMAGE_LINK_NAME}/iso
-    cp -f ${IMAGE_ROOTFS}/${datadir}/syslinux/ldlinux.c32 ${DEPLOY_DIR_IMAGE}/${IMAGE_LINK_NAME}/iso/
-    cp -f ${IMAGE_ROOTFS}/${datadir}/syslinux/mboot.c32 ${DEPLOY_DIR_IMAGE}/${IMAGE_LINK_NAME}/iso/
-    cp -f ${IMAGE_ROOTFS}/${datadir}/syslinux/libcom32.c32 ${DEPLOY_DIR_IMAGE}/${IMAGE_LINK_NAME}/iso/
-    cp -f ${IMAGE_ROOTFS}/${datadir}/syslinux/isolinux.bin ${DEPLOY_DIR_IMAGE}/${IMAGE_LINK_NAME}/iso/
-    cp -f ${WORKDIR}/bootmsg.txt ${DEPLOY_DIR_IMAGE}/${IMAGE_LINK_NAME}/iso/
-    cp -f ${WORKDIR}/isolinux.cfg ${DEPLOY_DIR_IMAGE}/${IMAGE_LINK_NAME}/iso/
-    cp -f ${WORKDIR}/grub.cfg ${DEPLOY_DIR_IMAGE}/${IMAGE_LINK_NAME}/iso/
-}
-IMAGE_POSTPROCESS_COMMAND += "syslinux_install_files; "
-
-# Install TBoot image and ACMs.
-tboot_install_files() {
-    cp -f ${IMAGE_ROOTFS}/boot/tboot.gz ${DEPLOY_DIR_IMAGE}/
-    cp -f ${IMAGE_ROOTFS}/boot/GM45_GS45_PM45_SINIT_51.BIN ${DEPLOY_DIR_IMAGE}/gm45.acm
-    cp -f ${IMAGE_ROOTFS}/boot/4th_gen_i5_i7_SINIT_75.BIN ${DEPLOY_DIR_IMAGE}/hsw.acm
-    cp -f ${IMAGE_ROOTFS}/boot/i5_i7_DUAL_SINIT_51.BIN ${DEPLOY_DIR_IMAGE}/duali.acm
-    cp -f ${IMAGE_ROOTFS}/boot/i7_QUAD_SINIT_51.BIN ${DEPLOY_DIR_IMAGE}/quadi.acm
-    cp -f ${IMAGE_ROOTFS}/boot/Q35_SINIT_51.BIN ${DEPLOY_DIR_IMAGE}/q35.acm
-    cp -f ${IMAGE_ROOTFS}/boot/Q45_Q43_SINIT_51.BIN ${DEPLOY_DIR_IMAGE}/q45q43.acm
-    cp -f ${IMAGE_ROOTFS}/boot/Xeon-5600-3500-SINIT-v1.1.bin ${DEPLOY_DIR_IMAGE}/xeon56.acm
-    cp -f ${IMAGE_ROOTFS}/boot/Xeon-E7-8800-4800-2800-SINIT-v1.1.bin ${DEPLOY_DIR_IMAGE}/xeone7.acm
-    cp -f ${IMAGE_ROOTFS}/boot/3rd_gen_i5_i7_SINIT_67.BIN ${DEPLOY_DIR_IMAGE}/ivb_snb.acm
-    cp -f ${IMAGE_ROOTFS}/boot/5th_gen_i5_i7_SINIT_79.BIN ${DEPLOY_DIR_IMAGE}/bdw.acm
-    cp -f ${IMAGE_ROOTFS}/boot/6th_gen_i5_i7_SINIT_71.BIN ${DEPLOY_DIR_IMAGE}/skl.acm
-    cp -f ${IMAGE_ROOTFS}/boot/7th_gen_i5_i7-SINIT_74.bin ${DEPLOY_DIR_IMAGE}/kbl.acm
-    cp -f ${IMAGE_ROOTFS}/boot/8th_gen_i5_i7-SINIT_76.bin ${DEPLOY_DIR_IMAGE}/cfl.acm
-    cp -f ${IMAGE_ROOTFS}/boot/license-SINIT-ACMs.txt ${DEPLOY_DIR_IMAGE}/license-SINIT-ACMs.txt
-}
-IMAGE_POSTPROCESS_COMMAND += "tboot_install_files; "
-
 # Install Xen in the installer image.
 # This is a legacy procedure as the installer does not require Xen to run,
 # presumably this was done so that users would know immediately before
@@ -153,24 +100,3 @@ xen_install() {
     cp -f ${IMAGE_ROOTFS}/boot/xen.gz ${DEPLOY_DIR_IMAGE}/
 }
 IMAGE_POSTPROCESS_COMMAND += "xen_install; "
-
-# Install the microcode binary blob in the installer image.
-microcode_install() {
-    cp -f ${IMAGE_ROOTFS}/boot/microcode_intel.bin ${DEPLOY_DIR_IMAGE}/microcode_intel.bin
-}
-IMAGE_POSTPROCESS_COMMAND += "microcode_install; "
-
-# Install Answerfiles used to configure the OpenXT installer.
-openxt_install_answerfiles() {
-    for i in ${WORKDIR}/*.ans ; do
-        cp -f ${i} ${DEPLOY_DIR_IMAGE}/${IMAGE_LINK_NAME}/netboot/
-    done
-}
-IMAGE_POSTPROCESS_COMMAND += "openxt_install_answerfiles; "
-
-# Re-enable do_fetch/do_unpack to fetch image specific configuration files
-# (see SRC_URI).
-python () {
-    d.delVarFlag("do_fetch", "noexec");
-    d.delVarFlag("do_unpack", "noexec");
-}
