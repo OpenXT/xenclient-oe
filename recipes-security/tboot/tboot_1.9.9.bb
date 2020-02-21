@@ -27,12 +27,12 @@ SRC_URI[md5sum] = "b5b235ddcecceb3663975e28be16d0d9"
 SRC_URI[sha256sum] = "ae6edcb3f7dcc86993e297108886ae2b2808fab29d1fd29678eafd10bc181185"
 
 do_compile() {
-	oe_runmake SUBDIRS="tboot" CC="${HOST_PREFIX}gcc ${TOOLCHAIN_OPTIONS}" CPP="${HOST_PREFIX}cpp ${TOOLCHAIN_OPTIONS}"
-	if [ "${TBOOT_TARGET_ARCH}" != "x86_32" ]; then
-                # Safestringlib is built statically by tboot right before and
-		# TBoot is always 32bit (-m32 -march=i686).
-		# Clean and rebuild for now.
-		oe_runmake SUBDIRS="safestringlib" clean
-	fi
-	oe_runmake SUBDIRS="safestringlib lcptools lcptools-v2 tb_polgen utils pcr-calc" TARGET_ARCH="${TBOOT_TARGET_ARCH}"
+    oe_runmake SUBDIRS="tboot" CC="${HOST_PREFIX}gcc ${TOOLCHAIN_OPTIONS}" CPP="${HOST_PREFIX}cpp ${TOOLCHAIN_OPTIONS}"
+    if [ "${TBOOT_TARGET_ARCH}" != "x86_32" ]; then
+        # Safestringlib is built statically by tboot right before and
+        # TBoot is always 32bit (-m32 -march=i686).
+        # Clean and rebuild for now.
+        oe_runmake SUBDIRS="safestringlib" clean
+    fi
+    oe_runmake SUBDIRS="safestringlib lcptools lcptools-v2 tb_polgen utils pcr-calc" TARGET_ARCH="${TBOOT_TARGET_ARCH}"
 }
