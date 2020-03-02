@@ -21,8 +21,6 @@ inherit allarch deploy
 do_install () {
     ${S}/install part1 ${D}/install
     ${S}/install part2 ${D}
-    # base-files provides a run directory and we should not conflict
-    mv -f ${D}/run ${D}/run.installer
 }
 
 do_deploy() {
@@ -37,6 +35,8 @@ do_deploy() {
         install -m 0644 "${WORKDIR}/${f}" "${DEPLOYDIR}/netboot/${f}"
     done
 
+    tar --exclude=./install \
+        -C ${D} -cjf ${DEPLOYDIR}/control.tar.bz2 .
 }
 addtask do_deploy after do_install before do_build
 
