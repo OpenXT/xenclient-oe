@@ -9,11 +9,10 @@
  
  #if WITH_WWAN
  # include "applet-device-broadband.h"
-@@ -64,6 +65,34 @@ extern gboolean with_appindicator;
+@@ -64,6 +65,32 @@ extern gboolean with_appindicator;
  
  G_DEFINE_TYPE (NMApplet, nma, G_TYPE_APPLICATION)
  
-+
 +GDBusConnection *menu_bus;
 +
 +enum {
@@ -32,19 +31,18 @@
 +    const guint y_ordinate,
 +    gpointer user_data);
 +
-+
 +static gboolean on_handle_close_network_menu (
 +    OpenXTNmapplet *object,
 +    GDBusMethodInvocation *invocation,
 +    gpointer user_data);
 +
-+static void nma_context_menu_create (GtkMenuShell *menu, NMApplet *applet);
++static void nma_context_menu_populate (GtkMenuShell *menu, NMApplet *applet);
 +static void nma_context_menu_update (NMApplet *applet);
 +
  /********************************************************************/
  
- static inline NMADeviceClass *
-@@ -1304,14 +1333,19 @@ nma_menu_device_get_menu_item (NMDevice
+ static gboolean
+@@ -1319,14 +1346,19 @@ nma_menu_device_get_menu_item (NMDevice
  	case NM_DEVICE_STATE_ACTIVATED:
  	{
  		struct AppletDeviceMenuInfo *info = g_new0 (struct AppletDeviceMenuInfo, 1);
@@ -56,31 +54,31 @@
 -		g_signal_connect_data (item, "activate",
 -		                       G_CALLBACK (applet_device_disconnect_db),
 -		                       info,
--		                       (GClosureNotify) applet_device_info_destroy, 0);
+-		                       applet_device_info_destroy, 0);
 -		gtk_widget_set_sensitive (item, TRUE);
 +
 +		if (devtype != NM_DEVICE_TYPE_ETHERNET) {
 +			item = gtk_menu_item_new_with_label (_("Disconnect"));
 +			g_signal_connect_data (item, "activate",
-+						G_CALLBACK (applet_device_disconnect_db),
-+						info,
-+						(GClosureNotify) applet_device_info_destroy, 0);
++			                       G_CALLBACK (applet_device_disconnect_db),
++			                       info,
++			                       (GClosureNotify) applet_device_info_destroy, 0);
 +			gtk_widget_set_sensitive (item, TRUE);
 +		}
  		break;
  	}
  	default:
-@@ -1443,6 +1477,9 @@ nma_menu_add_vpn_submenu (GtkWidget *men
+@@ -1458,6 +1490,9 @@ nma_menu_add_vpn_submenu (GtkWidget *men
  	GPtrArray *list;
  	int i;
  
 +	/* Don't show VPN menu */
 +	return;
 +
- 	nma_menu_add_separator_item (menu);
- 
  	vpn_menu = GTK_MENU (gtk_menu_new ());
-@@ -1537,30 +1574,6 @@ nma_set_networking_enabled_cb (GtkWidget
+ 
+ 	item = GTK_MENU_ITEM (gtk_menu_item_new_with_mnemonic (_("_VPN Connections")));
+@@ -1550,30 +1585,6 @@ nma_set_networking_enabled_cb (GtkWidget
  	nm_client_networking_set_enabled (applet->nm_client, state, NULL);
  }
  
@@ -111,67 +109,65 @@
  static gboolean
  has_usable_wifi (NMApplet *applet)
  {
-@@ -1606,19 +1619,22 @@ static void nma_menu_show_cb (GtkWidget
+@@ -1619,18 +1630,19 @@ static void nma_menu_show_cb (GtkWidget
  
  	if (nm_client_get_state (applet->nm_client) == NM_STATE_ASLEEP) {
  		nma_menu_add_text_item (menu, _("Networking disabled"));
 -		return;
--	}
 +	} else {
- 
--	nma_menu_add_devices (menu, applet);
--	nma_menu_add_vpn_submenu (menu, applet);
 +		nma_menu_add_devices (menu, applet);
-+		nma_menu_add_vpn_submenu (menu, applet);
- 
--	if (has_usable_wifi (applet)) {
--		/* Add the "Hidden Wi-Fi network..." entry */
--		nma_menu_add_separator_item (menu);
--		nma_menu_add_hidden_network_item (menu, applet);
--		nma_menu_add_create_network_item (menu, applet);
 +		if (has_usable_wifi (applet)) {
 +			/* Add the "Hidden Wi-Fi network..." entry */
-+			nma_menu_add_separator_item (menu);
 +			nma_menu_add_hidden_network_item (menu, applet);
 +			nma_menu_add_create_network_item (menu, applet);
++			nma_menu_add_separator_item (menu);
 +		}
++		nma_menu_add_vpn_submenu (menu, applet);
  	}
  
-+	nma_context_menu_create (GTK_MENU_SHELL (menu), applet);
+-	nma_menu_add_devices (menu, applet);
+-
+-	if (has_usable_wifi (applet)) {
+-		/* Add the "Hidden Wi-Fi network..." entry */
+-		nma_menu_add_hidden_network_item (menu, applet);
+-		nma_menu_add_create_network_item (menu, applet);
+-		nma_menu_add_separator_item (menu);
+-	}
+-	nma_menu_add_vpn_submenu (menu, applet);
++	nma_context_menu_populate (GTK_MENU_SHELL (menu), applet);
 +	nma_context_menu_update (applet);
-+
+ 
  	if (!INDICATOR_ENABLED (applet))
  		gtk_widget_show_all (menu);
- }
-@@ -1793,15 +1809,12 @@ applet_connection_info_cb (NMApplet *app
-  * Generate the contextual popup menu.
+@@ -1808,16 +1820,13 @@ applet_connection_info_cb (NMApplet *app
+  * Populate the contextual popup menu.
   *
   */
--static GtkWidget *nma_context_menu_create (NMApplet *applet)
-+static void nma_context_menu_create (GtkMenuShell *menu, NMApplet *applet)
+-static void nma_context_menu_populate (NMApplet *applet, GtkMenu *menu)
++static void nma_context_menu_populate (GtkMenuShell *menu_shell, NMApplet *applet)
  {
--	GtkMenuShell *menu;
+-	GtkMenuShell *menu_shell;
  	guint id;
  	static gboolean icons_shown = FALSE;
  
--	g_return_val_if_fail (applet != NULL, NULL);
--
--	menu = GTK_MENU_SHELL (gtk_menu_new ());
-+	g_assert (applet != NULL);
+ 	g_return_if_fail (applet != NULL);
  
+-	menu_shell = GTK_MENU_SHELL (menu);
+-
  	if (G_UNLIKELY (icons_shown == FALSE)) {
- 		GtkSettings *settings = gtk_widget_get_settings (GTK_WIDGET (menu));
-@@ -1811,6 +1824,7 @@ static GtkWidget *nma_context_menu_creat
+ 		GtkSettings *settings = gtk_widget_get_settings (GTK_WIDGET (menu_shell));
+ 
+@@ -1826,6 +1835,7 @@ static void nma_context_menu_populate (N
  			g_object_set (G_OBJECT (settings), "gtk-menu-images", TRUE, NULL);
  		icons_shown = TRUE;
  	}
-+	nma_menu_add_separator_item (GTK_WIDGET (menu));
++	nma_menu_add_separator_item (GTK_WIDGET (menu_shell));
  
  	/* 'Enable Networking' item */
  	applet->networking_enabled_item = gtk_check_menu_item_new_with_mnemonic (_("Enable _Networking"));
-@@ -1841,19 +1855,6 @@ static GtkWidget *nma_context_menu_creat
+@@ -1856,19 +1866,6 @@ static void nma_context_menu_populate (N
  
- 	nma_menu_add_separator_item (GTK_WIDGET (menu));
+ 	nma_menu_add_separator_item (GTK_WIDGET (menu_shell));
  
 -	if (!INDICATOR_ENABLED (applet)) {
 -		/* Toggle notifications item */
@@ -181,20 +177,20 @@
 -			                   G_CALLBACK (nma_set_notifications_enabled_cb),
 -			                   applet);
 -		applet->notifications_enabled_toggled_id = id;
--		gtk_menu_shell_append (menu, applet->notifications_enabled_item);
+-		gtk_menu_shell_append (menu_shell, applet->notifications_enabled_item);
 -
--		nma_menu_add_separator_item (GTK_WIDGET (menu));
+-		nma_menu_add_separator_item (GTK_WIDGET (menu_shell));
 -	}
 -
  	/* 'Connection Information' item */
  	applet->info_menu_item = gtk_menu_item_new_with_mnemonic (_("Connection _Information"));
  	g_signal_connect_swapped (applet->info_menu_item,
-@@ -1870,21 +1871,6 @@ static GtkWidget *nma_context_menu_creat
+@@ -1885,19 +1882,6 @@ static void nma_context_menu_populate (N
  				   applet);
- 	gtk_menu_shell_append (menu, applet->connections_menu_item);
+ 	gtk_menu_shell_append (menu_shell, applet->connections_menu_item);
  
 -	/* Separator */
--	nma_menu_add_separator_item (GTK_WIDGET (menu));
+-	nma_menu_add_separator_item (GTK_WIDGET (menu_shell));
 -
 -	if (!INDICATOR_ENABLED (applet)) {
 -		/* About item */
@@ -202,16 +198,23 @@
 -
 -		menu_item = gtk_menu_item_new_with_mnemonic (_("_About"));
 -		g_signal_connect_swapped (menu_item, "activate", G_CALLBACK (applet_about_dialog_show), applet);
--		gtk_menu_shell_append (menu, menu_item);
+-		gtk_menu_shell_append (menu_shell, menu_item);
 -	}
 -
--	gtk_widget_show_all (GTK_WIDGET (menu));
--
--	return GTK_WIDGET (menu);
+-	gtk_widget_show_all (GTK_WIDGET (menu_shell));
  }
  
  typedef struct {
-@@ -2930,6 +2916,55 @@ applet_agent_cancel_secrets_cb (AppletAg
+@@ -2034,7 +2018,7 @@ applet_update_menu (gpointer user_data)
+ 	if (INDICATOR_ENABLED (applet)) {
+ 		nma_menu_show_cb (GTK_WIDGET (menu), applet);
+ 		nma_menu_add_separator_item (GTK_WIDGET (menu));
+-		nma_context_menu_populate (applet, menu);
++		nma_context_menu_populate (GTK_MENU_SHELL (menu), applet);
+ 		nma_context_menu_update (applet);
+ 	} else
+ 		nma_menu_show_cb (GTK_WIDGET (menu), applet);
+@@ -2989,6 +2973,54 @@ applet_agent_cancel_secrets_cb (AppletAg
  	}
  }
  
@@ -240,7 +243,6 @@
 +	if (applet->menu)
 +		g_object_unref (applet->menu);
 +
-+
 +	/* And make a fresh new one */
 +	applet->menu = gtk_menu_new ();
 +	/* Sink the ref so we can explicitly destroy the menu later */
@@ -267,8 +269,8 @@
  /*****************************************************************************/
  
  static void nma_icons_free (NMApplet *applet)
-@@ -3113,11 +3148,6 @@ status_icon_popup_menu_cb (GtkStatusIcon
- 	 * of the notification. 
+@@ -3174,11 +3206,6 @@ status_icon_popup_menu_cb (GtkStatusIcon
+ 	 * of the notification.
  	 */
  	applet_clear_notify (applet);
 -
@@ -279,18 +281,20 @@
  }
  
  static gboolean
-@@ -3150,10 +3180,6 @@ setup_widgets (NMApplet *applet)
+@@ -3213,12 +3240,6 @@ setup_widgets (NMApplet *applet)
  				  G_CALLBACK (status_icon_activate_cb), applet);
  		g_signal_connect (applet->status_icon, "popup-menu",
  				  G_CALLBACK (status_icon_popup_menu_cb), applet);
 -
--		applet->context_menu = nma_context_menu_create (applet);
+-		menu = GTK_MENU (gtk_menu_new ());
+-		nma_context_menu_populate (applet, menu);
+-		applet->context_menu = GTK_WIDGET (menu);
 -		if (!applet->context_menu)
 -			return FALSE;
  	}
  
  	return TRUE;
-@@ -3169,6 +3195,105 @@ applet_embedded_cb (GObject *object, GPa
+@@ -3234,6 +3255,108 @@ applet_embedded_cb (GObject *object, GPa
  }
  
  static void
@@ -315,11 +319,12 @@
 +                                             gpointer user_data)
 +{
 +	NMApplet *applet = user_data;
-+	if (applet != NULL) {
++
++	if (applet != NULL)
 +		g_signal_emit (applet, signals[POPUP_NETWORK_MENU], 0, x_ordinate, y_ordinate);
-+	} else {
++	else
 +		g_warning("OpenXT: Couldn't popup network menu: applet is NULL");
-+	}
++
 +	open_xt_nmapplet_complete_popup_network_menu(interface, invocation);
 +
 +	return TRUE;
@@ -330,8 +335,10 @@
 +                                             gpointer user_data)
 +{
 +	NMApplet *applet = user_data;
++
 +	if (applet != NULL)
 +		g_signal_emit (applet, signals[CLOSE_NETWORK_MENU], 0);
++
 +	open_xt_nmapplet_complete_close_network_menu(interface, invocation);
 +
 +	return TRUE;
@@ -396,7 +403,7 @@
  register_agent (NMApplet *applet)
  {
  	GError *error = NULL;
-@@ -3264,6 +3389,11 @@ applet_startup (GApplication *app, gpoin
+@@ -3329,6 +3452,11 @@ applet_startup (GApplication *app, gpoin
  	if (!notify_is_initted ())
  		notify_init ("NetworkManager");
  
@@ -408,7 +415,7 @@
  	/* Initialize device classes */
  	applet->ethernet_class = applet_device_ethernet_get_class (applet);
  	g_assert (applet->ethernet_class);
-@@ -3358,5 +3488,23 @@ static void nma_class_init (NMAppletClas
+@@ -3423,5 +3551,23 @@ static void nma_class_init (NMAppletClas
  	GObjectClass *oclass = G_OBJECT_CLASS (klass);
  
  	oclass->finalize = finalize;
@@ -434,18 +441,18 @@
  
 --- a/src/applet.h
 +++ b/src/applet.h
-@@ -52,6 +52,8 @@
+@@ -56,6 +56,8 @@
  
  typedef struct {
- 	GApplicationClass	parent_class;
+ 	GApplicationClass parent_class;
 +	void (*popup_network_menu) (AppletAgent *self, unsigned int x, unsigned int y);
 +	void (*close_network_menu) (AppletAgent *self);
- } NMAppletClass; 
+ } NMAppletClass;
  
- #define APPLET_PREFS_SCHEMA "org.gnome.nm-applet"
-@@ -66,6 +68,9 @@ typedef struct {
- #define ICON_LAYER_VPN 1
- #define ICON_LAYER_MAX ICON_LAYER_VPN
+ #define APPLET_PREFS_SCHEMA                       "org.gnome.nm-applet"
+@@ -70,6 +72,9 @@ typedef struct {
+ #define ICON_LAYER_VPN                            1
+ #define ICON_LAYER_MAX                            ICON_LAYER_VPN
  
 +#define APPLET_CLOSE_NETWORK_MENU "close-network-menu"
 +#define APPLET_POPUP_NETWORK_MENU "popup-network-menu"
@@ -453,14 +460,14 @@
  typedef struct NMADeviceClass NMADeviceClass;
  
  /*
---- a/src/Makefile.am
-+++ b/src/Makefile.am
-@@ -27,6 +27,8 @@ nm_applet_SOURCES = \
- 	main.c \
- 	applet.c \
- 	applet.h \
-+	popup-menu.c \
-+	popup-menu.h \
- 	applet-agent.c \
- 	applet-agent.h \
- 	applet-vpn-request.c \
+--- a/Makefile.am
++++ b/Makefile.am
+@@ -945,6 +945,8 @@ nm_applet_hc_real = \
+ 	src/main.c \
+ 	src/applet.c \
+ 	src/applet.h \
++	src/popup-menu.c \
++	src/popup-menu.h \
+ 	src/applet-agent.c \
+ 	src/applet-agent.h \
+ 	src/applet-vpn-request.c \

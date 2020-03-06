@@ -14,7 +14,10 @@ DEPENDS = " \
     hkg-mtl \
     hkg-network \
 "
-RDEPENDS_${PN} += "glibc-gconv-utf-32"
+RDEPENDS_${PN} += " \
+    glibc-gconv-utf-32 \
+    iproute2 \
+"
 
 PV = "0+git${SRCPV}"
 SRCREV = "${AUTOREV}"
@@ -40,13 +43,13 @@ do_configure_append() {
     xc-rpcgen --haskell --templates-dir=${STAGING_RPCGENDATADIR_NATIVE} --server -o ${S}/Rpc/Autogen --module-prefix=Rpc.Autogen ${STAGING_IDLDATADIR}/network_nm.xml
 
     # NetworkManager objects (stored in the network-manager specific directory)
-    xc-rpcgen --haskell --templates-dir=${STAGING_RPCGENDATADIR_NATIVE} --client -o ${S}/Rpc/Autogen --module-prefix=Rpc.Autogen ${STAGING_NMIDLDATADIR}/nm-manager.xml -n NmManager
-    xc-rpcgen --haskell --templates-dir=${STAGING_RPCGENDATADIR_NATIVE} --client -o ${S}/Rpc/Autogen --module-prefix=Rpc.Autogen ${STAGING_NMIDLDATADIR}/nm-device.xml -n NmDevice
-    xc-rpcgen --haskell --templates-dir=${STAGING_RPCGENDATADIR_NATIVE} --client -o ${S}/Rpc/Autogen --module-prefix=Rpc.Autogen ${STAGING_NMIDLDATADIR}/nm-device-ethernet.xml -n NmDeviceEthernet
-    xc-rpcgen --haskell --templates-dir=${STAGING_RPCGENDATADIR_NATIVE} --client -o ${S}/Rpc/Autogen --module-prefix=Rpc.Autogen ${STAGING_NMIDLDATADIR}/nm-device-wifi.xml -n NmDeviceWifi
-    xc-rpcgen --haskell --templates-dir=${STAGING_RPCGENDATADIR_NATIVE} --client -o ${S}/Rpc/Autogen --module-prefix=Rpc.Autogen ${STAGING_NMIDLDATADIR}/nm-device-modem.xml -n NmDeviceModem
-    xc-rpcgen --haskell --templates-dir=${STAGING_RPCGENDATADIR_NATIVE} --client -o ${S}/Rpc/Autogen --module-prefix=Rpc.Autogen ${STAGING_NMIDLDATADIR}/nm-access-point.xml  -n NmAccessPoint
-    xc-rpcgen --haskell --templates-dir=${STAGING_RPCGENDATADIR_NATIVE} --client -o ${S}/Rpc/Autogen --module-prefix=Rpc.Autogen ${STAGING_NMIDLDATADIR}/nm-active-connection.xml -n NmActiveConnection
+    xc-rpcgen --haskell --templates-dir=${STAGING_RPCGENDATADIR_NATIVE} --client -o ${S}/Rpc/Autogen --module-prefix=Rpc.Autogen ${STAGING_NMIDLDATADIR}/org.freedesktop.NetworkManager.xml -n NmManager
+    xc-rpcgen --haskell --templates-dir=${STAGING_RPCGENDATADIR_NATIVE} --client -o ${S}/Rpc/Autogen --module-prefix=Rpc.Autogen ${STAGING_NMIDLDATADIR}/org.freedesktop.NetworkManager.Device.xml -n NmDevice
+    xc-rpcgen --haskell --templates-dir=${STAGING_RPCGENDATADIR_NATIVE} --client -o ${S}/Rpc/Autogen --module-prefix=Rpc.Autogen ${STAGING_NMIDLDATADIR}/org.freedesktop.NetworkManager.Device.Wired.xml -n NmDeviceEthernet
+    xc-rpcgen --haskell --templates-dir=${STAGING_RPCGENDATADIR_NATIVE} --client -o ${S}/Rpc/Autogen --module-prefix=Rpc.Autogen ${STAGING_NMIDLDATADIR}/org.freedesktop.NetworkManager.Device.Wireless.xml -n NmDeviceWifi
+    xc-rpcgen --haskell --templates-dir=${STAGING_RPCGENDATADIR_NATIVE} --client -o ${S}/Rpc/Autogen --module-prefix=Rpc.Autogen ${STAGING_NMIDLDATADIR}/org.freedesktop.NetworkManager.Device.Modem.xml -n NmDeviceModem
+    xc-rpcgen --haskell --templates-dir=${STAGING_RPCGENDATADIR_NATIVE} --client -o ${S}/Rpc/Autogen --module-prefix=Rpc.Autogen ${STAGING_NMIDLDATADIR}/org.freedesktop.NetworkManager.AccessPoint.xml -n NmAccessPoint
+    xc-rpcgen --haskell --templates-dir=${STAGING_RPCGENDATADIR_NATIVE} --client -o ${S}/Rpc/Autogen --module-prefix=Rpc.Autogen ${STAGING_NMIDLDATADIR}/org.freedesktop.NetworkManager.Connection.Active.xml -n NmActiveConnection
 
     xc-rpcgen --haskell --templates-dir=${STAGING_RPCGENDATADIR_NATIVE} -o Rpc/Autogen --module-prefix=Rpc.Autogen ${STAGING_IDLDATADIR}/dbus.xml
 }

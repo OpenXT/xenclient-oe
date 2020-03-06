@@ -1,16 +1,16 @@
 #OpenXT:Use WPA-PSK mechanism to authenticate on a WLAN connection.
 --- a/configure.ac
 +++ b/configure.ac
-@@ -142,6 +142,10 @@ GLIB_CONFIG_NMA
- GLIB_GSETTINGS
- AC_PATH_PROG(GLIB_COMPILE_RESOURCES, glib-compile-resources)
+@@ -120,6 +120,10 @@ else
+     AC_DEFINE_UNQUOTED([MOBILE_BROADBAND_PROVIDER_INFO_DATABASE],["$prefix/share/mobile-broadband-provider-info/serviceproviders.xml"],[Mobile Broadband Service Provider Information Database location])
+ fi
  
 +dnl Add libcrypto for PKCS5_PBKDF2_HMAC_SHA1
 +dnl OpenXT patch always-use-psk-hash.patch
 +PKG_CHECK_MODULES(OPENSSL, libcrypto libssl,, AC_MSG_ERROR([openssl cannot be found.]))
 +
  dnl
- dnl Compiler flags
+ dnl API documentation
  dnl
 --- a/src/wireless-security/ws-wpa-psk.c
 +++ b/src/wireless-security/ws-wpa-psk.c
@@ -22,7 +22,7 @@
  
  #define WPA_PMK_LEN 32
  
-@@ -122,6 +123,17 @@ add_to_size_group (WirelessSecurity *par
+@@ -104,6 +105,17 @@ add_to_size_group (WirelessSecurity *par
  	gtk_size_group_add_widget (group, widget);
  }
  
@@ -40,7 +40,7 @@
  static void
  fill_connection (WirelessSecurity *parent, NMConnection *connection)
  {
-@@ -148,6 +160,18 @@ fill_connection (WirelessSecurity *paren
+@@ -130,6 +142,18 @@ fill_connection (WirelessSecurity *paren
  	widget = GTK_WIDGET (gtk_builder_get_object (parent->builder, "wpa_psk_entry"));
  	passwd_entry = widget;
  	key = gtk_entry_get_text (GTK_ENTRY (widget));
@@ -59,37 +59,57 @@
  	g_object_set (s_wireless_sec, NM_SETTING_WIRELESS_SECURITY_PSK, key, NULL);
  
  	/* Save PSK_FLAGS to the connection */
---- a/src/wireless-security/Makefile.am
-+++ b/src/wireless-security/Makefile.am
-@@ -45,6 +45,7 @@ libwireless_security_libnm_glib_la_CPPFL
- 	$(GTK_CFLAGS) \
- 	-DNETWORKMANAGER_COMPILATION=NM_NETWORKMANAGER_COMPILATION_LIB_LEGACY \
+--- a/Makefile.am
++++ b/Makefile.am
+@@ -298,12 +298,14 @@ src_wireless_security_libwireless_securi
+ 	"-I$(srcdir)/src/libnma" \
+ 	-Isrc/libnma \
+ 	$(GTK3_CFLAGS) \
+-	$(LIBNM_CFLAGS)
++	$(LIBNM_CFLAGS) \
++	$(OPENSSL_CFLAGS)
+ 
+ src_wireless_security_libwireless_security_libnm_la_LIBADD = \
+ 	src/utils/libutils-libnm.la \
+ 	$(GTK3_LIBS) \
+-	$(LIBNM_LIBS)
++	$(LIBNM_LIBS) \
++	$(OPENSSL_LIBS)
+ 
+ $(src_wireless_security_libwireless_security_libnm_la_OBJECTS): $(wireless_security_h_gen)
+ 
+@@ -325,12 +327,14 @@ src_wireless_security_libwireless_securi
+ 	"-I$(srcdir)/src/utils" \
+ 	"-I$(srcdir)/src/libnma" \
+ 	-Isrc/libnma \
+-	$(LIBNM_GLIB_CFLAGS)
++	$(LIBNM_GLIB_CFLAGS) \
++	$(OPENSSL_CFLAGS)
+ 
+ src_wireless_security_libwireless_security_libnm_glib_la_LIBADD = \
+ 	src/utils/libutils-libnm-glib.la \
+ 	$(GTK3_LIBS) \
+-	$(LIBNM_GLIB_LIBS)
++	$(LIBNM_GLIB_LIBS) \
++	$(OPENSSL_LIBS)
+ 
+ $(src_wireless_security_libwireless_security_libnm_glib_la_OBJECTS): $(wireless_security_h_gen)
+ 
+@@ -422,13 +426,15 @@ src_libnm_gtk_libnm_gtk_la_CFLAGS = \
+ 	-Isrc/libnma \
+ 	$(GTK3_CFLAGS) \
  	$(LIBNM_GLIB_CFLAGS) \
-+	$(OPENSSL_CFLAGS) \
- 	"-I${top_srcdir}/shared/" \
- 	-I${top_srcdir}/src/utils \
- 	-I${top_srcdir}/src/libnma
-@@ -52,6 +53,7 @@ libwireless_security_libnm_glib_la_CPPFL
- libwireless_security_libnm_glib_la_LIBADD = \
- 	$(GTK_LIBS) \
+-	$(GUDEV_CFLAGS)
++	$(GUDEV_CFLAGS) \
++	$(OPENSSL_CFLAGS)
+ 
+ src_libnm_gtk_libnm_gtk_la_LIBADD = \
+ 	src/wireless-security/libwireless-security-libnm-glib.la \
+ 	$(GTK3_LIBS) \
  	$(LIBNM_GLIB_LIBS) \
-+	$(OPENSSL_LIBS) \
- 	${top_builddir}/src/utils/libutils-libnm-glib.la
+-	$(GUDEV_LIBS)
++	$(GUDEV_LIBS) \
++	$(OPENSSL_LIBS)
  
- libwireless_security_libnm_la_SOURCES = \
-@@ -60,6 +62,7 @@ libwireless_security_libnm_la_SOURCES =
- libwireless_security_libnm_la_CPPFLAGS = \
- 	$(GTK_CFLAGS) \
- 	$(LIBNM_CFLAGS) \
-+	$(OPENSSL_CFLAGS) \
- 	"-I${top_srcdir}/shared/" \
- 	-I${top_srcdir}/src/utils \
- 	-I${top_srcdir}/src/libnma
-@@ -67,6 +70,7 @@ libwireless_security_libnm_la_CPPFLAGS =
- libwireless_security_libnm_la_LIBADD = \
- 	$(GTK_LIBS) \
- 	$(LIBNM_LIBS) \
-+	$(OPENSSL_LIBS) \
- 	${top_builddir}/src/utils/libutils-libnm.la
+ EXTRA_src_libnm_gtk_libnm_gtk_la_DEPENDENCIES = src/libnm-gtk/libnm-gtk.ver
  
- ws-resources.h: $(srcdir)/ws.gresource.xml
