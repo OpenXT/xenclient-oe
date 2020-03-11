@@ -5,7 +5,7 @@ DEPENDS = " \
     dbus-native \
     ocaml-dbus \
     xen-ocaml-libs \
-    xenclient-toolstack \
+    openxt-ocaml-libs \
 "
 
 PV = "0+git${SRCPV}"

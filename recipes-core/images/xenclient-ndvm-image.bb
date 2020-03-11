@@ -53,7 +53,6 @@ IMAGE_INSTALL = " \
     dbus \
     xenclient-dbusbouncer \
     networkmanager \
-    xenclient-toolstack \
     linux-firmware-iwlwifi \
     linux-firmware-bnx2 \
     bridge-utils \
@@ -71,6 +70,8 @@ IMAGE_INSTALL = " \
     modemmanager \
     ppp \
     iputils-ping \
+    dbd-tools-vm \
+    xen-vif-scripts-ndvm \
 "
 
 require xenclient-version.inc

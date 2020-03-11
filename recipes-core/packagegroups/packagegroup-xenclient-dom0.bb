@@ -36,7 +36,7 @@ RDEPENDS_${PN} = " \
     ovmf-firmware \
     xcpmd \
     vbetool \
-    xenclient-toolstack \
+    xen-vif-scripts-dom0 \
     xenclient-input-daemon \
     xenclient-dom0-tweaks \
     xenclient-splash-images \
@@ -107,7 +107,7 @@ RDEPENDS_${PN} = " \
     xen-xenstore \
     tpm2-tss \
     tpm2-tools \
-    ${@bb.utils.contains('DISTRO_FEATURES', 'blktap2', 'xen-blktap xen-libblktapctl xen-libvhd', 'blktap3 tapback', d)} \
+    ${@bb.utils.contains('DISTRO_FEATURES', 'blktap2', 'xen-blktap xen-libblktapctl xen-libvhd xen-legacy-block-scripts xen-tap-scripts', 'blktap3 tapback', d)} \
     pesign \
     ipxe \
 "
