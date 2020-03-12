@@ -17,6 +17,7 @@ IMAGE_INSTALL = " \
     tpm2-tools \
     initramfs-module-functions \
     initramfs-module-lvm \
+    initramfs-module-udev \
     initramfs-module-bootfs \
     initramfs-module-tpm \
     initramfs-module-tpm2 \
