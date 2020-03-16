@@ -82,6 +82,7 @@ FILES_${PN} += " \
     ${sysconfdir}/init.d/* \
 "
 RDEPENDS_${PN} += "bash"
+RRECOMMENDS_${PN} += "dbd-tools"
 
 FILES_${PN}-tools = " \
     ${bindir}/db-cmd \
