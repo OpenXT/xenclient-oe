@@ -1,26 +1,15 @@
 --- a/drivers/gpu/drm/i915/Makefile
 +++ b/drivers/gpu/drm/i915/Makefile
-@@ -71,6 +71,7 @@ i915-y += i915_cmd_parser.o \
- 	  i915_gem_shrinker.o \
- 	  i915_gem_stolen.o \
- 	  i915_gem_tiling.o \
-+	  i915_gem_foreign.o \
- 	  i915_gem_userptr.o \
- 	  i915_gemfs.o \
- 	  i915_query.o \
---- a/drivers/gpu/drm/i915/i915_drv.h
-+++ b/drivers/gpu/drm/i915/i915_drv.h
-@@ -3295,6 +3295,8 @@ unsigned long i915_gem_shrink(struct drm
- 			      unsigned long target,
- 			      unsigned long *nr_scanned,
- 			      unsigned flags);
-+int i915_gem_foreign_ioctl(struct drm_device *dev, void *data,
-+			   struct drm_file *file);
- #define I915_SHRINK_PURGEABLE 0x1
- #define I915_SHRINK_UNBOUND 0x2
- #define I915_SHRINK_BOUND 0x4
+@@ -123,6 +123,7 @@ gem-y += \
+ 	gem/i915_gem_stolen.o \
+ 	gem/i915_gem_throttle.o \
+ 	gem/i915_gem_tiling.o \
++	gem/i915_gem_foreign.o \
+ 	gem/i915_gem_userptr.o \
+ 	gem/i915_gem_wait.o \
+ 	gem/i915_gemfs.o
 --- /dev/null
-+++ b/drivers/gpu/drm/i915/i915_gem_foreign.c
++++ b/drivers/gpu/drm/i915/gem/i915_gem_foreign.c
 @@ -0,0 +1,423 @@
 +/*
 + * Copyright © 2013 Citrix Systems, Inc.
@@ -50,7 +39,7 @@
 +#include <drm/i915_drm.h>
 +#include "i915_drv.h"
 +#include "i915_trace.h"
-+#include "intel_drv.h"
++#include "i915_gem_object.h"
 +#include <linux/mmu_notifier.h>
 +#include <linux/swap.h>
 +#include <linux/gfp.h>
@@ -269,7 +258,7 @@
 +	return ret;
 +}
 +
-+static int 
++static int
 +i915_gem_foreign_get_pages(struct drm_i915_gem_object *obj)
 +{
 +	struct i915_gem_foreign *fo = &obj->foreign;
@@ -409,7 +398,7 @@
 +	if (size > dev_priv->ggtt.vm.total)
 +		return -E2BIG;
 +
-+	obj = i915_gem_object_alloc(dev_priv);
++	obj = i915_gem_object_alloc();
 +	if (obj == NULL)
 +		return -ENOMEM;
 +
@@ -445,42 +434,25 @@
 +	args->handle = handle;
 +	return 0;
 +}
---- a/drivers/gpu/drm/i915/i915_gem_object.h
-+++ b/drivers/gpu/drm/i915/i915_gem_object.h
-@@ -280,6 +280,14 @@ struct drm_i915_gem_object {
- 
- 	/** for phys allocated objects */
- 	struct drm_dma_handle *phys_handle;
-+	
-+	struct i915_gem_foreign {
-+		uint32_t flags;                 /* foreign region flags. */
-+		unsigned long *mfns;            /* mfns "rent" from the guest */
-+		size_t num_pages;               /* number of pages rented. */
-+		unsigned long *mfns_ovr;        /* dom0 mfns overriden, used for reset. */
-+		struct page **pvec;             /* vector of struct page backing the "rent" region. */
-+	} foreign;
- 
- 	struct reservation_object __builtin_resv;
- };
 --- a/include/uapi/drm/i915_drm.h
 +++ b/include/uapi/drm/i915_drm.h
-@@ -319,6 +319,7 @@ typedef struct _drm_i915_sarea {
- #define DRM_I915_PERF_ADD_CONFIG	0x37
- #define DRM_I915_PERF_REMOVE_CONFIG	0x38
+@@ -359,6 +359,7 @@ typedef struct _drm_i915_sarea {
  #define DRM_I915_QUERY			0x39
-+#define DRM_I915_GEM_FOREIGN		0x3a
+ #define DRM_I915_GEM_VM_CREATE		0x3a
+ #define DRM_I915_GEM_VM_DESTROY		0x3b
++#define DRM_I915_GEM_FOREIGN		0x3c
+ /* Must be kept compact -- no holes */
  
  #define DRM_IOCTL_I915_INIT		DRM_IOW( DRM_COMMAND_BASE + DRM_I915_INIT, drm_i915_init_t)
- #define DRM_IOCTL_I915_FLUSH		DRM_IO ( DRM_COMMAND_BASE + DRM_I915_FLUSH)
-@@ -377,6 +378,7 @@ typedef struct _drm_i915_sarea {
- #define DRM_IOCTL_I915_PERF_ADD_CONFIG	DRM_IOW(DRM_COMMAND_BASE + DRM_I915_PERF_ADD_CONFIG, struct drm_i915_perf_oa_config)
- #define DRM_IOCTL_I915_PERF_REMOVE_CONFIG	DRM_IOW(DRM_COMMAND_BASE + DRM_I915_PERF_REMOVE_CONFIG, __u64)
+@@ -421,6 +422,7 @@ typedef struct _drm_i915_sarea {
  #define DRM_IOCTL_I915_QUERY			DRM_IOWR(DRM_COMMAND_BASE + DRM_I915_QUERY, struct drm_i915_query)
+ #define DRM_IOCTL_I915_GEM_VM_CREATE	DRM_IOWR(DRM_COMMAND_BASE + DRM_I915_GEM_VM_CREATE, struct drm_i915_gem_vm_control)
+ #define DRM_IOCTL_I915_GEM_VM_DESTROY	DRM_IOW (DRM_COMMAND_BASE + DRM_I915_GEM_VM_DESTROY, struct drm_i915_gem_vm_control)
 +#define DRM_IOCTL_I915_GEM_FOREIGN		DRM_IOWR (DRM_COMMAND_BASE + DRM_I915_GEM_FOREIGN, struct drm_i915_gem_foreign)
  
  /* Allow drivers to submit batchbuffers directly to hardware, relying
   * on the security mechanisms provided by hardware.
-@@ -1429,6 +1431,14 @@ struct drm_i915_reset_stats {
+@@ -1808,6 +1810,14 @@ struct drm_i915_reset_stats {
  	__u32 pad;
  };
  
@@ -497,11 +469,38 @@
  	__u64 user_size;
 --- a/drivers/gpu/drm/i915/i915_drv.c
 +++ b/drivers/gpu/drm/i915/i915_drv.c
-@@ -2866,6 +2866,7 @@ static const struct drm_ioctl_desc i915_
- 	DRM_IOCTL_DEF_DRV(I915_PERF_ADD_CONFIG, i915_perf_add_config_ioctl, DRM_UNLOCKED|DRM_RENDER_ALLOW),
- 	DRM_IOCTL_DEF_DRV(I915_PERF_REMOVE_CONFIG, i915_perf_remove_config_ioctl, DRM_UNLOCKED|DRM_RENDER_ALLOW),
- 	DRM_IOCTL_DEF_DRV(I915_QUERY, i915_query_ioctl, DRM_UNLOCKED|DRM_RENDER_ALLOW),
+@@ -2855,6 +2855,7 @@ static const struct drm_ioctl_desc i915_
+ 	DRM_IOCTL_DEF_DRV(I915_QUERY, i915_query_ioctl, DRM_RENDER_ALLOW),
+ 	DRM_IOCTL_DEF_DRV(I915_GEM_VM_CREATE, i915_gem_vm_create_ioctl, DRM_RENDER_ALLOW),
+ 	DRM_IOCTL_DEF_DRV(I915_GEM_VM_DESTROY, i915_gem_vm_destroy_ioctl, DRM_RENDER_ALLOW),
 +	DRM_IOCTL_DEF_DRV(I915_GEM_FOREIGN, i915_gem_foreign_ioctl, DRM_RENDER_ALLOW),
  };
  
  static struct drm_driver driver = {
+--- a/drivers/gpu/drm/i915/gem/i915_gem_ioctls.h
++++ b/drivers/gpu/drm/i915/gem/i915_gem_ioctls.h
+@@ -48,5 +48,7 @@ int i915_gem_userptr_ioctl(struct drm_de
+ 			   struct drm_file *file);
+ int i915_gem_wait_ioctl(struct drm_device *dev, void *data,
+ 			struct drm_file *file);
++int i915_gem_foreign_ioctl(struct drm_device *dev, void *data,
++			   struct drm_file *file);
+ 
+ #endif
+--- a/drivers/gpu/drm/i915/gem/i915_gem_object_types.h
++++ b/drivers/gpu/drm/i915/gem/i915_gem_object_types.h
+@@ -240,6 +240,14 @@ struct drm_i915_gem_object {
+ 
+ 		void *gvt_info;
+ 	};
++
++	struct i915_gem_foreign {
++		uint32_t flags;                 /* foreign region flags. */
++		unsigned long *mfns;            /* mfns "rent" from the guest */
++		size_t num_pages;               /* number of pages rented. */
++		unsigned long *mfns_ovr;        /* dom0 mfns overriden, used for reset. */
++		struct page **pvec;             /* vector of struct page backing the "rent" region. */
++	} foreign;
+ };
+ 
+ static inline struct drm_i915_gem_object *

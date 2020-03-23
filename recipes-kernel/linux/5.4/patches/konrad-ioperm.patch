@@ -45,28 +45,22 @@ PATCHES
 ################################################################################
 --- a/arch/x86/include/asm/paravirt.h
 +++ b/arch/x86/include/asm/paravirt.h
-@@ -257,11 +257,18 @@ static inline void write_idt_entry(gate_
- {
- 	PVOP_VCALL3(pv_cpu_ops.write_idt_entry, dt, entry, g);
- }
-+
- static inline void set_iopl_mask(unsigned mask)
- {
- 	PVOP_VCALL1(pv_cpu_ops.set_iopl_mask, mask);
+@@ -299,6 +299,12 @@ static inline void set_iopl_mask(unsigne
+ 	PVOP_VCALL1(cpu.set_iopl_mask, mask);
  }
  
 +static inline void set_io_bitmap(struct thread_struct *thread,
 +				 unsigned long bytes_updated)
 +{
-+	PVOP_VCALL2(pv_cpu_ops.set_io_bitmap, thread, bytes_updated);
++	PVOP_VCALL2(cpu.set_io_bitmap, thread, bytes_updated);
 +}
 +
- /* The paravirtualized I/O functions */
- static inline void slow_down_io(void)
+ static inline void paravirt_activate_mm(struct mm_struct *prev,
+ 					struct mm_struct *next)
  {
 --- a/arch/x86/include/asm/paravirt_types.h
 +++ b/arch/x86/include/asm/paravirt_types.h
-@@ -139,6 +139,8 @@ struct pv_cpu_ops {
+@@ -141,6 +141,8 @@ struct pv_cpu_ops {
  	void (*load_sp0)(unsigned long sp0);
  
  	void (*set_iopl_mask)(unsigned mask);
@@ -74,10 +68,10 @@ PATCHES
 +			      unsigned long bytes_updated);
  
  	void (*wbinvd)(void);
- 	void (*io_delay)(void);
+ 
 --- a/arch/x86/include/asm/processor.h
 +++ b/arch/x86/include/asm/processor.h
-@@ -549,6 +549,9 @@ static inline void native_set_iopl_mask(
+@@ -534,6 +534,9 @@ static inline void native_set_iopl_mask(
  #endif
  }
  
@@ -87,27 +81,22 @@ PATCHES
  static inline void
  native_load_sp0(unsigned long sp0)
  {
-@@ -588,7 +591,16 @@ static inline void load_sp0(unsigned lon
- 	native_load_sp0(sp0);
+@@ -574,6 +577,12 @@ static inline void load_sp0(unsigned lon
  }
  
--#define set_iopl_mask native_set_iopl_mask
-+static inline void set_iopl_mask(unsigned mask)
-+{
-+	native_set_iopl_mask(mask);
-+}
+ #define set_iopl_mask native_set_iopl_mask
 +
 +static inline void set_io_bitmap(struct thread_struct *thread,
 +				 unsigned long updated_bytes)
 +{
 +	native_set_io_bitmap(thread, updated_bytes);
 +}
- #endif /* CONFIG_PARAVIRT */
+ #endif /* CONFIG_PARAVIRT_XXL */
  
  /* Free all resources held by a thread. */
 --- a/arch/x86/kernel/ioport.c
 +++ b/arch/x86/kernel/ioport.c
-@@ -20,6 +20,23 @@
+@@ -21,6 +21,23 @@
  #include <asm/syscalls.h>
  #include <asm/desc.h>
  
@@ -131,7 +120,7 @@ PATCHES
  /*
   * this changes the io permissions bitmap in the current task.
   */
-@@ -61,13 +78,13 @@ long ksys_ioperm(unsigned long from, uns
+@@ -63,13 +80,13 @@ long ksys_ioperm(unsigned long from, uns
  	}
  
  	/*
@@ -148,7 +137,7 @@ PATCHES
  
  	if (turn_on)
  		bitmap_clear(t->io_bitmap_ptr, from, num);
-@@ -88,10 +105,9 @@ long ksys_ioperm(unsigned long from, uns
+@@ -90,10 +107,9 @@ long ksys_ioperm(unsigned long from, uns
  
  	t->io_bitmap_max = bytes;
  
@@ -163,17 +152,17 @@ PATCHES
  }
 --- a/arch/x86/kernel/paravirt.c
 +++ b/arch/x86/kernel/paravirt.c
-@@ -380,6 +380,7 @@ __visible struct pv_cpu_ops pv_cpu_ops =
- 	.swapgs = native_swapgs,
+@@ -342,6 +342,7 @@ struct paravirt_patch_template pv_ops =
+ 	.cpu.swapgs		= native_swapgs,
  
- 	.set_iopl_mask = native_set_iopl_mask,
-+	.set_io_bitmap = native_set_io_bitmap,
- 	.io_delay = native_io_delay,
+ 	.cpu.set_iopl_mask	= native_set_iopl_mask,
++	.cpu.set_io_bitmap	= native_set_io_bitmap,
  
- 	.start_context_switch = paravirt_nop,
+ 	.cpu.start_context_switch	= paravirt_nop,
+ 	.cpu.end_context_switch		= paravirt_nop,
 --- a/arch/x86/kernel/process.c
 +++ b/arch/x86/kernel/process.c
-@@ -111,16 +111,12 @@ void exit_thread(struct task_struct *tsk
+@@ -114,16 +114,12 @@ void exit_thread(struct task_struct *tsk
  	struct fpu *fpu = &t->fpu;
  
  	if (bp) {
@@ -193,7 +182,7 @@ PATCHES
  		kfree(bp);
  	}
  
-@@ -258,26 +254,10 @@ static inline void switch_to_bitmap(stru
+@@ -273,26 +269,10 @@ static inline void switch_to_bitmap(stru
  				    struct thread_struct *next,
  				    unsigned long tifp, unsigned long tifn)
  {
@@ -226,7 +215,7 @@ PATCHES
  #ifdef CONFIG_SMP
 --- a/arch/x86/xen/enlighten_pv.c
 +++ b/arch/x86/xen/enlighten_pv.c
-@@ -839,6 +839,18 @@ void xen_set_iopl_mask(unsigned mask)
+@@ -846,6 +846,18 @@ void xen_set_iopl_mask(unsigned mask)
  	HYPERVISOR_physdev_op(PHYSDEVOP_set_iopl, &set_iopl);
  }
  
@@ -245,7 +234,7 @@ PATCHES
  static void xen_io_delay(void)
  {
  }
-@@ -1060,6 +1072,7 @@ static const struct pv_cpu_ops xen_cpu_o
+@@ -1057,6 +1069,7 @@ static const struct pv_cpu_ops xen_cpu_o
  	.load_sp0 = xen_load_sp0,
  
  	.set_iopl_mask = xen_set_iopl_mask,
