@@ -239,7 +239,7 @@ PATCHES
 +int blktap_device_pause(struct blktap *);
 +int blktap_device_resume(struct blktap *tap);
 +void blktap_device_run_queue(struct blktap *);
-+void blktap_device_end_request(struct blktap *, struct blktap_request *, int);
++void blktap_device_end_request(struct blktap *, struct blktap_request *, blk_status_t);
 +
 +int blktap_page_pool_init(struct kobject *);
 +void blktap_page_pool_exit(void);
@@ -742,7 +742,7 @@ PATCHES
 +/* NB. err == 0 indicates success, failures < 0 */
 +
 +static inline void
-+__blktap_end_queued_rq(struct request *rq, int err)
++__blktap_end_queued_rq(struct request *rq, blk_status_t err)
 +{
 +	rq->cmd_flags |= RQF_QUIET;
 +	blk_mq_start_request(rq);
@@ -750,13 +750,13 @@ PATCHES
 +}
 +
 +static inline void
-+__blktap_end_rq(struct request *rq, int err)
++__blktap_end_rq(struct request *rq, blk_status_t err)
 +{
 +	blk_mq_end_request(rq, err);
 +}
 +
 +static inline void
-+blktap_end_rq(struct request *rq, int err)
++blktap_end_rq(struct request *rq, blk_status_t err)
 +{
 +	struct request_queue *q = rq->q;
 +
@@ -768,7 +768,7 @@ PATCHES
 +void
 +blktap_device_end_request(struct blktap *tap,
 +			  struct blktap_request *request,
-+			  int error)
++			  blk_status_t error)
 +{
 +	struct blktap_device *tapdev = &tap->device;
 +	struct request *rq = request->rq;
@@ -1853,7 +1853,7 @@ PATCHES
 +		"request %d [%p] response: %d\n",
 +		request->usr_idx, request, rsp->status);
 +
-+	err = rsp->status == BLKTAP_RSP_OKAY ? 0 : -EIO;
++	err = rsp->status == BLKTAP_RSP_OKAY ? BLK_STS_OK : BLK_STS_IOERR;
 +end_request:
 +	blktap_device_end_request(tap, request, err);
 +	return;
@@ -1918,7 +1918,7 @@ PATCHES
 +			continue;
 +
 +		request->rq->cmd_flags |= RQF_QUIET;
-+		blktap_device_end_request(tap, request, -EIO);
++		blktap_device_end_request(tap, request, BLK_STS_IOERR);
 +	}
 +}
 +
