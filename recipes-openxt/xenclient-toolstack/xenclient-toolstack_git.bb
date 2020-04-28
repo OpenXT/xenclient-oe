@@ -63,7 +63,9 @@ S = "${WORKDIR}/git"
 # TODO: ocamlc can figure it out in the build-system.
 CFLAGS_append = " -I${ocamlincdir}"
 do_compile() {
-        make V=1 XEN_DIST_ROOT="${STAGING_DIR_HOST}"
+    make V=1 \
+        XEN_DIST_ROOT="${STAGING_DIR_HOST}" \
+        OCAMLMKLIB="ocamlmklib -ldopt '--sysroot=${STAGING_DIR_TARGET} ${LDFLAGS}'"
 }
 
 OCAML_INSTALL_LIBS = " \
@@ -94,7 +96,7 @@ do_install() {
         for ocaml_lib in ${OCAML_INSTALL_LIBS}; do
             # Use of DESTDIR is not consistent here.
             # root Makefile sur $(DESTDIR)/usr/bin while libs use $(DESTDIR)/$(ocamlfind printconf destdir)
-                oe_runmake -C $ocaml_lib V=1 install
+            oe_runmake -C $ocaml_lib V=1 install
         done
 }
 

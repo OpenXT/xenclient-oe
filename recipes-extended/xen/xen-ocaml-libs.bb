@@ -89,16 +89,8 @@ do_compile() {
 		       LDLIBS_libxenevtchn='-lxenevtchn' \
 		       -C tools subdir-all-libxl
 
-    # ocamlopt/ocamlc -cc argument will treat everything following it as the
-    # executable name, so wrap everything.
-    cat - > ocaml-cc.sh <<EOF
-#! /bin/sh
-exec ${CC} "\$@"
-EOF
-    chmod +x ocaml-cc.sh
-
     oe_runmake V=1 \
-       CC="${B}/ocaml-cc.sh" \
+       OCAMLMKLIB="ocamlmklib -ldopt '--sysroot=${STAGING_DIR_TARGET} ${LDFLAGS}'" \
        LDLIBS_libxenctrl='-lxenctrl' \
        LDLIBS_libxenstore='-lxenstore' \
        LDLIBS_libblktapctl='-lblktapctl' \

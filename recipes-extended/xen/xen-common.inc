@@ -115,6 +115,7 @@ SRC_URI_append = " \
     file://argo-add-viptables.patch \
     file://libxl-seabios-ipxe.patch \
     file://memory-scrub-on-domain-shutdown.patch \
+    file://ocaml-makefiles-sysroot.patch \
 "
 
 COMPATIBLE_HOST = 'i686-oe-linux|(x86_64.*).*-linux|aarch64.*-linux'
