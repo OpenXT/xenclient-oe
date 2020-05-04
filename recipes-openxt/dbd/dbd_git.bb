@@ -40,8 +40,6 @@ do_configure() {
     xc-rpcgen --camel --templates-dir=${STAGING_RPCGENDATADIR_NATIVE} -c -o ${B}/autogen ${STAGING_IDLDATADIR}/dbus.xml
 }
 
-PARALLEL_MAKE=""
-
 do_install() {
     oe_runmake DESTDIR="${D}" install
 
