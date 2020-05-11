@@ -16,19 +16,10 @@ SRC_URI = " \
     file://db.default \
 "
 
-RDEPENDS_${PN} += "bash"
-
 S = "${WORKDIR}/git/dbd"
 
-inherit update-rc.d haskell ocaml findlib xc-rpcgen
+inherit update-rc.d ocaml findlib xc-rpcgen
 
-INITSCRIPT_NAME = "dbd"
-INITSCRIPT_PARAMS = "defaults 25"
-
-FILES_${PN} += " \
-    ${datadir}/xenclient/db.default \
-    ${sysconfdir}/init.d/* \
-"
 
 do_configure() {
     # generate rpc stubs
@@ -41,16 +32,25 @@ do_configure() {
 }
 
 do_compile() {
-    make V=1 XEN_DIST_ROOT="${STAGING_DIR}" TARGET_PREFIX="${TARGET_PREFIX}" STAGING_DIR="${STAGING_DIR}" STAGING_BINDIR_CROSS="${STAGING_BINDIR_CROSS}" STAGING_LIBDIR="${STAGING_LIBDIR}" STAGING_INCDIR="${STAGING_INCDIR}" all
+    oe_runmake V=1 XEN_DIST_ROOT="${STAGING_DIR}" all
 }
 
 do_install() {
     # findlib.bbclass will create ${D}${sitelibdir} for generic ocamlfind
     # compliance with bitbake. This does not ship any library though.
     rm -rf ${D}${libdir}
-    make DESTDIR=${D} V=1 install
+    oe_runmake V=1 DESTDIR="${D}" install
     install -m 0755 -d ${D}${sysconfdir}/init.d
     install -m 0755 ${WORKDIR}/dbd.initscript ${D}${sysconfdir}/init.d/dbd
     install -m 0755 -d ${D}/usr/share/xenclient
     install -m 0644 ${WORKDIR}/db.default ${D}/usr/share/xenclient/db.default
 }
+
+INITSCRIPT_NAME = "dbd"
+INITSCRIPT_PARAMS = "defaults 25"
+
+FILES_${PN} += " \
+    ${datadir}/xenclient/db.default \
+    ${sysconfdir}/init.d/* \
+"
+RDEPENDS_${PN} += "bash"
