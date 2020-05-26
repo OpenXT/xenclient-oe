@@ -55,7 +55,6 @@ IMAGE_INSTALL += "\
     packagegroup-xenclient-xfce-minimal \
     openssh \
     packagegroup-base \
-    xenfb2 \
     kernel-modules \
     argo-module \
     libargo \
