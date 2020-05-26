@@ -46,9 +46,6 @@ SRC_URI += " \
     file://policy/modules/services/icbinn.fc \
     file://policy/modules/services/icbinn.if \
     file://policy/modules/services/icbinn.te \
-    file://policy/modules/services/input-server.fc \
-    file://policy/modules/services/input-server.if \
-    file://policy/modules/services/input-server.te \
     file://policy/modules/services/language-sync.fc \
     file://policy/modules/services/language-sync.if \
     file://policy/modules/services/language-sync.te \
@@ -134,7 +131,6 @@ SRC_URI += " \
     file://patches/blktap-interfaces.diff \
     file://patches/db-cmd-interfaces.diff \
     file://patches/dbd-interfaces.diff \
-    file://patches/input-server-interfaces.diff \
     file://patches/network-daemon-interfaces.diff \
     file://patches/statusreport-interfaces.diff \
     file://patches/stubdom-helpers-interfaces.diff \
