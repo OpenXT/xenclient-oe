@@ -88,7 +88,6 @@ IMAGE_INSTALL += "\
     glibc-gconv-libjis \
     glibc-gconv-euc-jp \
     mobile-broadband-provider-info \
-    shutdown-screen \
     ttf-dejavu-sans \
     ttf-dejavu-sans-mono \
     uim \
