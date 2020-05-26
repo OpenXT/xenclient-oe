@@ -26,7 +26,6 @@ SRC_URI += "${KERNELORG_MIRROR}/linux/kernel/v${PV_MAJOR}.x/linux-${PV}.tar.xz;n
     file://xenbus-move-otherend-watches-on-relocate.patch \
     file://netfront-support-backend-relocate.patch \
     file://konrad-ioperm.patch \
-    file://fbcon-do-not-drag-detect-primary-option.patch \
     file://usbback-base.patch \
     file://hvc-kgdb-fix.patch \
     file://pciback-restrictive-attr.patch \
