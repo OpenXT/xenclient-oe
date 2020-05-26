@@ -40,7 +40,6 @@ RDEPENDS_${PN} = " \
     ovmf-firmware \
     xcpmd \
     xen-vif-scripts-dom0 \
-    xenclient-input-daemon \
     xenclient-dom0-tweaks \
     xenclient-splash-images \
     xenclient-config-access \
