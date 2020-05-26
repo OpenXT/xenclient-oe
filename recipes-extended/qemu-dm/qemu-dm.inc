@@ -127,7 +127,6 @@ EXTRA_OECONF += " \
     --disable-tpm \
     --enable-pie \
     --enable-werror \
-    --enable-surfman \
     --enable-atapi-pt \
     --enable-atapi-pt-argo \
     --enable-readonly-ide \

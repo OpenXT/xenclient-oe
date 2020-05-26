@@ -94,7 +94,6 @@ RDEPENDS_${PN} = " \
     libicbinn-server \
     screen \
     xenclient-pcrdiff \
-    drm-surfman-plugin \
     eject \
     linux-input \
     iputils-ping \
@@ -102,8 +101,6 @@ RDEPENDS_${PN} = " \
     xenmgr-data \
     updatemgr \
     uid \
-    surfman \
-    linuxfb-surfman-plugin \
     xenmgr \
     xen-tools-xenstore \
     tpm2-tss \
