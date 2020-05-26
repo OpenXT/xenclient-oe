@@ -58,9 +58,6 @@ SRC_URI += " \
     file://policy/modules/services/rpcproxy.fc \
     file://policy/modules/services/rpcproxy.if \
     file://policy/modules/services/rpcproxy.te \
-    file://policy/modules/services/surfman.fc \
-    file://policy/modules/services/surfman.if \
-    file://policy/modules/services/surfman.te \
     file://policy/modules/services/uid.fc \
     file://policy/modules/services/uid.if \
     file://policy/modules/services/uid.te \
@@ -141,7 +138,6 @@ SRC_URI += " \
     file://patches/network-daemon-interfaces.diff \
     file://patches/statusreport-interfaces.diff \
     file://patches/stubdom-helpers-interfaces.diff \
-    file://patches/surfman-interfaces.diff \
     file://patches/sysutils-interfaces.diff \
     file://patches/tcs-interfaces.diff \
     file://patches/tpmsetup-interfaces.diff \
