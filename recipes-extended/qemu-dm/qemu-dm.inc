@@ -10,7 +10,6 @@ DEPENDS = " \
     libargo \
     zlib \
     libcap-ng \
-    libdmbus \
     pixman \
 "
 
@@ -43,7 +42,6 @@ SRC_URI += "file://0001-configure-use-valid-args-testing-sem_timedwait.patch \
             file://generic-xenstore-extensions.patch \
             file://readonly-ide.patch \
             file://hvm-param-dm-domain.patch \
-            file://dmbus.patch \
             file://switcher.patch \
             file://acpi.patch \
             file://xenmou.patch \
@@ -62,7 +60,6 @@ SRC_URI += "file://0001-configure-use-valid-args-testing-sem_timedwait.patch \
             file://acpi-wakeup.patch \
             file://openxt-misc-fixes.patch \
             file://qmp-argo-char-driver.patch \
-            file://exit-mainloop-on-reset.patch \
             file://write-acpi-state-to-xenstore.patch \
             file://set-blockdev-ro.patch \
             file://block-remove-unused-block-format-support.patch \
