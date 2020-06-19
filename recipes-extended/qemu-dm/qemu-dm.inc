@@ -42,14 +42,12 @@ SRC_URI += "file://0001-configure-use-valid-args-testing-sem_timedwait.patch \
             file://generic-xenstore-extensions.patch \
             file://readonly-ide.patch \
             file://hvm-param-dm-domain.patch \
-            file://switcher.patch \
             file://acpi.patch \
-            file://xenmou.patch \
+            file://argo-configure.patch \
             file://atapi-pass-through.patch \
             file://vbe-xt-extensions.patch \
             file://vga-spinlock.patch \
             file://vga-shadow-bda.patch \
-            file://surfman-dcl.patch \
             file://audio-policy.patch \
             file://msix-cap-disable.patch \
             file://openxtaudio.patch \
