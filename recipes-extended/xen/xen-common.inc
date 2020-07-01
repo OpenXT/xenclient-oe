@@ -1,16 +1,8 @@
-LIC_FILES_CHKSUM := "file://COPYING;md5=bbb4b1bdc2c3b6743da3c39d03249095"
-require xen-version.inc
-
-PV = "${XEN_PV}"
-
-SRCREV = "${XEN_SRCREV}"
-SRC_URI = "git://xenbits.xen.org/xen.git;branch=${XEN_BRANCH}"
+FILESEXTRAPATHS_prepend := "${THISDIR}/files:"
 
 # XSA patches take precedence and belong at the head of the queue.
 # This ensures that any collisions with other patches get addressed
 # by modifying the OpenXT-specific patches, not the XSA patches.
-
-require ${@bb.utils.contains('DISTRO_FEATURES', 'blktap2', 'xen-blktap2.inc', 'xen-blktap3.inc', d)}
 
 SRC_URI_append = " \
     file://defconfig \
@@ -94,8 +86,28 @@ SRC_URI_append = " \
     file://libxl-block-scripts-log-to-syslog.patch \
     file://domain-reboot.patch \
     file://libxl-retry-qmp-pci-add.patch \
-    ${BLKTAP_PATCHQUEUE} \
-    file://efi-hardcode-openxt-cfg.patch \
+    ${@bb.utils.contains('DISTRO_FEATURES', 'blktap2', \
+       'file://blktap-resume-fix.patch \
+        file://blktap2-miscellaneous-oxt-fixes.patch \
+        file://blktap2-libvhd-atomic-write-helpers.patch \
+        file://blktap2-vhd-marker-flag.patch \
+        file://blktap2-vhd-print-allocated-virtblock-list.patch \
+        file://blktap2-tap-ctl-optional-pid-ro-mount.patch \
+        file://blktap2-vhd-keyhash-support.patch \
+        file://blktap2-vhd-encryption-support.patch \
+        file://blktap2-vhd-icbinn-support.patch \
+        file://blktap2-libxl-crypto-key-dir.patch \
+        file://blktap2-newer-openssl.patch \
+        file://blktap2-fix-warnings.patch \
+    ', \
+       'file://libxl-blktap3-support.patch \
+        file://libxl-crypto-key-dir.patch \
+        file://libxl-blktap3-do-not-destroy-in-use-tapdevs.patch \
+        file://libxl-blktap3-iso-hotswap.patch \
+        file://enable-blktap3-within-tree.patch \
+        file://blktap3-build-integration.patch \
+    ', d) \
+  } file://efi-hardcode-openxt-cfg.patch \
     file://shim-support-for-shim-lock-measure.patch \
     file://efi-require-shim.patch \
     file://tboot-measure-and-launch-from-xen-efi.patch \
@@ -110,32 +122,13 @@ SRC_URI_append = " \
     file://ocaml-makefiles-sysroot.patch \
 "
 
-COMPATIBLE_HOST = 'i686-oe-linux|(x86_64.*).*-linux|aarch64.*-linux'
-
 PACKAGECONFIG =+ "xsm"
 PACKAGECONFIG =+ "hvm"
 
-S = "${WORKDIR}/git"
-
-TUNE_CCARGS := "${@oe.utils.str_filter_out('-msse3', '${TUNE_CCARGS}', d)}"
-
 #--
-# Override meta-virtualization's path to seabios and add ovmf:
+# Add ovmf binary path
 PACKAGECONFIG[hvm] = "--with-system-seabios="/usr/share/firmware/bios.bin" --with-system-ovmf="/usr/share/firmware/ovmf.bin",--disable-seabios,seabios ipxe vgabios ovmf,"
 
-#--
-# Modifications to the meta-virtualiation configuration (ref: OXT-1016)
-
-# The stubs and deploy tasks are detected as MACHINE-specific due to the
-# variables that they use. Those tasks are not required here so drop them.
-
-deltask stubs
+# The deploy task is detected as MACHINE-specific due to the variables it uses.
+# The task is not required here so drop it.
 deltask deploy
-
-do_configure_append() {
-    if [ ! -e ${STAGING_INCDIR}/bits/long-double-32.h ]; then
-        cp ${STAGING_INCDIR}/bits/long-double-64.h ${STAGING_INCDIR}/bits/long-double-32.h
-        cp ${STAGING_INCDIR}/gnu/stubs-64.h ${STAGING_INCDIR}/gnu/stubs-32.h
-    fi
-}
-#--

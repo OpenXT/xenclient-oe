@@ -1,17 +1,17 @@
 DESCRIPTION = "XSM Policy"
 LICENSE = "GPLv2"
-LIC_FILES_CHKSUM="file://COPYING;md5=4641e94ec96f98fabc56ff9cc48be14b"
 DEPENDS += "checkpolicy-native"
-PROVIDES = "xen-xsm-policy"
 
-S = "${WORKDIR}/git"
-
-require xen-version.inc
-
+XEN_REL ?= "4.12"
 PV = "${XEN_REL}+git${SRCPV}"
 
 SRCREV = "${AUTOREV}"
+
 SRC_URI = "git://${OPENXT_GIT_MIRROR}/xsm-policy.git;protocol=${OPENXT_GIT_PROTOCOL};branch=${OPENXT_BRANCH}"
+
+LIC_FILES_CHKSUM="file://COPYING;md5=4641e94ec96f98fabc56ff9cc48be14b"
+
+S = "${WORKDIR}/git"
 
 FILES_${PN} += "/etc/xen/refpolicy/policy/policy.24"
 
