@@ -10,14 +10,18 @@ RDEPENDS_${PN} = " \
     openssh-sshd-tcp-init \
     util-linux-mount \
     util-linux-umount \
-    xen-console \
-    xen-hvmloader \
-    xen-hypervisor \
+    xen-tools-console \
+    xen-tools-hvmloader \
+    xen \
     xen-efi \
-    xen-flask-tools \
-    xen-xenstat \
-    xen-xenstored \
-    xen-xl \
+    xen-tools-flask-tools \
+    xen-tools-libxenguest \
+    xen-tools-libxenlight \
+    xen-tools-libxenstat \
+    xen-tools-libxlutil \
+    xen-tools-xenstat \
+    virtual/xenstored \
+    xen-tools-xl \
     xen-xsm-policy \
     grub \
     shim \
@@ -104,10 +108,10 @@ RDEPENDS_${PN} = " \
     surfman \
     linuxfb-surfman-plugin \
     xenmgr \
-    xen-xenstore \
+    xen-tools-xenstore \
     tpm2-tss \
     tpm2-tools \
-    ${@bb.utils.contains('DISTRO_FEATURES', 'blktap2', 'xen-blktap xen-libblktapctl xen-libvhd xen-legacy-block-scripts xen-tap-scripts', 'blktap3 tapback', d)} \
+    ${@bb.utils.contains('DISTRO_FEATURES', 'blktap2', 'xen-tools-blktap xen-tools-libblktapctl xen-tools-libvhd xen-legacy-block-scripts xen-tap-scripts', 'xen-tools-blktap3 xen-tools-tapback', d)} \
     pesign \
     ipxe \
 "

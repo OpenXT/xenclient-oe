@@ -27,5 +27,5 @@ RDEPENDS_${PN} += " \
     libtirpc \
     libicbinn \
     libicbinn-client \
-    xen-xenstore \
+    xen-tools-xenstore \
 "

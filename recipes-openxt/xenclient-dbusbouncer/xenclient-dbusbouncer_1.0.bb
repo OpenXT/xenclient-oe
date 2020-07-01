@@ -1,8 +1,8 @@
 DESCRIPTION = "XenClient DBUS socket connections dom0-uivm"
 LICENSE = "GPLv2"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/GPL-2.0;md5=801f80980d171dd6425610833a22dbe6"
-DEPENDS = "libargo"
-RDEPENDS_${PN} += "xen-libxenstore"
+DEPENDS = "libargo xen-tools"
+RDEPENDS_${PN} += "xen-tools-libxenstore"
 
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
