@@ -7,3 +7,5 @@ SRC_URI = "git://xenbits.xen.org/xen.git;branch=${XEN_BRANCH}"
 
 require xen-common.inc
 require xen-openxt.inc
+
+DEFAULT_PREFERENCE = "1"
