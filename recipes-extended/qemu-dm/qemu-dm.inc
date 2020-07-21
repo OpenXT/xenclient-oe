@@ -72,6 +72,8 @@ S = "${WORKDIR}/qemu-${PV}"
 
 inherit autotools-brokensep pkgconfig python3native
 
+require recipes-extended/qemu-dm/qemu-dm-vglass.inc
+
 # Include a minimal amount of blobs by default.
 FILES_${PN} += "/usr/share/qemu/keymaps/en-us       \
                 /usr/share/qemu/keymaps/commons     \
