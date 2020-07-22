@@ -21,7 +21,6 @@ PACKAGES += " \
 
 PROVIDES =+ "virtual/xenstored"
 
-RPROVIDES_${PN}-toolstack-headers = "${PN}-toolstack-headers"
 RPROVIDES_${PN}-xenstored-c += " virtual/xenstored"
 
 FILES_${PN}-cmp-fd-file-inode = "${libdir}/xen/bin/cmp-fd-file-inode"
