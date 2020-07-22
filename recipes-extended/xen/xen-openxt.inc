@@ -13,7 +13,7 @@ EXTRA_OECONF_remove = " \
     --disable-ocamltools \
     --with-initddir=${INIT_D_DIR} \
     --with-sysconfig-leaf-dir=default \
-    --with-system-qemu=/usr/bin/qemu-system-i386 \
+    --with-system-qemu=${bindir}/qemu-system-i386 \
     --disable-qemu-traditional \
 "
 
