@@ -10,7 +10,6 @@ EXTRA_OECONF_remove = " \
     --disable-ioemu-stubdom \
     --disable-pv-grub \
     --disable-xenstore-stubdom \
-    --disable-rombios \
     --disable-ocamltools \
     --with-initddir=${INIT_D_DIR} \
     --with-sysconfig-leaf-dir=default \
