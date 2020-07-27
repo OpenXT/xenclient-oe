@@ -160,6 +160,9 @@ do_install() {
 	# Remove pointless bash script
 	rm ${D}/lib/firmware/configure
 
+	# Remove python script used to check the WHENCE file
+	rm ${D}/lib/firmware/check_whence.py
+
 	# Libertas sd8686
 	ln -sf libertas/sd8686_v9.bin ${D}/lib/firmware/sd8686.bin
 	ln -sf libertas/sd8686_v9_helper.bin ${D}/lib/firmware/sd8686_helper.bin
@@ -193,7 +196,6 @@ PACKAGES =+ "${PN}-ralink-license ${PN}-ralink \
              ${PN}-iwlwifi-8000c \
              ${PN}-iwlwifi-misc \
              ${PN}-i915-license ${PN}-i915 \
-             ${PN}-check-whence \
              ${PN}-license \
              "
 
@@ -416,7 +418,6 @@ FILES_${PN}-iwlwifi-8000c = "/lib/firmware/iwlwifi-8000C-*.ucode"
 FILES_${PN}-iwlwifi-misc = "/lib/firmware/iwlwifi-*.ucode"
 FILES_${PN}-i915 = "/lib/firmware/i915/*.bin"
 FILES_${PN}-i915-license = "/lib/firmware/LICENSE.i915"
-FILES_${PN}-check-whence = "/lib/firmware/check_whence.py"
 
 ALLOW_EMPTY_${PN}-iwlwifi = "1"
 ALLOW_EMPTY_${PN}-iwlwifi-misc = "1"
@@ -444,7 +445,6 @@ RDEPENDS_${PN}-iwlwifi-7260-13 = "${PN}-iwlwifi-license"
 RDEPENDS_${PN}-iwlwifi-8000c = "${PN}-iwlwifi-license"
 RDEPENDS_${PN}-iwlwifi-misc = "${PN}-iwlwifi-license"
 RDEPENDS_${PN}-i915 = "${PN}-i915-license"
-RDEPENDS_${PN}-check-whence = "python"
 
 # For other firmwares
 # Maybe split out to separate packages when needed.
