@@ -75,7 +75,7 @@ SRC_URI[sha256sum] = "98fee0c86b299ebaf08587ba8df1dc8bb7152708d62937a0631875d95c
 
 S = "${WORKDIR}/qemu-${PV}"
 
-inherit autotools-brokensep pkgconfig
+inherit autotools-brokensep pkgconfig python3native
 
 # Include a minimal amount of blobs by default.
 FILES_${PN} += "/usr/share/qemu/keymaps/en-us       \
