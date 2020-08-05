@@ -19,7 +19,7 @@ S = "${WORKDIR}/git"
 require recipes-extended/xen/xen.inc
 require xen-common.inc
 
-inherit ocaml findlib update-rc.d
+inherit ocaml findlib python3native update-rc.d
 
 PACKAGES = " \
     ${PN}-xenstored \
