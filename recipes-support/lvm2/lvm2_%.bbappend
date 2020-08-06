@@ -19,10 +19,12 @@ do_install_append() {
     fi
 }
 
-pkg_postinst_${PN}_append () {
-#! /bin/sh
-install -d /config/etc/lvm
+PACKAGES =+ "${PN}-conf"
+RRECOMMENDS_${PN}_append += "${PN}-conf"
 
-RESTORECON="/sbin/restorecon"
-[ -x "${RESTORECON}" ] && ${RESTORECON} -R -F /config/etc/lvm
-}
+FILES_${PN}-conf = " \
+    ${sysconfdir}/lvm/lvm.conf \
+"
+CONFFILES_${PN}-conf = " \
+    ${sysconfdir}/lvm/lvm.conf \
+"
