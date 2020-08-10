@@ -26,6 +26,7 @@ SRC_URI = " \
     file://0003-Add-Measure-function-to-the-shim-lock-protocol.patch \
     file://0004-Don-t-measure-with-Authenticode.patch \
     file://0005-mokmanager-GCC9-address-of-packed-member.patch \
+    file://0006-Fix-typo-in-EFI-error-codes.patch \
 "
 
 SRCREV = "51413d1deb0df0debdf1d208723131ff0e36d3a3"
