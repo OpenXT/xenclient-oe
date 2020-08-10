@@ -17,20 +17,18 @@ DEPENDS += "\
     gnu-efi-native openssl util-linux-native openssl-native \
 "
 
-PV = "14+git${SRCPV}"
+PV = "15+git${SRCPV}"
 
 SRC_URI = " \
     git://github.com/rhboot/shim;protocol=https;branch=master \
     file://0001-Add-KEEP_DISCARDABLE_RELOC-build-option.patch \
-    file://0002-Make-EFI_INCLUDE-path-configurable-during-make.patch \
+    file://0002-Allow-32-bit-images-for-measurement-verification-via.patch \
     file://0003-Add-Measure-function-to-the-shim-lock-protocol.patch \
-    file://0004-Don-t-overwrite-LoadOptions-if-NULL.patch \
-    file://0005-Allow-32-bit-images-for-measurement-verification-via.patch \
-    file://0006-Don-t-measure-with-Authenticode.patch \
-    file://0007-mokmanager-GCC9-address-of-packed-member.patch \
+    file://0004-Don-t-measure-with-Authenticode.patch \
+    file://0005-mokmanager-GCC9-address-of-packed-member.patch \
 "
 
-SRCREV = "6c8d08c0af4768c715b79c8ec25141d56e34f8b4"
+SRCREV = "51413d1deb0df0debdf1d208723131ff0e36d3a3"
 
 S = "${WORKDIR}/git"
 
