@@ -45,8 +45,8 @@ XSERVER = " \
     xserver-xorg \
     xf86-input-evdev \
     xf86-input-mouse \
-    xf86-video-fbdev \
     xf86-input-keyboard \
+    xf86-video-openxtfb \
 "
 
 IMAGE_INSTALL += "\
@@ -96,6 +96,7 @@ IMAGE_INSTALL += "\
     anthy \
     matchbox-keyboard \
     matchbox-keyboard-im \
+    kernel-module-openxtfb \
 "
 
 require xenclient-version.inc
