@@ -1797,7 +1797,7 @@ PATCHES
 +}
 --- /dev/null
 +++ b/drivers/block/blktap/ring.c
-@@ -0,0 +1,810 @@
+@@ -0,0 +1,809 @@
 +
 +#include <linux/device.h>
 +#include <linux/signal.h>
@@ -1877,9 +1877,7 @@ PATCHES
 +	struct blktap_ring_response rsp;
 +	RING_IDX rc, rp;
 +
-+	down_write(&current->mm->mmap_sem);
 +	if (!ring->vma) {
-+		up_read(&current->mm->mmap_sem);
 +		return;
 +	}
 +
@@ -1893,8 +1891,6 @@ PATCHES
 +	}
 +
 +	ring->ring.rsp_cons = rc;
-+
-+	up_write(&current->mm->mmap_sem);
 +}
 +
 +#define MMAP_VADDR(_start, _req, _seg)				\
@@ -1956,9 +1952,16 @@ PATCHES
 +{
 +	struct blktap_ring *ring = &tap->ring;
 +	unsigned long uaddr;
++	int ret;
++
++	down_write(&ring->vma->vm_mm->mmap_sem);
 +
 +	uaddr = MMAP_VADDR(ring->user_vstart, request->usr_idx, seg);
-+	return vm_insert_page(ring->vma, uaddr, request->pages[seg]);
++	ret = vm_insert_page(ring->vma, uaddr, request->pages[seg]);
++
++	up_write(&ring->vma->vm_mm->mmap_sem);
++
++	return ret;
 +}
 +
 +int
@@ -2247,10 +2250,8 @@ PATCHES
 +{
 +        struct blktap_ring *ring = &tap->ring;
 +
-+        down_read(&current->mm->mmap_sem);
 +        if (ring->ring.sring)
 +                ring->ring.sring->pad[0] = msg;
-+        up_read(&current->mm->mmap_sem);
 +}
 +
 +static long
@@ -2418,10 +2419,8 @@ PATCHES
 +	poll_wait(filp, &tap->pool->wait, wait);
 +	poll_wait(filp, &ring->poll_wait, wait);
 +
-+	down_read(&current->mm->mmap_sem);
 +	if (ring->vma && tap->device.gd)
 +		blktap_device_run_queue(tap);
-+	up_read(&current->mm->mmap_sem);
 +
 +	work = ring->ring.req_prod_pvt - ring->ring.sring->req_prod;
 +	RING_PUSH_REQUESTS(&ring->ring);
