@@ -616,7 +616,7 @@ PATCHES
 +MODULE_LICENSE("Dual BSD/GPL");
 --- /dev/null
 +++ b/drivers/block/blktap/device.c
-@@ -0,0 +1,710 @@
+@@ -0,0 +1,701 @@
 +#include <linux/fs.h>
 +#include <linux/blkdev.h>
 +#include <linux/blk-mq.h>
@@ -838,14 +838,6 @@ PATCHES
 +}
 +
 +static void
-+blktap_device_do_request(struct request_queue *rq)
-+{
-+	struct blktap *tap = rq->queuedata;
-+
-+	blktap_ring_kick_user(tap);
-+}
-+
-+static void
 +blktap_device_restart(struct blktap *tap)
 +{
 +        struct blktap_device *dev;
@@ -862,7 +854,7 @@ PATCHES
 +                        blk_mq_start_hw_queues(rq);
 +
 +                /* Kick things off immediately. */
-+                blktap_device_do_request(rq);
++                blktap_ring_kick_user(tap);
 +        }
 +
 +        spin_unlock_irq(&dev->lock);
@@ -1125,7 +1117,7 @@ PATCHES
 +	}
 +
 +	if (qd->last)
-+		blktap_device_do_request(tapdev->gd->queue);
++		blktap_ring_kick_user(tap);
 +
 +	spin_unlock_irqrestore(&tapdev->lock, flags);
 +	return BLK_STS_OK;
@@ -1149,9 +1141,8 @@ PATCHES
 +static void blktap_commit_rqs(struct blk_mq_hw_ctx *hctx)
 +{
 +	struct blktap *tap = hctx->queue->queuedata;
-+	struct blktap_device *tapdev = &tap->device;
 +
-+	blktap_device_do_request(tapdev->gd->queue);
++	blktap_ring_kick_user(tap);
 +}
 +
 +static const struct blk_mq_ops blktap_mq_ops = {
