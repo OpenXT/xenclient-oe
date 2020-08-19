@@ -30,8 +30,6 @@ SRC_URI_append = " \
     file://openxt-xci-cpuid-signature.patch;patch=1 \
     file://allow-mwait-cstate.patch;patch=1 \
     file://unmap-shared-info.patch;patch=1 \
-    file://foreign-batch-cacheattr.patch;patch=1 \
-    file://allow-pat-cacheattrs-for-all-domains.patch;patch=1 \
     file://opt-disable-vmcs-shadowing.patch;patch=1 \
     file://hvmloader-legacy-seabios-optionroms.patch;patch=1 \
     file://gpt-s3-resume-reason.patch;patch=1 \
@@ -43,7 +41,6 @@ SRC_URI_append = " \
     file://acpi-slic-support.patch \
     file://tboot-xen-evtlog-support.patch \
     file://disable-cpuid-hle-rtm.patch \
-    file://allow-stubdoms-cacheattr-control.patch \
     file://add-xc-hypercall-page.patch \
     file://libxl-do-not-destroy-in-use-tapdevs.patch \
     file://libxl-syslog.patch \
