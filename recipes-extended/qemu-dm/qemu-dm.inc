@@ -45,9 +45,6 @@ SRC_URI += "file://0001-configure-use-valid-args-testing-sem_timedwait.patch \
             file://acpi.patch \
             file://argo-configure.patch \
             file://atapi-pass-through.patch \
-            file://vbe-xt-extensions.patch \
-            file://vga-spinlock.patch \
-            file://vga-shadow-bda.patch \
             file://audio-policy.patch \
             file://msix-cap-disable.patch \
             file://openxtaudio.patch \
