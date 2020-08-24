@@ -8,7 +8,7 @@ DEPENDS = "gtk+3 libnotify libsecret networkmanager \
 "
 
 GNOMEBASEBUILDCLASS = "autotools-brokensep"
-inherit distro_features_check gnomebase gsettings gtk-icon-cache gobject-introspection gettext
+inherit features_check gnomebase gsettings gtk-icon-cache gobject-introspection gettext
 
 REQUIRED_DISTRO_FEATURES = "x11"
 
