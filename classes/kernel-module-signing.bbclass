@@ -17,3 +17,9 @@ do_configure_append() {
                ${B}/.config
     fi
 }
+
+def get_signing_key(d):
+    path = d.getVar("KERNEL_MODULE_SIG_CERT") or os.path.join(d.getVar("STAGING_KERNEL_BUILDDIR"),"certs","signing_key.x509")
+    return path + ":" + str(os.path.exists(path))
+
+do_shared_workdir[file-checksums] = "${@get_signing_key(d)}"
