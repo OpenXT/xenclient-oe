@@ -33,10 +33,6 @@ exec 0< /dev/hvc0
 exec 1> /dev/hvc0
 exec 2> /dev/hvc0
 
-## the modprobe of busybox-static is broken
-## so we have to use insmod directly
-insmod /lib/modules/`uname -r`/extra/xen-argo.ko
-
 sync
 mkdir -p /proc /sys /mnt /tmp
 mount -t proc proc /proc
@@ -51,6 +47,9 @@ for arg in $KERNEL_CMDLINE; do
         *) continue ;;
     esac
 done
+
+modprobe xen-argo
+modprobe ivc
 
 if [ "${LOGLVL}" = "debug" ]; then
     cut -f1,2,3,4,5 -d ' ' /proc/modules
