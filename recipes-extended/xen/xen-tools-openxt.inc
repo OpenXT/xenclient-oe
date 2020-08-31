@@ -16,12 +16,9 @@ RDEPENDS_${PN}-scripts-block += " udev"
 PACKAGES += " \
     ${PN}-cmp-fd-file-inode \
     ${PN}-toolstack-headers \
-    ${PN}-xenstored-c \
     "
 
 PROVIDES =+ "virtual/xenstored"
-
-RPROVIDES_${PN}-xenstored-c += " virtual/xenstored"
 
 FILES_${PN}-cmp-fd-file-inode = "${libdir}/xen/bin/cmp-fd-file-inode"
 
@@ -40,10 +37,10 @@ FILES_${PN}-toolstack-headers = "\
     ${includedir}/xen/libelf/elfstructs.h \
     "
 
-FILES_${PN}-xenstored-c = " \
-    ${sbindir}/xenstored.${PN}-xenstored-c \
+FILES_${PN}-xenstored = " \
+    ${sbindir}/xenstored.${PN}-xenstored \
     ${localstatedir}/lib/xenstored \
-    ${sysconfdir}/init.d/xenstored.${PN}-xenstored-c \
+    ${sysconfdir}/init.d/xenstored.${PN}-xenstored \
     ${sysconfdir}/xen/xenstored.conf \
     "
 
@@ -53,13 +50,13 @@ FILES_${PN}-xl += " ${sysconfdir}/init.d/xen-init-dom0"
 
 INITSCRIPT_PACKAGES =+ " \
     ${PN}-console \
-    ${PN}-xenstored-c \
+    ${PN}-xenstored \
     ${PN}-xl \
 "
 INITSCRIPT_NAME_${PN}-console = "xenconsoled"
 INITSCRIPT_PARAMS_${PN}-console = "defaults 20"
-INITSCRIPT_NAME_${PN}-xenstored-c = "xenstored"
-INITSCRIPT_PARAMS_${PN}-xenstored-c = "defaults 05"
+INITSCRIPT_NAME_${PN}-xenstored = "xenstored"
+INITSCRIPT_PARAMS_${PN}-xenstored = "defaults 05"
 INITSCRIPT_NAME_${PN}-xl = "xen-init-dom0"
 INITSCRIPT_PARAMS_${PN}-xl = "defaults 21"
 INITSCRIPT_NAME_${PN}-xl = "xen-init-dom0"
@@ -67,13 +64,13 @@ INITSCRIPT_PARAMS_${PN}-xl = "defaults 21"
 
 EXTRA_OEMAKE += "ETHERBOOT_ROMS=${STAGING_DIR_HOST}/usr/share/firmware/intel.rom"
 
-pkg_postinst_${PN}-xenstored-c () {
-    update-alternatives --install ${sbindir}/xenstored xenstored xenstored.${PN}-xenstored-c 200
-    update-alternatives --install ${sysconfdir}/init.d/xenstored xenstored-initscript xenstored.${PN}-xenstored-c 200
+pkg_postinst_${PN}-xenstored () {
+    update-alternatives --install ${sbindir}/xenstored xenstored xenstored.${PN}-xenstored 200
+    update-alternatives --install ${sysconfdir}/init.d/xenstored xenstored-initscript xenstored.${PN}-xenstored 200
 }
-pkg_prerm_${PN}-xenstored-c () {
-    update-alternatives --remove xenstored xenstored.${PN}-xenstored-c
-    update-alternatives --remove xenstored-initscript xenstored.${PN}-xenstored-c
+pkg_prerm_${PN}-xenstored () {
+    update-alternatives --remove xenstored xenstored.${PN}-xenstored
+    update-alternatives --remove xenstored-initscript xenstored.${PN}-xenstored
 }
 
 do_install_append() {
@@ -97,13 +94,13 @@ do_install_append() {
     install -m 0755 ${S}/tools/include/xen/libelf/elfstructs.h \
                     ${D}${includedir}/xen/libelf/elfstructs.h
 
-    mv ${D}${sbindir}/xenstored ${D}${sbindir}/xenstored.${PN}-xenstored-c
+    mv ${D}${sbindir}/xenstored ${D}${sbindir}/xenstored.${PN}-xenstored
     install -m 0755 ${WORKDIR}/xenstored.initscript \
-                    ${D}${sysconfdir}/init.d/xenstored.${PN}-xenstored-c
+                    ${D}${sysconfdir}/init.d/xenstored.${PN}-xenstored
 
     # The C xenstored uses one additional command line argument:
     sed 's/EXECUTABLE --/EXECUTABLE --internal-db --/' \
-        -i ${D}${sysconfdir}/init.d/xenstored.${PN}-xenstored-c
+        -i ${D}${sysconfdir}/init.d/xenstored.${PN}-xenstored
 
     # Since we don't have a xenstore stubdomain, remove the
     # xenstore stubdomain init program (libdir == /usr/lib)
