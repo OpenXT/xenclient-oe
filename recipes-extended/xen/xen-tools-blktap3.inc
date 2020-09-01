@@ -111,9 +111,9 @@ do_install_append() {
     if ${@bb.utils.contains('DISTRO_FEATURES', 'systemd', 'false', 'true', d)}; then
         rm -rf ${D}/usr/lib/systemd
     fi
-    install -d ${D}${sysconfdir}/init.d
+    install -d ${D}${INIT_D_DIR}
     install -m 0755 ${WORKDIR}/tapback.initscript \
-                    ${D}${sysconfdir}/init.d/tapback
+                    ${D}${INIT_D_DIR}/tapback
 }
 
 FILES_${PN}-libvhdio = "${libdir}/libvhd.so.*"
@@ -155,7 +155,7 @@ FILES_${PN}-blktap3-dev += " \
 "
 FILES_${PN}-tapback += " \
     ${bindir}/tapback \
-    ${sysconfdir}/init.d/tapback \
+    ${INIT_D_DIR}/tapback \
 "
 
 RDEPENDS_${PN}-blktap3 += "glibc-gconv-utf-16"

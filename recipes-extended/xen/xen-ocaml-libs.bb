@@ -43,7 +43,7 @@ DEPENDS += " \
 FILES_${PN}-xenstored = " \
     ${sbindir}/xenstored.${PN}-xenstored \
     ${localstatedir}/lib/xenstored \
-    ${sysconfdir}/init.d/xenstored.${PN}-xenstored \
+    ${INIT_D_DIR}/xenstored.${PN}-xenstored \
     ${sysconfdir}/xen/oxenstored.conf \
     "
 RPROVIDES_${PN}-xenstored = "virtual/xenstored"
@@ -73,7 +73,7 @@ INITSCRIPT_PARAMS_${PN}-xenstored = "defaults 05"
 
 pkg_postinst_${PN}-xenstored () {
     update-alternatives --install ${sbindir}/xenstored xenstored xenstored.${PN}-xenstored 100
-    update-alternatives --install ${sysconfdir}/init.d/xenstored xenstored-initscript xenstored.${PN}-xenstored 100
+    update-alternatives --install ${INIT_D_DIR}/xenstored xenstored-initscript xenstored.${PN}-xenstored 100
 }
 
 pkg_prerm_${PN}-xenstored () {
@@ -125,9 +125,9 @@ do_install() {
     oe_runmake -C tools/ocaml install
 
     mv ${D}/usr/sbin/oxenstored ${D}/${sbindir}/xenstored.${PN}-xenstored
-    install -d ${D}${sysconfdir}/init.d
+    install -d ${D}${INIT_D_DIR}
     install -m 0755 ${WORKDIR}/xenstored.initscript \
-                    ${D}${sysconfdir}/init.d/xenstored.${PN}-xenstored
+                    ${D}${INIT_D_DIR}/xenstored.${PN}-xenstored
     rm ${D}${sysconfdir}/xen/oxenstored.conf
     install -m 0644 ${WORKDIR}/oxenstored.conf \
                     ${D}${sysconfdir}/xen/oxenstored.conf

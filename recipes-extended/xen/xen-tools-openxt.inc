@@ -23,7 +23,7 @@ PROVIDES =+ "virtual/xenstored"
 FILES_${PN}-cmp-fd-file-inode = "${libdir}/xen/bin/cmp-fd-file-inode"
 
 # OpenXT uses init scripts rather than systemd
-FILES_${PN}-console += "${sysconfdir}/init.d/xenconsoled"
+FILES_${PN}-console += "${INIT_D_DIR}/xenconsoled"
 
 FILES_${PN}-scripts-block += " \
     ${sysconfdir}/udev/rules.d/xen-vbd3-backend.rules \
@@ -40,13 +40,13 @@ FILES_${PN}-toolstack-headers = "\
 FILES_${PN}-xenstored = " \
     ${sbindir}/xenstored.${PN}-xenstored \
     ${localstatedir}/lib/xenstored \
-    ${sysconfdir}/init.d/xenstored.${PN}-xenstored \
+    ${INIT_D_DIR}/xenstored.${PN}-xenstored \
     ${sysconfdir}/xen/xenstored.conf \
     "
 
 # This init script is added by OpenXT and runs the xen-init-dom0 script
 # that meta-virtualization has packaged in the ${PN}-xl package.
-FILES_${PN}-xl += " ${sysconfdir}/init.d/xen-init-dom0"
+FILES_${PN}-xl += " ${INIT_D_DIR}/xen-init-dom0"
 
 INITSCRIPT_PACKAGES =+ " \
     ${PN}-console \
@@ -66,7 +66,7 @@ EXTRA_OEMAKE += "ETHERBOOT_ROMS=${STAGING_DIR_HOST}/usr/share/firmware/intel.rom
 
 pkg_postinst_${PN}-xenstored () {
     update-alternatives --install ${sbindir}/xenstored xenstored xenstored.${PN}-xenstored 200
-    update-alternatives --install ${sysconfdir}/init.d/xenstored xenstored-initscript xenstored.${PN}-xenstored 200
+    update-alternatives --install ${INIT_D_DIR}/xenstored xenstored-initscript xenstored.${PN}-xenstored 200
 }
 pkg_prerm_${PN}-xenstored () {
     update-alternatives --remove xenstored xenstored.${PN}-xenstored
@@ -76,11 +76,11 @@ pkg_prerm_${PN}-xenstored () {
 do_install_append() {
     install -d ${D}${datadir}/pkgconfig
 
-    install -d ${D}${sysconfdir}/init.d
+    install -d ${D}${INIT_D_DIR}
     install -m 0755 ${WORKDIR}/xenconsoled.initscript \
-                    ${D}${sysconfdir}/init.d/xenconsoled
+                    ${D}${INIT_D_DIR}/xenconsoled
     install -m 0755 ${WORKDIR}/xen-init-dom0.initscript \
-                    ${D}${sysconfdir}/init.d/xen-init-dom0
+                    ${D}${INIT_D_DIR}/xen-init-dom0
 
     install -d ${D}${sysconfdir}/xen
     install -m 0644 ${WORKDIR}/xl.conf \
@@ -96,11 +96,11 @@ do_install_append() {
 
     mv ${D}${sbindir}/xenstored ${D}${sbindir}/xenstored.${PN}-xenstored
     install -m 0755 ${WORKDIR}/xenstored.initscript \
-                    ${D}${sysconfdir}/init.d/xenstored.${PN}-xenstored
+                    ${D}${INIT_D_DIR}/xenstored.${PN}-xenstored
 
     # The C xenstored uses one additional command line argument:
     sed 's/EXECUTABLE --/EXECUTABLE --internal-db --/' \
-        -i ${D}${sysconfdir}/init.d/xenstored.${PN}-xenstored
+        -i ${D}${INIT_D_DIR}/xenstored.${PN}-xenstored
 
     # Since we don't have a xenstore stubdomain, remove the
     # xenstore stubdomain init program (libdir == /usr/lib)
@@ -111,8 +111,8 @@ do_install_append() {
     install -m 0755 ${WORKDIR}/xen-vbd3-backend.rules ${D}${sysconfdir}/udev/rules.d/xen-vbd3-backend.rules
     install -m 0755 ${WORKDIR}/block-vbd3 ${D}${sysconfdir}/xen/scripts/block-vbd3
 
-    rm -rf ${D}/${sysconfdir}/init.d/xencommons
-    rm -rf ${D}/${sysconfdir}/init.d/xendriverdomain
+    rm -rf ${D}/${INIT_D_DIR}/xencommons
+    rm -rf ${D}/${INIT_D_DIR}/xendriverdomain
     rm -rf ${D}/${sysconfdir}/xen/scripts/colo-proxy-setup
     rm -rf ${D}/${sysconfdir}/xen/scripts/launch-xenstore
     rm -rf ${D}/${sysconfdir}/xen/scripts/block-dummy
