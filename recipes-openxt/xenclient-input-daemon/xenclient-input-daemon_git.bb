@@ -1,7 +1,7 @@
 DESCRIPTION = "Input daemon for XenClient"
 LICENSE = "LGPLv2.1"
 LIC_FILES_CHKSUM = "file://COPYING;md5=321bf41f280cf805086dd5a720b37785"
-DEPENDS = "xen libxcdbus udev openssl libevent libxcxenstore libdmbus libxenbackend xenfb2"
+DEPENDS = "xen-tools libxcdbus udev openssl libevent libxcxenstore libdmbus libxenbackend xenfb2"
 
 RDEPENDS_${PN} += "xenclient-keyboard-list libxcxenstore"
 

@@ -105,5 +105,5 @@ RDEPENDS_${PN} += " \
     bash \
     dbus \
     xrandr \
-    xen-xenstore \
+    xen-tools-xenstore \
 "

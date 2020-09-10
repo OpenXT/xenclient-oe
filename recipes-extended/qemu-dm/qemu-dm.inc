@@ -6,7 +6,7 @@ DEPENDS = " \
     alsa-lib \
     pciutils \
     libpng \
-    ${@bb.utils.contains('DISTRO_FEATURES', 'blktap2', 'xen-blktap', 'blktap3', d)} \
+    xen-tools \
     libargo \
     zlib \
     libcap-ng \

@@ -11,10 +11,14 @@ then add any detected device to a boot entry.  This can add several seconds
 to the VM boot time. This patch avoid that by not filling a boot entry for
 devices that were not present in the NVRAM boot order.
 
+Also disable the special-case CD-Rom query when QEMU is detected since the
+assumption that it will not access a physical device is inaccurate for OpenXT.
+
 ################################################################################
 CHANGELOG 
 ################################################################################
 Ported to SeaBIOS 1.7.5: Eric Chanudet, chanudete@ainfosec.com, 01/03/2015
+Ported to SeaBIOS 1.13.0: Christopher Clark, christopher.w.clark@gmail.com, 2020
 
 ################################################################################
 REMOVAL 
@@ -34,9 +38,11 @@ None.
 ################################################################################
 PATCHES
 ################################################################################
+diff --git a/src/boot.c b/src/boot.c
+index 5194115..aed49ea 100644
 --- a/src/boot.c
 +++ b/src/boot.c
-@@ -257,6 +257,10 @@ static int DefaultFloppyPrio = 101;
+@@ -423,6 +423,10 @@ static int DefaultFloppyPrio = 101;
  static int DefaultCDPrio     = 102;
  static int DefaultHDPrio     = 103;
  static int DefaultBEVPrio    = 104;
@@ -47,7 +53,7 @@ PATCHES
  
  void
  boot_init(void)
-@@ -277,10 +281,10 @@ boot_init(void)
+@@ -443,10 +447,10 @@ boot_init(void)
              u32 val = bootorder & 0x0f;
              bootorder >>= 4;
              switch (val) {
@@ -62,7 +68,7 @@ PATCHES
              }
          }
      }
-@@ -363,47 +367,56 @@ static inline int defPrio(int priority,
+@@ -530,57 +534,52 @@ static inline int defPrio(int priority, int defaultprio) {
  void
  boot_add_bev(u16 seg, u16 bev, u16 desc, int prio)
  {
@@ -82,11 +88,10 @@ PATCHES
  void
  boot_add_bcv(u16 seg, u16 ip, u16 desc, int prio)
  {
-+#if 0
-     bootentry_add(IPL_TYPE_BCV, defPrio(prio, DefaultHDPrio)
-                   , SEGOFF(seg, ip).segoff
-                   , desc ? MAKE_FLATPTR(seg, desc) : "Legacy option rom");
-+#endif
+-    bootentry_add(IPL_TYPE_BCV, defPrio(prio, DefaultHDPrio)
+-                  , SEGOFF(seg, ip).segoff
+-                  , desc ? MAKE_FLATPTR(seg, desc) : "Legacy option rom");
++    /* Disabled for OpenXT */
  }
  
  void
@@ -112,8 +117,20 @@ PATCHES
  void
  boot_add_cd(struct drive_s *drive, const char *desc, int prio)
  {
+-    if (GET_GLOBAL(PlatformRunningOn) & PF_QEMU) {
+-        // We want short boot times.  But on physical hardware even
+-        // the test unit ready can take several seconds.  So do media
+-        // access on qemu only, where we know it will be fast.
+-        char *extra = cdrom_media_info(drive);
+-        if (extra) {
+-            desc = znprintf(MAXDESCSIZE, "%s (%s)", desc, extra);
+-            free(extra);
+-        }
+-    }
 -    bootentry_add(IPL_TYPE_CDROM, defPrio(prio, DefaultCDPrio)
 -                  , (u32)drive, desc);
++    if (!desc)
++        desc = znprintf(MAXDESCSIZE, "%s", "CD/DVD");
 +    if (SelectedCD)
 +        bootentry_add(IPL_TYPE_CDROM, defPrio(prio, DefaultCDPrio)
 +                      , (u32)drive, desc);
@@ -123,21 +140,19 @@ PATCHES
  void
  boot_add_cbfs(void *data, const char *desc, int prio)
  {
-+#if 0
-     bootentry_add(IPL_TYPE_CBFS, defPrio(prio, DEFAULT_PRIO), (u32)data, desc);
-+#endif
+-    bootentry_add(IPL_TYPE_CBFS, defPrio(prio, DEFAULT_PRIO), (u32)data, desc);
++    /* Disabled for OpenXT */
  }
  
  
-@@ -589,9 +602,11 @@ bcv_prepboot(void)
+@@ -801,10 +800,6 @@ bcv_prepboot(void)
+             break;
          }
      }
- 
-+#if 0
-     // If nothing added a floppy/hd boot - add it manually.
-     add_bev(IPL_TYPE_FLOPPY, 0);
-     add_bev(IPL_TYPE_HARDDISK, 0);
-+#endif
+-
+-    // If nothing added a floppy/hd boot - add it manually.
+-    add_bev(IPL_TYPE_FLOPPY, 0);
+-    add_bev(IPL_TYPE_HARDDISK, 0);
  }
  
  

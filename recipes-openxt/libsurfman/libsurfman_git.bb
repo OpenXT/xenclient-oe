@@ -1,7 +1,7 @@
 DESCRIPTION = "Library Surface Manager Plugin"
 LICENSE = "LGPLv2.1"
 LIC_FILES_CHKSUM = "file://COPYING;md5=321bf41f280cf805086dd5a720b37785"
-DEPENDS = "xen libevent"
+DEPENDS = "xen-tools libevent"
 
 PV = "0+git${SRCPV}"
 

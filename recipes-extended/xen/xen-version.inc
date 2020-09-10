@@ -1,4 +1,0 @@
-XEN_REL = "4.12"
-XEN_PV = "${XEN_REL}+git${SRCPV}"
-XEN_BRANCH = "stable-${XEN_REL}"
-XEN_SRCREV = "${AUTOREV}"

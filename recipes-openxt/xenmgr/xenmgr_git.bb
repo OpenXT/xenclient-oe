@@ -3,7 +3,7 @@ LICENSE = "GPLv2"
 LIC_FILES_CHKSUM = "file://../COPYING;md5=4641e94ec96f98fabc56ff9cc48be14b"
 DEPENDS = " \
     xen \
-    xen-libxl \
+    xen-tools \
     libxenmgr-core \
     libxchutils \
     libxchargo \

@@ -14,7 +14,7 @@ IMAGE_INSTALL = " \
     busybox \
     bridge-utils \
     initramfs-stubdomain \
-    xen-xenstore \
+    xen-tools-xenstore \
     qemu-dm-stubdom \
     argo-module \
 "
