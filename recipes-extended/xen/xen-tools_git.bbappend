@@ -9,4 +9,7 @@ require xen-common.inc
 require ${@bb.utils.contains('DISTRO_FEATURES', 'blktap2', 'xen-tools-blktap2.inc', 'xen-tools-blktap3.inc', d)}
 require xen-tools-openxt.inc
 
+# Workaround for setuptools3 overriding autotools-brokensep
+B = "${S}"
+
 DEFAULT_PREFERENCE = "1"
