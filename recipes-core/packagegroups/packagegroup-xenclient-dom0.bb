@@ -39,7 +39,6 @@ RDEPENDS_${PN} = " \
     seabios \
     ovmf-firmware \
     xcpmd \
-    vbetool \
     xen-vif-scripts-dom0 \
     xenclient-input-daemon \
     xenclient-dom0-tweaks \
