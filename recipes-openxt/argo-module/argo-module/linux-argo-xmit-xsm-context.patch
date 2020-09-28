@@ -1,0 +1,206 @@
+From 9b019db98c2c52d9c34b1734e82b878417a3c89c Mon Sep 17 00:00:00 2001
+From: Christopher Clark <christopher.w.clark@gmail.com>
+Date: Wed, 14 Aug 2019 14:56:35 -0700
+Subject: [PATCH] OXT-1503: Update the argo-linux driver to new Argo ABI with
+ XSM sid in message header
+
+Handles the changes to the Argo message header format and sendv operation
+arguments for the ABI change to indicate XSM/Flask SID in Argo messages:
+the message_type field has been reduced in size to 8 bits from 32 bits,
+and the message source domain and port fields are now standalone rather
+than within a xen_argo_addr struct.
+
+Since the message_type field, which is used to indicate the protocol that
+is in use between driver endpoints -- ie. either datagram or stream -- has
+decreased in size, the protocol indicator values for dgram and stream are
+changed to new values within the 8-bit range.
+
+Signed-off-by: Christopher Clark <christopher.clark6@baesystems.com>
+
+ argo-module.c      | 43 ++++++++++++++++++++-----------------------
+ include/xen/argo.h | 11 +++++++----
+ 2 files changed, 27 insertions(+), 27 deletions(-)
+
+--- a/argo-module.c
++++ b/argo-module.c
+@@ -236,8 +236,8 @@ static struct list_head ring_list;
+ #define ARGO_SHF_PING        (1 << 8)
+ #define ARGO_SHF_PONG        (1 << 9)
+ 
+-#define ARGO_PROTO_DGRAM     0x6447724d
+-#define ARGO_PROTO_STREAM    0x3574526d
++#define ARGO_PROTO_DGRAM     0x01
++#define ARGO_PROTO_STREAM    0x02
+ 
+ struct argo_stream_header
+ {
+@@ -263,7 +263,7 @@ argo_ring_bytes_to_read(volatile struct xen_argo_ring *r, uint32_t ring_size)
+  */
+ static ssize_t
+ argo_copy_out(struct xen_argo_ring *r, uint32_t ring_size,
+-              struct xen_argo_addr *from, uint32_t * protocol,
++              struct xen_argo_addr *from, uint8_t *protocol,
+               void *_buf, size_t t, int consume)
+ {
+     volatile struct xen_argo_ring_message_header *mh;
+@@ -288,15 +288,12 @@ argo_copy_out(struct xen_argo_ring *r, uint32_t ring_size,
+     if ( btr < len )
+         return -1;
+ 
+-#if defined(__GNUC__)
+     if ( from )
+-        *from = mh->source;
+-#else
+-    /* MSVC can't do the above */
+-    if ( from )
+-        memcpy((void *) from, (void *) &(mh->source),
+-               sizeof(struct xen_argo_addr));
+-#endif
++    {
++        from->aport = mh->src_aport;
++        from->domain_id = mh->src_domain_id;
++        from->pad = 0;
++    }
+ 
+     if ( protocol )
+         *protocol = mh->message_type;
+@@ -447,7 +444,7 @@ struct pending_xmit
+     struct argo_ring_id from;
+     xen_argo_addr_t to;
+     size_t len;
+-    uint32_t protocol;
++    uint8_t protocol;
+     uint8_t data[0];
+ };
+ 
+@@ -683,7 +680,7 @@ H_argo_unregister_ring (xen_argo_unregister_ring_t *r)
+ static int
+ H_argo_sendv(xen_argo_addr_t *s, xen_argo_addr_t *d,
+              const xen_argo_iov_t *iovs, uint32_t niov,
+-             uint32_t protocol)
++             uint8_t protocol)
+ {
+     xen_argo_send_addr_t send;
+     send.dst = *d;
+@@ -1242,7 +1239,7 @@ xmit_queue_wakeup_sponsor(struct argo_ring_id *from, xen_argo_addr_t * to, int l
+ 
+ static int
+ xmit_queue_inline(struct argo_ring_id *from, xen_argo_addr_t *to,
+-                  void *buf, size_t len, uint32_t protocol)
++                  void *buf, size_t len, uint8_t protocol)
+ {
+     ssize_t ret;
+     unsigned long flags;
+@@ -1656,7 +1653,7 @@ static int
+ connector_interrupt(struct ring *r)
+ {
+     ssize_t msg_len;
+-    uint32_t protocol;
++    uint8_t protocol;
+     struct argo_stream_header sh;
+     xen_argo_addr_t from;
+     int ret = 0;
+@@ -1762,7 +1759,7 @@ listener_interrupt(struct ring *r)
+ {
+     int ret = 0;
+     ssize_t msg_len;
+-    uint32_t protocol;
++    uint8_t protocol;
+     struct argo_stream_header sh;
+     struct argo_private *p;
+     xen_argo_addr_t from;
+@@ -2033,7 +2030,7 @@ static int stream_connected(struct argo_private *p)
+ 
+ static size_t
+ argo_try_send_sponsor(struct argo_private *p, xen_argo_addr_t *dest,
+-                      const void *buf, size_t len, uint32_t protocol)
++                      const void *buf, size_t len, uint8_t protocol)
+ {
+     size_t ret;
+     unsigned long flags;
+@@ -2085,7 +2082,7 @@ static size_t
+ argo_try_sendv_sponsor(struct argo_private *p,
+                       xen_argo_addr_t * dest,
+                       const xen_argo_iov_t *iovs, size_t niov, size_t len,
+-                      uint32_t protocol)
++                      uint8_t protocol)
+ {
+     size_t ret;
+     unsigned long flags;
+@@ -2135,7 +2132,7 @@ argo_try_sendv_sponsor(struct argo_private *p,
+ static size_t
+ argo_try_sendv_privates(struct argo_private *p, xen_argo_addr_t * dest,
+                         const xen_argo_iov_t * iovs, size_t niov, size_t len,
+-                        uint32_t protocol)
++                        uint8_t protocol)
+ {
+     size_t ret;
+     unsigned long flags;
+@@ -2169,7 +2166,7 @@ static ssize_t
+ argo_sendto_from_sponsor(struct argo_private *p,
+                          const void *buf, size_t len,
+                          int nonblock, xen_argo_addr_t *dest,
+-                         uint32_t protocol)
++                         uint8_t protocol)
+ {
+     size_t ret = 0, ts_ret;
+ 
+@@ -2245,7 +2242,7 @@ argo_sendto_from_sponsor(struct argo_private *p,
+ static ssize_t
+ argo_stream_sendvto_from_sponsor(struct argo_private *p,
+                           const xen_argo_iov_t *iovs, size_t niov, size_t len,
+-                          int nonblock, xen_argo_addr_t * dest, uint32_t protocol)
++                          int nonblock, xen_argo_addr_t * dest, uint8_t protocol)
+ {
+     size_t ret = 0, ts_ret;
+ 
+@@ -2315,7 +2312,7 @@ argo_stream_sendvto_from_sponsor(struct argo_private *p,
+ static ssize_t
+ argo_stream_sendvto_from_private (struct argo_private *p,
+                           const xen_argo_iov_t * iovs, size_t niov, size_t len,
+-                          int nonblock, xen_argo_addr_t *dest, uint32_t protocol)
++                          int nonblock, xen_argo_addr_t *dest, uint8_t protocol)
+ {
+     size_t ret = 0, ts_ret;
+ 
+@@ -2453,7 +2450,7 @@ argo_recvfrom_dgram(struct argo_private *p, void *buf, size_t len,
+                     int nonblock, int peek, xen_argo_addr_t *src)
+ {
+     ssize_t ret;
+-    uint32_t protocol;
++    uint8_t protocol;
+     xen_argo_addr_t lsrc;
+ 
+     if (!src)
+--- a/include/xen/argo.h
++++ b/include/xen/argo.h
+@@ -159,8 +159,11 @@ typedef struct xen_argo_ring_data
+ struct xen_argo_ring_message_header
+ {
+     uint32_t len;
+-    struct xen_argo_addr source;
+-    uint32_t message_type;
++    uint8_t pad;
++    uint8_t message_type;
++    domid_t src_domain_id;
++    xen_argo_port_t src_aport;
++    uint32_t src_sid;
+ #if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 199901L
+     uint8_t data[];
+ #elif defined(__GNUC__)
+@@ -251,13 +254,13 @@ typedef struct xen_argo_viptables_list
+  * If insufficient space exists in the destination ring, it will return -EAGAIN
+  * and Xen will notify the caller when sufficient space becomes available.
+  *
+- * The message type is a 32-bit data field available to communicate message
++ * The message type is a 8-bit data field available to communicate message
+  * context data (eg. kernel-to-kernel, rather than application layer).
+  *
+  * arg1: XEN_GUEST_HANDLE(xen_argo_send_addr_t) source and dest addresses
+  * arg2: XEN_GUEST_HANDLE(xen_argo_iov_t) iovs
+  * arg3: unsigned long niov
+- * arg4: unsigned long message type (32-bit value)
++ * arg4: unsigned long message type (8-bit value)
+  */
+ #define XEN_ARGO_OP_sendv               3
+ 

@@ -114,6 +114,7 @@ SRC_URI_append = " \
     file://efi-load-options-no-default-image-name.patch \
     file://argo-add-viptables.patch \
     file://argo-quiet-xsm-check-during-init.patch \
+    file://argo-xmit-xsm-context.patch \
     file://libxl-seabios-ipxe.patch \
     file://memory-scrub-on-domain-shutdown.patch \
     file://0001-tools-helpers-Introduce-cmp-fd-file-inode-utility.patch \
