@@ -8,7 +8,7 @@ RDEPENDS_${PN} += "fbtap"
 PV = "0+git${SRCPV}"
 
 SRCREV = "${AUTOREV}"
-SRC_URI = "git://${OPENXT_GIT_MIRROR}/surfman.git;protocol=${OPENXT_GIT_PROTOCOL};branch=${OPENXT_BRANCH} \
+SRC_URI = "git://github.com/OpenXT/surfman.git \
            file://surfman.initscript \
            file://surfman.conf"
 
