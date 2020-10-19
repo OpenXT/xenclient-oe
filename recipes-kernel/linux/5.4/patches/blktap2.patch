@@ -74,7 +74,7 @@ PATCHES
 +blktap-objs := control.o ring.o device.o request.o sysfs.o
 --- /dev/null
 +++ b/drivers/block/blktap/blktap.h
-@@ -0,0 +1,178 @@
+@@ -0,0 +1,185 @@
 +#ifndef _BLKTAP_H_
 +#define _BLKTAP_H_
 +
@@ -135,7 +135,14 @@ PATCHES
 +
 +	int                            response;
 +
-+	int                            n_pending;
++	/* pending doesn't have any locking, but that is okay.  Insertions
++	 * happen under blktap_device->lock, so that is serialized.  Removal
++	 * uses the blktap_request->usr_idx, so they aren't iterating the
++	 * array.  As long as pointer assignments are atomic, then you don't
++	 * have to worry about Insertion and Removal racing.  In practice,
++	 * there are simultaneous operations, so n_pending needs to be
++	 * atomic_t to keep those in sync. */
++	atomic_t                       n_pending;
 +	struct blktap_request         *pending[BLKTAP_RING_SIZE];
 +
 +	wait_queue_head_t              poll_wait;
@@ -255,7 +262,7 @@ PATCHES
 +#endif
 --- /dev/null
 +++ b/drivers/block/blktap/control.c
-@@ -0,0 +1,358 @@
+@@ -0,0 +1,359 @@
 +#include <linux/module.h>
 +#include <linux/sched.h>
 +#include <linux/miscdevice.h>
@@ -399,13 +406,14 @@ PATCHES
 +
 +	ring = &tap->ring;
 +
-+	if (ring->vma == NULL && ring->n_pending)
++	if (ring->vma == NULL && atomic_read(&ring->n_pending))
 +		printk(KERN_WARNING
 +		       "blktap%d ring not mapped and n_pending %d\n",
-+		       minor, ring->n_pending);
++		       minor, atomic_read(&ring->n_pending));
 +
 +	r = wait_event_interruptible(tap->remove_wait,
-+				     ring->n_pending == 0 || ring->vma == NULL);
++				     atomic_read(&ring->n_pending) == 0 ||
++				     ring->vma == NULL);
 +	if (r == -ERESTARTSYS)
 +		return -EAGAIN;
 +
@@ -1752,7 +1760,7 @@ PATCHES
 +}
 --- /dev/null
 +++ b/drivers/block/blktap/ring.c
-@@ -0,0 +1,806 @@
+@@ -0,0 +1,807 @@
 +
 +#include <linux/device.h>
 +#include <linux/signal.h>
@@ -1970,7 +1978,7 @@ PATCHES
 +	struct blktap_ring *ring = &tap->ring;
 +
 +	ring->pending[request->usr_idx] = NULL;
-+	ring->n_pending--;
++	atomic_dec(&ring->n_pending);
 +	wake_up_interruptible(&tap->remove_wait);
 +
 +	blktap_request_free(tap, request);
@@ -2000,7 +2008,7 @@ PATCHES
 +	request->usr_idx = usr_idx;
 +
 +	ring->pending[usr_idx] = request;
-+	ring->n_pending++;
++	atomic_inc(&ring->n_pending);
 +	wake_up_interruptible(&tap->remove_wait);
 +
 +	return request;
@@ -2445,7 +2453,8 @@ PATCHES
 +		int r;
 +
 +		r = wait_event_interruptible_timeout(tap->remove_wait,
-+						     !ring->n_pending, HZ / 10);
++						     atomic_read(&ring->n_pending) == 0,
++						     HZ / 10);
 +		if (r == -ERESTARTSYS)
 +			return -EAGAIN;
 +		if (r > 0)
@@ -2493,7 +2502,7 @@ PATCHES
 +	int usr_idx;
 +
 +	s += snprintf(s, end - s,
-+		      "begin pending:%d\n", ring->n_pending);
++		      "begin pending:%d\n", atomic_read(&ring->n_pending));
 +
 +	for (usr_idx = 0; usr_idx < BLKTAP_RING_SIZE; usr_idx++) {
 +		struct blktap_request *request;
