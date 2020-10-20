@@ -18,7 +18,6 @@ SRC_URI = "file://enter-s3.sh \
 	   file://firstboot.sh \
 	   file://firstboot.initscript \
 	   file://dom0_add_vif.sh \
-	   file://r8168.conf \
 	   file://create-ndvm \
 	   file://status-report \
 	   file://status-tool \
@@ -44,11 +43,6 @@ INITSCRIPT_NAME_${PN} = "firstboot"
 INITSCRIPT_PARAMS_${PN} = "start 70 S ."
 
 do_install () {
-	install -d ${D}/etc
-	install -d ${D}/etc/modprobe.d
-	install -m 0644 ${WORKDIR}/r8168.conf \
-		${D}/etc/modprobe.d/r8168.conf
-
 	install -d ${D}/etc/init.d
 	install -m 0755 ${WORKDIR}/firstboot.initscript \
 		${D}/etc/init.d/firstboot
