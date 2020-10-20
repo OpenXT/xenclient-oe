@@ -113,6 +113,7 @@ RDEPENDS_${PN} = " \
     ${@bb.utils.contains('DISTRO_FEATURES', 'blktap2', 'xen-tools-blktap xen-tools-libblktapctl xen-tools-libvhd xen-legacy-block-scripts xen-tap-scripts', 'xen-tools-blktap3 xen-tools-tapback', d)} \
     pesign \
     ipxe \
+    udev-extraconf-dom0 \
 "
 
 # OE upgrade - temporarly disabled:
