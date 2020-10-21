@@ -27,7 +27,6 @@ INITSCRIPT_REMOVE = " \
 
 IMAGE_INSTALL = "\
     ${ROOTFS_PKGMANAGE} \
-    modules-syncvm \
     packagegroup-core-boot \
     packagegroup-base \
     packagegroup-xenclient-common \

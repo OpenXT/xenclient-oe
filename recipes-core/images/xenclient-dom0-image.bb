@@ -35,7 +35,6 @@ BAD_RECOMMENDATIONS += " \
 
 IMAGE_INSTALL += "\
     initscripts \
-    modules-dom0 \
     packagegroup-core-boot \
     packagegroup-base \
     packagegroup-xenclient-common \

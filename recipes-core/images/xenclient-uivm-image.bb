@@ -51,7 +51,6 @@ XSERVER = " \
 
 IMAGE_INSTALL += "\
     ${XSERVER} \
-    modules-uivm \
     packagegroup-xenclient-common \
     packagegroup-xenclient-xfce-minimal \
     openssh \
