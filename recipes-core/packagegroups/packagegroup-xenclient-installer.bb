@@ -62,7 +62,6 @@ RDEPENDS_${PN} = " \
     xenclient-installer-tweaks \
     xenclient-pcrdiff \
     xenclient-tpm-scripts \
-    xenclient-udev-force-discreet-net-to-eth0 \
     xen-tools-console \
     xen-efi \
     xen-tools-flask-tools \

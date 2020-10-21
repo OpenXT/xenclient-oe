@@ -76,7 +76,6 @@ RDEPENDS_${PN} = " \
     rsyslog-conf-dom0 \
     logrotate \
     dialog \
-    xenclient-udev-force-discreet-net-to-eth0 \
     xenclient-nwd \
     wget \
     xenclient-repo-certs \
