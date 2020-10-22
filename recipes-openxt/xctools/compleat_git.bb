@@ -4,9 +4,7 @@ LIC_FILES_CHKSUM = "file://LICENSE;md5=acbef28775875450fdedef37d178f5c4"
 DEPENDS = "hkg-parsec"
 RDEPENDS_${PN} += "glibc-gconv-utf-32"
 
-PV = "0+git${SRCPV}"
-SRCREV = "${AUTOREV}"
-SRC_URI = "git://${OPENXT_GIT_MIRROR}/xctools.git;protocol=${OPENXT_GIT_PROTOCOL};branch=${OPENXT_BRANCH}"
+require xctools.inc
 
 S = "${WORKDIR}/git/compleat"
 

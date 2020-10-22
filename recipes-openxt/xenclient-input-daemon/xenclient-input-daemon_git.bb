@@ -8,7 +8,7 @@ RDEPENDS_${PN} += "xenclient-keyboard-list libxcxenstore"
 PV = "0+git${SRCPV}"
 
 SRCREV = "${AUTOREV}"
-SRC_URI = "git://${OPENXT_GIT_MIRROR}/input.git;protocol=${OPENXT_GIT_PROTOCOL};branch=${OPENXT_BRANCH} \
+SRC_URI = "git://github.com/OpenXT/input.git \
 	   file://input-daemon.initscript \
 "
 
