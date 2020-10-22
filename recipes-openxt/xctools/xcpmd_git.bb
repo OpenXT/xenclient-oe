@@ -3,11 +3,9 @@ LICENSE = "GPLv2"
 LIC_FILES_CHKSUM = "file://COPYING;md5=4641e94ec96f98fabc56ff9cc48be14b"
 DEPENDS = "dbus xen pciutils libxcdbus libxcxenstore udev libnl yajl"
 
-PV = "0+git${SRCPV}"
-
-SRCREV = "${AUTOREV}"
-SRC_URI = "git://github.com/OpenXT/xctools.git \
-	   file://xcpmd.initscript \
+require xctools.inc
+SRC_URI += " \
+    file://xcpmd.initscript \
 "
 
 CFLAGS_prepend += " -I${STAGING_INCDIR}/libnl3 "

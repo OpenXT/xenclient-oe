@@ -5,7 +5,7 @@ DEPENDS = ""
 
 PV = "0+git${SRCPV}"
 
-SRCREV = "${AUTOREV}"
+SRCREV = "bad8ca87e4649e9aa931c607e6a17a7881c2cfd6"
 SRC_URI = "git://github.com/OpenXT/libedid.git"
 
 S = "${WORKDIR}/git"

@@ -10,7 +10,7 @@ DEPENDS = " \
 
 PV = "0+git${SRCPV}"
 
-SRCREV = "${AUTOREV}"
+SRCREV = "30dc9152274b92ca4a73813b43477deac3c24442"
 SRC_URI = "git://github.com/OpenXT/uid.git"
 
 SRC_URI += " \

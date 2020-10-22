@@ -5,12 +5,12 @@ DEPENDS = " xen xenfb2 libargo dbus xenclient-idl xenclient-rpcgen-native libpng
 
 RDEPENDS_${PN} += "fbtap"
 
-PV = "0+git${SRCPV}"
+require surfman.inc
 
-SRCREV = "${AUTOREV}"
-SRC_URI = "git://github.com/OpenXT/surfman.git \
-           file://surfman.initscript \
-           file://surfman.conf"
+SRC_URI += " \
+    file://surfman.initscript \
+    file://surfman.conf \
+"
 
 CFLAGS_append = " -Wno-unused-parameter "
 

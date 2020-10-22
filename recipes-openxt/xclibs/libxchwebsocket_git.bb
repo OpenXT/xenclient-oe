@@ -8,14 +8,11 @@ DEPENDS = " \
 "
 RDEPENDS_${PN} += "glibc-gconv-utf-32 hkg-utf8-string"
 
-PV = "0+git${SRCPV}"
-SRCREV = "${AUTOREV}"
-SRC_URI = "git://github.com/OpenXT/xclibs.git"
+require xclibs.inc
 
 S = "${WORKDIR}/git/xchwebsocket"
 
 HPN = "xchwebsocket"
 HPV = "0.1"
 
-require xclibs.inc
-inherit haskell
+require xclibs-haskell.inc
