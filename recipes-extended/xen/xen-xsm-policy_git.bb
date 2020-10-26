@@ -10,7 +10,7 @@ require xen-version.inc
 
 PV = "${XEN_REL}+git${SRCPV}"
 
-SRCREV = "${AUTOREV}"
+SRCREV = "872126eb809f8be90bd5eb9850d6fe673ce3025c"
 SRC_URI = "git://github.com/OpenXT/xsm-policy.git"
 
 FILES_${PN} += "/etc/xen/refpolicy/policy/policy.24"

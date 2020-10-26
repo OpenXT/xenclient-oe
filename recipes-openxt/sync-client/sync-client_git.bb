@@ -23,7 +23,7 @@ RDEPENDS_${PN} += "python \
 
 PV = "0+git${SRCPV}"
 
-SRCREV = "${AUTOREV}"
+SRCREV = "d501139ec156b8f3de5f7150f5d3559de0362fa9"
 SRC_URI = "git://github.com/OpenXT/sync-client.git \
            file://sync-client-daemon.initscript"
 

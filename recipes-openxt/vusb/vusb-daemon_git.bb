@@ -6,7 +6,7 @@ RDEPENDS_${PN} += "libxcxenstore"
 
 PV = "0+git${SRCPV}"
 
-SRCREV = "${AUTOREV}"
+SRCREV = "9877a53cf64d1f7a03b2637b59fff281ce721e4c"
 SRC_URI = "git://github.com/OpenXT/vusb-daemon.git \
            file://xenclient-vusb.initscript \
            "

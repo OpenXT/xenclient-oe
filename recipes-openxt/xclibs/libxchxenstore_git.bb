@@ -11,14 +11,11 @@ RDEPENDS_${PN} += " \
     ghc-runtime \
 "
 
-PV = "0+git${SRCPV}"
-SRCREV = "${AUTOREV}"
-SRC_URI = "git://github.com/OpenXT/xclibs.git"
+require xclibs.inc
 
 S = "${WORKDIR}/git/xchxenstore"
 
 HPN = "xchxenstore"
 HPV = "0.1"
 
-require xclibs.inc
-inherit haskell
+require xclibs-haskell.inc
