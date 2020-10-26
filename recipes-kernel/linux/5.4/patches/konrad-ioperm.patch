@@ -1,0 +1,251 @@
+################################################################################
+SHORT DESCRIPTION: 
+################################################################################
+Paravirtualize IO permission bitmap.
+
+################################################################################
+LONG DESCRIPTION: 
+################################################################################
+See:
+http://old-list-archives.xen.org/archives/html/xen-devel/2009-05/msg01139.html
+
+A PV Xen guest kernel has no TSS of its own, so the IO permission
+bitmap must be paravirtualized.  This patch adds set_io_bitmap
+as a paravirt op, and defines a native version which updates the tss,
+and a Xen version which uses a hypercall.
+
+This is much easier now that 32 and 64-bit use the same code to
+manage the IO bitmap.
+
+################################################################################
+CHANGELOG 
+################################################################################
+Original author: Konrad Rzeszutek Wilk
+Port to 3.18: Eric Chanudet <chanudete@ainfosec.com>
+Port to 4.14: Richard Turner <turnerr@ainfosec.com>
+Port to 4.19: Richard Turner <turnerr@ainfosec.com>
+
+################################################################################
+REMOVAL 
+################################################################################
+Until fixed upstream or for non-pv service VM pass-through.
+
+################################################################################
+UPSTREAM PLAN
+################################################################################
+None.
+
+################################################################################
+INTERNAL DEPENDENCIES 
+################################################################################
+PIO passthrough in PV guests.
+
+################################################################################
+PATCHES 
+################################################################################
+--- a/arch/x86/include/asm/paravirt.h
++++ b/arch/x86/include/asm/paravirt.h
+@@ -299,6 +299,12 @@ static inline void set_iopl_mask(unsigne
+ 	PVOP_VCALL1(cpu.set_iopl_mask, mask);
+ }
+ 
++static inline void set_io_bitmap(struct thread_struct *thread,
++				 unsigned long bytes_updated)
++{
++	PVOP_VCALL2(cpu.set_io_bitmap, thread, bytes_updated);
++}
++
+ static inline void paravirt_activate_mm(struct mm_struct *prev,
+ 					struct mm_struct *next)
+ {
+--- a/arch/x86/include/asm/paravirt_types.h
++++ b/arch/x86/include/asm/paravirt_types.h
+@@ -141,6 +141,8 @@ struct pv_cpu_ops {
+ 	void (*load_sp0)(unsigned long sp0);
+ 
+ 	void (*set_iopl_mask)(unsigned mask);
++	void (*set_io_bitmap)(struct thread_struct *thread,
++			      unsigned long bytes_updated);
+ 
+ 	void (*wbinvd)(void);
+ 
+--- a/arch/x86/include/asm/processor.h
++++ b/arch/x86/include/asm/processor.h
+@@ -534,6 +534,9 @@ static inline void native_set_iopl_mask(
+ #endif
+ }
+ 
++extern void native_set_io_bitmap(struct thread_struct *thread,
++				 unsigned long updated_bytes);
++
+ static inline void
+ native_load_sp0(unsigned long sp0)
+ {
+@@ -574,6 +577,12 @@ static inline void load_sp0(unsigned lon
+ }
+ 
+ #define set_iopl_mask native_set_iopl_mask
++
++static inline void set_io_bitmap(struct thread_struct *thread,
++				 unsigned long updated_bytes)
++{
++	native_set_io_bitmap(thread, updated_bytes);
++}
+ #endif /* CONFIG_PARAVIRT_XXL */
+ 
+ /* Free all resources held by a thread. */
+--- a/arch/x86/kernel/ioport.c
++++ b/arch/x86/kernel/ioport.c
+@@ -21,13 +21,29 @@
+ #include <asm/syscalls.h>
+ #include <asm/desc.h>
+ 
++void native_set_io_bitmap(struct thread_struct *t,
++			  unsigned long bytes_updated)
++{
++	struct tss_struct *tss;
++
++	if (!bytes_updated)
++		return;
++
++	tss = &per_cpu(cpu_tss_rw, get_cpu());
++
++	/* Update the TSS: */
++	if (t->io_bitmap_ptr)
++		memcpy(tss->io_bitmap, t->io_bitmap_ptr, bytes_updated);
++	else
++		memset(tss->io_bitmap, 0xff, bytes_updated);
++}
++
+ /*
+  * this changes the io permissions bitmap in the current task.
+  */
+ long ksys_ioperm(unsigned long from, unsigned long num, int turn_on)
+ {
+ 	struct thread_struct *t = &current->thread;
+-	struct tss_struct *tss;
+ 	unsigned int i, max_long, bytes, bytes_updated;
+ 
+ 	if ((from + num <= from) || (from + num > IO_BITMAP_BITS))
+@@ -63,13 +79,13 @@ long ksys_ioperm(unsigned long from, uns
+ 	}
+ 
+ 	/*
+-	 * do it in the per-thread copy and in the TSS ...
++	 * do it in the per-thread copy
+ 	 *
+-	 * Disable preemption via get_cpu() - we must not switch away
++	 * Disable preemption - we must not switch away
+ 	 * because the ->io_bitmap_max value must match the bitmap
+ 	 * contents:
+ 	 */
+-	tss = &per_cpu(cpu_tss_rw, get_cpu());
++	preempt_disable();
+ 
+ 	if (turn_on)
+ 		bitmap_clear(t->io_bitmap_ptr, from, num);
+@@ -90,10 +106,9 @@ long ksys_ioperm(unsigned long from, uns
+ 
+ 	t->io_bitmap_max = bytes;
+ 
+-	/* Update the TSS: */
+-	memcpy(tss->io_bitmap, t->io_bitmap_ptr, bytes_updated);
++	set_io_bitmap(t, bytes_updated);
+ 
+-	put_cpu();
++	preempt_enable();
+ 
+ 	return 0;
+ }
+--- a/arch/x86/kernel/paravirt.c
++++ b/arch/x86/kernel/paravirt.c
+@@ -342,6 +342,7 @@ struct paravirt_patch_template pv_ops =
+ 	.cpu.swapgs		= native_swapgs,
+ 
+ 	.cpu.set_iopl_mask	= native_set_iopl_mask,
++	.cpu.set_io_bitmap	= native_set_io_bitmap,
+ 
+ 	.cpu.start_context_switch	= paravirt_nop,
+ 	.cpu.end_context_switch		= paravirt_nop,
+--- a/arch/x86/kernel/process.c
++++ b/arch/x86/kernel/process.c
+@@ -114,16 +114,12 @@ void exit_thread(struct task_struct *tsk
+ 	struct fpu *fpu = &t->fpu;
+ 
+ 	if (bp) {
+-		struct tss_struct *tss = &per_cpu(cpu_tss_rw, get_cpu());
+-
++		preempt_disable();
+ 		t->io_bitmap_ptr = NULL;
+ 		clear_thread_flag(TIF_IO_BITMAP);
+-		/*
+-		 * Careful, clear this in the TSS too:
+-		 */
+-		memset(tss->io_bitmap, 0xff, t->io_bitmap_max);
++		set_io_bitmap(t, t->io_bitmap_max);
+ 		t->io_bitmap_max = 0;
+-		put_cpu();
++		preempt_enable();
+ 		kfree(bp);
+ 	}
+ 
+@@ -273,26 +269,10 @@ static inline void switch_to_bitmap(stru
+ 				    struct thread_struct *next,
+ 				    unsigned long tifp, unsigned long tifn)
+ {
+-	struct tss_struct *tss = this_cpu_ptr(&cpu_tss_rw);
+-
+-	if (tifn & _TIF_IO_BITMAP) {
+-		/*
+-		 * Copy the relevant range of the IO bitmap.
+-		 * Normally this is 128 bytes or less:
+-		 */
+-		memcpy(tss->io_bitmap, next->io_bitmap_ptr,
+-		       max(prev->io_bitmap_max, next->io_bitmap_max));
+-		/*
+-		 * Make sure that the TSS limit is correct for the CPU
+-		 * to notice the IO bitmap.
+-		 */
+-		refresh_tss_limit();
+-	} else if (tifp & _TIF_IO_BITMAP) {
+-		/*
+-		 * Clear any possible leftover bits:
+-		 */
+-		memset(tss->io_bitmap, 0xff, prev->io_bitmap_max);
+-	}
++	if ((tifn & _TIF_IO_BITMAP) ||
++		(tifp & _TIF_IO_BITMAP))
++			set_io_bitmap(next,
++			max(prev->io_bitmap_max, next->io_bitmap_max));
+ }
+ 
+ #ifdef CONFIG_SMP
+--- a/arch/x86/xen/enlighten_pv.c
++++ b/arch/x86/xen/enlighten_pv.c
+@@ -846,6 +846,18 @@ void xen_set_iopl_mask(unsigned mask)
+ 	HYPERVISOR_physdev_op(PHYSDEVOP_set_iopl, &set_iopl);
+ }
+ 
++static void xen_set_io_bitmap(struct thread_struct *thread,
++                             unsigned long bytes_updated)
++{
++       struct physdev_set_iobitmap set_iobitmap;
++
++       set_xen_guest_handle(set_iobitmap.bitmap,
++                            (char *)thread->io_bitmap_ptr);
++       set_iobitmap.nr_ports = thread->io_bitmap_ptr ? IO_BITMAP_BITS : 0;
++       WARN_ON(HYPERVISOR_physdev_op(PHYSDEVOP_set_iobitmap,
++                                     &set_iobitmap));
++}
++
+ static void xen_io_delay(void)
+ {
+ }
+@@ -1057,6 +1069,7 @@ static const struct pv_cpu_ops xen_cpu_o
+ 	.load_sp0 = xen_load_sp0,
+ 
+ 	.set_iopl_mask = xen_set_iopl_mask,
++	.set_io_bitmap = xen_set_io_bitmap,
+ 	.io_delay = xen_io_delay,
+ 
+ 	/* Xen takes care of %gs when switching to usermode for us */
