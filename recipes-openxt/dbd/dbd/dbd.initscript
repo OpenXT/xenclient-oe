@@ -43,6 +43,7 @@ start() {
         fi
 	echo -n "Starting dbd: "
 	/usr/bin/dbd 2> /dev/null 2>&1
+	wait_for_db
 	echo "OK"
 }
 
@@ -55,6 +56,32 @@ stop() {
 restart() {
 	stop
 	start
+}
+
+# make sure the db is fully initialized so other
+# processes can read the rules they need
+wait_for_db() {
+	local attempts=0
+	local max_attempts=10
+
+	while [ $attempts -lt $max_attempts ]; do
+		check_db
+		if [ $? -eq 0 ]; then
+			return
+		fi
+
+		attempts=$((attempts + 1))
+		sleep .2
+	done
+	echo "WARN: db initialization timed out" | logger -t dbd
+	echo "WARN: db may be unavailable over dbus" | logger -t dbd
+}
+
+check_db() {
+	dbus-send --print-reply --system
+			--type=method_call \
+			--dest=com.citrix.xenclient.db \
+			/ com.citrix.xenclient.db.exists string:"/" >/dev/null 2>&1
 }
 
 case "$1" in
