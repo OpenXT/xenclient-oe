@@ -245,7 +245,7 @@ PATCHES
 +int blktap_device_try_destroy(struct blktap *tap);
 +int blktap_device_pause(struct blktap *);
 +int blktap_device_resume(struct blktap *tap);
-+void blktap_device_run_queue(struct blktap *);
++void blktap_device_run_queues(struct blktap *);
 +void blktap_device_end_request(struct blktap *, struct blktap_request *, blk_status_t);
 +
 +int blktap_page_pool_init(struct kobject *);
@@ -624,7 +624,7 @@ PATCHES
 +MODULE_LICENSE("Dual BSD/GPL");
 --- /dev/null
 +++ b/drivers/block/blktap/device.c
-@@ -0,0 +1,703 @@
+@@ -0,0 +1,713 @@
 +#include <linux/fs.h>
 +#include <linux/blkdev.h>
 +#include <linux/blk-mq.h>
@@ -844,6 +844,16 @@ PATCHES
 +
 +	blk_cleanup_queue(rq);
 +	blk_mq_free_tag_set(&tapdev->tag_set);
++}
++
++void blktap_device_run_queues(struct blktap *tap)
++{
++	struct blktap_device *tapdev = &tap->device;
++
++	if (!tapdev->gd)
++		return;
++
++	blk_mq_start_stopped_hw_queues(tapdev->gd->queue, true);
 +}
 +
 +static void
@@ -1760,7 +1770,7 @@ PATCHES
 +}
 --- /dev/null
 +++ b/drivers/block/blktap/ring.c
-@@ -0,0 +1,807 @@
+@@ -0,0 +1,812 @@
 +
 +#include <linux/device.h>
 +#include <linux/signal.h>
@@ -1854,6 +1864,8 @@ PATCHES
 +	}
 +
 +	ring->ring.rsp_cons = rc;
++
++	blktap_device_run_queues(tap);
 +}
 +
 +#define MMAP_VADDR(_start, _req, _seg)				\
@@ -2381,6 +2393,9 @@ PATCHES
 +
 +	poll_wait(filp, &tap->pool->wait, wait);
 +	poll_wait(filp, &ring->poll_wait, wait);
++
++	if (ring->vma)
++		blktap_device_run_queues(tap);
 +
 +	work = ring->ring.req_prod_pvt - ring->ring.sring->req_prod;
 +	RING_PUSH_REQUESTS(&ring->ring);
