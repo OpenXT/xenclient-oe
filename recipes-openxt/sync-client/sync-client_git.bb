@@ -5,18 +5,16 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=4641e94ec96f98fabc56ff9cc48be14b"
 # FIXME: xen-tools-xenstore can be removed when xenmgr supports disks
 # with icbinn paths.
 
-RDEPENDS_${PN} += "python \
-                   python-argparse \
-                   python-daemon \
-                   python-dbus \
-                   python-fcntl \
-                   python-io \
-                   python-json \
-                   python-lang \
-                   python-logging \
-                   python-netclient \
-                   python-subprocess \
-                   python-syslog \
+RDEPENDS_${PN} += "python3-core \
+                   python3-daemon \
+                   python3-dbus \
+                   python3-fcntl \
+                   python3-io \
+                   python3-json \
+                   python3-logging \
+                   python3-netclient \
+                   python3-pickle \
+                   python3-syslog \
                    pyicbinn \
                    curl \
                    xen-tools-xenstore"
@@ -32,7 +30,7 @@ INITSCRIPT_PARAMS = "defaults 85"
 
 S = "${WORKDIR}/git"
 
-inherit distutils
+inherit distutils3
 inherit update-rc.d
 
 FILES_${PN} += "/etc/init.d/${INITSCRIPT_NAME}"

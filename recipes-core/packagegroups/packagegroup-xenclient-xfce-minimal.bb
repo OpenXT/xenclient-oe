@@ -12,7 +12,6 @@ RDEPENDS_${PN} = " \
     xfce4-session \     
     xfconf \
     \
-    gtk-xfce-engine \
     xfce4-appfinder \
     xfce4-settings \
     \
