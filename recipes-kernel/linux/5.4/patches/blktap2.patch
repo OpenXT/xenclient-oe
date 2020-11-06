@@ -624,7 +624,7 @@ PATCHES
 +MODULE_LICENSE("Dual BSD/GPL");
 --- /dev/null
 +++ b/drivers/block/blktap/device.c
-@@ -0,0 +1,710 @@
+@@ -0,0 +1,711 @@
 +#include <linux/fs.h>
 +#include <linux/blkdev.h>
 +#include <linux/blk-mq.h>
@@ -850,7 +850,8 @@ PATCHES
 +	if (!tapdev->gd)
 +		return;
 +
-+	blk_mq_start_stopped_hw_queues(tapdev->gd->queue, true);
++	if (!RING_FULL(&tap->ring.ring))
++		blk_mq_start_stopped_hw_queues(tapdev->gd->queue, true);
 +}
 +
 +static void
@@ -1100,11 +1101,13 @@ PATCHES
 +	return err;
 +}
 +
-+static inline void flush_requests(struct blktap_ring *rinfo)
++static inline void flush_requests(struct blktap *tap)
 +{
-+	int notify;
++	struct blktap_ring *rinfo = &tap->ring;
 +
-+	RING_PUSH_REQUESTS_AND_CHECK_NOTIFY(&rinfo->ring, notify);
++	RING_PUSH_REQUESTS(&rinfo->ring);
++
++	blktap_ring_kick_user(tap);
 +}
 +
 +static blk_status_t blktap_queue_rq(struct blk_mq_hw_ctx *hctx,
@@ -1131,7 +1134,7 @@ PATCHES
 +	}
 +
 +	if (qd->last)
-+		blktap_ring_kick_user(tap);
++		flush_requests(tap);
 +
 +	mutex_unlock(&tapdev->lock);
 +	return BLK_STS_OK;
@@ -1156,7 +1159,7 @@ PATCHES
 +{
 +	struct blktap *tap = hctx->queue->queuedata;
 +
-+	blktap_ring_kick_user(tap);
++	flush_requests(tap);
 +}
 +
 +static const struct blk_mq_ops blktap_mq_ops = {
@@ -1765,7 +1768,7 @@ PATCHES
 +}
 --- /dev/null
 +++ b/drivers/block/blktap/ring.c
-@@ -0,0 +1,812 @@
+@@ -0,0 +1,814 @@
 +
 +#include <linux/device.h>
 +#include <linux/signal.h>
@@ -2384,16 +2387,18 @@ PATCHES
 +{
 +	struct blktap *tap = filp->private_data;
 +	struct blktap_ring *ring = &tap->ring;
++	struct blktap_device *tapdev = &tap->device;
 +	int work;
 +
 +	poll_wait(filp, &tap->pool->wait, wait);
 +	poll_wait(filp, &ring->poll_wait, wait);
 +
++	mutex_lock(&tapdev->lock);
 +	if (ring->vma)
 +		blktap_device_run_queues(tap);
 +
-+	work = ring->ring.req_prod_pvt - ring->ring.sring->req_prod;
-+	RING_PUSH_REQUESTS(&ring->ring);
++	work = ring->ring.sring->rsp_prod != ring->ring.sring->req_prod;
++	mutex_unlock(&tapdev->lock);
 +
 +	if (work ||
 +	    *BLKTAP_RING_MESSAGE(ring->ring.sring) ||
