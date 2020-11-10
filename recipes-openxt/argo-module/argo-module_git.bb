@@ -19,3 +19,5 @@ inherit module-signing
 
 EXTRA_OEMAKE += "INSTALL_HDR_PATH=${D}${prefix}"
 MODULES_INSTALL_TARGET += "headers_install"
+
+KERNEL_MODULE_AUTOLOAD += "xen-argo"

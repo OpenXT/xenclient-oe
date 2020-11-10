@@ -40,7 +40,6 @@ INITSCRIPT_REMOVE = " \
 
 IMAGE_INSTALL = " \
     ${ROOTFS_PKGMANAGE} \
-    modules-ndvm \
     packagegroup-core-boot \
     packagegroup-base \
     packagegroup-xenclient-common \
@@ -59,7 +58,6 @@ IMAGE_INSTALL = " \
     iptables \
     xenclient-ndvm-tweaks \
     rsyslog \
-    xenclient-udev-force-discreet-net-to-eth0 \
     argo-module \
     xen-tools-libxenstore \
     xen-tools-xenstore \

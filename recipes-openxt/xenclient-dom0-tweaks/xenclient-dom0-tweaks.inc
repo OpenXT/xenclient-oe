@@ -18,8 +18,6 @@ SRC_URI = "file://enter-s3.sh \
 	   file://firstboot.sh \
 	   file://firstboot.initscript \
 	   file://dom0_add_vif.sh \
-	   file://blacklist-nvidiafb.conf \
-	   file://r8168.conf \
 	   file://create-ndvm \
 	   file://status-report \
 	   file://status-tool \
@@ -28,8 +26,6 @@ SRC_URI = "file://enter-s3.sh \
 	   file://USB_fakenames.conf \
 	   file://usb-state \
 	   file://selinux-state \
-	   file://99-kvm.rules \
-	   file://no-kvm-autosuspend.sh \
 	   file://inputrc \
 "
 
@@ -45,13 +41,6 @@ INITSCRIPT_NAME_${PN} = "firstboot"
 INITSCRIPT_PARAMS_${PN} = "start 70 S ."
 
 do_install () {
-	install -d ${D}/etc
-	install -d ${D}/etc/modprobe.d
-	install -m 0644 ${WORKDIR}/blacklist-nvidiafb.conf \
-		${D}/etc/modprobe.d/blacklist-nvidiafb.conf
-	install -m 0644 ${WORKDIR}/r8168.conf \
-		${D}/etc/modprobe.d/r8168.conf
-
 	install -d ${D}/etc/init.d
 	install -m 0755 ${WORKDIR}/firstboot.initscript \
 		${D}/etc/init.d/firstboot
@@ -112,12 +101,6 @@ do_install () {
 		${D}/usr/bin/usb-state
 	install -m 0755 ${WORKDIR}/selinux-state \
 		${D}/usr/bin/selinux-state
-
-    # Disable Avocent KVM autosleep
-    install -d ${D}/lib/udev
-    install -d ${D}/etc/udev/rules.d
-    install -D -m 644 -o root -g root ${WORKDIR}/99-kvm.rules ${D}/etc/udev/rules.d/99-kvm.rules
-    install -D -m 755 -o root -g root ${WORKDIR}/no-kvm-autosuspend.sh ${D}/usr/bin/no-kvm-autosuspend.sh
 }
 
 INC_PR="r4"
