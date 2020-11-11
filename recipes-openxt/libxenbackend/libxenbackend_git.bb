@@ -6,12 +6,10 @@ DEPENDS = "xen-tools"
 PV = "0+git${SRCPV}"
 
 SRCREV = "${AUTOREV}"
-SRC_URI = "git://${OPENXT_GIT_MIRROR}/libxenbackend.git;protocol=${OPENXT_GIT_PROTOCOL};branch=${OPENXT_BRANCH}"
+SRC_URI = "git://github.com/OpenXT/libxenbackend.git"
 
 S = "${WORKDIR}/git"
 
 EXTRA_OEMAKE += "LIBDIR=${STAGING_LIBDIR}"
 
 inherit autotools-brokensep pkgconfig lib_package
-
-PR = "r1"

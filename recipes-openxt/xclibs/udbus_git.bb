@@ -10,14 +10,11 @@ DEPENDS = " \
 "
 RDEPENDS_${PN} += "glibc-gconv-utf-32 hkg-utf8-string"
 
-PV = "0+git${SRCPV}"
-SRCREV = "${AUTOREV}"
-SRC_URI = "git://${OPENXT_GIT_MIRROR}/xclibs.git;protocol=${OPENXT_GIT_PROTOCOL};branch=${OPENXT_BRANCH}"
+require xclibs.inc
 
 S = "${WORKDIR}/git/udbus"
 
 HPV = "0.2"
-require xclibs.inc
-inherit haskell
+require xclibs-haskell.inc
 
 FILES_${PN}-doc += "/usr/share/${PN}-${HPV}"

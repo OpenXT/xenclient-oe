@@ -3,11 +3,11 @@ LICENSE = "GPLv2"
 LIC_FILES_CHKSUM = "file://COPYING;md5=4641e94ec96f98fabc56ff9cc48be14b"
 DEPENDS = " libargo alsa-lib "
 
-PV = "0+git${SRCPV}"
+require xctools.inc
 
-SRCREV = "${AUTOREV}"
-SRC_URI = "git://${OPENXT_GIT_MIRROR}/xctools.git;protocol=${OPENXT_GIT_PROTOCOL};branch=${OPENXT_BRANCH} \
-           file://audio_helper_start"
+SRC_URI += " \
+    file://audio_helper_start \
+"
 
 FILES_${PN} += "/usr/lib/xen/bin/audio_helper \
                 /usr/lib/xen/bin/audio_helper_start "
