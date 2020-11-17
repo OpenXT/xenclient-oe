@@ -125,7 +125,7 @@ PATCHES
  {
 --- a/xen/common/memory.c
 +++ b/xen/common/memory.c
-@@ -510,6 +510,162 @@ static bool propagate_node(unsigned int
+@@ -510,6 +510,165 @@ static bool propagate_node(unsigned int
      return true;
  }
  
@@ -135,7 +135,7 @@ PATCHES
 +    struct xen_translate_gpfn_list op;
 +    unsigned long i;
 +    xen_pfn_t gpfn;
-+    xen_pfn_t mfn;
++    mfn_t mfn;
 +    struct domain *d;
 +    struct page_info *page;
 +    int rc;
@@ -192,7 +192,7 @@ PATCHES
 +        }
 +
 +        mfn = page_to_mfn(page);
-+        if ( unlikely(!mfn_valid(_mfn(mfn))) )
++        if ( unlikely(!mfn_valid(mfn)) )
 +        {
 +            gdprintk(XENLOG_INFO, "Could not translate gpfn %lx", gpfn);
 +            put_page(page);
@@ -208,7 +208,7 @@ PATCHES
 +            return -EFAULT;
 +        }
 +
-+        if ( unlikely(__copy_to_guest_offset(op.mfn_list, i, &mfn, 1)) )
++        if ( unlikely(__copy_mfn_to_guest_offset(op.mfn_list, i, mfn)) )
 +        {
 +            put_page(page);
 +            rcu_unlock_domain(d);
@@ -227,7 +227,7 @@ PATCHES
 +{
 +    struct xen_release_mfn_list op;
 +    unsigned long i;
-+    xen_pfn_t mfn;
++    mfn_t mfn;
 +    struct domain *d;
 +    struct page_info *page;
 +    int rc;
@@ -262,6 +262,8 @@ PATCHES
 +
 +    for ( i = *progress; i < op.nr_mfns; i++ )
 +    {
++        xen_pfn_t val;
++
 +        if ( hypercall_preempt_check() )
 +        {
 +            rcu_unlock_domain(d);
@@ -269,12 +271,13 @@ PATCHES
 +            return -EAGAIN;
 +        }
 +
-+        if ( unlikely(__copy_from_guest_offset(&mfn, op.mfn_list, i, 1)) )
++        if ( unlikely(__copy_from_guest_offset(&val, op.mfn_list, i, 1)) )
 +        {
 +            rcu_unlock_domain(d);
 +            return -EFAULT;
 +        }
 +
++        mfn = _mfn(val);
 +        page = mfn_to_page(mfn);
 +        if (test_and_clear_bit(_PGC_pinned_by_tools, &page->count_info)) {
 +            put_page(page);
@@ -288,7 +291,7 @@ PATCHES
  static long memory_exchange(XEN_GUEST_HANDLE_PARAM(xen_memory_exchange_t) arg)
  {
      struct xen_memory_exchange exch;
-@@ -1156,6 +1312,7 @@ long do_memory_op(unsigned long cmd, XEN
+@@ -1154,6 +1313,7 @@ long do_memory_op(unsigned long cmd, XEN
      struct memop_args args;
      domid_t domid;
      unsigned long start_extent = cmd >> MEMOP_EXTENT_SHIFT;
@@ -296,7 +299,7 @@ PATCHES
      int op = cmd & MEMOP_CMD_MASK;
  
      switch ( op )
-@@ -1608,6 +1765,27 @@ long do_memory_op(unsigned long cmd, XEN
+@@ -1606,6 +1766,27 @@ long do_memory_op(unsigned long cmd, XEN
              guest_handle_cast(arg, xen_mem_acquire_resource_t));
          break;
  
@@ -422,7 +425,7 @@ PATCHES
  
      int (*console_io) (struct domain *d, int cmd);
  
-@@ -388,6 +389,11 @@ static inline int xsm_claim_pages(xsm_de
+@@ -389,6 +390,11 @@ static inline int xsm_claim_pages(xsm_de
      return xsm_ops->claim_pages(d);
  }
  
