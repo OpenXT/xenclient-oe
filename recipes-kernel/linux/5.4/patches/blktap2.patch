@@ -117,7 +117,7 @@ PATCHES
 +#define BLKTAP2_RING_MESSAGE_RESUME  2
 +
 +struct blktap_device {
-+	spinlock_t                     lock;
++	struct mutex                   lock;
 +	struct gendisk                *gd;
 +	struct request_queue          *rq;
 +	struct blk_mq_tag_set          tag_set;
@@ -245,7 +245,7 @@ PATCHES
 +int blktap_device_try_destroy(struct blktap *tap);
 +int blktap_device_pause(struct blktap *);
 +int blktap_device_resume(struct blktap *tap);
-+void blktap_device_run_queue(struct blktap *);
++void blktap_device_run_queues(struct blktap *);
 +void blktap_device_end_request(struct blktap *, struct blktap_request *, blk_status_t);
 +
 +int blktap_page_pool_init(struct kobject *);
@@ -262,7 +262,7 @@ PATCHES
 +#endif
 --- /dev/null
 +++ b/drivers/block/blktap/control.c
-@@ -0,0 +1,359 @@
+@@ -0,0 +1,360 @@
 +#include <linux/module.h>
 +#include <linux/sched.h>
 +#include <linux/miscdevice.h>
@@ -349,6 +349,7 @@ PATCHES
 +
 +	kobject_get(&default_pool->kobj);
 +	tap->pool = default_pool;
++	mutex_init(&tap->device.lock);
 +
 +	err = blktap_ring_create(tap);
 +	if (err)
@@ -624,7 +625,7 @@ PATCHES
 +MODULE_LICENSE("Dual BSD/GPL");
 --- /dev/null
 +++ b/drivers/block/blktap/device.c
-@@ -0,0 +1,703 @@
+@@ -0,0 +1,710 @@
 +#include <linux/fs.h>
 +#include <linux/blkdev.h>
 +#include <linux/blk-mq.h>
@@ -755,10 +756,7 @@ PATCHES
 +		"end_request: op=%d error=%d bytes=%d\n",
 +		rq_data_dir(rq), error, blk_rq_bytes(rq));
 +
-+	// XXX Maybe this lock is unneeded
-+	spin_lock_irq(&rq->q->queue_lock);
 +	blk_mq_end_request(rq, error);
-+	spin_unlock_irq(&rq->q->queue_lock);
 +}
 +
 +int
@@ -846,6 +844,17 @@ PATCHES
 +	blk_mq_free_tag_set(&tapdev->tag_set);
 +}
 +
++void blktap_device_run_queues(struct blktap *tap)
++{
++	struct blktap_device *tapdev = &tap->device;
++
++	if (!tapdev->gd)
++		return;
++
++	if (!RING_FULL(&tap->ring.ring))
++		blk_mq_start_stopped_hw_queues(tapdev->gd->queue, true);
++}
++
 +static void
 +blktap_device_restart(struct blktap *tap)
 +{
@@ -853,7 +862,7 @@ PATCHES
 +
 +        dev = &tap->device;
 +
-+        spin_lock_irq(&dev->lock);
++        mutex_lock(&dev->lock);
 +
 +        /* Re-enable calldowns. */
 +        if (dev->gd) {
@@ -866,7 +875,7 @@ PATCHES
 +                blktap_ring_kick_user(tap);
 +        }
 +
-+        spin_unlock_irq(&dev->lock);
++        mutex_unlock(&dev->lock);
 +}
 +
 +void
@@ -998,7 +1007,6 @@ PATCHES
 +int
 +blktap_device_pause(struct blktap *tap)
 +{
-+	unsigned long flags;
 +	struct blktap_device *dev = &tap->device;
 +
 +	if (!test_bit(BLKTAP_DEVICE, &tap->dev_inuse))
@@ -1007,12 +1015,12 @@ PATCHES
 +	if (test_bit(BLKTAP_PAUSED, &tap->dev_inuse))
 +		return 0;
 +
-+	spin_lock_irqsave(&dev->lock, flags);
++	mutex_lock(&dev->lock);
 +
 +	blk_mq_stop_hw_queues(dev->gd->queue);
 +	set_bit(BLKTAP_PAUSE_REQUESTED, &tap->dev_inuse);
 +
-+	spin_unlock_irqrestore(&dev->lock, flags);
++	mutex_unlock(&dev->lock);
 +
 +	return blktap_ring_pause(tap);
 +}
@@ -1074,12 +1082,12 @@ PATCHES
 +	struct blktap_device *tapdev = &tap->device;
 +	struct request_queue *q = tapdev->gd->queue;
 +
-+	spin_lock_irq(&tapdev->lock);
++	mutex_lock(&tapdev->lock);
 +	// Moved inside lock like it was in 4.14
 +	blk_queue_flag_clear(QUEUE_FLAG_STOPPED, q);
 +	cleanup_queue(tapdev->gd->queue);
 +
-+	spin_unlock_irq(&tapdev->lock);
++	mutex_unlock(&tapdev->lock);
 +}
 +
 +int
@@ -1094,23 +1102,24 @@ PATCHES
 +	return err;
 +}
 +
-+static inline void flush_requests(struct blktap_ring *rinfo)
++static inline void flush_requests(struct blktap *tap)
 +{
-+	int notify;
++	struct blktap_ring *rinfo = &tap->ring;
 +
-+	RING_PUSH_REQUESTS_AND_CHECK_NOTIFY(&rinfo->ring, notify);
++	RING_PUSH_REQUESTS(&rinfo->ring);
++
++	blktap_ring_kick_user(tap);
 +}
 +
 +static blk_status_t blktap_queue_rq(struct blk_mq_hw_ctx *hctx,
 +				    const struct blk_mq_queue_data *qd)
 +{
-+	unsigned long flags;
 +	struct blktap *tap = hctx->queue->queuedata;
 +	struct blktap_device *tapdev = &tap->device;
 +	struct blktap_ring *rinfo = &tap->ring;
 +
 +	blk_mq_start_request(qd->rq);
-+	spin_lock_irqsave(&tapdev->lock, flags);
++	mutex_lock(&tapdev->lock);
 +	if (RING_FULL(&rinfo->ring))
 +		goto out_busy;
 +
@@ -1126,19 +1135,19 @@ PATCHES
 +	}
 +
 +	if (qd->last)
-+		blktap_ring_kick_user(tap);
++		flush_requests(tap);
 +
-+	spin_unlock_irqrestore(&tapdev->lock, flags);
++	mutex_unlock(&tapdev->lock);
 +	return BLK_STS_OK;
 +
 +// EOPNOTSUPP
 +out_err:
-+	spin_unlock_irqrestore(&tapdev->lock, flags);
++	mutex_unlock(&tapdev->lock);
 +	return BLK_STS_IOERR;
 +
 +out_busy:
 +	blk_mq_stop_hw_queue(hctx);
-+	spin_unlock_irqrestore(&tapdev->lock, flags);
++	mutex_unlock(&tapdev->lock);
 +	return BLK_STS_DEV_RESOURCE;
 +}
 +
@@ -1151,7 +1160,7 @@ PATCHES
 +{
 +	struct blktap *tap = hctx->queue->queuedata;
 +
-+	blktap_ring_kick_user(tap);
++	flush_requests(tap);
 +}
 +
 +static const struct blk_mq_ops blktap_mq_ops = {
@@ -1170,7 +1179,7 @@ PATCHES
 +	tapdev->tag_set.nr_hw_queues = 1;
 +	tapdev->tag_set.queue_depth = BLKTAP_RING_SIZE / 2;
 +	tapdev->tag_set.numa_node = NUMA_NO_NODE;
-+	tapdev->tag_set.flags = BLK_MQ_F_SHOULD_MERGE;
++	tapdev->tag_set.flags = BLK_MQ_F_SHOULD_MERGE | BLK_MQ_F_BLOCKING;
 +	tapdev->tag_set.cmd_size = 0;
 +	tapdev->tag_set.driver_data = tap;
 +
@@ -1233,7 +1242,6 @@ PATCHES
 +	gd->fops = &blktap_device_file_operations;
 +	gd->private_data = tapdev;
 +
-+	spin_lock_init(&tapdev->lock);
 +	rq = init_queue(tap);
 +	if (!rq) {
 +		err = -ENOMEM;
@@ -1760,7 +1768,7 @@ PATCHES
 +}
 --- /dev/null
 +++ b/drivers/block/blktap/ring.c
-@@ -0,0 +1,807 @@
+@@ -0,0 +1,814 @@
 +
 +#include <linux/device.h>
 +#include <linux/signal.h>
@@ -1854,6 +1862,8 @@ PATCHES
 +	}
 +
 +	ring->ring.rsp_cons = rc;
++
++	blktap_device_run_queues(tap);
 +}
 +
 +#define MMAP_VADDR(_start, _req, _seg)				\
@@ -2377,13 +2387,18 @@ PATCHES
 +{
 +	struct blktap *tap = filp->private_data;
 +	struct blktap_ring *ring = &tap->ring;
++	struct blktap_device *tapdev = &tap->device;
 +	int work;
 +
 +	poll_wait(filp, &tap->pool->wait, wait);
 +	poll_wait(filp, &ring->poll_wait, wait);
 +
-+	work = ring->ring.req_prod_pvt - ring->ring.sring->req_prod;
-+	RING_PUSH_REQUESTS(&ring->ring);
++	mutex_lock(&tapdev->lock);
++	if (ring->vma)
++		blktap_device_run_queues(tap);
++
++	work = ring->ring.sring->rsp_prod != ring->ring.sring->req_prod;
++	mutex_unlock(&tapdev->lock);
 +
 +	if (work ||
 +	    *BLKTAP_RING_MESSAGE(ring->ring.sring) ||
