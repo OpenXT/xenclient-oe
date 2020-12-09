@@ -8,7 +8,7 @@ SRC_URI = " \
 
 S = "${WORKDIR}"
 
-inherit allarch
+inherit multilib-allarch
 
 do_install() {
     install -d ${D}/sbin

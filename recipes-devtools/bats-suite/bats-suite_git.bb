@@ -7,7 +7,7 @@ SRCREV = "${AUTOREV}"
 
 S = "${WORKDIR}/git"
 
-inherit allarch
+inherit multilib-allarch
 
 do_install () {
     if [ -e "${S}/dom0" ]; then

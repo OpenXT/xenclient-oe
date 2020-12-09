@@ -6,7 +6,7 @@ require idl.inc
 
 S = "${WORKDIR}/git"
 
-inherit allarch
+inherit multilib-allarch
 
 do_install() {
     install -m 0755 -d ${D}${idldatadir}
