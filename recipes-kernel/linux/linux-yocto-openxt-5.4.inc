@@ -10,11 +10,11 @@ SRC_URI_append += " \
     file://openxt-kmeta;type=kmeta;destsuffix=openxt-kmeta \
 "
 
-SRCREV_machine = "v5.4.75"
-SRCREV_meta = "8d0ed83a864cc91eef4d2abbc90f13d4ecd1c213"
+SRCREV_machine = "v5.4.106"
+SRCREV_meta = "6144556fdee152870d8e792d41948ddcf9a684f1"
 
 LIC_FILES_CHKSUM = "file://COPYING;md5=bbea815ee2795b2f4230826c0c6b8814"
-LINUX_VERSION ?= "5.4.75"
+LINUX_VERSION ?= "5.4.106"
 
 inherit kernel-module-signing
 
