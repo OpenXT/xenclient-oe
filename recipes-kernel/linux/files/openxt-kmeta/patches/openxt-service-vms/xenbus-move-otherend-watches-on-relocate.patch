@@ -1,0 +1,110 @@
+################################################################################
+SHORT DESCRIPTION: 
+################################################################################
+Manage chained backend relocation.
+
+################################################################################
+LONG DESCRIPTION: 
+################################################################################
+Tweak xenbus state machine to manage chained back-end domains to be restarted
+without loosing the xenstore watches.
+
+################################################################################
+CHANGELOG 
+################################################################################
+Original author: unknown
+Port to 3.18: Eric Chanudet <chanudete@ainfosec.com>
+Port to 4.14: Richard Turner <turnerr@ainfosec.com>
+Port to 4.19: Richard Turner <turnerr@ainfosec.com>
+
+################################################################################
+REMOVAL 
+################################################################################
+Disagregation with PV drivers need this patch to run smoothly unless some
+refactoring is done to adapt the state machine.
+
+################################################################################
+UPSTREAM PLAN
+################################################################################
+None.
+
+################################################################################
+INTERNAL DEPENDENCIES 
+################################################################################
+Complements netfront-support-backend-relocate.patch.
+Required for service VM network disagregation.
+
+################################################################################
+PATCHES 
+################################################################################
+--- a/drivers/xen/xenbus/xenbus_probe.c
++++ b/drivers/xen/xenbus/xenbus_probe.c
+@@ -554,12 +554,36 @@ static int strsep_len(const char *str, c
+ 	return (len == 0) ? i : -ERANGE;
+ }
+ 
++static int move_otherend(struct xenbus_device *dev)
++{
++	int err;
++
++	/* Only move netdevs. */
++	if (!dev || !dev->dev.driver)
++		return 0;
++	if (!xenbus_dev_is_vif(dev))
++		return 0;
++
++	DPRINTK("xenbus %s: otherend possibly changed location;\
++		  renegotiating connection\n", dev->nodename);
++	err = talk_to_otherend(dev);
++	if (err) {
++		DPRINTK("talk_to_otherend on %s failed.\n", dev->nodename);
++		return err;
++	}
++        err = watch_otherend(dev);
++        if (err)
++		DPRINTK("watch_otherend on %s failed.\n", dev->nodename);
++
++	return err;
++}
++
+ void xenbus_dev_changed(const char *node, struct xen_bus_type *bus)
+ {
+-	int exists, rootlen;
++	int exists, nodelen, rootlen;
+ 	struct xenbus_device *dev;
+ 	char type[XEN_BUS_ID_SIZE];
+-	const char *p, *root;
++	const char *p, *root, *ending;
+ 
+ 	if (char_count(node, '/') < 2)
+ 		return;
+@@ -571,6 +595,7 @@ void xenbus_dev_changed(const char *node
+ 	}
+ 
+ 	/* backend/<type>/... or device/<type>/... */
++	nodelen = strnlen(node, INT_MAX);
+ 	p = strchr(node, '/') + 1;
+ 	snprintf(type, XEN_BUS_ID_SIZE, "%.*s", (int)strcspn(p, "/"), p);
+ 	type[XEN_BUS_ID_SIZE-1] = '\0';
+@@ -582,12 +607,20 @@ void xenbus_dev_changed(const char *node
+ 	if (!root)
+ 		return;
+ 
++	ending = kasprintf(GFP_KERNEL, "%.*s", nodelen - rootlen, node + rootlen);
++	if (!ending)
++		return;
+ 	dev = xenbus_device_find(root, &bus->bus);
+ 	if (!dev)
+ 		xenbus_probe_node(bus, type, root);
+-	else
++	else {
++		if (!strcmp(ending, "/backend") || !strcmp(ending, "/frontend"))
++			/* reconfigure xenstore watches if backend/frontend node pointer has changed */
++			move_otherend(dev);
+ 		put_device(&dev->dev);
++	}
+ 
++	kfree(ending);
+ 	kfree(root);
+ }
+ EXPORT_SYMBOL_GPL(xenbus_dev_changed);
