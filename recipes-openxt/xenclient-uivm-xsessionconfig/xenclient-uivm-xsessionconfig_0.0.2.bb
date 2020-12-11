@@ -31,7 +31,7 @@ SRC_URI = " \
     file://keyboard \
 "
 
-inherit allarch
+inherit multilib-allarch
 
 do_install () {
     install -d ${D}/root/.config/xfce4

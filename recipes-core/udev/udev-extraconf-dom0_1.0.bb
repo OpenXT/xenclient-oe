@@ -7,7 +7,7 @@ SRC_URI = " \
     file://50-usb-powersave.rules \
 "
 
-inherit allarch
+inherit multilib-allarch
 
 do_install() {
     install -d ${D}${sysconfdir}/udev/rules.d

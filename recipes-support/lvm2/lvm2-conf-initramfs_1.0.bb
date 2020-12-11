@@ -6,7 +6,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda
 
 SRC_URI = "file://lvm.conf"
 
-inherit allarch
+inherit multilib-allarch
 # The lvm2 recipe in openembedded-core uses multilib_script and MULTILIB_SCRIPTS
 # to handle installation of lvm.conf, and doing so here ensures that the file
 # is packaged in a compatible way.
