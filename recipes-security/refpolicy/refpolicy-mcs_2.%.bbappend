@@ -228,3 +228,8 @@ pkg_postinst_${PN}_append_xenclient-dom0 () {
         ${base_sbindir}/setfiles "${sysconfdir}/selinux/${POLICY_NAME}/contexts/files/file_contexts" /config /storage
     fi
 }
+pkg_postinst_${PN}_append_openxt-dom0 () {
+    if [ -z "$D" ]; then
+        ${base_sbindir}/setfiles "${sysconfdir}/selinux/${POLICY_NAME}/contexts/files/file_contexts" /config /storage
+    fi
+}
