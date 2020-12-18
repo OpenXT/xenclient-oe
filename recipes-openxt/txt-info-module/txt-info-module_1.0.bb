@@ -17,8 +17,4 @@ S = "${WORKDIR}/sources"
 inherit module
 inherit module-signing
 
-KERNEL_MODULE_AUTOLOAD += "txt_info"
-
-RDEPENDS_${PN} += " \
-    kernel-module-txt \
-"
+KERNEL_MODULE_AUTOLOAD += "txt-info"
