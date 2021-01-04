@@ -14,6 +14,12 @@ do_install() {
     oe_runmake INSTALL_HDR_PATH=${D}${prefix} headers_install
 }
 
-# Skip build steps.
-do_compile[noexec] = "1"
-do_configure[noexec] = "1"
+# Skip build steps.  Exec empty functions so externalsrc can find sstate.
+#do_compile[noexec] = "1"
+do_compile() {
+    :
+}
+#do_configure[noexec] = "1"
+do_configure() {
+    :
+}
