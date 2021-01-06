@@ -39,19 +39,7 @@ PATCHES
 ################################################################################
 --- a/tools/libxl/libxl_create.c
 +++ b/tools/libxl/libxl_create.c
-@@ -750,6 +750,11 @@ retry_transaction:
-     libxl__xs_writev(gc, t, dom_path, info->xsdata);
-     libxl__xs_writev(gc, t, GCSPRINTF("%s/platform", dom_path), info->platformdata);
- 
-+    if(d_config->b_info.display_depth)
-+        xs_write(ctx->xsh, t, GCSPRINTF("%s/platform/restrictdisplaydepth", dom_path), "1", 1);
-+    if(d_config->b_info.display_res)
-+        xs_write(ctx->xsh, t, GCSPRINTF("%s/platform/restrictdisplayres", dom_path), "1", 1);
-+
-     xs_write(ctx->xsh, t, GCSPRINTF("%s/control/platform-feature-multiprocessor-suspend", dom_path), "1", 1);
-     xs_write(ctx->xsh, t, GCSPRINTF("%s/control/platform-feature-xs_reset_watches", dom_path), "1", 1);
- 
-@@ -1435,17 +1440,12 @@ static void domcreate_launch_dm(libxl__e
+@@ -1435,17 +1435,12 @@ static void domcreate_launch_dm(libxl__e
      {
          libxl__device_console console;
          libxl__device device;
@@ -101,19 +89,6 @@ PATCHES
  
      return 0;
  }
---- a/tools/libxl/libxl_types.idl
-+++ b/tools/libxl/libxl_types.idl
-@@ -520,6 +520,10 @@ libxl_domain_build_info = Struct("domain
-     ("device_model_ssid_label", string),
-     ("device_model_user", string),
- 
-+    #display restrictions
-+    ("display_depth", uint32),
-+    ("display_res", uint32),
-+
-     # extra parameters pass directly to qemu, NULL terminated
-     ("extra",            libxl_string_list),
-     # extra parameters pass directly to qemu for PV guest, NULL terminated
 --- a/tools/xl/xl_parse.c
 +++ b/tools/xl/xl_parse.c
 @@ -1229,8 +1229,9 @@ void parse_config_data(const char *confi
@@ -127,19 +102,7 @@ PATCHES
                     *usbctrls, *usbdevs, *p9devs, *vdispls, *pvcallsifs_devs;
      XLU_ConfigList *channels, *ioports, *irqs, *iomem, *viridian, *dtdevs,
                     *mca_caps;
-@@ -1593,6 +1594,11 @@ void parse_config_data(const char *confi
- 
-     xlu_cfg_get_defbool(config, "nestedhvm", &b_info->nested_hvm, 0);
- 
-+    if(!xlu_cfg_get_long(config, "restrictdisplaydepth", &l, 0))
-+        b_info->display_depth = l;
-+    if(!xlu_cfg_get_long(config, "restrictdisplayres", &l, 0))
-+        b_info->display_res = l;
-+
-     switch(b_info->type) {
-     case LIBXL_DOMAIN_TYPE_HVM:
-         kernel_basename = libxl_basename(b_info->kernel);
-@@ -2222,64 +2228,38 @@ skip_nic:
+@@ -2222,64 +2223,38 @@ skip_nic:
          fprintf(stderr, "WARNING: vif2: netchannel2 is deprecated and not supported by xl\n");
      }
  
