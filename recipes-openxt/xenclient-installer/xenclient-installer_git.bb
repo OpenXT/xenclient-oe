@@ -21,10 +21,6 @@ inherit multilib-allarch deploy
 do_install () {
     ${S}/install part1 ${D}/install
     ${S}/install part2 ${D}
-}
-
-do_deploy() {
-    install -m 0755 -d "${DEPLOYDIR}/netboot"
     for f in \
         network.ans \
         network_download_win.ans \
@@ -32,17 +28,26 @@ do_deploy() {
         network_manual_download_win.ans \
         network_upgrade.ans
     do
-        install -m 0644 "${WORKDIR}/${f}" "${DEPLOYDIR}/netboot/${f}"
+        install -m 0644 "${WORKDIR}/${f}" "${D}/${f}"
     done
+}
+
+do_deploy() {
+    install -m 0755 -d "${DEPLOYDIR}/netboot"
+    install -m 0644 ${D}/*.ans ${DEPLOYDIR}/netboot/
 
     tar --exclude=./install \
         -C ${D} -cjf ${DEPLOYDIR}/control.tar.bz2 .
 }
 addtask do_deploy after do_install before do_build
 
-PACKAGES += "${PN}-part2"
+PACKAGES += " \
+    ${PN}-answerfiles \
+    ${PN}-part2 \
+"
 
 FILES_${PN} = "/install/*"
+FILES_${PN}-answerfiles = "/*.ans"
 FILES_${PN}-part2 = "/*"
 
 RDEPENDS_${PN} = " \
