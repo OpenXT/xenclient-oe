@@ -24,13 +24,6 @@ IMAGE_INSTALL = " \
     kernel-module-tpm \
     kernel-module-tpm-tis \
     kernel-module-tpm-tis-core \
-    kernel-module-usbhid \
-    kernel-module-ehci-hcd \
-    kernel-module-ehci-pci \
-    kernel-module-uhci-hcd \
-    kernel-module-ohci-hcd \
-    kernel-module-hid \
-    kernel-module-hid-generic \
     module-init-tools-depmod \
     module-init-tools \
     policycoreutils-setfiles \
