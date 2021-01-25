@@ -25,4 +25,8 @@ IMAGE_INSTALL = " \
 "
 IMAGE_LINGUAS = "en-us"
 
-inherit image
+inherit openxt-image
+
+PACKAGE_REMOVE = " \
+    kernel-image-* \
+"
