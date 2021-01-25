@@ -17,3 +17,10 @@ SRC_URI = "git://github.com/01org/tpm2-tools.git;protocol=git;branch=3.X \
 S = "${WORKDIR}/git"
 
 inherit autotools pkgconfig
+
+PACKAGES =+ "tpm2-tools-initrd"
+FILES_${PN}-initrd = " \
+    ${bindir}/tpm2_pcrlist \
+    ${bindir}/tpm2_extendpcr \
+"
+RDEPENDS_${PN} += "${PN}-initrd"
