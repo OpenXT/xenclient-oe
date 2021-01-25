@@ -66,6 +66,7 @@ do_install_append() {
 PACKAGES =+ " \
     ${PN}-data \
     ${PN}-conf \
+    libtspi-sa \
 "
 FILES_${PN} += " \
     /boot/system/tpm \
@@ -79,6 +80,9 @@ FILES_${PN}-conf = " \
 "
 CONFFILES_${PN}-conf = " \
     ${sysconfdir}/tcsd.conf \
+"
+FILES_libtspi-sa = " \
+    ${libdir}/libtspi_sa${SOLIBS} \
 "
 
 RRECOMMENDS_${PN}_append += "${PN}-conf"
