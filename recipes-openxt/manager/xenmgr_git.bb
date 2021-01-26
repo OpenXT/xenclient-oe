@@ -20,6 +20,7 @@ DEPENDS = " \
     hkg-deepseq \
     hkg-text \
     hkg-mtl \
+    hkg-split \
     xenmgr-data \
 "
 
