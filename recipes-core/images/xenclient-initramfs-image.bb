@@ -22,7 +22,6 @@ IMAGE_INSTALL = " \
     kernel-module-tpm \
     kernel-module-tpm-tis \
     kernel-module-tpm-tis-core \
-    module-init-tools \
 "
 IMAGE_LINGUAS = "en-us"
 
