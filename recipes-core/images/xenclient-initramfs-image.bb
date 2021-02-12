@@ -11,7 +11,6 @@ IMAGE_FEATURES = ""
 IMAGE_FSTYPES = "cpio.gz"
 IMAGE_INSTALL = " \
     busybox \
-    lvm2 \
     initramfs-module-functions \
     initramfs-module-lvm \
     initramfs-module-udev \
