@@ -69,6 +69,9 @@ SRC_URI_append = " \
     file://libxl-fix-reboot.patch \
     file://libxl-display-manager-support.patch \
     file://libxl-xenmgr-support.patch \
+    file://libxl-no-PV-qemu.patch \
+    file://libxl-hard-shutdown.patch \
+    file://libxl-argo-xswait.patch \
     file://libxl-move-extra-qemu-args-to-the-end.patch \
     file://libxl-stubdom-options.patch \
     file://libxl-support-hvm-readonly-disks.patch \
