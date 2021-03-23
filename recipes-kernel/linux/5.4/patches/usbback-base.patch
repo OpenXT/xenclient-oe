@@ -330,7 +330,7 @@ PATCHES
  				drv = to_usb_driver(cintf->dev.driver);
 --- a/drivers/usb/host/xhci-pci.c
 +++ b/drivers/usb/host/xhci-pci.c
-@@ -273,6 +273,11 @@ static void xhci_pci_quirks(struct devic
+@@ -289,6 +289,11 @@ static void xhci_pci_quirks(struct devic
  	if (xhci->quirks & XHCI_RESET_ON_RESUME)
  		xhci_dbg_trace(xhci, trace_xhci_dbg_quirks,
  				"QUIRK: Resetting on resume");
@@ -1123,8 +1123,8 @@ PATCHES
 +#define LOG_LVL_DEBUG  2
 +#define LOG_LVL_DUMP   3
 +
-+#define debug_print(l, _f, _a...) \
-+	do { if (usbback_debug_lvl() >= l) printk( _f, ## _a ); } while(0)
++#define debug_print(l, _f, ...) \
++	do { if (usbback_debug_lvl() >= (l)) printk((_f), ##__VA_ARGS__); } while(0)
 +
 +static inline unsigned int buffer_pages(unsigned int length)
 +{
@@ -1251,7 +1251,7 @@ PATCHES
 +		BUG();
 +	}
 +
-+	err = bind_interdomain_evtchn_to_irqhandler(
++	err = bind_interdomain_evtchn_to_irqhandler_lateeoi(
 +		usbif->domid, evtchn, usbif_be_int, 0, "usbif-backend", usbif);
 +	if (err < 0)
 +	{
@@ -1308,7 +1308,7 @@ PATCHES
 +}
 --- /dev/null
 +++ b/drivers/usb/xen-usbback/usbback.c
-@@ -0,0 +1,1269 @@
+@@ -0,0 +1,1295 @@
 +/******************************************************************************
 + *
 + * Back-end of the driver for virtual block devices. This portion of the
@@ -1397,7 +1397,7 @@ PATCHES
 +static void async_free_reqs(unsigned long);
 +static DECLARE_TASKLET(async_free_reqs_task, async_free_reqs, 0);
 +
-+static int do_usb_io_op(usbif_t *usbif);
++static int do_usb_io_op(usbif_t *usbif, unsigned int *eoi_flags);
 +static void dispatch_usb_io(usbif_t *usbif,
 +				 usbif_request_t *req,
 +				 pending_req_t *pending_req);
@@ -1517,6 +1517,7 @@ PATCHES
 +                pending_segment_t *segment = req->pending_indirect_segment[index];
 +
 +		BUG_ON(!segment);
++		req->pending_indirect_segment[index] = NULL;
 +                list_add(&segment->free_list, &pending_segments_free);
 +                pending_segments_free_cnt++;
 +
@@ -1637,6 +1638,7 @@ PATCHES
 +        unsigned int i, invcount = 0;
 +        grant_handle_t *handle;
 +	pending_segment_t *indirect_seg;
++	struct page **pages;
 +        int ret;
 +
 +	debug_print(LOG_LVL_DEBUG, "%s Flushing %d indirect segs!\n",
@@ -1651,6 +1653,14 @@ PATCHES
 +		return;
 +	}
 +
++	pages = kmalloc_array(req->pending_indirect_segments, sizeof(pages[0]), GFP_KERNEL);
++	if (!pages) {
++		debug_print(LOG_LVL_ERROR, "%s: req %p malloc %d pages failed\n",
++					__FUNCTION__, req, req->pending_indirect_segments);
++		ret = -1;
++		goto free_unmap;
++	}
++
 +	for (i = 0; i < req->pending_indirect_segments; i++) {
 +		indirect_seg = req->pending_indirect_segment[i];
 +		BUG_ON(!indirect_seg);
@@ -1662,11 +1672,13 @@ PATCHES
 +					GNTMAP_host_map, *handle);
 +		*handle = USBBACK_INVALID_HANDLE;
 +		invcount++;
++		pages[i] = indirect_seg->page;
 +	}
-+        ret = HYPERVISOR_grant_table_op(GNTTABOP_unmap_grant_ref,
-+					unmap, invcount);
++	ret = gnttab_unmap_refs(unmap, NULL, pages, invcount);
 +	BUG_ON(ret);
 +
++	kfree(pages);
++free_unmap:
 +	kfree(unmap);
 +}
 +#endif
@@ -1676,12 +1688,20 @@ PATCHES
 +	struct gnttab_unmap_grant_ref unmap[USBIF_MAX_SEGMENTS_PER_REQUEST];
 +	unsigned int i, invcount = 0;
 +	grant_handle_t *handle;
++	struct page **pages;
 +	int ret;
 +
 +#ifdef INDIRECT_SEGMENTS
 +	if (is_indirect(req))
 +		fast_flush_area_indirect(req);
 +#endif
++
++	pages = kmalloc_array(req->nr_pages, sizeof(pages[0]), GFP_KERNEL);
++	if (!pages) {
++		debug_print(LOG_LVL_ERROR, "%s: req %p malloc %d pages failed\n",
++					__FUNCTION__, req, req->nr_pages);
++		return;
++	}
 +
 +	debug_print(LOG_LVL_DEBUG, "%s Flushing %d segs!\n",
 +                                __FUNCTION__, req->nr_pages);
@@ -1694,10 +1714,10 @@ PATCHES
 +				    *handle);
 +		*handle = USBBACK_INVALID_HANDLE;
 +		invcount++;
++		pages[i] = req->pending_segment[i]->page;
 +	}
 +
-+	ret = HYPERVISOR_grant_table_op(
-+		GNTTABOP_unmap_grant_ref, unmap, invcount);
++	ret = gnttab_unmap_refs(unmap, NULL, pages, invcount);
 +	BUG_ON(ret);
 +}
 +
@@ -1755,6 +1775,8 @@ PATCHES
 +int usbif_schedule(void *arg)
 +{
 +	usbif_t *usbif = arg;
++	bool do_eoi;
++	unsigned int eoi_flags = XEN_EOI_FLAG_SPURIOUS;
 +
 +	usbif_get(usbif);
 +
@@ -1772,11 +1794,17 @@ PATCHES
 +			!list_empty(&pending_free) || kthread_should_stop());
 +
 +		if (!kthread_should_stop()) {
++			do_eoi = usbif->waiting_reqs;
 +			usbif->waiting_reqs = 0;
 +			smp_mb(); /* clear flag *before* checking for work */
 +
-+			if (do_usb_io_op(usbif))
++			if (do_usb_io_op(usbif, &eoi_flags))
 +				usbif->waiting_reqs = 1;
++
++			if (do_eoi && !usbif->waiting_reqs) {
++				xen_irq_lateeoi(usbif->irq, eoi_flags);
++				eoi_flags |= XEN_EOI_FLAG_SPURIOUS;
++			}
 +
 +			if (log_stats && time_after(jiffies, usbif->st_print))
 +				print_stats(usbif);
@@ -2001,7 +2029,7 @@ PATCHES
 + * DOWNWARD CALLS -- These interface with the usb-device layer proper.
 + */
 +
-+static int do_usb_io_op(usbif_t *usbif)
++static int do_usb_io_op(usbif_t *usbif, unsigned int *eoi_flags)
 +{
 +	usbif_back_rings_t *usb_rings = &usbif->usb_rings;
 +	usbif_request_t req;
@@ -2017,6 +2045,9 @@ PATCHES
 +
 +		if (RING_REQUEST_CONS_OVERFLOW(&usb_rings->common, rc))
 +			break;
++
++		/* We have a request, clean the spurious flag. */
++		*eoi_flags &= ~XEN_EOI_FLAG_SPURIOUS;
 +
 +		pending_req = alloc_req();
 +		if (NULL == pending_req) {
@@ -2151,6 +2182,7 @@ PATCHES
 +			int indirect)
 +{
 +	struct gnttab_map_grant_ref *map;
++	struct page **pages;
 +	int i, ret;
 +
 +	BUG_ON(nseg > USBIF_MAX_SEGMENTS_PER_IREQUEST);
@@ -2160,6 +2192,14 @@ PATCHES
 +		debug_print(LOG_LVL_ERROR, "%s: req %p offset %d nseg %d indirect %d\n",
 +			__FUNCTION__, pending_req, offset, nseg, indirect);
 +		return (-1);
++	}
++
++	pages = kmalloc_array(nseg, sizeof(pages[0]), GFP_KERNEL);
++	if (!pages) {
++		debug_print(LOG_LVL_ERROR, "%s: req %p offset %d nseg %d indirect %d\n",
++					__FUNCTION__, pending_req, offset, nseg, indirect);
++		ret = -1;
++		goto free_map;
 +	}
 +
 +	for (i = 0; i < nseg; i++) {
@@ -2177,29 +2217,26 @@ PATCHES
 +		else
 +			flags = GNTMAP_host_map;
 +		gnttab_set_map_op(&map[i], virtual_address, flags, gref[i], domid);
++
++		pages[i] = is_indirect(pending_req) ?
++			pending_req->pending_indirect_segment[page_nr]->page :
++			pending_req->pending_segment[page_nr]->page;
 +#ifdef DEBUG_CHECKS
 +		debug_print(LOG_LVL_DEBUG, "%s: %d of %d gref %x flags %x vaddr %lx\n",
 +			__FUNCTION__, i, nseg, gref[i], flags, virtual_address);
 +#endif
 +	}
 +
-+	ret = HYPERVISOR_grant_table_op(GNTTABOP_map_grant_ref, map, nseg);
-+	BUG_ON(ret);
++	ret = gnttab_map_refs(map, NULL, pages, nseg);
 +
 +	for (i = 0; i < nseg; i++) {
-+#ifdef INDIRECT_SEGMENTS
 +		int page_nr = i + offset;
-+		unsigned long virtual_address = indirect ? vaddr(pending_req, page_nr)
-+				: vaddr_base(pending_req, page_nr);
-+#else
-+		unsigned long virtual_address = vaddr_base(pending_req, i);
-+#endif
 +
 +		if (unlikely(map[i].status != 0)) {
 +			debug_print(LOG_LVL_ERROR,
 +				"invalid buffer -- could not remap it\n");
 +			map[i].handle = USBBACK_INVALID_HANDLE;
-+			ret |= 1;
++			ret |= !ret;
 +		}
 +
 +#ifdef INDIRECT_SEGMENTS
@@ -2208,14 +2245,10 @@ PATCHES
 +		else
 +#endif
 +			pending_req->pending_segment[i]->grant_handle = map[i].handle;
-+
-+		if (ret)
-+			continue;
-+
-+		set_phys_to_machine(__pa(virtual_address) >> PAGE_SHIFT,
-+				FOREIGN_FRAME(map[i].dev_bus_addr >> PAGE_SHIFT));
 +	}
 +
++	kfree(pages);
++free_map:
 +	kfree(map);
 +
 +	return (ret);
@@ -2513,9 +2546,6 @@ PATCHES
 +{
 +	int i, mmap_pages;
 +
-+	if (!xen_pv_domain())
-+		return -ENODEV;
-+
 +	if (vusb_init())
 +		return -EINVAL;
 +
@@ -2531,13 +2561,13 @@ PATCHES
 +	if (!pending_reqs || !pending_pages || !pending_segments)
 +		goto out_of_memory;
 +
++	if (gnttab_alloc_pages(mmap_pages, pending_pages))
++		goto out_of_memory;
++
 +	INIT_LIST_HEAD(&pending_segments_free);
 +
 +	for (i = 0; i < mmap_pages; i++) {
 +		pending_segments[i].grant_handle = USBBACK_INVALID_HANDLE;
-+		pending_pages[i] = alloc_page(GFP_KERNEL);
-+		if (pending_pages[i] == NULL)
-+			goto out_of_memory;
 +		pending_segments[i].page = pending_pages[i];
 +		list_add_tail(&pending_segments[i].free_list, &pending_segments_free);
 +	}
@@ -2566,10 +2596,6 @@ PATCHES
 + out_of_memory:
 +	kfree(pending_reqs);
 +	kfree(pending_segments);
-+	for (i = 0; i < mmap_pages; i++) {
-+		if (pending_pages[i])
-+			__free_page(pending_pages[i]);
-+	}
 +	vfree(pending_pages);
 +	printk("%s: out of memory\n", __FUNCTION__);
 +	return -ENOMEM;
@@ -3521,7 +3547,7 @@ PATCHES
 +
 --- /dev/null
 +++ b/drivers/usb/xen-usbback/xenbus.c
-@@ -0,0 +1,582 @@
+@@ -0,0 +1,583 @@
 +/*  Xenbus code for usbif backend
 +    Copyright (C) 2005 Rusty Russell <rusty@rustcorp.com.au>
 +    Copyright (C) 2005 XenSource Ltd
@@ -3883,12 +3909,12 @@ PATCHES
 +	/* setup back pointer */
 +	be->usbif->be = be;
 +
-+	err = xenbus_watch_pathfmt(dev, &be->backend_watch, backend_changed,
++	err = xenbus_watch_pathfmt(dev, &be->backend_watch, NULL, backend_changed,
 +				   "%s/%s", dev->nodename, "physical-device");
 +	if (err)
 +		goto fail;
 +
-+	err = xenbus_watch_pathfmt(dev, &be->autosuspend_watch,
++	err = xenbus_watch_pathfmt(dev, &be->autosuspend_watch, NULL,
 +				   autosuspend_changed, "%s/%s", dev->otherend,
 +				   "autosuspend");
 +	if (err)
@@ -3961,6 +3987,7 @@ PATCHES
 +		if (xenbus_dev_is_online(dev))
 +			break;
 +		/* fall through if not online */
++		fallthrough;
 +	case XenbusStateUnknown:
 +		device_unregister(&dev->dev);
 +		break;

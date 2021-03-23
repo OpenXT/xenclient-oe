@@ -9,7 +9,6 @@ PV_MAJOR = "${@"${PV}".split('.', 3)[0]}"
 
 FILESEXTRAPATHS_prepend := "${THISDIR}/patches:${THISDIR}/defconfigs:"
 SRC_URI += "${KERNELORG_MIRROR}/linux/kernel/v${PV_MAJOR}.x/linux-${PV}.tar.xz;name=kernel \
-    file://0001-nvme-pci-disable-the-write-zeros-command-for-Intel-6.patch \
     file://bridge-carrier-follow-prio0.patch \
     file://privcmd-mmapnocache-ioctl.patch \
     file://xenkbd-tablet-resolution.patch \
@@ -50,5 +49,5 @@ SRC_URI += "${KERNELORG_MIRROR}/linux/kernel/v${PV_MAJOR}.x/linux-${PV}.tar.xz;n
     "
 
 LIC_FILES_CHKSUM = "file://COPYING;md5=bbea815ee2795b2f4230826c0c6b8814"
-SRC_URI[kernel.md5sum] = "28a29677c102b211359439f78d1f3d6a"
-SRC_URI[kernel.sha256sum] = "b9d3c2938466f388a70fd190fd6691baa8b757393b267e9f7b06c4730d85d5ef"
+SRC_URI[kernel.md5sum] = "3a7d158c73f660134e0c0aa3f9c650d7"
+SRC_URI[kernel.sha256sum] = "cc873b2c39c1823d4bc4f6cde527943c8cfd28ae94cb517804b0f9679359c8db"
