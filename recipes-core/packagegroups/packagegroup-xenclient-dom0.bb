@@ -79,7 +79,6 @@ RDEPENDS_${PN} = " \
     xenclient-nwd \
     wget \
     xenclient-repo-certs \
-    gobi-loader \
     usb-modeswitch \
     upgrade-db \
     rpc-proxy \
