@@ -1,0 +1,319 @@
+################################################################################
+SHORT DESCRIPTION:
+################################################################################
+Add POST and argo support to quark.
+
+################################################################################
+LONG DESCRIPTION:
+################################################################################
+POST support: very basic; added to support surf sending log messages via POST
+
+argo support: added a few select() calls to prevent server lockup when serving
+resources
+
+################################################################################
+CHANGELOG
+################################################################################
+x64 patch: Nicholas Tsirakis <tsirakisn@ainfosec.com>
+
+################################################################################
+REMOVAL
+################################################################################
+
+################################################################################
+UPSTREAM PLAN
+################################################################################
+
+################################################################################
+INTERNAL DEPENDENCIES
+################################################################################
+
+################################################################################
+PATCHES
+################################################################################
+
+commit 8ea834685a163c7dd20ac6c46e0efcae43f8d2e8
+Author: Nicholas Tsirakis <tsirakisn@ainfosec.com>
+Date:   Tue Feb 12 10:22:24 2019 -0500
+
+    x64 patch
+
+diff --git a/config.mk b/config.mk
+index 7056241..668b0ef 100644
+--- a/config.mk
++++ b/config.mk
+@@ -4,13 +4,13 @@ VERSION = 0
+ # Customize below to fit your system
+ 
+ # paths
+-PREFIX = /usr/local
++PREFIX ?= /usr
+ MANPREFIX = $(PREFIX)/share/man
+ 
+ # flags
+-CPPFLAGS = -DVERSION=\"$(VERSION)\" -D_DEFAULT_SOURCE -D_XOPEN_SOURCE=700 -D_BSD_SOURCE
+-CFLAGS   = -std=c99 -pedantic -Wall -Wextra -Os
+-LDFLAGS  = -s
++CPPFLAGS ?= -DVERSION=\"$(VERSION)\" -D_DEFAULT_SOURCE -D_XOPEN_SOURCE=700 -D_BSD_SOURCE
++CFLAGS   ?= -std=c99 -pedantic -Wall -Wextra -O
++LDFLAGS  ?=
+ 
+ # compiler and linker
+-CC = cc
++CC ?= gcc
+diff --git a/http.c b/http.c
+index c848e81..f53c25c 100644
+--- a/http.c
++++ b/http.c
+@@ -30,6 +30,7 @@ const char *req_field_str[] = {
+ const char *req_method_str[] = {
+ 	[M_GET]  = "GET",
+ 	[M_HEAD] = "HEAD",
++	[M_POST] = "POST"
+ };
+ 
+ const char *status_str[] = {
+@@ -121,14 +122,37 @@ http_get_request(int fd, struct request *r)
+ 		}
+ 	}
+ 
+-	/* remove terminating empty line */
+-	if (hlen < 2) {
++	/* split header and payload (if applicable)
++	 *
++	 *  expected POST format: HEADER,
++	 *                        two newlines,
++	 *                        PAYLOAD,
++	 *                        two newlines
++	 *
++	 *  expected GET format: HEADER,
++	 *                       two newlines
++	 */
++
++	/* find first occurrence of double newlines */
++	p = strstr(h, "\r\n\r\n");
++	if (!p) {
+ 		return http_send_status(fd, S_BAD_REQUEST);
+ 	}
+-	hlen -= 2;
+ 
+-	/* null-terminate the header */
+-	h[hlen] = '\0';
++	/* keep the first newline */
++	p += 2;
++
++	/* find second occurrence - if exists, POST request, else GET */
++	q = strstr(p, "\r\n\r\n");
++	if (q) {
++		*q = '\0';
++		strncpy(r->payload, p, q-p+1);
++	} else {
++		r->payload[0] = '\0';
++	}
++
++	/* null terminate header; strip second newline */
++	*p = '\0';
+ 
+ 	/*
+ 	 * parse request line
+@@ -270,6 +294,8 @@ http_get_request(int fd, struct request *r)
+ 		memmove(r->field[REQ_HOST], p, q - p + 1);
+ 	}
+ 
++	/* wait until our fd is available for the next operation */
++	wait_fd_ready(fd, true, true);
+ 	return 0;
+ }
+ 
+@@ -355,7 +381,7 @@ http_send_response(int fd, struct request *r)
+ 	struct tm tm;
+ 	size_t len, i;
+ 	off_t lower, upper;
+-	int hasport, ipv6host;
++	int hasport, ipv6host, ret;
+ 	static char realtarget[PATH_MAX], tmptarget[PATH_MAX], t[TIMESTAMP_LEN];
+ 	char *p, *q, *mime;
+ 	const char *vhostmatch, *targethost, *err;
+@@ -604,5 +630,10 @@ http_send_response(int fd, struct request *r)
+ 		}
+ 	}
+ 
+-	return resp_file(fd, RELPATH(realtarget), r, &st, mime, lower, upper);
++	/* wait until our fd is available for the next operation */
++	wait_fd_ready(fd, true, true);
++	ret = resp_file(fd, RELPATH(realtarget), r, &st, mime, lower, upper);
++	wait_fd_ready(fd, true, false);
++
++	return ret;
+ }
+diff --git a/http.h b/http.h
+index cd1ba22..f0ea49e 100644
+--- a/http.h
++++ b/http.h
+@@ -5,6 +5,7 @@
+ #include <limits.h>
+ 
+ #define HEADER_MAX 4096
++#define PAYLOAD_MAX 8192
+ #define FIELD_MAX 200
+ 
+ enum req_field {
+@@ -19,6 +20,7 @@ extern const char *req_field_str[];
+ enum req_method {
+ 	M_GET,
+ 	M_HEAD,
++	M_POST,
+ 	NUM_REQ_METHODS,
+ };
+ 
+@@ -28,6 +30,7 @@ struct request {
+ 	enum req_method method;
+ 	char target[PATH_MAX];
+ 	char field[NUM_REQ_FIELDS][FIELD_MAX];
++	char payload[PAYLOAD_MAX];
+ };
+ 
+ enum status {
+diff --git a/main.c b/main.c
+index e9d0a06..a3eebf6 100644
+--- a/main.c
++++ b/main.c
+@@ -13,6 +13,7 @@
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <string.h>
++#include <syslog.h>
+ #include <time.h>
+ #include <unistd.h>
+ 
+@@ -31,14 +32,17 @@ serve(int infd, struct sockaddr_storage *in_sa)
+ 	char inaddr[INET6_ADDRSTRLEN /* > INET_ADDRSTRLEN */];
+ 	char tstmp[21];
+ 
+-	/* set connection timeout */
+-	if (sock_set_timeout(infd, 30)) {
+-		goto cleanup;
+-	}
+-
+ 	/* handle request */
+-	if (!(status = http_get_request(infd, &r))) {
+-		status = http_send_response(infd, &r);
++	status = http_get_request(infd, &r);
++
++	if (!status) {
++		if (r.method == M_POST) {
++			/* handle POST */
++			syslog(LOG_INFO, "[quark] %s", r.payload);
++		} else {
++			/* handle GET */
++			status = http_send_response(infd, &r);
++		}
+ 	}
+ 
+ 	/* write output to log */
+@@ -228,18 +232,6 @@ main(int argc, char *argv[])
+ 		die("setrlimit RLIMIT_NPROC:");
+ 	}
+ 
+-	/* validate user and group */
+-	errno = 0;
+-	if (user && !(pwd = getpwnam(user))) {
+-		die("getpwnam '%s': %s", user, errno ? strerror(errno) :
+-		    "Entry not found");
+-	}
+-	errno = 0;
+-	if (group && !(grp = getgrnam(group))) {
+-		die("getgrnam '%s': %s", group, errno ? strerror(errno) :
+-		    "Entry not found");
+-	}
+-
+ 	/* Open a new process group */
+ 	setpgid(0,0);
+ 
+@@ -270,23 +262,6 @@ main(int argc, char *argv[])
+ 			die("chroot .:");
+ 		}
+ 
+-		/* drop root */
+-		if (grp && setgroups(1, &(grp->gr_gid)) < 0) {
+-			die("setgroups:");
+-		}
+-		if (grp && setgid(grp->gr_gid) < 0) {
+-			die("setgid:");
+-		}
+-		if (pwd && setuid(pwd->pw_uid) < 0) {
+-			die("setuid:");
+-		}
+-		if (getuid() == 0) {
+-			die("Won't run as root user", argv0);
+-		}
+-		if (getgid() == 0) {
+-			die("Won't run as root group", argv0);
+-		}
+-
+ 		/* accept incoming connections */
+ 		while (1) {
+ 			in_sa_len = sizeof(in_sa);
+diff --git a/resp.c b/resp.c
+index 3075c28..ee12606 100644
+--- a/resp.c
++++ b/resp.c
+@@ -141,6 +141,7 @@ resp_file(int fd, char *name, struct request *r, struct stat *st, char *mime,
+ 	            "Date: %s\r\n"
+ 	            "Connection: close\r\n"
+ 	            "Last-Modified: %s\r\n"
++	            "Expires: Wed, 1 Jan 2030 00:00:00 GMT\r\n"
+ 	            "Content-Type: %s\r\n"
+ 	            "Content-Length: %zu\r\n",
+ 	            s, status_str[s], timestamp(time(NULL), t1),
+diff --git a/util.c b/util.c
+index 0b05d91..5e16271 100644
+--- a/util.c
++++ b/util.c
+@@ -133,3 +133,27 @@ reallocarray(void *optr, size_t nmemb, size_t size)
+ 	}
+ 	return realloc(optr, size * nmemb);
+ }
++
++void
++wait_fd_ready(int fd, bool read, bool write)
++{
++	struct timeval tv;
++	fd_set readfds;
++	fd_set writefds;
++
++	tv.tv_sec = 0;
++	tv.tv_usec = 500000;
++
++	FD_ZERO(&readfds);
++	FD_ZERO(&writefds);
++
++	if (read) {
++		FD_SET(fd, &readfds);
++	}
++
++	if (write) {
++		FD_SET(fd, &writefds);
++	}
++
++	select(fd + 1, &readfds, &writefds, NULL, &tv);
++}
+diff --git a/util.h b/util.h
+index 12b7bd8..d41dc40 100644
+--- a/util.h
++++ b/util.h
+@@ -3,6 +3,7 @@
+ #define UTIL_H
+ 
+ #include <regex.h>
++#include <stdbool.h>
+ #include <stddef.h>
+ #include <time.h>
+ 
+@@ -54,4 +55,6 @@ int esnprintf(char *, size_t, const char *, ...);
+ void *reallocarray(void *, size_t, size_t);
+ long long strtonum(const char *, long long, long long, const char **);
+ 
++void wait_fd_ready(int, bool, bool);
++
+ #endif /* UTIL_H */

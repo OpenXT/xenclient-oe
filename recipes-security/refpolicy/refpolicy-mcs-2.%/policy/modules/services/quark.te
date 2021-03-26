@@ -18,44 +18,23 @@
 #
 #############################################################################
 
-## <summary>uid daemon</summary>
+policy_module(quark, 0.1)
 
-#######################################
-## <summary>
-##	Send messages to uid over dbus.
-## </summary>
-## <param name="domain">
-##	<summary>
-##	The type of the process sending messages to uid over dbus.
-##	</summary>
-## </param>
-#
-interface(`uid_dbus_send',`
-	gen_require(`
-		type uid_t;
-		class dbus send_msg;
-	')
-	
-	allow $1 uid_t:dbus	send_msg;
-')
+type quark_t;
+type quark_exec_t;
 
-#######################################
-## <summary>
-##	Exchange messages with uid over dbus.
-## </summary>
-## <param name="domain">
-##	<summary>
-##	The type of the process chatting with uid over dbus.
-##	</summary>
-## </param>
-#
-interface(`uid_dbus_chat',`
-	gen_require(`
-		type uid_t;
-		class dbus send_msg;
-	')
-	
-	allow $1 uid_t:dbus	send_msg;
-	allow uid_t $1:dbus	send_msg;
-')
+init_daemon_domain(quark_t, quark_exec_t);
 
+xc_files_rw_v4v_chr(quark_t)
+logging_send_syslog_msg(quark_t)
+
+# quark spawns a new child process for each file it
+# serves. allow it to configure these processes.
+allow quark_t self:process { rlimitinh setpgid setrlimit siginh };
+
+# the files are served from the dir provided on the cmdline.
+# quark chroots to that dir to handle relative pathnames.
+allow quark_t self:capability sys_chroot;
+
+# allow to signal itself (on shutdown)
+allow quark_t self:process signal;

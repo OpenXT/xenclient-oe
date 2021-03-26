@@ -102,7 +102,6 @@ RDEPENDS_${PN} = " \
     vusb-daemon \
     xenmgr-data \
     updatemgr \
-    uid \
     surfman \
     linuxfb-surfman-plugin \
     xenmgr \
@@ -113,6 +112,7 @@ RDEPENDS_${PN} = " \
     pesign \
     ipxe \
     udev-extraconf-dom0 \
+    quark \
 "
 
 # OE upgrade - temporarly disabled:
