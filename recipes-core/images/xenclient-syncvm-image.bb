@@ -12,6 +12,7 @@ IMAGE_FEATURES += " \
     package-management \
     read-only-rootfs \
     root-bash-shell \
+    ctrlaltdel-reboot \
 "
 
 IMAGE_FSTYPES = "ext3.vhd.gz"
@@ -47,9 +48,6 @@ require xenclient-version.inc
 inherit xenclient-licences
 
 post_rootfs_shell_commands() {
-    # enable ctrlaltdel reboot because PV driver uses ctrl+alt+del to interpret reboot issued via xenstore
-    echo 'ca:12345:ctrlaltdel:/sbin/shutdown -t1 -a -r now' >> ${IMAGE_ROOTFS}/etc/inittab;
-
     # Trick to resolve dom0 name with argo.
     echo '1.0.0.0 dom0' >> ${IMAGE_ROOTFS}/etc/hosts;
 }
