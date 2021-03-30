@@ -20,7 +20,7 @@ DEPENDS += "\
 PV = "15+git${SRCPV}"
 
 SRC_URI = " \
-    git://github.com/rhboot/shim;protocol=https;branch=master \
+    git://github.com/rhboot/shim;protocol=https;branch=main \
     file://0001-Add-KEEP_DISCARDABLE_RELOC-build-option.patch \
     file://0002-Allow-32-bit-images-for-measurement-verification-via.patch \
     file://0003-Add-Measure-function-to-the-shim-lock-protocol.patch \

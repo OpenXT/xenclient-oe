@@ -1,4 +1,4 @@
-SRC_URI = "https://svwh.dl.sourceforge.net/project/linuxconsole/linuxconsoletools-${PV}.tar.bz2 \
+SRC_URI = "https://download.sourceforge.net/project/linuxconsole/linuxconsoletools-${PV}.tar.bz2 \
 	file://snes232.patch \
 	file://99-wacom-serial.rules \
 "
