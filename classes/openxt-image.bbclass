@@ -1,5 +1,6 @@
 inherit openxt_image_types
 inherit openxt-image-disk
+inherit image-qa-module-sigs
 
 # We want to inherit the FEATURE_PACKAGES but do only want core-boot included into IMAGE_INSTALL
 IMAGE_INSTALL ?= "packagegroup-core-boot"
