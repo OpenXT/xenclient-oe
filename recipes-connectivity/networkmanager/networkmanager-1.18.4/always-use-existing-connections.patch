@@ -1,0 +1,98 @@
+################################################################################
+SHORT DESCRIPTION:
+################################################################################
+Always used saved connection profiles. If none exist, let networkmanager create
+default ones.
+
+################################################################################
+LONG DESCRIPTION:
+################################################################################
+Now that networkmanager actively manages wired/wireless/bridged devices+
+connections, if we make changes to these connections and save them to disk (db)
+for future use, due to networkmanager's core logic, it creates new connections
+with the same ID but fails to match our saved connection profiles.
+It also writes them to a different tempdir path than our on-disk saved connection 
+profiles.
+
+This patch detects when networkmanager creates these default connections for
+the managed devices and checks first to see if a connection profile exists in
+the expected path /etc/NetworkManager/system-connections. Any connection profile
+in this path is populated by network-slave calling nm_sync.sh to read the db
+entries and converting them to networkmanager-style connection profiles. We simply
+bypass writing the new, default connection, and let the normal logic parse the
+saved connections and load them into NetworkManager for use.
+
+This allows connection setting changes, such as DNS entries or password credentials,
+to persist across ndvm and host platform reboots.
+
+################################################################################
+CHANGELOG
+################################################################################
+Authors:
+Chris Rogers <rogersc@ainfosec.com>
+
+################################################################################
+REMOVAL
+################################################################################
+None
+
+################################################################################
+UPSTREAM PLAN
+################################################################################
+None
+
+################################################################################
+INTERNAL DEPENDENCIES
+################################################################################
+db-nm-settings.patch
+
+################################################################################
+PATCHES
+################################################################################
+
+
+--- a/src/settings/plugins/keyfile/nms-keyfile-writer.c
++++ b/src/settings/plugins/keyfile/nms-keyfile-writer.c
+@@ -359,11 +359,28 @@ nms_keyfile_writer_connection (NMConnect
+                                GError **error)
+ {
+ 	const char *keyfile_dir;
++	gboolean ret = TRUE;
++	const char *id;
++	gs_free char *filename_escaped = NULL;
++	gs_free char *path = NULL;
++	NMSettingConnection *s_con;
+ 
+-	if (save_to_disk)
+-		keyfile_dir = nms_keyfile_utils_get_path ();
+-	else
+-		keyfile_dir = NM_KEYFILE_PATH_NAME_RUN;
++	keyfile_dir = nms_keyfile_utils_get_path ();
++
++	// if null Default generated connection or new connection, check if we already have
++	// a connection profile for it.
++	if (!existing_path) {
++		id = nm_connection_get_id (connection);
++		g_assert (id && *id);	
++		filename_escaped = nm_keyfile_utils_create_filename (id, TRUE);
++		path = g_build_filename (keyfile_dir, filename_escaped, NULL);	
++
++		if (g_file_test (path, G_FILE_TEST_EXISTS))
++			return ret;
++		s_con = nm_connection_get_setting_connection(connection);
++		if (s_con)
++			nm_g_object_set_property_boolean(G_OBJECT(s_con), NM_SETTING_CONNECTION_AUTOCONNECT, TRUE, NULL);
++	}
+ 
+ 	return _internal_write_connection (connection,
+ 	                                   keyfile_dir,
+--- a/src/settings/plugins/keyfile/nms-keyfile-plugin.c
++++ b/src/settings/plugins/keyfile/nms-keyfile-plugin.c
+@@ -456,7 +456,6 @@ read_connections (NMSettingsPlugin *conf
+ 
+ 	filenames = g_ptr_array_new_with_free_func (g_free);
+ 
+-	_read_dir (filenames, NM_KEYFILE_PATH_NAME_RUN, TRUE);
+ 	_read_dir (filenames, nms_keyfile_utils_get_path (), FALSE);
+ 
+ 	alive_connections = g_hash_table_new (nm_direct_hash, NULL);
