@@ -1,0 +1,72 @@
+################################################################################
+SHORT DESCRIPTION:
+################################################################################
+Remove any permission entries from a connection before persisting it to disk
+
+################################################################################
+LONG DESCRIPTION:
+################################################################################
+When a wireless connection has permissions associated with it, networkmanager
+will bail out of its autoconnection operation, even if autoconnect is TRUE and
+the wireless connection profile has access point credentials saved.
+
+The ndvm only has one user and is run headless, so there's no reason to define
+permissions for a given connection with the root user. When we persist the
+connection profile to disk in the keyfile plugin, prune out any permissions
+that networkmanager may have assigned to the connection. On the subsequent boot,
+networkmanager will automatically connect to the access point saved in the
+connection profile without the user needing to manually select it.
+
+################################################################################
+CHANGELOG
+################################################################################
+Authors:
+Chris Rogers <rogersc@ainfosec.com>
+
+################################################################################
+REMOVAL
+################################################################################
+None
+
+################################################################################
+UPSTREAM PLAN
+################################################################################
+None
+
+################################################################################
+INTERNAL DEPENDENCIES
+################################################################################
+
+################################################################################
+PATCHES
+################################################################################
+
+--- a/src/nm-manager.c
+--- a/src/settings/plugins/keyfile/nms-keyfile-writer.c
++++ b/src/nm-manager.c
++++ b/src/settings/plugins/keyfile/nms-keyfile-writer.c
+@@ -359,12 +359,24 @@ nms_keyfile_writer_connection (NMConnect
+                                GError **error)
+ {
+ 	const char *keyfile_dir;
++	NMSettingConnection *s_con;
++	int num_perms = 0;
+ 
+ 	if (save_to_disk)
+ 		keyfile_dir = nms_keyfile_utils_get_path ();
+ 	else
+ 		keyfile_dir = NM_KEYFILE_PATH_NAME_RUN;
+ 
++	/* We don't support storing permissions on connections as this
++	 * prevents wireless connections from autoconnecting. Remove them.
++	 */
++	s_con = nm_connection_get_setting_connection(connection);
++	num_perms = nm_setting_connection_get_num_permissions(s_con);
++	if (num_perms > 0) {
++		for (int i = 0; i < num_perms; i++)
++			nm_setting_connection_remove_permission(s_con, i);
++	}
++
+ 	return _internal_write_connection (connection,
+ 	                                   keyfile_dir,
+ 	                                   nms_keyfile_utils_get_path (),

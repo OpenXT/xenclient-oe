@@ -11,6 +11,7 @@ SRC_URI += " \
     file://use-dom0-db-for-seen-bssids.patch \
     file://disable-ipv6-config.patch \
     file://fix-network-reenable.patch \
+    file://clear-permissions-on-connection-profiles.patch \
     file://NetworkManager.conf \
     file://nm_sync.sh \
     file://db_to_nm.awk \
