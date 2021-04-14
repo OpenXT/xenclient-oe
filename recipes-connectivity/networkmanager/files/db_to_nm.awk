@@ -8,6 +8,10 @@ BEGIN {
     print "[" group "]";
 }
 
+/^  permissions = .+$/ {
+    continue
+}
+
 /^  [a-zA-Z0-9-]+ = .+$/ {
     equals=index($0, "=");
     key=substr($0, 1, equals - 1)
