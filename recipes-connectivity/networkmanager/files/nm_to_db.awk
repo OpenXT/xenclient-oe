@@ -20,6 +20,9 @@ BEGIN {
     gsub(/'/, "'\\''", key);
     gsub(/'/, "'\\''", value);
 
+    if (key == "permissions" && group == "connection")
+        continue
+
     system("db-write-dom0 '/" node "/" file "/" group "/" key "' '" value "'");
 }
 
