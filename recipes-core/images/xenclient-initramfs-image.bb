@@ -7,13 +7,10 @@ LIC_FILES_CHKSUM = " \
 "
 COMPATIBLE_MACHINE = "(xenclient-dom0)"
 
+IMAGE_FEATURES = ""
 IMAGE_FSTYPES = "cpio.gz"
 IMAGE_INSTALL = " \
     busybox \
-    lvm2 \
-    tpm-tools-sa \
-    tpm2-tss \
-    tpm2-tools \
     initramfs-module-functions \
     initramfs-module-lvm \
     initramfs-module-udev \
@@ -24,10 +21,23 @@ IMAGE_INSTALL = " \
     kernel-module-tpm \
     kernel-module-tpm-tis \
     kernel-module-tpm-tis-core \
-    module-init-tools-depmod \
-    module-init-tools \
-    policycoreutils-setfiles \
 "
 IMAGE_LINGUAS = "en-us"
 
-inherit image
+inherit openxt-image
+
+NO_RECOMMENDATIONS = "1"
+BAD_RECOMMENDATIONS += " \
+    ldconfig \
+    busybox-syslog \
+    busybox-udhcpc \
+"
+
+PACKAGE_REMOVE = " \
+    kernel-image-* \
+"
+post_rootfs_shell_commands() {
+    rm -f ${IMAGE_ROOTFS}/sbin/udhcpc;
+    rm -rvf ${IMAGE_ROOTFS}/usr/lib/opkg;
+}
+ROOTFS_POSTPROCESS_COMMAND += " post_rootfs_shell_commands; "
