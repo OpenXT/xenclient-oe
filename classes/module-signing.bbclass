@@ -44,7 +44,7 @@ KERNEL_MODULE_SIG_CERT in local.conf."
         SIG_HASH=$( grep CONFIG_MODULE_SIG_HASH= \
                         ${STAGING_KERNEL_BUILDDIR}/.config | \
                       cut -d '"' -f 2 )
-        [ -z "$SIG_HASH" ] && bbfatal CONFIG_MODULE_SIG_HASH is not set in .config
+        [ -z "$SIG_HASH" ] && bbfatal "CONFIG_MODULE_SIG_HASH is not set in .config"
 
         [ -x "${SIGN_FILE}" ] || bbfatal "Cannot find scripts/sign-file"
 
