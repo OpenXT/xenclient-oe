@@ -32,7 +32,8 @@ def get_signing_key(d):
 SIGN_FILE = "${STAGING_KERNEL_BUILDDIR}/scripts/sign-file"
 
 fakeroot do_sign_modules() {
-    if ! grep -q '^CONFIG_MODULE_SIG=y' "${B}/.config"; then
+    if ! grep -q '^CONFIG_MODULE_SIG=y' "${STAGING_KERNEL_BUILDDIR}/.config"; then
+        bbnote "Kernel module signing deactivated in kernel configuration ${STAGING_KERNEL_BUILDDIR}/.config."
         return
     fi
     if [ -z "${KERNEL_MODULE_SIG_CERT}" ]; then
