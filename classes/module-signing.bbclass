@@ -20,7 +20,7 @@ export KERNEL_MODULE_SIG_CERT
 # Kernel builds will override this with ${B}/scripts/sign-file
 SIGN_FILE = "${STAGING_KERNEL_BUILDDIR}/scripts/sign-file"
 
-do_sign_modules() {
+fakeroot do_sign_modules() {
     if [ -n "${KERNEL_MODULE_SIG_KEY}" ] &&
        grep -q '^CONFIG_MODULE_SIG=y' ${STAGING_KERNEL_BUILDDIR}/.config; then
         SIG_HASH=$( grep CONFIG_MODULE_SIG_HASH= \
