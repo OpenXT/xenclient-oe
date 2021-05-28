@@ -6,7 +6,7 @@ SHORT DESCRIPTION:
 LONG DESCRIPTION:
 ################################################################################
 New config option 'dm_display' to support different display managers. Defaults
-to surfman.
+to vGlass.
 
 ################################################################################
 CHANGELOG
@@ -54,32 +54,19 @@ PATCHES
      const libxl_sdl_info *sdl = dm_sdl(guest_config);
      const char *keymap = dm_keymap(guest_config);
      char *machinearg;
-@@ -1262,11 +1271,6 @@ static int libxl__build_device_model_arg
-         flexarray_append(dm_args, vncarg);
-     } /* OpenXT: no else here, we don't support "-vnc none" */
+@@ -1331,6 +1340,12 @@ static int libxl__build_device_model_arg
  
--    /*
--     * OpenXT: the default display backend is Surfman
--     */
--    flexarray_append_pair(dm_args, "-display", "surfman");
--
-     if (sdl && !is_stubdom) {
-         flexarray_append(dm_args, "-sdl");
-         if (sdl->display)
-@@ -1337,6 +1341,13 @@ static int libxl__build_device_model_arg
          if (libxl_defbool_val(b_info->u.hvm.nographic) && (!sdl && !vnc)) {
              flexarray_append(dm_args, "-nographic");
-         } else {
-+            /*
-+             * OpenXT: the default display backend is Surfman
-+             */
++        } else {
++            /* OpenXT: the default display backend is vGlass. */
 +            if (display && display->kind)
 +                flexarray_append_pair(dm_args, "-display", display->kind);
 +            else
-+                flexarray_append_pair(dm_args, "-display", "surfman");
-             /* OpenXT: only add mouse if graphical */
-             flexarray_append_pair(dm_args, "-device", "xenmou");
++                flexarray_append_pair(dm_args, "-display", "dhqemu");
          }
+ 
+         if (libxl_defbool_val(b_info->u.hvm.spice.enable) && !is_stubdom) {
 --- a/tools/libxl/libxl_internal.h
 +++ b/tools/libxl/libxl_internal.h
 @@ -1867,6 +1867,8 @@ _hidden int libxl__wait_for_device_model
@@ -114,14 +101,13 @@ PATCHES
                                         ("sdl",              libxl_sdl_info),
 --- a/tools/xl/xl_parse.c
 +++ b/tools/xl/xl_parse.c
-@@ -2599,6 +2599,16 @@ skip_usbdev:
+@@ -2599,6 +2599,15 @@ skip_usbdev:
              b_info->u.hvm.vga.kind = l ? LIBXL_VGA_INTERFACE_TYPE_STD :
                                           LIBXL_VGA_INTERFACE_TYPE_CIRRUS;
  
 +        if (!xlu_cfg_get_string(config, "dm_display", &buf, 0)) {
-+            char *surfstr = "surfman";
-+            if (!strcmp(buf, surfstr)) {
-+                b_info->u.hvm.dm_display.kind = strdup(surfstr);
++            if (!strcmp(buf, "dhqemu")) {
++                b_info->u.hvm.dm_display.kind = strdup("dhqemu");
 +            } else {
 +                fprintf(stderr, "Unknown dm_display \"%s\" specified\n", buf);
 +                exit(1);

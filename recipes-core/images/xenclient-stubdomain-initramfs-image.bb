@@ -10,6 +10,10 @@ IMAGE_FSTYPES = "cpio.gz"
 
 COMPATIBLE_MACHINE = "(xenclient-stubdomain)"
 
+BAD_RECOMMENDATIONS += " \
+    libivc2 \
+"
+
 IMAGE_INSTALL = " \
     busybox \
     bridge-utils \

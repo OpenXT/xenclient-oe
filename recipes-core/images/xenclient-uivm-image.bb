@@ -45,8 +45,8 @@ XSERVER = " \
     xserver-xorg \
     xf86-input-evdev \
     xf86-input-mouse \
-    xf86-video-fbdev \
     xf86-input-keyboard \
+    xf86-video-openxtfb \
 "
 
 IMAGE_INSTALL += "\
@@ -55,7 +55,6 @@ IMAGE_INSTALL += "\
     packagegroup-xenclient-xfce-minimal \
     openssh \
     packagegroup-base \
-    xenfb2 \
     kernel-modules \
     argo-module \
     libargo \
@@ -89,7 +88,6 @@ IMAGE_INSTALL += "\
     glibc-gconv-libjis \
     glibc-gconv-euc-jp \
     mobile-broadband-provider-info \
-    shutdown-screen \
     ttf-dejavu-sans \
     ttf-dejavu-sans-mono \
     uim \
@@ -98,6 +96,7 @@ IMAGE_INSTALL += "\
     anthy \
     matchbox-keyboard \
     matchbox-keyboard-im \
+    kernel-module-openxtfb \
 "
 
 require xenclient-version.inc

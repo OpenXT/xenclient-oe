@@ -7,9 +7,9 @@ LONG DESCRIPTION:
 ################################################################################
 This patch contains several changes that couldn't be grouped elsewhere. These
 changes support running xl on OpenXT with xenmgr as the toplevel toolstack
-component. Some of the changes include tweaking qemu options, reworking the
-vfb/vkb initialization, and writing OpenXT specific xenstore nodes.  Refer
-to the patch below for a comprehensive list of changes.
+component. Some of the changes include tweaking qemu options, and writing
+OpenXT specific xenstore nodes.  Refer to the patch below for a comprehensive
+list of changes.
 
 ################################################################################
 CHANGELOG
@@ -37,38 +37,6 @@ INTERNAL DEPENDENCIES
 ################################################################################
 PATCHES
 ################################################################################
---- a/tools/libxl/libxl_create.c
-+++ b/tools/libxl/libxl_create.c
-@@ -750,6 +750,11 @@ retry_transaction:
-     libxl__xs_writev(gc, t, dom_path, info->xsdata);
-     libxl__xs_writev(gc, t, GCSPRINTF("%s/platform", dom_path), info->platformdata);
- 
-+    if(d_config->b_info.display_depth)
-+        xs_write(ctx->xsh, t, GCSPRINTF("%s/platform/restrictdisplaydepth", dom_path), "1", 1);
-+    if(d_config->b_info.display_res)
-+        xs_write(ctx->xsh, t, GCSPRINTF("%s/platform/restrictdisplayres", dom_path), "1", 1);
-+
-     xs_write(ctx->xsh, t, GCSPRINTF("%s/control/platform-feature-multiprocessor-suspend", dom_path), "1", 1);
-     xs_write(ctx->xsh, t, GCSPRINTF("%s/control/platform-feature-xs_reset_watches", dom_path), "1", 1);
- 
-@@ -1435,17 +1440,12 @@ static void domcreate_launch_dm(libxl__e
-     {
-         libxl__device_console console;
-         libxl__device device;
--        libxl_device_vkb vkb;
- 
-         init_console_info(gc, &console, 0);
-         console.backend_domid = state->console_domid;
-         libxl__device_console_add(gc, domid, &console, state, &device);
-         libxl__device_console_dispose(&console);
- 
--        libxl_device_vkb_init(&vkb);
--        libxl__device_add(gc, domid, &libxl__vkb_devtype, &vkb);
--        libxl_device_vkb_dispose(&vkb);
--
-         dcs->sdss.dm.guest_domid = domid;
-         if (libxl_defbool_val(d_config->b_info.device_model_stubdomain))
-             libxl__spawn_stub_dm(egc, &dcs->sdss);
 --- a/tools/libxl/libxl_domain.c
 +++ b/tools/libxl/libxl_domain.c
 @@ -1824,7 +1824,7 @@ int libxl_retrieve_domain_configuration(
@@ -101,137 +69,3 @@ PATCHES
  
      return 0;
  }
---- a/tools/libxl/libxl_types.idl
-+++ b/tools/libxl/libxl_types.idl
-@@ -520,6 +520,10 @@ libxl_domain_build_info = Struct("domain
-     ("device_model_ssid_label", string),
-     ("device_model_user", string),
- 
-+    #display restrictions
-+    ("display_depth", uint32),
-+    ("display_res", uint32),
-+
-     # extra parameters pass directly to qemu, NULL terminated
-     ("extra",            libxl_string_list),
-     # extra parameters pass directly to qemu for PV guest, NULL terminated
---- a/tools/xl/xl_parse.c
-+++ b/tools/xl/xl_parse.c
-@@ -1229,8 +1229,9 @@ void parse_config_data(const char *confi
- {
-     const char *buf;
-     long l, vcpus = 0;
-+    long vkb_flag, vfb_flag;
-     XLU_Config *config;
--    XLU_ConfigList *cpus, *vbds, *nics, *pcis, *cvfbs, *cpuids, *vtpms,
-+    XLU_ConfigList *cpus, *vbds, *nics, *pcis, *cpuids, *vtpms,
-                    *usbctrls, *usbdevs, *p9devs, *vdispls, *pvcallsifs_devs;
-     XLU_ConfigList *channels, *ioports, *irqs, *iomem, *viridian, *dtdevs,
-                    *mca_caps;
-@@ -1593,6 +1594,11 @@ void parse_config_data(const char *confi
- 
-     xlu_cfg_get_defbool(config, "nestedhvm", &b_info->nested_hvm, 0);
- 
-+    if(!xlu_cfg_get_long(config, "restrictdisplaydepth", &l, 0))
-+        b_info->display_depth = l;
-+    if(!xlu_cfg_get_long(config, "restrictdisplayres", &l, 0))
-+        b_info->display_res = l;
-+
-     switch(b_info->type) {
-     case LIBXL_DOMAIN_TYPE_HVM:
-         kernel_basename = libxl_basename(b_info->kernel);
-@@ -2222,64 +2228,38 @@ skip_nic:
-         fprintf(stderr, "WARNING: vif2: netchannel2 is deprecated and not supported by xl\n");
-     }
- 
--    d_config->num_vfbs = 0;
--    d_config->num_vkbs = 0;
--    d_config->vfbs = NULL;
--    d_config->vkbs = NULL;
--
--    if (!xlu_cfg_get_list (config, "vfb", &cvfbs, 0, 0)) {
--        while ((buf = xlu_cfg_get_listitem (cvfbs, d_config->num_vfbs)) != NULL) {
--            libxl_device_vfb *vfb;
--            libxl_device_vkb *vkb;
--
--            char *buf2 = strdup(buf);
--            char *p, *p2;
--
--            vfb = ARRAY_EXTEND_INIT(d_config->vfbs, d_config->num_vfbs,
--                                    libxl_device_vfb_init);
--
--            vkb = ARRAY_EXTEND_INIT(d_config->vkbs, d_config->num_vkbs,
--                                    libxl_device_vkb_init);
--
--            p = strtok(buf2, ",");
--            if (!p)
--                goto skip_vfb;
--            do {
--                while (*p == ' ')
--                    p++;
--                if ((p2 = strchr(p, '=')) == NULL)
--                    break;
--                *p2 = '\0';
--                if (!strcmp(p, "vnc")) {
--                    libxl_defbool_set(&vfb->vnc.enable, atoi(p2 + 1));
--                } else if (!strcmp(p, "vnclisten")) {
--                    free(vfb->vnc.listen);
--                    vfb->vnc.listen = strdup(p2 + 1);
--                } else if (!strcmp(p, "vncpasswd")) {
--                    free(vfb->vnc.passwd);
--                    vfb->vnc.passwd = strdup(p2 + 1);
--                } else if (!strcmp(p, "vncdisplay")) {
--                    vfb->vnc.display = atoi(p2 + 1);
--                } else if (!strcmp(p, "vncunused")) {
--                    libxl_defbool_set(&vfb->vnc.findunused, atoi(p2 + 1));
--                } else if (!strcmp(p, "keymap")) {
--                    free(vfb->keymap);
--                    vfb->keymap = strdup(p2 + 1);
--                } else if (!strcmp(p, "sdl")) {
--                    libxl_defbool_set(&vfb->sdl.enable, atoi(p2 + 1));
--                } else if (!strcmp(p, "opengl")) {
--                    libxl_defbool_set(&vfb->sdl.opengl, atoi(p2 + 1));
--                } else if (!strcmp(p, "display")) {
--                    free(vfb->sdl.display);
--                    vfb->sdl.display = strdup(p2 + 1);
--                } else if (!strcmp(p, "xauthority")) {
--                    free(vfb->sdl.xauthority);
--                    vfb->sdl.xauthority = strdup(p2 + 1);
--                }
--            } while ((p = strtok(NULL, ",")) != NULL);
-+    //Support adding vkbs by themselves
-+    if (!xlu_cfg_get_long (config, "vkb", &vkb_flag, 0)){
-+        d_config->num_vkbs = 0;
-+        d_config->vkbs = NULL;
-+
-+        if (vkb_flag == 1) {
-+            for(i = 0; i < 2; i++) {
-+                libxl_device_vkb *vkb;
-+                fprintf(stderr, "WARNING: init vkb device\n");
-+                d_config->vkbs = (libxl_device_vkb *) realloc(d_config->vkbs,                          sizeof(libxl_device_vkb) * (d_config->num_vkbs + 1));
-+                vkb = d_config->vkbs + d_config->num_vkbs;
-+                libxl_device_vkb_init(vkb);
-+                vkb->devid = d_config->num_vkbs;
-+                fprintf(stderr, "WARNING: vkb device of devid %d created.\n", vkb->devid);
-+                d_config->num_vkbs++;
-+            }
-+        }
-+    }
- 
--skip_vfb:
--            free(buf2);
-+    if (!xlu_cfg_get_long (config, "vfb", &vfb_flag, 0)) {
-+        d_config->num_vfbs = 0;
-+        d_config->vfbs = NULL;
-+
-+        if (vfb_flag == 1) {
-+            libxl_device_vfb * vfb;
-+            fprintf(stderr, "WARNING: init vfb device\n");
-+            d_config->vfbs = (libxl_device_vfb *) realloc(d_config->vfbs,                              sizeof(libxl_device_vfb) * (d_config->num_vfbs + 1));
-+            vfb = d_config->vfbs + d_config->num_vfbs;
-+            libxl_device_vfb_init(vfb);
-+            vfb->devid = d_config->num_vfbs;
-+            fprintf(stderr, "WARNING: vfb device of devid %d created.\n", vfb->devid);
-+            d_config->num_vfbs++;
-         }
-     }
- 

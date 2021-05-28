@@ -29,23 +29,18 @@ SRC_URI_append = " \
     file://parse-video-from-mbi.patch;patch=1 \
     file://openxt-xci-cpuid-signature.patch;patch=1 \
     file://allow-mwait-cstate.patch;patch=1 \
-    file://xen-translate.patch;patch=1 \
     file://unmap-shared-info.patch;patch=1 \
-    file://foreign-batch-cacheattr.patch;patch=1 \
-    file://allow-pat-cacheattrs-for-all-domains.patch;patch=1 \
     file://opt-disable-vmcs-shadowing.patch;patch=1 \
     file://hvmloader-legacy-seabios-optionroms.patch;patch=1 \
     file://gpt-s3-resume-reason.patch;patch=1 \
     file://fix-memcpy-in-x86-emulate.patch;patch=1 \
     file://stubdomain-msi-irq-access.patch;patch=1 \
-    file://workaround-nehalem-igd-vtd.patch;patch=1 \
     file://xen-x86-Fix-up-rules-when-forcing-mno-sse.patch;patch=1 \
     file://increase-ap-startup-time.patch;patch=1 \
     file://xenstat-disable-tmem-use.patch;patch=1 \
     file://acpi-slic-support.patch \
     file://tboot-xen-evtlog-support.patch \
     file://disable-cpuid-hle-rtm.patch \
-    file://allow-stubdoms-cacheattr-control.patch \
     file://add-xc-hypercall-page.patch \
     file://libxl-do-not-destroy-in-use-tapdevs.patch \
     file://libxl-syslog.patch \

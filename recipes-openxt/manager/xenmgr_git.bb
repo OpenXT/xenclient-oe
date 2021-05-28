@@ -20,15 +20,8 @@ DEPENDS = " \
     hkg-deepseq \
     hkg-text \
     hkg-mtl \
+    hkg-split \
     xenmgr-data \
-"
-RDEPENDS_${PN} += " \
-    glibc-gconv-utf-32 \
-    xenclient-eula \
-    xenclient-caps \
-    heimdallr \
-    bash \
-    openssl-bin \
 "
 
 require manager.inc
@@ -43,46 +36,53 @@ S = "${WORKDIR}/git/xenmgr"
 
 inherit haskell update-rc.d xc-rpcgen
 
+do_configure_append() {
+    # generate rpc stubs
+    mkdir -p Rpc/Autogen
+    # Server objects
+    xc-rpcgen --haskell --templates-dir="${STAGING_RPCGENDATADIR_NATIVE}" -s -o "Rpc/Autogen" --module-prefix="Rpc.Autogen" "${STAGING_IDLDATADIR}/xenmgr.xml"
+    xc-rpcgen --haskell --templates-dir="${STAGING_RPCGENDATADIR_NATIVE}" -s -o "Rpc/Autogen" --module-prefix="Rpc.Autogen" "${STAGING_IDLDATADIR}/xenmgr_vm.xml"
+    xc-rpcgen --haskell --templates-dir="${STAGING_RPCGENDATADIR_NATIVE}" -s -o "Rpc/Autogen" --module-prefix="Rpc.Autogen" "${STAGING_IDLDATADIR}/xenmgr_host.xml"
+    xc-rpcgen --haskell --templates-dir="${STAGING_RPCGENDATADIR_NATIVE}" -s -o "Rpc/Autogen" --module-prefix="Rpc.Autogen" "${STAGING_IDLDATADIR}/vm_nic.xml"
+    xc-rpcgen --haskell --templates-dir="${STAGING_RPCGENDATADIR_NATIVE}" -s -o "Rpc/Autogen" --module-prefix="Rpc.Autogen" "${STAGING_IDLDATADIR}/vm_disk.xml"
+
+    xc-rpcgen --haskell --templates-dir=${STAGING_RPCGENDATADIR_NATIVE} -c -o "Rpc/Autogen" --module-prefix="Rpc.Autogen" "${STAGING_IDLDATADIR}/input_daemon.xml"
+    xc-rpcgen --haskell --templates-dir="${STAGING_RPCGENDATADIR_NATIVE}" -c -o "Rpc/Autogen" --module-prefix="Rpc.Autogen" "${STAGING_IDLDATADIR}/guest.xml"
+    xc-rpcgen --haskell --templates-dir="${STAGING_RPCGENDATADIR_NATIVE}" -c -o "Rpc/Autogen" --module-prefix="Rpc.Autogen" "${STAGING_IDLDATADIR}/dbus.xml"
+    xc-rpcgen --haskell --templates-dir="${STAGING_RPCGENDATADIR_NATIVE}" -c -o "Rpc/Autogen" --module-prefix="Rpc.Autogen" "${STAGING_IDLDATADIR}/network_daemon.xml"
+    xc-rpcgen --haskell --templates-dir="${STAGING_RPCGENDATADIR_NATIVE}" -c -o "Rpc/Autogen" --module-prefix="Rpc.Autogen" "${STAGING_IDLDATADIR}/network.xml"
+    xc-rpcgen --haskell --templates-dir="${STAGING_RPCGENDATADIR_NATIVE}" -c -o "Rpc/Autogen" --module-prefix="Rpc.Autogen" "${STAGING_IDLDATADIR}/ctxusb_daemon.xml"
+}
+
+do_install_append() {
+    install -m 0755 ${S}/setup-ica-vm ${D}${bindir}/setup-ica-vm
+    install -m 0755 -d ${D}${sysconfdir}/dbus-1/system.d
+    install -m 0644 ${WORKDIR}/xenmgr_dbus.conf ${D}${sysconfdir}/dbus-1/system.d/
+    install -m 0755 -d ${D}${datadir}/xenclient
+    install -m 0755 ${WORKDIR}/xenstore-init-extra ${D}${datadir}/xenclient/
+    install -m 0755 -d ${D}${sysconfdir}/init.d
+    install -m 0755 ${WORKDIR}/xenmgr.initscript ${D}${sysconfdir}/init.d/xenmgr
+    install -m 0755 -d ${D}${datadir}/xenmgr-1.0/templates
+    install -m 0755 -d ${D}${datadir}/xenmgr-1.0/templates/default
+    install -m 0644 ${S}/../templates/default/* ${D}${datadir}/xenmgr-1.0/templates/default/
+}
+
+RDEPENDS_${PN} += " \
+    glibc-gconv-utf-32 \
+    xenclient-eula \
+    xenclient-caps \
+    heimdallr \
+    bash \
+    openssl-bin \
+"
+
 INITSCRIPT_NAME = "xenmgr"
 INITSCRIPT_PARAMS = "defaults 80"
 
 FILES_${PN} += " \
     ${datadir}/xenmgr-1.0/templates/default/* \
     ${datadir}/xenclient \
-    /etc/dbus-1/system.d/xenmgr_dbus.conf \
-    /etc/init.d/xenmgr \
+    ${sysconfdir}/dbus-1/system.d/xenmgr_dbus.conf \
+    ${sysconfdir}/init.d/xenmgr \
 "
-
-do_configure_append() {
-    # generate rpc stubs
-    mkdir -p Rpc/Autogen
-    # Server objects
-    xc-rpcgen --haskell --templates-dir=${STAGING_RPCGENDATADIR_NATIVE} -s -o Rpc/Autogen --module-prefix=Rpc.Autogen ${STAGING_IDLDATADIR}/xenmgr.xml
-    xc-rpcgen --haskell --templates-dir=${STAGING_RPCGENDATADIR_NATIVE} -s -o Rpc/Autogen --module-prefix=Rpc.Autogen ${STAGING_IDLDATADIR}/xenmgr_vm.xml
-    xc-rpcgen --haskell --templates-dir=${STAGING_RPCGENDATADIR_NATIVE} -s -o Rpc/Autogen --module-prefix=Rpc.Autogen ${STAGING_IDLDATADIR}/xenmgr_host.xml
-    xc-rpcgen --haskell --templates-dir=${STAGING_RPCGENDATADIR_NATIVE} -s -o Rpc/Autogen --module-prefix=Rpc.Autogen ${STAGING_IDLDATADIR}/vm_nic.xml
-    xc-rpcgen --haskell --templates-dir=${STAGING_RPCGENDATADIR_NATIVE} -s -o Rpc/Autogen --module-prefix=Rpc.Autogen ${STAGING_IDLDATADIR}/vm_disk.xml
-
-    xc-rpcgen --haskell --templates-dir=${STAGING_RPCGENDATADIR_NATIVE} -c -o Rpc/Autogen --module-prefix=Rpc.Autogen ${STAGING_IDLDATADIR}/input_daemon.xml
-    xc-rpcgen --haskell --templates-dir=${STAGING_RPCGENDATADIR_NATIVE} -c -o Rpc/Autogen --module-prefix=Rpc.Autogen ${STAGING_IDLDATADIR}/surfman.xml
-    xc-rpcgen --haskell --templates-dir=${STAGING_RPCGENDATADIR_NATIVE} -c -o Rpc/Autogen --module-prefix=Rpc.Autogen ${STAGING_IDLDATADIR}/guest.xml
-    xc-rpcgen --haskell --templates-dir=${STAGING_RPCGENDATADIR_NATIVE} -c -o Rpc/Autogen --module-prefix=Rpc.Autogen ${STAGING_IDLDATADIR}/dbus.xml
-    xc-rpcgen --haskell --templates-dir=${STAGING_RPCGENDATADIR_NATIVE} -c -o Rpc/Autogen --module-prefix=Rpc.Autogen ${STAGING_IDLDATADIR}/network_daemon.xml
-    xc-rpcgen --haskell --templates-dir=${STAGING_RPCGENDATADIR_NATIVE} -c -o Rpc/Autogen --module-prefix=Rpc.Autogen ${STAGING_IDLDATADIR}/network.xml
-    xc-rpcgen --haskell --templates-dir=${STAGING_RPCGENDATADIR_NATIVE} -c -o Rpc/Autogen --module-prefix=Rpc.Autogen ${STAGING_IDLDATADIR}/ctxusb_daemon.xml
-}
-
-do_install_append() {
-    install -m 0755 ${S}/setup-ica-vm ${D}/usr/bin/setup-ica-vm
-    install -m 0755 -d ${D}/etc
-    install -m 0755 -d ${D}/etc/dbus-1/system.d
-    install -m 0644 ${WORKDIR}/xenmgr_dbus.conf ${D}/etc/dbus-1/system.d/
-    install -m 0755 -d ${D}/usr/share/xenclient
-    install -m 0755 ${WORKDIR}/xenstore-init-extra ${D}/usr/share/xenclient/
-    install -m 0755 -d ${D}${sysconfdir}/init.d
-    install -m 0755 ${WORKDIR}/xenmgr.initscript ${D}${sysconfdir}/init.d/xenmgr
-    install -m 0755 -d ${D}/usr/share/xenmgr-1.0/templates
-    install -m 0755 -d ${D}/usr/share/xenmgr-1.0/templates/default
-    install -m 0644 ${S}/../templates/default/* ${D}/usr/share/xenmgr-1.0/templates/default/
-}
 

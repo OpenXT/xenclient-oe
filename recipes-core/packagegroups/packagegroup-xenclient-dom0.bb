@@ -40,7 +40,6 @@ RDEPENDS_${PN} = " \
     ovmf-firmware \
     xcpmd \
     xen-vif-scripts-dom0 \
-    xenclient-input-daemon \
     xenclient-dom0-tweaks \
     xenclient-splash-images \
     xenclient-config-access \
@@ -94,7 +93,6 @@ RDEPENDS_${PN} = " \
     libicbinn-server \
     screen \
     xenclient-pcrdiff \
-    drm-surfman-plugin \
     eject \
     linux-input \
     iputils-ping \
@@ -102,8 +100,6 @@ RDEPENDS_${PN} = " \
     xenmgr-data \
     updatemgr \
     uid \
-    surfman \
-    linuxfb-surfman-plugin \
     xenmgr \
     xen-tools-xenstore \
     tpm2-tss \
@@ -112,6 +108,8 @@ RDEPENDS_${PN} = " \
     pesign \
     ipxe \
     udev-extraconf-dom0 \
+    vglass \
+    disman \
 "
 
 # OE upgrade - temporarly disabled:

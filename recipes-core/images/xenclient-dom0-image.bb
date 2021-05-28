@@ -31,6 +31,7 @@ BAD_RECOMMENDATIONS += " \
     avahi-daemon \
     avahi-autoipd \
     ${@bb.utils.contains('IMAGE_FEATURES', 'web-certificates', '', 'ca-certificates', d)} \
+    libivc \
 "
 
 IMAGE_INSTALL += "\

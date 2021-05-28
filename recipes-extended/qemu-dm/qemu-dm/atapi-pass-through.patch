@@ -217,6 +217,12 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
  block-obj-y += null.o mirror.o commit.o io.o create.o
  block-obj-y += throttle-groups.o
  block-obj-$(CONFIG_LINUX) += nvme.o
+@@ -61,3 +62,5 @@ qcow.o-libs        := -lz
+ linux-aio.o-libs   := -laio
+ parallels.o-cflags := $(LIBXML2_CFLAGS)
+ parallels.o-libs   := $(LIBXML2_LIBS)
++atapi-pt-protocol.o-cflags := $(LIBARGO_CFLAGS)
++atapi-pt-protocol.o-libs := $(LIBARGO_LIBS)
 --- /dev/null
 +++ b/block/atapi-pt-protocol.c
 @@ -0,0 +1,1503 @@
@@ -1791,7 +1797,7 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
          break;
 --- a/configure
 +++ b/configure
-@@ -452,6 +452,8 @@ crypto_afalg="no"
+@@ -451,6 +451,8 @@ crypto_afalg="no"
  seccomp=""
  glusterfs=""
  stubdom="no"
@@ -1800,7 +1806,7 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
  glusterfs_xlator_opt="no"
  glusterfs_discard="no"
  glusterfs_fallocate="no"
-@@ -1357,6 +1359,14 @@ for opt do
+@@ -1353,6 +1355,14 @@ for opt do
    ;;
    --enable-glusterfs) glusterfs="yes"
    ;;
@@ -1808,14 +1814,14 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
 +  ;;
 +  --disable-atapi-pt) atapipt="no"
 +  ;;
-+  --enable-atapi-pt-argo) atapiptargo="yes" && atapipt="yes"
++  --enable-atapi-pt-argo) atapiptargo="yes" && atapipt="yes" && libargo="yes"
 +  ;;
 +  --disable-atapi-pt-argo) atapiptargo="no"
 +  ;;
    --disable-virtio-blk-data-plane|--enable-virtio-blk-data-plane)
        echo "$0: $opt is obsolete, virtio-blk data-plane is always on" >&2
    ;;
-@@ -6128,6 +6138,8 @@ echo "GlusterFS support $glusterfs"
+@@ -6104,6 +6114,8 @@ echo "GlusterFS support $glusterfs"
  echo "gcov              $gcov_tool"
  echo "gcov enabled      $gcov"
  echo "OpenXT stubdomain support $stubdom"
@@ -1824,7 +1830,7 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
  echo "TPM support       $tpm"
  echo "libssh2 support   $libssh2"
  echo "TPM passthrough   $tpm_passthrough"
-@@ -6802,6 +6814,14 @@ if test "$stubdom" = "yes" ; then
+@@ -6776,6 +6788,14 @@ if test "$stubdom" = "yes" ; then
    echo "CONFIG_STUBDOM=y" >> $config_host_mak
  fi
  
@@ -1841,11 +1847,14 @@ Ross Philipson, <philipsonr@ainfosec.com>, 10/13/2016
    # TPM passthrough support?
 --- a/hw/ide/Makefile.objs
 +++ b/hw/ide/Makefile.objs
-@@ -12,3 +12,4 @@ common-obj-$(CONFIG_AHCI) += ahci.o
+@@ -12,3 +12,7 @@ common-obj-$(CONFIG_AHCI) += ahci.o
  common-obj-$(CONFIG_AHCI) += ich.o
  common-obj-$(CONFIG_ALLWINNER_A10) += ahci-allwinner.o
  common-obj-$(CONFIG_IDE_SII3112) += sii3112.o
 +common-obj-$(CONFIG_ATAPI_PT) += atapi_pt.o
++
++atapi-pt.o-cflags := $(LIBARGO_CFLAGS)
++atapi-pt.o-libs := $(LIBARGO_LIBS)
 --- a/hw/ide/atapi.c
 +++ b/hw/ide/atapi.c
 @@ -320,7 +320,10 @@ void ide_atapi_cmd_reply_end(IDEState *s

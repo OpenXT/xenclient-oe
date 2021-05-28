@@ -10,7 +10,6 @@ DEPENDS = " \
     libargo \
     zlib \
     libcap-ng \
-    libdmbus \
     pixman \
 "
 
@@ -43,15 +42,9 @@ SRC_URI += "file://0001-configure-use-valid-args-testing-sem_timedwait.patch \
             file://generic-xenstore-extensions.patch \
             file://readonly-ide.patch \
             file://hvm-param-dm-domain.patch \
-            file://dmbus.patch \
-            file://switcher.patch \
             file://acpi.patch \
-            file://xenmou.patch \
+            file://argo-configure.patch \
             file://atapi-pass-through.patch \
-            file://vbe-xt-extensions.patch \
-            file://vga-spinlock.patch \
-            file://vga-shadow-bda.patch \
-            file://surfman-dcl.patch \
             file://audio-policy.patch \
             file://msix-cap-disable.patch \
             file://openxtaudio.patch \
@@ -62,7 +55,6 @@ SRC_URI += "file://0001-configure-use-valid-args-testing-sem_timedwait.patch \
             file://acpi-wakeup.patch \
             file://openxt-misc-fixes.patch \
             file://qmp-argo-char-driver.patch \
-            file://exit-mainloop-on-reset.patch \
             file://write-acpi-state-to-xenstore.patch \
             file://set-blockdev-ro.patch \
             file://block-remove-unused-block-format-support.patch \
@@ -76,6 +68,8 @@ SRC_URI[sha256sum] = "98fee0c86b299ebaf08587ba8df1dc8bb7152708d62937a0631875d95c
 S = "${WORKDIR}/qemu-${PV}"
 
 inherit autotools-brokensep pkgconfig python3native
+
+require recipes-extended/qemu-dm/qemu-dm-vglass.inc
 
 # Include a minimal amount of blobs by default.
 FILES_${PN} += "/usr/share/qemu/keymaps/en-us       \
@@ -127,7 +121,6 @@ EXTRA_OECONF += " \
     --disable-tpm \
     --enable-pie \
     --enable-werror \
-    --enable-surfman \
     --enable-atapi-pt \
     --enable-atapi-pt-argo \
     --enable-readonly-ide \

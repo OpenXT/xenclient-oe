@@ -34,21 +34,24 @@ SRC_URI += " \
     file://policy/modules/services/blktap.fc \
     file://policy/modules/services/blktap.if \
     file://policy/modules/services/blktap.te \
-    file://policy/modules/services/vusb.fc \
-    file://policy/modules/services/vusb.if \
-    file://policy/modules/services/vusb.te \
     file://policy/modules/services/dbd.fc \
     file://policy/modules/services/dbd.if \
     file://policy/modules/services/dbd.te \
     file://policy/modules/services/dbusbouncer.fc \
     file://policy/modules/services/dbusbouncer.if \
     file://policy/modules/services/dbusbouncer.te \
+    file://policy/modules/services/disman.fc \
+    file://policy/modules/services/disman.if \
+    file://policy/modules/services/disman.te \
+    file://policy/modules/services/glass.fc \
+    file://policy/modules/services/glass.if \
+    file://policy/modules/services/glass.te \
     file://policy/modules/services/icbinn.fc \
     file://policy/modules/services/icbinn.if \
     file://policy/modules/services/icbinn.te \
-    file://policy/modules/services/input-server.fc \
-    file://policy/modules/services/input-server.if \
-    file://policy/modules/services/input-server.te \
+    file://policy/modules/services/ivcd.fc \
+    file://policy/modules/services/ivcd.if \
+    file://policy/modules/services/ivcd.te \
     file://policy/modules/services/language-sync.fc \
     file://policy/modules/services/language-sync.if \
     file://policy/modules/services/language-sync.te \
@@ -58,15 +61,15 @@ SRC_URI += " \
     file://policy/modules/services/rpcproxy.fc \
     file://policy/modules/services/rpcproxy.if \
     file://policy/modules/services/rpcproxy.te \
-    file://policy/modules/services/surfman.fc \
-    file://policy/modules/services/surfman.if \
-    file://policy/modules/services/surfman.te \
     file://policy/modules/services/uid.fc \
     file://policy/modules/services/uid.if \
     file://policy/modules/services/uid.te \
     file://policy/modules/services/updatemgr.fc \
     file://policy/modules/services/updatemgr.if \
     file://policy/modules/services/updatemgr.te \
+    file://policy/modules/services/vusb.fc \
+    file://policy/modules/services/vusb.if \
+    file://policy/modules/services/vusb.te \
     file://policy/modules/services/xenpmd.fc \
     file://policy/modules/services/xenpmd.if \
     file://policy/modules/services/xenpmd.te \
@@ -137,11 +140,9 @@ SRC_URI += " \
     file://patches/blktap-interfaces.diff \
     file://patches/db-cmd-interfaces.diff \
     file://patches/dbd-interfaces.diff \
-    file://patches/input-server-interfaces.diff \
     file://patches/network-daemon-interfaces.diff \
     file://patches/statusreport-interfaces.diff \
     file://patches/stubdom-helpers-interfaces.diff \
-    file://patches/surfman-interfaces.diff \
     file://patches/sysutils-interfaces.diff \
     file://patches/tcs-interfaces.diff \
     file://patches/tpmsetup-interfaces.diff \
