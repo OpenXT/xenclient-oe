@@ -1,4 +1,9 @@
 do_image_qa_module_sigs() {
+	if [ "${KERNEL_MODULE_OFFLINE_SIGNING}" = "1" ]; then
+		bbnote "KERNEL_MODULE_OFFLINE_SIGNING == 1: skipping module signature verification"
+		return
+	fi
+
 	local bzImage="${IMAGE_ROOTFS}/boot/bzImage"
 	if [ ! -f "$bzImage" ]; then
 		bzImage="${DEPLOY_DIR_IMAGE}/bzImage"

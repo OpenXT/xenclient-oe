@@ -10,8 +10,10 @@ INHIBIT_PACKAGE_STRIP = "1"
 export HOST_EXTRACFLAGS = "${BUILD_CFLAGS} ${BUILD_LDFLAGS}"
 
 # Set KERNEL_MODULE_SIG_KEY in local.conf to the filepath of a private key
-# for signing kernel modules. If unset, signing can be done offline.
+# for signing kernel modules. If unset, signing can be done offline, but
+# KERNEL_MODULE_OFFLINE_SIGNING must be set to "1".
 export KERNEL_MODULE_SIG_KEY
+export KERNEL_MODULE_OFFLINE_SIGNING ?= "0"
 # Set KERNEL_MODULE_SIG_CERT in local.conf to the filepath of the corresponging
 # public key to verify the signed modules.
 export KERNEL_MODULE_SIG_CERT
@@ -41,7 +43,25 @@ fakeroot do_sign_modules() {
 KERNEL_MODULE_SIG_CERT in local.conf."
     fi
 
-    if [ -n "${KERNEL_MODULE_SIG_KEY}" ]; then
+    if [ -n "${KERNEL_MODULE_SIG_KEY}" ] &&
+       [ "${KERNEL_MODULE_OFFLINE_SIGNING}" = "1" ] ; then
+       bbfatal "Setting KERNEL_MODULE_SIG_KEY and KERNEL_MODULE_OFFLINE_SIGNING is inconsistent.  Choose one or the other."
+    fi
+
+    if [ "${KERNEL_MODULE_OFFLINE_SIGNING}" = "1" ]; then
+        bbnote "Skipping do_sign_modules - Offline signing required for usable image"
+        return
+    fi
+
+    if [ -z "${KERNEL_MODULE_SIG_KEY}" ] &&
+       [ "${KERNEL_MODULE_OFFLINE_SIGNING}" != "1" ] ; then
+        bbfatal "
+No KERNEL_MODULE_SIG_KEY provided, and offline kernel module signing has not
+been enabled by setting KERNEL_MODULE_OFFLINE_SIGNING = \"1\".  Set
+KERNEL_MODULE_OFFLINE_SIGNING if you want to continue.  The bitbake output
+image will not boot properly unless the .ko kernel modules are manually signed.
+"
+    else
         SIG_HASH=$( grep CONFIG_MODULE_SIG_HASH= \
                         ${STAGING_KERNEL_BUILDDIR}/.config | \
                       cut -d '"' -f 2 )
@@ -53,8 +73,6 @@ KERNEL_MODULE_SIG_CERT in local.conf."
           xargs -t --no-run-if-empty -0 -n 1 \
               ${SIGN_FILE} $SIG_HASH ${KERNEL_MODULE_SIG_KEY} \
                   ${KERNEL_MODULE_SIG_CERT}
-    else
-        bbnote "Kernel module offline signing enabled, modules still need to be signed."
     fi
 }
 
