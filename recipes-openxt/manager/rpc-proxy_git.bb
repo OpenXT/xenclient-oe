@@ -22,6 +22,7 @@ DEPENDS += " \
     hkg-lifted-base \
     hkg-monad-control \
     hkg-errors \
+    rpc-autogen \
 "
 RDEPENDS_${PN} += "glibc-gconv-utf-32 bash"
 
@@ -36,19 +37,10 @@ S = "${WORKDIR}/git/rpc-proxy"
 
 HPV = "1.0"
 require recipes-openxt/xclibs/xclibs-haskell.inc
-inherit update-rc.d haskell xc-rpcgen
+inherit update-rc.d haskell
 
 INITSCRIPT_NAME = "rpc-proxy"
 INITSCRIPT_PARAMS = "defaults 30"
-
-# ToDo: move xc-rpcgen into compile?
-
-do_configure_append() {
-	# generate rpc stubs
-	mkdir -p Rpc/Autogen
-	xc-rpcgen --haskell --templates-dir=${STAGING_RPCGENDATADIR_NATIVE} -s -o Rpc/Autogen --module-prefix=Rpc.Autogen ${STAGING_IDLDATADIR}/rpc_proxy.xml
-	xc-rpcgen --haskell --templates-dir=${STAGING_RPCGENDATADIR_NATIVE} -c -o Rpc/Autogen --module-prefix=Rpc.Autogen ${STAGING_IDLDATADIR}/dbus.xml
-}
 
 do_install_append() {
 	install -m 0755 -d ${D}/etc
