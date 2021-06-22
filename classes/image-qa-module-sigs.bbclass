@@ -86,13 +86,12 @@ check_module() {
 	"$scriptdir/extract-module-sig.pl" -0 "$mod" > "$data" 2>/dev/null
 
 	# needed to get smime failure and not sed's exit status
-	set -o pipefail
 	# Verify
-	openssl smime -verify -binary -inform DER -in "$sigdata" \
+	output=$( openssl smime -verify -binary -inform DER -in "$sigdata" \
 		-content "$data" -certfile "$keyring" -nointern -noverify \
-		-out /dev/null 2>&1 >/dev/null | \
-			sed -n '/Verification successful/!p'
+		-out /dev/null 2>&1 >/dev/null )
 	ret=$?
+	echo "$output" | sed -n '/Verification successful/!p'
 
 	rm "$data"
 	rm "$sigdata"
