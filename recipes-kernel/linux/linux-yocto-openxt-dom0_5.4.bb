@@ -61,7 +61,7 @@ KERNEL_FEATURES += " \
     patches/openxt-tpm/openxt-tpm.scc \
     patches/openxt-usbback/openxt-usbback.scc \
     patches/openxt-video-quirks/openxt-video-quirks.scc \
-    patches/xen-txt-evtlog/xen-txt-evtlog.scc \
+    patches/xen-txt/xen-txt.scc \
     patches/xsa-155/xsa-155.scc \
 "
 

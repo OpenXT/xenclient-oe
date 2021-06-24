@@ -1,0 +1,227 @@
+From acff0fec046e730871aa7342fe8118479eb092d2 Mon Sep 17 00:00:00 2001
+From: Eric Chanudet <chanudete@ainfosec.com>
+Date: Wed, 23 Jun 2021 10:12:42 -0400
+Subject: [PATCH] txt_info: expose TXT conf registers to userland
+
+TXT exposes configuration registers documented in its Software
+Development Guide. Accessing these registers in sometimes necessary for
+userland software to perform checks and validate compatibility with
+software resources.
+
+Expose the previously mentioned resources through a platform device
+driver in the sysfs.
+
+Signed-off-by: Eric Chanudet <chanudete@ainfosec.com>
+---
+ drivers/misc/Kconfig    |  10 +++
+ drivers/misc/Makefile   |   1 +
+ drivers/misc/txt_info.c | 167 ++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 178 insertions(+)
+ create mode 100644 drivers/misc/txt_info.c
+
+diff --git a/drivers/misc/Kconfig b/drivers/misc/Kconfig
+index c55b63750757..2d3479593610 100644
+--- a/drivers/misc/Kconfig
++++ b/drivers/misc/Kconfig
+@@ -466,6 +466,16 @@ config PVPANIC
+ 	  a paravirtualized device provided by QEMU; it lets a virtual machine
+ 	  (guest) communicate panic events to the host.
+ 
++config TXT_INFO
++	tristate "Add TXT configuration registers in securityfs"
++	depends on X86 && TCG_TPM
++	default n
++	help
++	  Expose the values of TXT configuration registers via the sysfs for
++	  use in userland. To compile this as a module choose M.
++
++	  If unsure, say N.
++
+ source "drivers/misc/c2port/Kconfig"
+ source "drivers/misc/eeprom/Kconfig"
+ source "drivers/misc/cb710/Kconfig"
+diff --git a/drivers/misc/Makefile b/drivers/misc/Makefile
+index c1860d35dc7e..4ebacab15df2 100644
+--- a/drivers/misc/Makefile
++++ b/drivers/misc/Makefile
+@@ -57,3 +57,4 @@ obj-y				+= cardreader/
+ obj-$(CONFIG_PVPANIC)   	+= pvpanic.o
+ obj-$(CONFIG_HABANA_AI)		+= habanalabs/
+ obj-$(CONFIG_XILINX_SDFEC)	+= xilinx_sdfec.o
++obj-$(CONFIG_TXT_INFO)		+= txt_info.o
+diff --git a/drivers/misc/txt_info.c b/drivers/misc/txt_info.c
+new file mode 100644
+index 000000000000..ebece6a50612
+--- /dev/null
++++ b/drivers/misc/txt_info.c
+@@ -0,0 +1,167 @@
++#include <linux/kobject.h>
++#include <linux/module.h>
++#include <linux/device.h>
++#include <linux/platform_device.h>
++#include <linux/io.h>
++
++#define TXT_PUB_CR_BASE	    0xfed30000
++#define TXT_PUB_CR_SIZE	    0x10000
++static const struct resource txt_resources[] = {
++	{
++		.start = TXT_PUB_CR_BASE,
++		.end = TXT_PUB_CR_BASE + TXT_PUB_CR_SIZE - 1,
++		.flags = IORESOURCE_MEM,
++	},
++};
++#define TXT_PUB_CR_INDEX    0
++
++struct platform_device *pdev;
++struct txt_info {
++	void __iomem *cr_pub;
++	void __iomem *cr_priv;
++};
++static struct txt_info txt_info;
++
++static void __iomem *txt_info_map_regs(struct platform_device *pdev,
++	size_t index)
++{
++	struct resource *res;
++	void __iomem *base;
++
++	res = platform_get_resource(pdev, IORESOURCE_MEM, index);
++	if (IS_ERR(res)) {
++		dev_dbg(&pdev->dev,
++			"Failed to access IOMEM resource %zu.\n", index);
++		return res;
++	}
++
++	base = devm_ioremap(&pdev->dev, res->start, resource_size(res));
++	if (IS_ERR(base))
++		dev_dbg(&pdev->dev,
++			"Failed to ioremap configuration registers.\n");
++
++	return base;
++}
++
++/* Registers offset from TXT_PUB_CR_BASE */
++#define TXT_STS_OFFSET		0x000
++#define TXT_ESTS_OFFSET		0x008
++#define TXT_ERRORCODE_OFFSET	0x030
++#define TXT_VER_FSBIF_OFFSET	0x100
++#define TXT_DIDVID_OFFSET	0x110
++#define TXT_VER_QPIIF_OFFSET	0x200
++
++#define DECLARE_PUB_SHOW_U8(name, offset)				\
++static ssize_t name##_show(struct kobject *kobj,			\
++	struct kobj_attribute *attr, char *buf)				\
++{									\
++	uint8_t v = ioread8(txt_info.cr_pub + (offset));		\
++	return sprintf(buf, "%#04x\n", v);				\
++}									\
++static struct kobj_attribute txt_attr_##name = __ATTR_RO(name);
++
++#define DECLARE_PUB_SHOW_U32(name, offset)				\
++static ssize_t name##_show(struct kobject *kobj,			\
++	struct kobj_attribute *attr, char *buf)				\
++{									\
++	uint32_t v = ioread32(txt_info.cr_pub + (offset));		\
++	return sprintf(buf, "%#010x\n", v);				\
++}									\
++static struct kobj_attribute txt_attr_##name = __ATTR_RO(name);
++
++#define DECLARE_PUB_SHOW_U64(name, offset)				\
++static ssize_t name##_show(struct kobject *kobj,			\
++	struct kobj_attribute *attr, char *buf)				\
++{									\
++	uint64_t v = ioread32(txt_info.cr_pub + (offset) + 0x4);	\
++	v <<= 32;							\
++	v |= ioread32(txt_info.cr_pub + (offset));			\
++	return sprintf(buf, "%#018llx\n", v);				\
++}									\
++static struct kobj_attribute txt_attr_##name = __ATTR_RO(name);
++
++DECLARE_PUB_SHOW_U64(sts, TXT_STS_OFFSET);
++DECLARE_PUB_SHOW_U8(ests, TXT_ESTS_OFFSET);
++DECLARE_PUB_SHOW_U32(errorcode, TXT_ERRORCODE_OFFSET);
++DECLARE_PUB_SHOW_U32(ver_fsbif, TXT_VER_FSBIF_OFFSET);
++DECLARE_PUB_SHOW_U64(didvid, TXT_DIDVID_OFFSET);
++DECLARE_PUB_SHOW_U32(ver_qpiif, TXT_VER_QPIIF_OFFSET);
++
++static struct attribute *txt_subsys_attrs[] = {
++	&txt_attr_sts.attr,
++	&txt_attr_ests.attr,
++	&txt_attr_errorcode.attr,
++	&txt_attr_ver_fsbif.attr,
++	&txt_attr_didvid.attr,
++	&txt_attr_ver_qpiif.attr,
++	NULL,
++};
++
++static umode_t txt_attr_is_visible(struct kobject *kobj,
++	struct attribute *attr, int n)
++{
++	return attr->mode;
++}
++
++static const struct attribute_group txt_subsys_attr_group = {
++	.attrs = txt_subsys_attrs,
++	.is_visible = txt_attr_is_visible,
++};
++
++struct kobject *txt_kobj;
++
++static int __init init_txt_info(void)
++{
++	int rc;
++	void __iomem *base;
++
++	pr_info("%s\n", __func__);
++
++	pdev = platform_device_register_simple(
++		"txt", -1, txt_resources, ARRAY_SIZE(txt_resources));
++	if (IS_ERR(pdev)) {
++		rc = PTR_ERR(pdev);
++		pr_err("Failed to register txt platform device driver (%d).\n", rc);
++		goto fail_register;
++	}
++
++	base = txt_info_map_regs(pdev, TXT_PUB_CR_INDEX);
++	if (IS_ERR(base)) {
++		rc = PTR_ERR(base);
++		dev_err(&pdev->dev,
++			"Failed to map TXT public resources (%d).\n", rc);
++		goto fail_map_pub;
++	}
++	txt_info.cr_pub = base;
++
++	rc = sysfs_create_group(&pdev->dev.kobj, &txt_subsys_attr_group);
++	if (rc) {
++		dev_err(&pdev->dev, "Failed to create sysfs group (%d).\n", rc);
++		goto fail_sysfs;
++	}
++
++	return 0;
++
++fail_sysfs:
++	devm_iounmap(&pdev->dev, txt_info.cr_pub);
++fail_map_pub:
++	platform_device_unregister(pdev);
++fail_register:
++	return rc;
++}
++
++static void __exit cleanup_txt_info(void)
++{
++	pr_info("%s\n", __func__);
++
++	if (pdev)
++		platform_device_unregister(pdev);
++}
++
++module_init(init_txt_info);
++module_exit(cleanup_txt_info);
++
++MODULE_AUTHOR("Assured Information Security, Inc");
++MODULE_DESCRIPTION("TXT driver.");
++MODULE_VERSION("1.0");
++MODULE_LICENSE("GPL");
+-- 
+2.17.1
+
