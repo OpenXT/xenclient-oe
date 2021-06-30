@@ -22,6 +22,7 @@ DEPENDS = " \
     hkg-mtl \
     hkg-split \
     xenmgr-data \
+    rpc-autogen \
 "
 
 require manager.inc
@@ -34,25 +35,7 @@ SRC_URI += " \
 
 S = "${WORKDIR}/git/xenmgr"
 
-inherit haskell update-rc.d xc-rpcgen
-
-do_configure_append() {
-    # generate rpc stubs
-    mkdir -p Rpc/Autogen
-    # Server objects
-    xc-rpcgen --haskell --templates-dir="${STAGING_RPCGENDATADIR_NATIVE}" -s -o "Rpc/Autogen" --module-prefix="Rpc.Autogen" "${STAGING_IDLDATADIR}/xenmgr.xml"
-    xc-rpcgen --haskell --templates-dir="${STAGING_RPCGENDATADIR_NATIVE}" -s -o "Rpc/Autogen" --module-prefix="Rpc.Autogen" "${STAGING_IDLDATADIR}/xenmgr_vm.xml"
-    xc-rpcgen --haskell --templates-dir="${STAGING_RPCGENDATADIR_NATIVE}" -s -o "Rpc/Autogen" --module-prefix="Rpc.Autogen" "${STAGING_IDLDATADIR}/xenmgr_host.xml"
-    xc-rpcgen --haskell --templates-dir="${STAGING_RPCGENDATADIR_NATIVE}" -s -o "Rpc/Autogen" --module-prefix="Rpc.Autogen" "${STAGING_IDLDATADIR}/vm_nic.xml"
-    xc-rpcgen --haskell --templates-dir="${STAGING_RPCGENDATADIR_NATIVE}" -s -o "Rpc/Autogen" --module-prefix="Rpc.Autogen" "${STAGING_IDLDATADIR}/vm_disk.xml"
-
-    xc-rpcgen --haskell --templates-dir=${STAGING_RPCGENDATADIR_NATIVE} -c -o "Rpc/Autogen" --module-prefix="Rpc.Autogen" "${STAGING_IDLDATADIR}/input_daemon.xml"
-    xc-rpcgen --haskell --templates-dir="${STAGING_RPCGENDATADIR_NATIVE}" -c -o "Rpc/Autogen" --module-prefix="Rpc.Autogen" "${STAGING_IDLDATADIR}/guest.xml"
-    xc-rpcgen --haskell --templates-dir="${STAGING_RPCGENDATADIR_NATIVE}" -c -o "Rpc/Autogen" --module-prefix="Rpc.Autogen" "${STAGING_IDLDATADIR}/dbus.xml"
-    xc-rpcgen --haskell --templates-dir="${STAGING_RPCGENDATADIR_NATIVE}" -c -o "Rpc/Autogen" --module-prefix="Rpc.Autogen" "${STAGING_IDLDATADIR}/network_daemon.xml"
-    xc-rpcgen --haskell --templates-dir="${STAGING_RPCGENDATADIR_NATIVE}" -c -o "Rpc/Autogen" --module-prefix="Rpc.Autogen" "${STAGING_IDLDATADIR}/network.xml"
-    xc-rpcgen --haskell --templates-dir="${STAGING_RPCGENDATADIR_NATIVE}" -c -o "Rpc/Autogen" --module-prefix="Rpc.Autogen" "${STAGING_IDLDATADIR}/ctxusb_daemon.xml"
-}
+inherit haskell update-rc.d
 
 do_install_append() {
     install -m 0755 ${S}/setup-ica-vm ${D}${bindir}/setup-ica-vm
