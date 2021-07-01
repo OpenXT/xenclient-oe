@@ -18,6 +18,7 @@
 #
 
 . /etc/init.d/functions
+. /etc/init.d/functions-selinux
 CFG_ETC=/config/etc
 
 umask 077
