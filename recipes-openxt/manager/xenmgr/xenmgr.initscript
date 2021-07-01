@@ -17,90 +17,84 @@
 # Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 #
 
-# (use /bin/sh when watchdog stuff is removed)
+### BEGIN INIT INFO
+# Provides:             xenmgr
+# Required-Start:       dbus-1 dbd
+# Required-Stop:
+# Default-Start:        5
+# Default-Stop:         0 1 6
+# Short-Description:    Starts OpenXT Xen manager.
+### END INIT INFO
 
-# Provides:		xenmgr
+DESC="XenMgr"
+EXEC="/usr/bin/xenmgr"
+PIDFILE="/var/run/xenmgr.pid"
+OPTS=("--writepid=$PIDFILE" "--no-daemonize")
+
+. /etc/init.d/functions-selinux
 
 set -e
 
-test -x /usr/bin/xenmgr || exit 0
+# Handle options passed by the bootloader on the kernel cmdline.
+cmdline_options() {
+    read -r -a cmdline_opts < /proc/cmdline
+    for i in "${cmdline_opts[@]}"; do
+        case "$i" in
+            no-autostart)
+                OPTS+=("--no-autostart")
+                echo "$DESC not starting VMs automatically."
+                ;;
+            rm_uivm_suspend_img)
+                rm -f /storage/uivm/uivm-suspend-image
+                ;;
+            no-xenmgr)
+                echo "Not starting $DESC: no-xenmgr specified on command line."
+                exit 0
+                ;;
+        esac
+    done
+}
 
-export XENVM_DEBUG=syslog:xenvm
+# Create/Label /storage/isos/null.iso if not present.
+check_null_iso() {
+    if [ -f "/storage/isos/null.iso" ]; then
+        return 0
+    fi
+    mkdir -p "/storage/isos"
+    cp -f "/usr/share/null.iso" "/storage/isos/"
+    restore -r "/storage/isos"
+}
 
-XENMGR_OPTS="--no-daemonize"
-if [ -n "$2" ]; then
-    XENMGR_OPTS="$XENMGR_OPTS $2"
-fi
+do_start() {
+    start-stop-daemon --start --quiet --oknodo --background --pidfile "$PIDFILE" \
+        --exec "$EXEC" -- "${OPTS[@]}"
+}
 
-export PATH="${PATH:+$PATH:}/usr/sbin:/sbin"
-
-autostart=0
-
-for i in `cat /proc/cmdline`
-do
-	case "$i" in
-		autostart)
-			autostart=1
-			;;
-		rm_uivm_suspend_img)
-			rm -f /storage/uivm/uivm-suspend-image
-			;;
-	esac
-done
+do_stop() {
+    start-stop-daemon --stop --pidfile "$PIDFILE" --oknodo
+    rm -f "$PIDFILE"
+}
 
 case "$1" in
-start)
-	if grep -q no-xenmgr /proc/cmdline; then
-	    echo "Not starting XenMgr: no-xenmgr specified on command line"
-	    exit 0
-	fi
-	echo "Starting XenMgr server"
-
-	if [ "$autostart" -ne 1 ]
-	then
-		XENMGR_OPTS="$XENMGR_OPTS --no-autostart "
-		echo "XenMgr noautostart"
-	fi
-
-	if [ ! -f "/storage/isos/null.iso" ]; then
-	    mkdir -p "/storage/isos"
-	    [ -x /sbin/restorecon ] && /sbin/restorecon -r "/storage/isos"
-	    cp -f "/usr/share/null.iso" "/storage/isos/"
-	fi
-
-	start-stop-daemon --start --background --quiet --oknodo --pidfile /var/run/xenmgr.pid --exec /usr/bin/xenmgr -- $XENMGR_OPTS --writepid=/var/run/xenmgr.pid
-	;;
-  stop)
-	XENMGR_PID=`cat /var/run/xenmgr.pid 2> /dev/null || echo ""`
-	if [ -z "$XENMGR_PID" ] || ! kill -0 $XENMGR_PID 2> /dev/null; then
-	    echo "XenMgr not running"
-	    exit 1
-	fi
-	echo -n "Stopping XenMgr server"
-	kill -USR2 $XENMGR_PID
-	rm -f /var/run/xenmgr.pid
-        COUNT=0
-        while kill -0 $XENMGR_PID 2> /dev/null; do
-           COUNT=$(( $COUNT + 1 ))
-           if [ "$COUNT" -gt 600 ]; then
-               echo "timed out..."
-               break
-           fi
-            sleep 1
-           echo -n "."
-	done
-	echo "Done"
-	;;
-
-  restart)
-	echo "Restarting XenMgr server"
-	$0 stop
-	$0 start
-	;;
-
-  *)
-	echo "Usage: $0 {start|stop|restart}"
-	exit 1
+    start)
+        check_null_iso
+        cmdline_options
+        echo -n "Starting $DESC... "
+        do_start
+        echo "OK"
+        ;;
+    stop)
+        echo -n "Stopping $DESC... "
+        do_stop
+        echo "OK"
+        ;;
+    restart)
+        echo -n "Restarting $DESC... "
+        do_stop
+        do_start
+        echo "OK"
+        ;;
+    *)
+        echo "Usage: $0 {start|stop|restart}"
+        exit 1
 esac
-
-exit 0
