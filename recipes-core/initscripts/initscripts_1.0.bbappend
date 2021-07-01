@@ -4,6 +4,7 @@ FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}-${PV}:"
 
 SRC_URI += " \
     file://functions-selinux \
+    file://functions-dbus \
     file://mountearly.sh \
     file://udev-volatiles.sh \
     file://finish.sh \
@@ -29,6 +30,7 @@ do_install () {
 
 	install -m 0644    ${WORKDIR}/functions		${D}${sysconfdir}/init.d
 	install -m 0644    ${WORKDIR}/functions-selinux	${D}${sysconfdir}/init.d
+	install -m 0644    ${WORKDIR}/functions-dbus	${D}${sysconfdir}/init.d
 	install -m 0755    ${WORKDIR}/bootmisc.sh	${D}${sysconfdir}/init.d
 	install -m 0755    ${WORKDIR}/checkroot.sh	${D}${sysconfdir}/init.d
 	install -m 0755    ${WORKDIR}/halt		${D}${sysconfdir}/init.d
