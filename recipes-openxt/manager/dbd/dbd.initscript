@@ -21,55 +21,67 @@
 # THE SOFTWARE.
 #
 
-#
-# Starts dbd daemon.
-#
+### BEGIN INIT INFO
+# Provides:             dbd
+# Required-Start:       dbus-1
+# Required-Stop:
+# Default-Start:        5
+# Default-Stop:         0 1 6
+# Short-Description:    Starts OpenXT DataBase Daemon.
+### END INIT INFO
 
-# Make sure the progam exists
-[ -f /usr/bin/dbd ] || exit 0
+DESC="DBd"
+EXEC="/usr/bin/dbd"
+PIDFILE="/var/run/dbd.pid"
+OPTS=()
 
-start() {
-        if [ ! -f /config/db ]; then
-          if [ ! -f /config/db.tmp ]; then    
-            echo "Installing default dbd database in /config/db"
-            cp --preserve=xattr /usr/share/xenclient/db.default /config/db
-          fi
-        fi
-	echo -n "Upgrading database format: "
-	/usr/bin/upgrade-db | logger -s -t upgrade-db -p user.notice
-        if [ ${PIPESTATUS[0]} -ne 0 ]; then
-          echo "FAILED to upgrade database. NOT starting dbd."
-          exit 1
-        fi
-	echo -n "Starting dbd: "
-	/usr/bin/dbd 2> /dev/null 2>&1
-	echo "OK"
+set -e -o pipefail
+
+# Deploy default configuration if none exist.
+default_conf() {
+    if [ -f "/config/db" ] || [ -f "/config/db.tmp" ]; then
+        return 0
+    fi
+    echo "Installing default dbd database in /config/db..."
+    cp --preserve=xattr "/usr/share/xenclient/db.default" "/config/db"
 }
 
-stop() {
-	echo -n "Stopping dbd: "
-	while kill `pidof -o %PPID dbd` 2>/dev/null ; do : ; done
-	echo "OK"
+# Run the upgrade-db program on the database.
+upgrade_db() {
+    echo "Upgrading database format..."
+    /usr/bin/upgrade-db | logger -s -t upgrade-db -p user.notice
 }
 
-restart() {
-	stop
-	start
+do_start() {
+    start-stop-daemon --start --quiet --oknodo --pidfile "$PIDFILE" \
+        --exec "$EXEC" -- "${OPTS[@]}"
+}
+
+do_stop() {
+    start-stop-daemon --stop --pidfile "$PIDFILE" --oknodo
+    rm -f "$PIDFILE"
 }
 
 case "$1" in
-  start)
-  	start
-	;;
-  stop)
-  	stop
-	;;
-  restart|reload)
-  	restart
-	;;
-  *)
-	echo $"Usage: $0 {start|stop|restart}"
-	exit 1
+    start)
+        default_conf
+        upgrade_db
+        echo -n "Starting $DESC..."
+        do_start
+        echo "OK"
+        ;;
+    stop)
+        echo -n "Stopping $DESC..."
+        do_stop
+        echo "OK"
+        ;;
+    restart)
+        echo -n "Restarting $DESC..."
+        do_stop
+        do_start
+        echo "OK"
+        ;;
+    *)
+        echo "Usage: $0 {start|stop|restart}"
+        exit 1
 esac
-
-exit $?
