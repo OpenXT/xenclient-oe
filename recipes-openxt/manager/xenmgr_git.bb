@@ -77,7 +77,7 @@ RDEPENDS_${PN} += " \
 "
 
 INITSCRIPT_NAME = "xenmgr"
-INITSCRIPT_PARAMS = "defaults 80 20"
+INITSCRIPT_PARAMS = "defaults 80 16"
 
 FILES_${PN} += " \
     ${datadir}/xenmgr-1.0/templates/default/* \

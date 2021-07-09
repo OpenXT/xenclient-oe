@@ -7,7 +7,7 @@ SRC_URI = "file://language-sync \
            file://language-sync.initscript"
 
 INITSCRIPT_NAME = "language-sync"
-INITSCRIPT_PARAMS = "defaults 80 20"
+INITSCRIPT_PARAMS = "defaults 80 11"
 
 S = "${WORKDIR}"
 

@@ -20,7 +20,7 @@ S = "${WORKDIR}/git"
 inherit autotools update-rc.d pkgconfig xc-rpcgen-c
 
 INITSCRIPT_NAME = "xenclient-vusb-daemon"
-INITSCRIPT_PARAMS = "defaults 60 40"
+INITSCRIPT_PARAMS = "defaults 60 19"
 
 do_install_append (){
         install -d ${D}/etc/init.d
