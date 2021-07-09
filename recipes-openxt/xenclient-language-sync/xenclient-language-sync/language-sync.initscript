@@ -21,47 +21,56 @@
 # THE SOFTWARE.
 #
 
-DAEMON_NAME="language-sync"
-DAEMON_BIN=/usr/sbin/language-sync
-PID_FILE=/var/run/language-sync.pid
+### BEGIN INIT INFO
+# Provides:          language-sync
+# Required-Start:    dbus-1 xenmgr
+# Required-Stop:
+# Default-Start:     5
+# Default-Stop:      0 1 6
+# Short-Description: Language Sync script for splashscreen
+### END INIT INFO
 
-start()
-{
-    start-stop-daemon --start \
-                      --quiet \
-                      --exec $DAEMON_BIN \
-                      --pidfile $PID_FILE \
-                      --background \
-                      --make-pidfile
+DESC="Language Sync"
+EXEC=/usr/sbin/language-sync
+PIDFILE="/var/run/language-sync.pid"
+
+do_start() {
+    start-stop-daemon --start --quiet --oknodo --background \
+        --pidfile "$PIDFILE" --make-pidfile \
+        --exec "$EXEC"
 }
 
-stop()
-{
-    start-stop-daemon --stop \
-                      --quiet \
-                      --pidfile $PID_FILE \
-                      --oknodo
-    rm -f $PID_FILE
+do_stop() {
+    # language-sync forks unmonitored children, kill the process group.
+    if [ ! -f "$PIDFILE" ]; then
+        return 0 # oknodo equivalent.
+    fi
+    pgid=$(ps -o pgid:1= "$(cat "$PIDFILE")")
+    if [ -z "$pgid" ]; then
+        return 0 # ignore daemon is already dead.
+    fi
+    kill -TERM -- "-$pgid"
+    rm -f "$PIDFILE"
 }
 
 case "$1" in
     start)
-        echo "Starting $DAEMON_NAME"
-        start
+        echo -n "Starting $DESC... "
+        do_start
+        echo "OK"
         ;;
     stop)
-        echo "Stopping $DAEMON_NAME"
-        stop
+        echo -n "Stopping $DESC... "
+        do_stop
+        echo "OK"
         ;;
     restart)
-        echo "Restarting $DAEMON_NAME"
-        stop
-        start
+        echo -n "Restarting $DESC... "
+        do_stop
+        do_start
+        echo "OK"
         ;;
     *)
-        echo "Usage: `basename $0` {start|stop|restart}" >&2
+        echo "Usage: $0 {start|stop|restart}"
         exit 1
-        ;;
 esac
-
-exit 0
