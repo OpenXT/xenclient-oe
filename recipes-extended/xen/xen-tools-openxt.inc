@@ -54,13 +54,13 @@ INITSCRIPT_PACKAGES =+ " \
     ${PN}-xl \
 "
 INITSCRIPT_NAME_${PN}-console = "xenconsoled"
-INITSCRIPT_PARAMS_${PN}-console = "defaults 20"
+INITSCRIPT_PARAMS_${PN}-console = "defaults 20 80"
 INITSCRIPT_NAME_${PN}-xenstored = "xenstored"
-INITSCRIPT_PARAMS_${PN}-xenstored = "defaults 05"
+INITSCRIPT_PARAMS_${PN}-xenstored = "defaults 05 95"
 INITSCRIPT_NAME_${PN}-xl = "xen-init-dom0"
-INITSCRIPT_PARAMS_${PN}-xl = "defaults 21"
+INITSCRIPT_PARAMS_${PN}-xl = "defaults 21 79"
 INITSCRIPT_NAME_${PN}-xl = "xen-init-dom0"
-INITSCRIPT_PARAMS_${PN}-xl = "defaults 21"
+INITSCRIPT_PARAMS_${PN}-xl = "defaults 21 79"
 
 EXTRA_OEMAKE += "ETHERBOOT_ROMS=${STAGING_DIR_HOST}/usr/share/firmware/intel.rom"
 

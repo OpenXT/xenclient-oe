@@ -26,7 +26,7 @@ inherit update-rc.d ocaml findlib pkgconfig
 INITSCRIPT_PACKAGES="${PN}"
 
 INITSCRIPT_NAME_${PN} = "uid"
-INITSCRIPT_PARAMS_${PN} = "defaults 81"
+INITSCRIPT_PARAMS_${PN} = "defaults 81 19"
 
 FILES_${PN} += " \
     ${bindir}/uid \

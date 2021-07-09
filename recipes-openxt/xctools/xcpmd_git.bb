@@ -19,7 +19,7 @@ ASNEEDED = ""
 inherit autotools update-rc.d pkgconfig xc-rpcgen-c
 
 INITSCRIPT_NAME = "xcpmd"
-INITSCRIPT_PARAMS = "defaults 60"
+INITSCRIPT_PARAMS = "defaults 60 40"
 
 do_install_append() {
 # RJP TODO remove xenpmd from xenclient-tools clam bake

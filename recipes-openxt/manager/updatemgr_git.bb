@@ -41,7 +41,7 @@ inherit update-rc.d haskell xc-rpcgen
 
 INITSCRIPT_PACKAGES = "${PN}"
 INITSCRIPT_NAME_${PN} = "updatemgr"
-INITSCRIPT_PARAMS_${PN} = "defaults 80"
+INITSCRIPT_PARAMS_${PN} = "defaults 80 20"
 
 do_configure_append() {
 	# generate rpc stubs

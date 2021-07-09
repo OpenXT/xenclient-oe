@@ -38,7 +38,7 @@ PACKAGES =+ " \
 
 INITSCRIPT_PACKAGES =+ "${PN}-tapback "
 INITSCRIPT_NAME_${PN}-tapback = "tapback"
-INITSCRIPT_PARAMS_${PN}-tapback = "defaults 61"
+INITSCRIPT_PARAMS_${PN}-tapback = "defaults 61 39"
 
 TARGET_CPPFLAGS += "-DTAP_CTL_NO_DEFAULT_CGROUP_SLICE -DOPEN_XT"
 

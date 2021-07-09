@@ -73,7 +73,7 @@ PACKAGES =+ " \
 "
 INITSCRIPT_PACKAGES = "${PN}"
 INITSCRIPT_NAME_${PN} = "dbd"
-INITSCRIPT_PARAMS_${PN} = "defaults 25"
+INITSCRIPT_PARAMS_${PN} = "defaults 25 75"
 
 FILES_${PN} += " \
     ${datadir}/xenclient/db.default \

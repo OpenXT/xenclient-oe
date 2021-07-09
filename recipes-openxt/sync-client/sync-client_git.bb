@@ -26,7 +26,7 @@ SRC_URI = "git://github.com/OpenXT/sync-client.git \
            file://sync-client-daemon.initscript"
 
 INITSCRIPT_NAME = "sync-client-daemon"
-INITSCRIPT_PARAMS = "defaults 85"
+INITSCRIPT_PARAMS = "defaults 85 15"
 
 S = "${WORKDIR}/git"
 

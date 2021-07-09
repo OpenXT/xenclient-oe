@@ -22,7 +22,7 @@ S = "${WORKDIR}/git/libicbinn"
 inherit autotools-brokensep pkgconfig lib_package xc-rpcgen-c
 
 INITSCRIPT_NAME = "icbinn_svc"
-INITSCRIPT_PARAMS = "defaults 76"
+INITSCRIPT_PARAMS = "defaults 76 24"
 INITSCRIPT_PACKAGES = "${PN}-server"
 inherit update-rc.d
 do_install_append() {

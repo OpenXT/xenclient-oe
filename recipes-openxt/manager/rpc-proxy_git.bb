@@ -39,7 +39,7 @@ require recipes-openxt/xclibs/xclibs-haskell.inc
 inherit update-rc.d haskell xc-rpcgen
 
 INITSCRIPT_NAME = "rpc-proxy"
-INITSCRIPT_PARAMS = "defaults 30"
+INITSCRIPT_PARAMS = "defaults 30 70"
 
 # ToDo: move xc-rpcgen into compile?
 

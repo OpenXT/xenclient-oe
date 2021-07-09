@@ -27,7 +27,7 @@ inherit update-rc.d useradd autotools-brokensep pkgconfig
 INITSCRIPT_PACKAGES = "${PN}"
 
 INITSCRIPT_NAME_${PN} = "trousers"
-INITSCRIPT_PARAMS_${PN} = "defaults 85"
+INITSCRIPT_PARAMS_${PN} = "defaults 85 15"
 
 USERADD_PACKAGES = "${PN}"
 GROUPADD_PARAM_${PN} = "--gid 421 tss"
