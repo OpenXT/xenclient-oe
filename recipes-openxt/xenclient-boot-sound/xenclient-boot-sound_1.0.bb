@@ -15,7 +15,7 @@ FILES_${PN} = "/"
 inherit update-rc.d
 
 INITSCRIPT_NAME = "xenclient-boot-sound"
-INITSCRIPT_PARAMS = "defaults 75"
+INITSCRIPT_PARAMS = "defaults 75 25"
 
 do_install () {
 	install -d ${D}/etc/init.d

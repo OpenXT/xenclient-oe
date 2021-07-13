@@ -69,7 +69,7 @@ CC_FOR_OCAML="${TARGET_PREFIX}gcc"
 
 INITSCRIPT_PACKAGES = "${PN}-xenstored"
 INITSCRIPT_NAME_${PN}-xenstored = "xenstored"
-INITSCRIPT_PARAMS_${PN}-xenstored = "defaults 05"
+INITSCRIPT_PARAMS_${PN}-xenstored = "defaults 05 95"
 
 pkg_postinst_${PN}-xenstored () {
     update-alternatives --install ${sbindir}/xenstored xenstored xenstored.${PN}-xenstored 100

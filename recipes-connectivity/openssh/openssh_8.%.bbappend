@@ -65,7 +65,7 @@ FILES_${PN}-sshd-tcp-init = "/etc/init.d/sshd"
 
 INITSCRIPT_PACKAGES += "${PN}-sshd-tcp-init"
 INITSCRIPT_NAME_${PN}-sshd-tcp-init = "sshd"
-INITSCRIPT_PARAMS_${PN}-sshd-tcp-init = "defaults 9"
+INITSCRIPT_PARAMS_${PN}-sshd-tcp-init = "defaults 9 91"
 
 RDEPENDS_${PN}-sshd += "libargo"
 RDEPENDS_${PN}-ssh += "bash libargo"

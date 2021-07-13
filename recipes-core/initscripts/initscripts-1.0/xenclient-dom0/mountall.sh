@@ -26,7 +26,7 @@ if test -f /etc/default/mountall; then
     . /etc/default/mountall
 fi
 
-. /etc/init.d/functions
+. /etc/init.d/functions-selinux
 
 mkdir -p /dev/shm /dev/pts
 restore /dev/shm /dev/pts
