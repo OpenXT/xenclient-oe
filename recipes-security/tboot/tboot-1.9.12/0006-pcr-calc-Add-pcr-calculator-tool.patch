@@ -1,26 +1,67 @@
-From 8da25880a0d44a23dafb13c80b3d6a869edb6c2f Mon Sep 17 00:00:00 2001
+From 4ca069edde470b45edf03d2cc0a6eca9264e8424 Mon Sep 17 00:00:00 2001
 From: Eric Chanudet <chanudete@ainfosec.com>
 Date: Mon, 13 Aug 2018 12:10:22 -0400
-Subject: [PATCH 06/10] pcr-calc: Add pcr calculator tool.
+Subject: [PATCH] pcr-calc: Add pcr calculator tool.
 
-Usage:
-module_hash [-hjz] [-e hash_str] -c cmd_line module_file\n
-	-h Help: will print out this help message.
-	-j module is compressed with BZip2
-	-z module is compressed with GZip
-	-e hash_str Extend Hash: has to be extended with module hash.
-	-c cmd_line Command Line: the command line passed.
-	-a hash algorithm to use.
-	module_file: file name of module to hash.
+This changeset includes the tools required to handle forward-sealing of
+TXT measured installations.
+
+module_hash [-hjz] [-e hash_str] -c cmd_line module_file
+ -h Help: will print out this help message.
+ -j module is compressed with BZip2
+ -z module is compressed with GZip
+ -e hash_str Extend Hash: has to be extended with module hash.
+ -c cmd_line Command Line: the command line passed.
+ -a hash algorithm to use.
+ module_file: file name of module to hash.
+
+acmmatch [-h] ACM [ACMs]
+Parse the given ACMs and display which match the current platform on
+stdout.
+ -h  Display this help.
+ -d didvid   Provide the didvid value to be used (instead of reading TXT
+             public configuration registers).
+ -f fsbif    Provide the fsbif value to be used (instead of reading TXT
+             public configuration registers).
+ -q qpiif    Provide the qpiif value to be used (instead of reading TXT
+             public configuration registers).
+ -p msr-pid  Provide the MSR platform ID value to be used (instead of
+             reading MSR devnodes).
+ -s cpuid    Provide the cpuid signature value to be used (instead of
+             running CPUID).
+
+pcr-calc [-h2dclvqe] [-a sha1|sha256] -p policy_file -m hash_str
+ -h Help: will print out this help message.
+ -2 TPM 2.0.
+ -d D/A mode.
+ -c Calculate from TPM eventlog.
+ -l Print TPM eventlog.
+ -v Print calculated TPM eventlog.
+ -q Hash start quirk mode.
+ -a alg Alogrithm: select what hash alogrithm to use.
+ -p policy_file Tboot Policy: the policy that was/will be used.
+ -m hash_str Multiboot Module: include module hash (MLE first).
+ -e evt_type:<hash_str>|emulate Override PCR events type found in the
+    logs with the provided value or emulate the value entirely (emulation
+    requires TBoot version and ACM to be provided).
+ -F file Use the given file as tpm event log (replace
+    /sys/kernel/security/txt/*_binary_evtlog).
+ -A acm-path Path to the ACM that will be used to emulate events for PCR
+    calculations (see -e).
+ -V tboot-version TBoot version targeted to emulate events for PCR
+    calculations (see -e).
+ -o Assume the event-log to be formated using the legacy format (prior
+    TCG PC Client Platform. EFI Protocol Specification).
 
 Signed-off-by: Daniel P. Smith <dpsmith@apertussolutions.com>
+Signed-off-by: Eric Chanudet <chanudete@ainfosec.com>
 ---
  Makefile                |   2 +-
  pcr-calc/Makefile       |  73 ++++++
  pcr-calc/acm.c          | 214 ++++++++++++++++
  pcr-calc/acm.h          | 139 +++++++++++
  pcr-calc/acmmatch.c     | 323 ++++++++++++++++++++++++
- pcr-calc/eventlog.c     | 363 +++++++++++++++++++++++++++
+ pcr-calc/eventlog.c     | 356 +++++++++++++++++++++++++++
  pcr-calc/eventlog.h     |  63 +++++
  pcr-calc/eventlog_tcg.h |  86 +++++++
  pcr-calc/hash.c         | 236 ++++++++++++++++++
@@ -31,14 +72,14 @@ Signed-off-by: Daniel P. Smith <dpsmith@apertussolutions.com>
  pcr-calc/platform.h     |  68 +++++
  pcr-calc/tb_policy.c    |  83 +++++++
  pcr-calc/tb_policy.h    |  43 ++++
- pcr-calc/tboot.h        |  10 +
+ pcr-calc/tboot.h        |  11 +
  pcr-calc/tpm.c          | 534 ++++++++++++++++++++++++++++++++++++++++
  pcr-calc/tpm.h          | 200 +++++++++++++++
  pcr-calc/txt.h          |  51 ++++
- pcr-calc/util.c         | 196 +++++++++++++++
+ pcr-calc/util.c         | 188 ++++++++++++++
  pcr-calc/util.h         |  49 ++++
  pcr-calc/uuid.h         |  53 ++++
- 23 files changed, 4127 insertions(+), 1 deletion(-)
+ 23 files changed, 4113 insertions(+), 1 deletion(-)
  create mode 100644 pcr-calc/Makefile
  create mode 100644 pcr-calc/acm.c
  create mode 100644 pcr-calc/acm.h
@@ -850,10 +891,10 @@ index 0000000..8dc63e1
 +}
 diff --git a/pcr-calc/eventlog.c b/pcr-calc/eventlog.c
 new file mode 100644
-index 0000000..b1b280e
+index 0000000..b96447f
 --- /dev/null
 +++ b/pcr-calc/eventlog.c
-@@ -0,0 +1,363 @@
+@@ -0,0 +1,356 @@
 +/*
 + *
 + * Copyright (c) 2017 Daniel P. Smith
@@ -963,7 +1004,7 @@ index 0000000..b1b280e
 +}
 +
 +/* See tboot/txt/txt.c, include/mle.h */
-+static int get_ossinit_caps_tboot196(const struct acm *acm, uint8_t tpmver,
++static int get_ossinit_caps_tboot_1_9_6(const struct acm *acm, uint8_t tpmver,
 +		txt_caps_t *caps)
 +{
 +	const txt_caps_t mle_hdr = {
@@ -999,7 +1040,7 @@ index 0000000..b1b280e
 +/* See tboot/txt/txt.c, include/mle.h */
 +/* Since 1.9.6: tcg_event_log_format is now masked before processing, so the
 + * value from the MLE header defined in TBoot is ignored. */
-+static int get_ossinit_caps_tboot199(const struct acm *acm, uint8_t tpmver,
++static int get_ossinit_caps_tboot_1_9_9(const struct acm *acm, uint8_t tpmver,
 +		txt_caps_t *caps)
 +{
 +	const txt_caps_t mle_hdr = {
@@ -1033,22 +1074,15 @@ index 0000000..b1b280e
 +}
 +
 +static int event_ossinit_data_cap_hash(const struct acm *acm, uint16_t alg,
-+		uint8_t tpmver, tb_version_t tbver, tb_hash_t *hash)
++		uint8_t tpmver, const tb_version_t *tbver, tb_hash_t *hash)
 +{
 +	txt_caps_t caps;
 +	int rc;
 +
-+	switch (tbver) {
-+		case TB_196:
-+			rc = get_ossinit_caps_tboot196(acm, tpmver, &caps);
-+			break;
-+		case TB_199:
-+			rc = get_ossinit_caps_tboot199(acm, tpmver, &caps);
-+			break;
-+		default:
-+			rc = -1;
-+			break;
-+	}
++	if (tbver->major <= 1 && tbver->minor <= 9 && tbver->micro <= 6)
++		rc = get_ossinit_caps_tboot_1_9_6(acm, tpmver, &caps);
++	else
++		rc = get_ossinit_caps_tboot_1_9_9(acm, tpmver, &caps);
 +
 +	if (!hash_buffer((unsigned char *)&caps, sizeof (caps), hash, alg))
 +		return -1;
@@ -1057,7 +1091,7 @@ index 0000000..b1b280e
 +}
 +
 +int emulate_event(const struct acm *acm, uint16_t alg,
-+		uint8_t tpmver, tb_version_t tbver, struct pcr_event *evt)
++		uint8_t tpmver, const tb_version_t *tbver, struct pcr_event *evt)
 +{
 +	int rc;
 +
@@ -1219,7 +1253,7 @@ index 0000000..b1b280e
 +}
 diff --git a/pcr-calc/eventlog.h b/pcr-calc/eventlog.h
 new file mode 100644
-index 0000000..2c3f6a5
+index 0000000..9d36d56
 --- /dev/null
 +++ b/pcr-calc/eventlog.h
 @@ -0,0 +1,63 @@
@@ -1279,7 +1313,7 @@ index 0000000..2c3f6a5
 +} txt_event_type_t;
 +
 +int emulate_event(const struct acm *acm, uint16_t alg, uint8_t tpmver,
-+	tb_version_t tbver, struct pcr_event *evt);
++	const tb_version_t *tbver, struct pcr_event *evt);
 +
 +struct tpm *parse_tpm12_log(char *buffer, size_t size);
 +struct tpm *parse_tpm20_log_legacy(char *buffer, size_t size);
@@ -2424,7 +2458,7 @@ index 0000000..35a16d0
 +}
 diff --git a/pcr-calc/pcr-calc.c b/pcr-calc/pcr-calc.c
 new file mode 100644
-index 0000000..8c7da06
+index 0000000..f3dbb90
 --- /dev/null
 +++ b/pcr-calc/pcr-calc.c
 @@ -0,0 +1,446 @@
@@ -2640,7 +2674,7 @@ index 0000000..8c7da06
 +	size_t pol_size = 0;
 +	tb_policy_t *policy_file = NULL;
 +	struct acm *acm = NULL;
-+	tb_version_t tbver = TB_199;
++	tb_version_t tbver = TB_VERSION_DEFAULT;
 +	const char *eventlog = NULL;
 +
 +	flags = FLAG_TPM12;
@@ -2731,7 +2765,7 @@ index 0000000..8c7da06
 +				}
 +			break;
 +			case 'V':
-+				if (read_tboot_version(optarg, &tbver)) {
++				if (parse_tboot_version(optarg, &tbver)) {
 +					error_msg("invalid tboot version: %s.\n", optarg);
 +					ret = 1;
 +					goto out;
@@ -2840,7 +2874,7 @@ index 0000000..8c7da06
 +		ret = 1;
 +		goto out;
 +	}
-+	if (!tpm_emulate_all_events(t, t->alg, evt, evt_count, acm, tbver)) {
++	if (!tpm_emulate_all_events(t, t->alg, evt, evt_count, acm, &tbver)) {
 +		error_msg("failed to emulate events in the event log.\n");
 +		ret = 1;
 +		goto out;
@@ -3200,23 +3234,24 @@ index 0000000..cc23f2f
 +#endif
 diff --git a/pcr-calc/tboot.h b/pcr-calc/tboot.h
 new file mode 100644
-index 0000000..e5f4cfe
+index 0000000..72b872c
 --- /dev/null
 +++ b/pcr-calc/tboot.h
-@@ -0,0 +1,10 @@
+@@ -0,0 +1,11 @@
 +#ifndef _TBOOT_H_
 +# define _TBOOT_H_
 +
-+typedef enum {
-+	TB_196,
-+	TB_199,
++typedef struct {
++    unsigned int major, minor, micro;
 +} tb_version_t;
++
++#define TB_VERSION_DEFAULT { .major = 1, .minor = 9, .micro = 12 }
 +
 +#endif /* !_TBOOT_H_ */
 +
 diff --git a/pcr-calc/tpm.c b/pcr-calc/tpm.c
 new file mode 100644
-index 0000000..5c16c3d
+index 0000000..45aac9b
 --- /dev/null
 +++ b/pcr-calc/tpm.c
 @@ -0,0 +1,534 @@
@@ -3605,7 +3640,7 @@ index 0000000..5c16c3d
 +
 +bool tpm_emulate_event(struct tpm *t, uint16_t alg,
 +		       const struct pcr_event *evt,
-+		       const struct acm *acm, tb_version_t tbver)
++		       const struct acm *acm, const tb_version_t *tbver)
 +{
 +	unsigned int i, j;
 +	struct pcr_bank *b;
@@ -3632,7 +3667,7 @@ index 0000000..5c16c3d
 +
 +bool tpm_emulate_all_events(struct tpm *t, uint16_t alg,
 +			    const struct pcr_event *evt, unsigned int evt_count,
-+			    const struct acm *acm, tb_version_t tbver)
++			    const struct acm *acm, const tb_version_t *tbver)
 +{
 +	unsigned int i;
 +
@@ -3756,7 +3791,7 @@ index 0000000..5c16c3d
 +}
 diff --git a/pcr-calc/tpm.h b/pcr-calc/tpm.h
 new file mode 100644
-index 0000000..b0c25a3
+index 0000000..bb5f30e
 --- /dev/null
 +++ b/pcr-calc/tpm.h
 @@ -0,0 +1,200 @@
@@ -3949,10 +3984,10 @@ index 0000000..b0c25a3
 +				unsigned int evt_count);
 +bool tpm_emulate_event(struct tpm *t, uint16_t alg,
 +		       const struct pcr_event *evt,
-+		       const struct acm *acm, tb_version_t tbver);
++		       const struct acm *acm, const tb_version_t *tbver);
 +bool tpm_emulate_all_events(struct tpm *t, uint16_t alg,
 +			    const struct pcr_event *evt, unsigned int evt_count,
-+			    const struct acm *acm, tb_version_t tbver);
++			    const struct acm *acm, const tb_version_t *tbver);
 +bool tpm_clear_all_event(struct tpm *t, uint16_t alg, uint32_t evt_type);
 +bool tpm_recalculate(struct tpm *t);
 +void tpm_print(struct tpm *t, uint16_t alg);
@@ -4019,10 +4054,10 @@ index 0000000..adf9c9c
 +#endif /* _TXT_H_ */
 diff --git a/pcr-calc/util.c b/pcr-calc/util.c
 new file mode 100644
-index 0000000..9856a19
+index 0000000..cc76f0d
 --- /dev/null
 +++ b/pcr-calc/util.c
-@@ -0,0 +1,196 @@
+@@ -0,0 +1,188 @@
 +/*
 + *
 + * Copyright (c) 2017 Daniel P. Smith
@@ -4201,27 +4236,19 @@ index 0000000..9856a19
 +	return len;
 +}
 +
-+#define TBVER_BUF_LEN 9
-+int read_tboot_version(const char *s, tb_version_t *ver)
++int parse_tboot_version(const char *s, tb_version_t *tbver)
 +{
-+	size_t len = strnlen(s, TBVER_BUF_LEN);
-+	int rc;
++	int n;
 +
-+	if (len >= TBVER_BUF_LEN)
-+		return -1;
-+
-+	if (strcmp_s(s, TBVER_BUF_LEN, "1.9.6", &rc) == EOK && !rc)
-+		*ver = TB_196;
-+	else if (strcmp_s(s, TBVER_BUF_LEN, "1.9.9", &rc) == EOK && !rc)
-+		*ver = TB_199;
-+	else
-+		return -1;
++	n = sscanf(s, "%u.%u.%u", &tbver->major, &tbver->minor, &tbver->micro);
++	if (n != 3)
++		return errno ? -errno : -EINVAL;
 +
 +	return 0;
 +}
 diff --git a/pcr-calc/util.h b/pcr-calc/util.h
 new file mode 100644
-index 0000000..57445ab
+index 0000000..506bb78
 --- /dev/null
 +++ b/pcr-calc/util.h
 @@ -0,0 +1,49 @@
@@ -4269,7 +4296,7 @@ index 0000000..57445ab
 +size_t read_file(const char *path, char **buffer);
 +int read_pcr_event(const char *s, struct pcr_event *evt);
 +
-+int read_tboot_version(const char *s, tb_version_t *ver);
++int parse_tboot_version(const char *s, tb_version_t *ver);
 +int read_pcr_event_emulate(const char *s,
 +	 struct acm **acm, tb_version_t *ver, struct pcr_event *evt);
 +
