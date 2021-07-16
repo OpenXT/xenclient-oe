@@ -1,0 +1,38 @@
+From:   Omar Sandoval <osandov@osandov.com>
+Subject: [PATCH] tpm_tis: work around status register bug in STMicroelectronics TPM
+Date:   Wed, 15 Apr 2020 15:45:22 -0700
+Message-Id: <6c55d7c1fb84e5bf2ace9f05ec816ef67bd873e1.1586990595.git.osandov@fb.com>
+
+We've encountered a particular model of STMicroelectronics TPM that
+transiently returns a bad value in the status register. This causes the
+kernel to believe that the TPM is ready to receive a command when it
+actually isn't, which in turn causes the send to time out in
+get_burstcount(). In testing, reading the status register one extra time
+convinces the TPM to return a valid value.
+
+Signed-off-by: Omar Sandoval <osandov@fb.com>
+---
+ drivers/char/tpm/tpm_tis_core.c | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+--- a/drivers/char/tpm/tpm_tis_core.c
++++ b/drivers/char/tpm/tpm_tis_core.c
+@@ -238,6 +238,18 @@ static u8 tpm_tis_status(struct tpm_chip
+ 	rc = tpm_tis_read8(priv, TPM_STS(priv->locality), &status);
+ 	if (rc < 0)
+ 		return 0;
++	/*
++	 * Some STMicroelectronics TPMs have a bug where the status register is
++	 * sometimes bogus (all 1s) if read immediately after the access
++	 * register is written to. Bits 0, 1, and 5 are always supposed to read
++	 * as 0, so this is clearly invalid. Reading the register a second time
++	 * returns a valid value.
++	 */
++	if (unlikely(status == 0xff)) {
++		rc = tpm_tis_read8(priv, TPM_STS(priv->locality), &status);
++		if (rc < 0)
++			return 0;
++	}
+ 
+ 	return status;
+ }

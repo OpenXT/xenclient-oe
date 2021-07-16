@@ -1,0 +1,105 @@
+################################################################################
+SHORT DESCRIPTION: 
+################################################################################
+PCI pass-through quirks for FLR.
+
+################################################################################
+LONG DESCRIPTION: 
+################################################################################
+Couple of quirks for FLR:
+_ Wait 500ms (instead of 200ms defined in specs?) for VGA/Display video
+  controllers FLR.
+
+_ Ivy Bridge Intel Graphic Device:
+  * Force enable response in memory before FLR.
+  * Restore command register and return ENOTTY so generic reset logic can be
+    run after the quirk.
+
+################################################################################
+CHANGELOG 
+################################################################################
+Original author: James McKenzie <james.mckenzie@citrix.com>
+Port to 3.18: Eric Chanudet <chanudete@ainfosec.com>
+Port to 4.14: Richard Turner <turnerr@ainfosec.com>
+Port to 4.19: Richard Turner <turnerr@ainfosec.com>
+
+################################################################################
+REMOVAL 
+################################################################################
+This patch is related to Intel Graphic Devices only.
+
+################################################################################
+UPSTREAM PLAN
+################################################################################
+None.
+
+################################################################################
+INTERNAL DEPENDENCIES 
+################################################################################
+None.
+
+################################################################################
+PATCHES 
+################################################################################
+--- a/drivers/pci/pci.c
++++ b/drivers/pci/pci.c
+@@ -5055,7 +5055,12 @@ int pci_probe_reset_function(struct pci_
+ 	if (rc != -ENOTTY)
+ 		return rc;
+ 
+-	return pci_parent_bus_reset(dev, 1);
++	rc = pci_parent_bus_reset(dev, 1);
++	/* larger delay for gpus */
++	if (dev->class == 0x30000 || dev->class == 0x38000)
++		msleep(500);
++	return rc;
++
+ }
+ 
+ /**
+--- a/drivers/pci/quirks.c
++++ b/drivers/pci/quirks.c
+@@ -3764,10 +3764,15 @@ static int reset_ivb_igd(struct pci_dev
+ 	void __iomem *mmio_base;
+ 	unsigned long timeout;
+ 	u32 val;
++	u16 cmd;
+ 
+ 	if (probe)
+ 		return 0;
+ 
++        /* enable response in memory space */
++        pci_read_config_word(dev, PCI_COMMAND, &cmd);
++        pci_write_config_word(dev, PCI_COMMAND, cmd | PCI_COMMAND_MEMORY);
++
+ 	mmio_base = pci_iomap(dev, 0, 0);
+ 	if (!mmio_base)
+ 		return -ENOMEM;
+@@ -3798,7 +3803,10 @@ reset_complete:
+ 	iowrite32(0x00000002, mmio_base + NSDE_PWR_STATE);
+ 
+ 	pci_iounmap(dev, mmio_base);
+-	return 0;
++        pci_write_config_word(dev, PCI_COMMAND, cmd);
++        /* follow with regular flr, returning ENOTTY causes rest of the FLR non-device specific code
++           to execute. Alternatively we could execute it here explicitly and mby that would be cleaner */
++        return -ENOTTY;
+ }
+ 
+ /* Device-specific reset method for Chelsio T4-based adapters */
+--- a/drivers/xen/xen-pciback/pci_stub.c
++++ b/drivers/xen/xen-pciback/pci_stub.c
+@@ -417,10 +417,13 @@ static int pcistub_init_device(struct pc
+ 	if (!dev_data->pci_saved_state)
+ 		dev_err(&dev->dev, "Could not store PCI conf saved state!\n");
+ 	else {
++#if 0
+ 		dev_dbg(&dev->dev, "resetting (FLR, D3, etc) the device\n");
+ 		__pci_reset_function_locked(dev);
+ 		pci_restore_state(dev);
++#endif
+ 	}
++
+ 	/* Now disable the device (this also ensures some private device
+ 	 * data is setup before we export)
+ 	 */

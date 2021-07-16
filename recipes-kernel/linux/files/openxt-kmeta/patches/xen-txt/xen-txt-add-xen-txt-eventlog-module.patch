@@ -1,0 +1,303 @@
+From fee3e4a2677f133a45f2b9bea40c8d7715f58b16 Mon Sep 17 00:00:00 2001
+From: "Daniel P. Smith" <dpsmith@apertussolutions.com>
+Date: Thu, 18 May 2017 17:48:52 -0400
+Subject: [PATCH] xen-txt: add xen txt eventlog module
+
+---
+ arch/x86/include/asm/xen/hypercall.h |   6 ++
+ drivers/xen/Kconfig                  |   7 ++
+ drivers/xen/Makefile                 |   1 +
+ drivers/xen/txt.c                    | 200 +++++++++++++++++++++++++++++++++++
+ include/xen/interface/xen.h          |   8 ++
+ 5 files changed, 222 insertions(+)
+ create mode 100644 drivers/xen/txt.c
+
+--- a/arch/x86/include/asm/xen/hypercall.h
++++ b/arch/x86/include/asm/xen/hypercall.h
+@@ -446,6 +446,12 @@ HYPERVISOR_dm_op(
+ 	return ret;
+ }
+ 
++static inline int
++HYPERVISOR_txt_op(unsigned int op, void *arg)
++{
++	return _hypercall2(int, txt_op, op, arg);
++}
++
+ static inline void
+ MULTI_fpu_taskswitch(struct multicall_entry *mcl, int set)
+ {
+--- a/drivers/xen/Kconfig
++++ b/drivers/xen/Kconfig
+@@ -177,6 +177,15 @@ config SWIOTLB_XEN
+ 	def_bool y
+ 	select SWIOTLB
+ 
++config XEN_TXT
++	tristate "Xen TXT event log retrieval"
++	depends on X86 && TCG_TPM
++	default n
++	help
++	  Support the Xen hypercall to retrieve the tboot TXT
++	  event log.  The log can be read through securityfs
++	  txt/tpm12_binary_evtlog or txt/tpm20_binary_evtlog
++
+ config XEN_PCIDEV_BACKEND
+ 	tristate "Xen PCI-device backend driver"
+ 	depends on PCI && X86 && XEN
+--- a/drivers/xen/Makefile
++++ b/drivers/xen/Makefile
+@@ -23,6 +23,7 @@ obj-$(CONFIG_XEN_GRANT_DEV_ALLOC)	+= xen
+ obj-$(CONFIG_XENFS)			+= xenfs/
+ obj-$(CONFIG_XEN_SYS_HYPERVISOR)	+= sys-hypervisor.o
+ obj-$(CONFIG_XEN_PVHVM)			+= platform-pci.o
++obj-$(CONFIG_XEN_TXT)			+= txt.o
+ obj-$(CONFIG_SWIOTLB_XEN)		+= swiotlb-xen.o
+ obj-$(CONFIG_XEN_MCE_LOG)		+= mcelog.o
+ obj-$(CONFIG_XEN_PCIDEV_BACKEND)	+= xen-pciback/
+--- /dev/null
++++ b/drivers/xen/txt.c
+@@ -0,0 +1,212 @@
++/*
++ * Copyright (C) 2017 Apertus Solutions, LLC
++ *
++ * Authors:
++ *      Daniel P. Smith <dpsmith@apertussolutions.com>
++ *
++ *
++ * This program is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU General Public License
++ * as published by the Free Software Foundation; either version
++ * 2 of the License, or (at your option) any later version.
++ */
++
++#include <linux/module.h>
++#include <linux/seq_file.h>
++#include <linux/security.h>
++#include <linux/tpm.h>
++
++#include <xen/xen.h>
++#include <asm/xen/hypercall.h>
++
++#define FS_LOG_ENTRY 0
++#define FS_DIR_ENTRY 1 /* must be last */
++#define FS_ENTRIES 2
++
++static struct txt_op txt_log;
++static struct dentry *fs_entries[FS_ENTRIES];
++
++
++#define TPM_LOG_BLOCK_SIZE 1024
++
++static void *tpm_evtlog_start(struct seq_file *m, loff_t *pos)
++{
++	struct txt_op *log = m->private;
++	void *addr = log->buffer;
++
++	addr += *pos * TPM_LOG_BLOCK_SIZE;
++
++	if (addr > log->buffer + log->size)
++		return NULL;
++
++	return addr;
++}
++
++static void *tpm_evtlog_next(struct seq_file *m, void *v, loff_t *pos)
++{
++	size_t size = 0;
++	struct txt_op *log = m->private;
++	void *addr = v;
++
++	size = (log->buffer + log->size) - addr;
++	size = size > TPM_LOG_BLOCK_SIZE ? TPM_LOG_BLOCK_SIZE : size;
++
++	if ((size == 0) ||
++	    ((addr + size) > (log->buffer + log->size)))
++		return NULL;
++
++	addr += size;
++	(*pos)++;
++
++	return addr;
++}
++
++static void tpm_evtlog_stop(struct seq_file *m, void *v)
++{
++}
++
++static int tpm_evtlog_show(struct seq_file *m, void *v)
++{
++	size_t size;
++	struct txt_op *log = m->private;
++	void *addr = v;
++
++	size = ((log->buffer + log->size) - addr) > TPM_LOG_BLOCK_SIZE ?
++		TPM_LOG_BLOCK_SIZE : (log->buffer + log->size) - addr;
++
++	if ((size != 0) &&
++	    ((addr + size) <= (log->buffer + log->size)))
++		seq_write(m, addr, size);
++
++	return 0;
++}
++
++const struct seq_operations tpm_evtlog_seqops = {
++	.start = tpm_evtlog_start,
++	.next = tpm_evtlog_next,
++	.stop = tpm_evtlog_stop,
++	.show = tpm_evtlog_show,
++};
++
++static int tpm_evtlog_open(struct inode *inode, struct file *file)
++{
++	int err;
++	struct seq_file *seq;
++
++	err = seq_open(file, &tpm_evtlog_seqops);
++	if (!err) {
++		seq = file->private_data;
++		seq->private = &txt_log;
++	}
++
++	return err;
++}
++
++static const struct file_operations tpm_evtlog_ops = {
++        .open = tpm_evtlog_open,
++        .read = seq_read,
++        .llseek = seq_lseek,
++        .release = seq_release,
++};
++
++
++static long expose_evtlog(const char *name)
++{
++	long ret = 0;
++	char *filename;
++
++	fs_entries[FS_DIR_ENTRY] = securityfs_create_dir(name, NULL);
++	if (IS_ERR(fs_entries[FS_DIR_ENTRY])) {
++		ret = PTR_ERR(fs_entries[FS_DIR_ENTRY]);
++		goto out;
++	}
++
++	switch (txt_log.format) {
++		case TXTOP_EVTLOG_FORMAT_TCG_12:
++			filename = "tpm12_binary_evtlog";
++			break;
++		case TXTOP_EVTLOG_FORMAT_LEGACY_20:
++			filename = "tpm20_binary_evtlog_legacy";
++			break;
++		case TXTOP_EVTLOG_FORMAT_TCG_20:
++			filename = "tpm20_binary_evtlog_tcg";
++			break;
++		default:
++			printk(KERN_ERR "Incompatible event-log format: %x\n", txt_log.format);
++			ret = EINVAL;
++			goto out_dir;
++	}
++
++	fs_entries[FS_LOG_ENTRY] =
++	    securityfs_create_file(filename,
++				   S_IRUSR | S_IRGRP,
++				   fs_entries[FS_DIR_ENTRY], NULL,
++				   &tpm_evtlog_ops);
++	if (IS_ERR(fs_entries[FS_LOG_ENTRY])) {
++		ret = PTR_ERR(fs_entries[FS_LOG_ENTRY]);
++		goto out_dir;
++	}
++
++	return 0;
++
++out_dir:
++	securityfs_remove(fs_entries[FS_DIR_ENTRY]);
++out:
++	return ret;
++}
++
++void teardown_evtlog(void)
++{
++	int i;
++
++	for (i = 0; i < FS_ENTRIES; i++)
++		securityfs_remove(fs_entries[i]);
++}
++
++static int __init txt_init(void)
++{
++	int err;
++
++	if (!xen_domain())
++		return -ENODEV;
++
++	txt_log.size = 0;
++	txt_log.buffer = NULL;
++	txt_log.format = 0;
++	if ((err = HYPERVISOR_txt_op(TXTOP_GET, &txt_log)) != 0)
++		return err;
++
++	if (!txt_log.size)
++		return -ENODEV;
++
++	txt_log.buffer = kmalloc(txt_log.size, GFP_KERNEL);
++	if (txt_log.buffer == NULL)
++		return -ENOMEM;
++
++	if ((err = HYPERVISOR_txt_op(TXTOP_GET, &txt_log)) != 0)
++		goto error;
++
++	if ((err = expose_evtlog("txt")) != 0)
++		goto error;
++
++	return 0;
++
++error:
++	kfree(txt_log.buffer);
++	return err;
++}
++
++static void __exit txt_exit(void)
++{
++	teardown_evtlog();
++
++	if (txt_log.buffer)
++		kfree(txt_log.buffer);
++}
++
++module_init(txt_init);
++module_exit(txt_exit);
++
++MODULE_LICENSE("GPL");
++MODULE_AUTHOR("Daniel P. Smith <dpsmith@apertussolutions.com>");
++MODULE_DESCRIPTION("TXT TPM Event log");
+--- a/include/xen/interface/xen.h
++++ b/include/xen/interface/xen.h
+@@ -82,6 +82,7 @@
+ #define __HYPERVISOR_xc_reserved_op       39 /* reserved for XenClient */
+ #define __HYPERVISOR_xenpmu_op            40
+ #define __HYPERVISOR_dm_op                41
++#define __HYPERVISOR_txt_op               42
+ 
+ /* Architecture-specific hypercall definitions. */
+ #define __HYPERVISOR_arch_0               48
+@@ -745,6 +746,20 @@ typedef uint64_t cpumap_t;
+ 
+ typedef uint8_t xen_domain_handle_t[16];
+ 
++#define TXTOP_GET 0
++
++struct txt_op {
++	uint64_t  size;
++
++#define TXTOP_EVTLOG_FORMAT_UNKNOWN	0x0
++#define TXTOP_EVTLOG_FORMAT_TCG_12	0x1
++#define TXTOP_EVTLOG_FORMAT_LEGACY_20	0x2
++#define TXTOP_EVTLOG_FORMAT_TCG_20	0x3
++	uint8_t format;
++	uint8_t _pad[7];
++	void *buffer;
++};
++
+ /* Turn a plain number into a C unsigned long constant. */
+ #define __mk_unsigned_long(x) x ## UL
+ #define mk_unsigned_long(x) __mk_unsigned_long(x)

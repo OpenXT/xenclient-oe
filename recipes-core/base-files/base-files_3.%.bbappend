@@ -31,8 +31,18 @@ dirs755_append_xenclient-dom0 = " \
     /storage \
     ${localstatedir}/cores \
 "
+dirs755_append_openxt-dom0 = " \
+    /storage \
+    ${localstatedir}/cores \
+"
 # OpenXT: UIVM has only root as user, pre-create local conf directories.
 dirs755_append_xenclient-uivm = " \
+    /root/.gconf \
+    /root/.gnome2 \
+    /root/.cache \
+    /root/.ssh \
+"
+dirs755_append_openxt-uivm = " \
     /root/.gconf \
     /root/.gnome2 \
     /root/.cache \
