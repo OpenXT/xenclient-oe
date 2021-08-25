@@ -35,7 +35,6 @@ SRC_URI += "file://compile-time-stubdom-flag.patch \
             file://stubdom-read-gsi-from-device-config-space.patch \
             file://acpi-pm-feature.patch \
             file://maintain-time-offset.patch \
-            file://acpi-wakeup.patch \
             file://openxt-misc-fixes.patch \
             file://qmp-argo-char-driver.patch \
             file://write-acpi-state-to-xenstore.patch \
