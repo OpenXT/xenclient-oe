@@ -88,44 +88,44 @@ PACKAGES += "${PN}-extra-keymaps ${PN}-extra-roms"
 PACKAGES =+ "${PN}-utils"
 
 EXTRA_OECONF += " \
-    --enable-xen \
     --target-list=i386-softmmu \
-    --disable-sdl \
-    --disable-vnc \
-    --disable-docs \
-    --disable-strip \
-    --disable-virtfs \
     --disable-bluez \
-    --disable-guest-agent \
-    --disable-curses \
-    --disable-slirp \
-    --disable-curl \
-    --disable-kvm \
-    --disable-tools \
-    --disable-fdt \
-    --disable-qom-cast-debug \
-    --disable-tcg-interpreter \
-    --disable-tcg \
-    --disable-vhost-net \
-    --disable-vhost-crypto \
-    --disable-vhost-scsi \
-    --disable-vhost-vsock \
-    --disable-vhost-user \
     --disable-bzip2 \
-    --disable-libusb \
-    --disable-usb-redir \
-    --disable-lzo \
-    --disable-gnutls \
-    --disable-nettle \
+    --disable-curl \
+    --disable-curses \
+    --disable-docs \
+    --disable-fdt \
     --disable-gcrypt \
+    --disable-gnutls \
+    --disable-guest-agent \
+    --disable-kvm \
+    --disable-libusb \
+    --disable-lzo \
+    --disable-nettle \
+    --disable-qom-cast-debug \
+    --disable-sdl \
+    --disable-slirp \
+    --disable-strip \
+    --disable-tcg \
+    --disable-tcg-interpreter \
+    --disable-tools \
     --disable-tpm \
-    --enable-pie \
-    --enable-werror \
+    --disable-usb-redir \
+    --disable-vhost-crypto \
+    --disable-vhost-net \
+    --disable-vhost-scsi \
+    --disable-vhost-user \
+    --disable-vhost-vsock \
+    --disable-virtfs \
+    --disable-vnc \
     --enable-atapi-pt \
     --enable-atapi-pt-argo \
-    --enable-readonly-ide \
     --enable-debug-info \
+    --enable-pie \
+    --enable-readonly-ide \
     --enable-trace-backends=nop \
+    --enable-werror \
+    --enable-xen \
     --extra-cflags=-DXC_WANT_COMPAT_DEVICEMODEL_API \
 "
 
