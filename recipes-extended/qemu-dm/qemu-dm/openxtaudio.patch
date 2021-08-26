@@ -30,6 +30,8 @@ Ported to QEMU 2.6.2: Ross Philipson, philipsonr@ainfosec.com, 10/13/2016
 Port to QEMU 2.12: Jason Andryuk, jandryuk@gmail.com, 6/19/2018
   CONFIG option must be prefixed CONFIG_AUDIO_
   name must be openxt to be found in driver search
+Port to QEMU 4.1: Nicholas Tsirakis, tsirakisn@ainfosec.com, 08/25/2021
+  Audio devices converted to qapi, json changes needed for interface marshalling
 
 ================================================================================
 REMOVAL
@@ -109,16 +111,16 @@ PATCHES
 +///
 +/// @return the ALSA equivalent audio format
 +///
-+snd_pcm_format_t aud_to_alsafmt(audfmt_e fmt, int endianness)
++snd_pcm_format_t aud_to_alsafmt(AudioFormat fmt, int endianness)
 +{
 +    switch (fmt) {
-+        case AUD_FMT_S8:
++        case AUDIO_FORMAT_S8:
 +            return SND_PCM_FORMAT_S8;
 +
-+        case AUD_FMT_U8:
++        case AUDIO_FORMAT_U8:
 +            return SND_PCM_FORMAT_U8;
 +
-+        case AUD_FMT_S16:
++        case AUDIO_FORMAT_S16:
 +            if (endianness) {
 +                return SND_PCM_FORMAT_S16_BE;
 +            }
@@ -126,7 +128,7 @@ PATCHES
 +                return SND_PCM_FORMAT_S16_LE;
 +            }
 +
-+        case AUD_FMT_U16:
++        case AUDIO_FORMAT_U16:
 +            if (endianness) {
 +                return SND_PCM_FORMAT_U16_BE;
 +            }
@@ -134,7 +136,7 @@ PATCHES
 +                return SND_PCM_FORMAT_U16_LE;
 +            }
 +
-+        case AUD_FMT_S32:
++        case AUDIO_FORMAT_S32:
 +            if (endianness) {
 +                return SND_PCM_FORMAT_S32_BE;
 +            }
@@ -142,7 +144,7 @@ PATCHES
 +                return SND_PCM_FORMAT_S32_LE;
 +            }
 +
-+        case AUD_FMT_U32:
++        case AUDIO_FORMAT_U32:
 +            if (endianness) {
 +                return SND_PCM_FORMAT_U32_BE;
 +            }
@@ -165,57 +167,57 @@ PATCHES
 +/// @return -1 on error
 +///         0 on success
 +///
-+int alsa_to_audfmt(snd_pcm_format_t alsafmt, audfmt_e *fmt, int *endianness)
++int alsa_to_audfmt(snd_pcm_format_t alsafmt, AudioFormat *fmt, int *endianness)
 +{
 +    switch (alsafmt) {
 +        case SND_PCM_FORMAT_S8:
 +            *endianness = 0;
-+            *fmt = AUD_FMT_S8;
++            *fmt = AUDIO_FORMAT_S8;
 +            break;
 +
 +        case SND_PCM_FORMAT_U8:
 +            *endianness = 0;
-+            *fmt = AUD_FMT_U8;
++            *fmt = AUDIO_FORMAT_U8;
 +            break;
 +
 +        case SND_PCM_FORMAT_S16_LE:
 +            *endianness = 0;
-+            *fmt = AUD_FMT_S16;
++            *fmt = AUDIO_FORMAT_S16;
 +            break;
 +
 +        case SND_PCM_FORMAT_U16_LE:
 +            *endianness = 0;
-+            *fmt = AUD_FMT_U16;
++            *fmt = AUDIO_FORMAT_U16;
 +            break;
 +
 +        case SND_PCM_FORMAT_S16_BE:
 +            *endianness = 1;
-+            *fmt = AUD_FMT_S16;
++            *fmt = AUDIO_FORMAT_S16;
 +            break;
 +
 +        case SND_PCM_FORMAT_U16_BE:
 +            *endianness = 1;
-+            *fmt = AUD_FMT_U16;
++            *fmt = AUDIO_FORMAT_U16;
 +            break;
 +
 +        case SND_PCM_FORMAT_S32_LE:
 +            *endianness = 0;
-+            *fmt = AUD_FMT_S32;
++            *fmt = AUDIO_FORMAT_S32;
 +            break;
 +
 +        case SND_PCM_FORMAT_U32_LE:
 +            *endianness = 0;
-+            *fmt = AUD_FMT_U32;
++            *fmt = AUDIO_FORMAT_U32;
 +            break;
 +
 +        case SND_PCM_FORMAT_S32_BE:
 +            *endianness = 1;
-+            *fmt = AUD_FMT_S32;
++            *fmt = AUDIO_FORMAT_S32;
 +            break;
 +
 +        case SND_PCM_FORMAT_U32_BE:
 +            *endianness = 1;
-+            *fmt = AUD_FMT_U32;
++            *fmt = AUDIO_FORMAT_U32;
 +            break;
 +
 +        default:
@@ -258,8 +260,8 @@ PATCHES
 +#include <alsa/asoundlib.h>
 +
 +// Conversion Functions
-+snd_pcm_format_t aud_to_alsafmt(audfmt_e fmt, int endianness);
-+int alsa_to_audfmt(snd_pcm_format_t alsafmt, audfmt_e *fmt, int *endianness);
++snd_pcm_format_t aud_to_alsafmt(AudioFormat fmt, int endianness);
++int alsa_to_audfmt(snd_pcm_format_t alsafmt, AudioFormat *fmt, int *endianness);
 +
 +#endif // ALSADEF_H
 --- /dev/null
@@ -291,6 +293,7 @@ PATCHES
 +#include "qemu-common.h"
 +#include "audio.h"
 +#include "qemu/timer.h"
++#include "qemu/module.h"
 +
 +#define AUDIO_CAP "openxtaudio"
 +#include "audio_int.h"
@@ -913,7 +916,7 @@ PATCHES
 +///
 +/// @return an opaque pointer. We don't use this.
 +///
-+static void *openxt_audio_init(void)
++static void *openxt_audio_init(Audiodev *dev)
 +{
 +    // Setup
 +    openxt_debug_init();
@@ -952,8 +955,8 @@ PATCHES
 +    // global memory like the other drivers, so like the other drivers we
 +    // just pass the address of this function, as returning NULL indicates
 +    // and error to QEMU.
-+    return &openxt_audio_init;
-+}
++    return dev;
++} 
 +
 +///
 +/// Finalize the audio front driver
@@ -992,7 +995,6 @@ PATCHES
 +static struct audio_driver openxt_audio_driver = {
 +    .name           = "openxt",
 +    .descr          = "OpenXT Audio Driver",
-+    .options        = NULL,
 +    .init           = openxt_audio_init,
 +    .fini           = openxt_audio_fini,
 +    .pcm_ops        = &openxt_pcm_ops,
@@ -1999,16 +2001,16 @@ PATCHES
 +#endif // OPENXT_ARGO_H
 --- a/configure
 +++ b/configure
-@@ -876,7 +876,7 @@ Haiku)
+@@ -905,7 +905,7 @@ Haiku)
  ;;
  Linux)
-   audio_drv_list="oss"
+   audio_drv_list="try-pa oss"
 -  audio_possible_drivers="oss alsa sdl pa"
 +  audio_possible_drivers="oss alsa sdl pa openxt"
    linux="yes"
    linux_user="yes"
    kvm="yes"
-@@ -1377,6 +1377,8 @@ for opt do
+@@ -1426,6 +1426,8 @@ for opt do
    ;;
    --disable-openxt-stubdom) stubdom="no"
    ;;
@@ -2017,8 +2019,8 @@ PATCHES
    --enable-xenpt-msix) xenpt_hide_msix="no"
    ;;
    --disable-xenpt-msix) xenpt_hide_msix="yes"
-@@ -3355,6 +3357,10 @@ for drv in $audio_drv_list; do
-     # XXX: Probes for CoreAudio, DirectSound
+@@ -3488,6 +3490,10 @@ for drv in $audio_drv_list; do
+       oss_libs="$oss_lib"
      ;;
  
 +    openxt)
@@ -2028,3 +2030,43 @@ PATCHES
      *)
      echo "$audio_possible_drivers" | grep -q "\<$drv\>" || {
          error_exit "Unknown driver '$drv' selected" \
+--- a/qapi/audio.json
++++ b/qapi/audio.json
+@@ -274,7 +274,7 @@
+ # Since: 4.0
+ ##
+ { 'enum': 'AudiodevDriver',
+-  'data': [ 'none', 'alsa', 'coreaudio', 'dsound', 'oss', 'pa', 'sdl',
++  'data': [ 'none', 'alsa', 'coreaudio', 'dsound', 'openxt', 'oss', 'pa', 'sdl',
+             'spice', 'wav' ] }
+
+ ##
+@@ -302,6 +302,7 @@
+     'coreaudio': 'AudiodevCoreaudioOptions',
+     'dsound':    'AudiodevDsoundOptions',
+     'oss':       'AudiodevOssOptions',
++    'openxt':    'AudiodevGenericOptions',
+     'pa':        'AudiodevPaOptions',
+     'sdl':       'AudiodevGenericOptions',
+     'spice':     'AudiodevGenericOptions',
+--- a/audio/audio.c
++++ b/audio/audio.c
+@@ -1661,6 +1661,7 @@ void audio_create_pdos(Audiodev *dev)
+         CASE(ALSA, alsa, Alsa);
+         CASE(COREAUDIO, coreaudio, Coreaudio);
+         CASE(DSOUND, dsound, );
++        CASE(OPENXT, openxt, );
+         CASE(OSS, oss, Oss);
+         CASE(PA, pa, Pa);
+         CASE(SDL, sdl, );
+--- a/audio/audio_template.h
++++ b/audio/audio_template.h
+@@ -311,6 +311,8 @@ AudiodevPerDirectionOptions *glue(audio_
+             dev->u.coreaudio.TYPE);
+     case AUDIODEV_DRIVER_DSOUND:
+         return dev->u.dsound.TYPE;
++    case AUDIODEV_DRIVER_OPENXT:
++        return dev->u.openxt.TYPE;
+     case AUDIODEV_DRIVER_OSS:
+         return qapi_AudiodevOssPerDirectionOptions_base(dev->u.oss.TYPE);
+     case AUDIODEV_DRIVER_PA:
