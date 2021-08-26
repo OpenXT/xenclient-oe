@@ -21,7 +21,6 @@ DEPENDS = " \
     hkg-text \
     hkg-mtl \
     hkg-split \
-    xenmgr-data \
 "
 
 require manager.inc
