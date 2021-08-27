@@ -48,17 +48,16 @@ Jason Andryuk, jandryuk@gmail.com, 06/19/2018
 
 --- a/configure
 +++ b/configure
-@@ -345,7 +345,8 @@ docs=""
+@@ -357,6 +357,8 @@ docs=""
  fdt=""
  netmap="no"
  sdl=""
--sdlabi=""
 +sdlabi="1.2"
 +readonly_ide="no"
+ sdl_image=""
  virtfs=""
  mpath=""
- vnc="yes"
-@@ -1038,6 +1039,10 @@ for opt do
+@@ -1080,6 +1082,10 @@ for opt do
    ;;
    --enable-sdl) sdl="yes"
    ;;
@@ -66,20 +65,20 @@ Jason Andryuk, jandryuk@gmail.com, 06/19/2018
 +  ;;
 +  --enable-readonly-ide) readonly_ide="yes"
 +  ;;
-   --with-sdlabi=*) sdlabi="$optarg"
+   --disable-sdl-image) sdl_image="no"
    ;;
-   --disable-qom-cast-debug) qom_cast_debug="no"
-@@ -5995,6 +6000,7 @@ if test "$darwin" = "yes" ; then
- fi
+   --enable-sdl-image) sdl_image="yes"
+@@ -6365,6 +6371,7 @@ fi
  echo "SDL support       $sdl $(echo_version $sdl $sdlversion)"
+ echo "SDL image support $sdl_image"
  echo "GTK support       $gtk $(echo_version $gtk $gtk_version)"
 +echo "readonly IDE support       $readonly_ide"
  echo "GTK GL support    $gtk_gl"
  echo "VTE support       $vte $(echo_version $vte $vteversion)"
  echo "TLS priority      $tls_priority"
-@@ -6333,6 +6339,9 @@ if test "$sdl" = "yes" ; then
-   echo "SDL_CFLAGS=$sdl_cflags" >> $config_host_mak
-   echo "SDL_LIBS=$sdl_libs" >> $config_host_mak
+@@ -6714,6 +6721,9 @@ if test "$sdl" = "yes" ; then
+       echo "CONFIG_SDL_IMAGE=y" >> $config_host_mak
+   fi
  fi
 +if test "$readonly_ide" = "yes" ; then
 +  echo "CONFIG_READONLY_IDE=y" >> $config_host_mak
@@ -89,7 +88,7 @@ Jason Andryuk, jandryuk@gmail.com, 06/19/2018
  fi
 --- a/hw/ide/core.c
 +++ b/hw/ide/core.c
-@@ -1466,6 +1466,13 @@ static bool cmd_write_multiple(IDEState
+@@ -1463,6 +1463,13 @@ static bool cmd_write_multiple(IDEState
          return true;
      }
  
@@ -103,7 +102,7 @@ Jason Andryuk, jandryuk@gmail.com, 06/19/2018
      ide_cmd_lba48_transform(s, lba48);
  
      s->req_nb_sectors = s->mult_sectors;
-@@ -1510,6 +1517,13 @@ static bool cmd_write_pio(IDEState *s, u
+@@ -1507,6 +1514,13 @@ static bool cmd_write_pio(IDEState *s, u
          return true;
      }
  
@@ -117,7 +116,7 @@ Jason Andryuk, jandryuk@gmail.com, 06/19/2018
      ide_cmd_lba48_transform(s, lba48);
  
      s->req_nb_sectors = 1;
-@@ -1545,6 +1559,13 @@ static bool cmd_write_dma(IDEState *s, u
+@@ -1542,6 +1556,13 @@ static bool cmd_write_dma(IDEState *s, u
          return true;
      }
  
@@ -131,7 +130,7 @@ Jason Andryuk, jandryuk@gmail.com, 06/19/2018
      ide_cmd_lba48_transform(s, lba48);
      ide_sector_start_dma(s, IDE_DMA_WRITE);
  
-@@ -2501,10 +2522,12 @@ int ide_init_drive(IDEState *s, BlockBac
+@@ -2498,10 +2519,12 @@ int ide_init_drive(IDEState *s, BlockBac
              error_setg(errp, "Device needs media, but drive is empty");
              return -1;
          }
@@ -146,7 +145,7 @@ Jason Andryuk, jandryuk@gmail.com, 06/19/2018
      if (serial) {
 --- a/hw/ide/qdev.c
 +++ b/hw/ide/qdev.c
-@@ -194,7 +194,12 @@ static void ide_dev_initfn(IDEDevice *de
+@@ -196,7 +196,12 @@ static void ide_dev_initfn(IDEDevice *de
              return;
          }
      }

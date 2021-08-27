@@ -71,15 +71,15 @@ PATCHES
      acpi_pm_tmr_update(regs,
 --- a/hw/acpi/piix4.c
 +++ b/hw/acpi/piix4.c
-@@ -39,6 +39,7 @@
+@@ -38,6 +38,7 @@
  #include "hw/acpi/memory_hotplug.h"
  #include "hw/acpi/acpi_dev_interface.h"
  #include "hw/xen/xen.h"
 +#include "hw/xen/xen_acpi_pm.h"
  #include "qom/cpu.h"
+ #include "trace.h"
  
- //#define DEBUG
-@@ -509,6 +510,11 @@ static void piix4_pm_realize(PCIDevice *
+@@ -513,6 +514,11 @@ static void piix4_pm_realize(PCIDevice *
      /* APM */
      apm_init(dev, &s->apm, apm_ctrl_changed, s);
  
@@ -91,15 +91,15 @@ PATCHES
      /* OpenXT: Enable ACPI, QEMU doesn't enable it by default */
      apm_ctrl_changed(ACPI_ENABLE, s);
  
-@@ -603,6 +609,7 @@ static void gpe_writeb(void *opaque, hwa
-     PIIX4PMState *s = opaque;
+@@ -598,6 +604,7 @@ static void gpe_writeb(void *opaque, hwa
  
+     trace_piix4_gpe_writeb(addr, width, val);
      acpi_gpe_ioport_writeb(&s->ar, addr, val);
 +    xen_acpi_pm_gpe_ioport_writeb(s->ar.gpe.len, addr, val);
      acpi_update_sci(&s->ar, s->irq);
+ }
  
-     PIIX4_DPRINTF("gpe write %" HWADDR_PRIx " <== %" PRIu64 "\n", addr, val);
-@@ -638,6 +645,32 @@ static void piix4_set_cpu_hotplug_legacy
+@@ -631,6 +638,30 @@ static void piix4_set_cpu_hotplug_legacy
      s->cpu_hotplug_legacy = value;
  }
  
@@ -125,8 +125,6 @@ PATCHES
 +
 +    if (update)
 +        acpi_update_sci(&s->ar, s->irq);
-+
-+    PIIX4_DPRINTF("sts raise sci %x\n", bits);
 +}
 +
  static void piix4_acpi_system_hot_add_init(MemoryRegion *parent,
@@ -134,14 +132,14 @@ PATCHES
  {
 --- a/hw/xen/Makefile.objs
 +++ b/hw/xen/Makefile.objs
-@@ -4,3 +4,4 @@ common-obj-$(CONFIG_XEN) += xen_backend.
+@@ -4,3 +4,4 @@ common-obj-$(CONFIG_XEN) += xen-legacy-b
  obj-$(CONFIG_XEN_PCI_PASSTHROUGH) += xen-host-pci-device.o
  obj-$(CONFIG_XEN_PCI_PASSTHROUGH) += xen_pt.o xen_pt_config_init.o xen_pt_graphics.o xen_pt_msi.o
  obj-$(CONFIG_XEN_PCI_PASSTHROUGH) += xen_pt_load_rom.o
 +obj-$(CONFIG_XEN) += xen_acpi_pm.o
 --- /dev/null
 +++ b/hw/xen/xen_acpi_pm.c
-@@ -0,0 +1,1127 @@
+@@ -0,0 +1,1126 @@
 +/*
 + * APCI PM feature for battery/AC/lid management for OpenXT guests.
 + *
@@ -170,9 +168,10 @@ PATCHES
 +
 +#include <stdint.h>
 +#include "qemu/osdep.h"
++#include "qapi/error.h"
 +#include "include/qemu-common.h"
 +#include "hw/sysbus.h"
-+#include "hw/xen/xen_backend.h"
++#include "hw/xen/xen-legacy-backend.h"
 +#include "hw/xen/xen.h"
 +#include "pci/pci.h"
 +#include "hw/i386/pc.h"
@@ -1151,9 +1150,9 @@ PATCHES
 +
 +/* -------/ Initialization /------------------------------------------------ */
 +
-+static int xen_acpi_pm_initfn(SysBusDevice *sbd)
++static void xen_acpi_pm_realize(DeviceState *dev, Error **errp)
 +{
-+    XenACPIPMState *s = XEN_ACPI_PM(sbd);
++    XenACPIPMState *s = XEN_ACPI_PM(SYS_BUS_DEVICE(dev));
 +    int i;
 +
 +    /*
@@ -1222,11 +1221,10 @@ PATCHES
 +
 +    fprintf(stdout, "Xen ACPI PM initialized\n");
 +
-+    return 0;
++    return;
 +
 +error_init:
-+    XBM_ERROR_MSG("Unable to initialize the Xen ACPI PM feature\n");
-+    return -1;
++    error_setg(errp, "Unable to initialize the Xen ACPI PM feature\n");
 +}
 +
 +void xen_acpi_pm_create(MemoryRegion *space_io, void *opaque)
@@ -1248,9 +1246,8 @@ PATCHES
 +static void xen_acpi_pm_class_init(ObjectClass *klass, void *data)
 +{
 +    DeviceClass *dc = DEVICE_CLASS(klass);
-+    SysBusDeviceClass *k = SYS_BUS_DEVICE_CLASS(klass);
 +
-+    k->init = xen_acpi_pm_initfn;
++    dc->realize = xen_acpi_pm_realize;
 +    dc->props = xen_acpi_pm_properties;
 +    set_bit(DEVICE_CATEGORY_MISC, dc->categories);
 +    dc->desc = "Xen ACPI PM device";
@@ -1271,7 +1268,7 @@ PATCHES
 +type_init(xen_acpi_pm_register_types)
 --- a/include/hw/i386/pc.h
 +++ b/include/hw/i386/pc.h
-@@ -240,6 +240,7 @@ int cmos_get_fd_drive_type(FloppyDriveTy
+@@ -248,6 +248,7 @@ int cmos_get_fd_drive_type(FloppyDriveTy
  I2CBus *piix4_pm_init(PCIBus *bus, int devfn, uint32_t smb_io_base,
                        qemu_irq sci_irq, qemu_irq smi_irq,
                        int smm_enabled, DeviceState **piix4_pm);
@@ -1327,7 +1324,7 @@ PATCHES
 +#endif /* !XEN_ACPI_PM_H_ */
 --- a/qemu-options.hx
 +++ b/qemu-options.hx
-@@ -3415,6 +3415,9 @@ DEF("xen-domid-restrict", 0, QEMU_OPTION
+@@ -3699,6 +3699,9 @@ DEF("xen-domid-restrict", 0, QEMU_OPTION
      "                        to specified domain id. (Does not affect\n"
      "                        xenpv machine type).\n",
      QEMU_ARCH_ALL)
@@ -1337,8 +1334,8 @@ PATCHES
  STEXI
  @item -xen-domid @var{id}
  @findex -xen-domid
-@@ -3429,6 +3432,9 @@ Attach to existing xen domain.
- xend will use this when starting QEMU (XEN only).
+@@ -3709,6 +3712,9 @@ Attach to existing xen domain.
+ libxl will use this when starting QEMU (XEN only).
  @findex -xen-domid-restrict
  Restrict set of available xen operations to specified domain id (XEN only).
 +@item -xen-acpi-pm
@@ -1349,15 +1346,15 @@ PATCHES
  DEF("no-reboot", 0, QEMU_OPTION_no_reboot, \
 --- a/vl.c
 +++ b/vl.c
-@@ -131,6 +131,7 @@ int main(int argc, char **argv)
+@@ -128,6 +128,7 @@ int main(int argc, char **argv)
  #include "qapi/qapi-commands-ui.h"
  #include "qapi/qmp/qerror.h"
  #include "sysemu/iothread.h"
 +#include "hw/xen/xen_acpi_pm.h"
+ #include "qemu/guest-random.h"
  
  #define MAX_VIRTIO_CONSOLES 1
- 
-@@ -3860,6 +3861,15 @@ int main(int argc, char **argv, char **e
+@@ -3697,6 +3698,15 @@ int main(int argc, char **argv, char **e
                  }
                  xen_domid_restrict = true;
                  break;

@@ -1,6 +1,6 @@
 LICENSE = "GPLv2 & LGPLv2"
 LIC_FILES_CHKSUM = "file://COPYING;md5=441c28d2cf86e15a37fa47e15a72fbac  \
-                    file://COPYING.LIB;md5=79ffa0ec772fa86740948cb7327a0cc7"
+                    file://COPYING.LIB;md5=4fbd65380cdd255951079008b364516c"
 DEPENDS = " \
     xen \
     alsa-lib \
@@ -13,7 +13,7 @@ DEPENDS = " \
     pixman \
 "
 
-PV = "3.1.0"
+PV = "4.1.0"
 
 # Leave this in it's own definition so that it can be replaced with a local
 # tarball (the QEMU download speed is terrible). If this is combined with the
@@ -21,24 +21,7 @@ PV = "3.1.0"
 SRC_URI = "http://wiki.qemu-project.org/download/qemu-${PV}.tar.bz2"
 
 # QEMU Patch Queue
-SRC_URI += "file://0001-configure-use-valid-args-testing-sem_timedwait.patch \
-            file://0002-qemu-compiler-Define-QEMU_NONSTRING.patch \
-            file://0003-block-sheepdog-Use-QEMU_NONSTRING-for-non-NUL-termin.patch \
-            file://0004-sockets-avoid-string-truncation-warnings-when-copyin.patch \
-            file://0005-hw-usb-avoid-format-truncation-warning-when-formatti.patch \
-            file://0006-spice-set-device-address-and-device-display-ID-in-QX.patch \
-            file://0007-migration-Fix-stringop-truncation-warning.patch \
-            file://0008-migration-Use-strnlen-for-fixed-size-string.patch \
-            file://0009-crypto-block-remove-redundant-struct-packing-to-fix-.patch \
-            file://0010-block-nvme-Remove-QEMU_PACKED-from-naturally-aligned.patch \
-            file://0011-qxl-avoid-unaligned-pointer-reads-writes.patch \
-            file://0012-usb-mtp-fix-alignment-of-access-of-ObjectInfo-filena.patch \
-            file://0013-virtio-scsi-Fix-build-with-gcc-9.patch \
-            file://0014-block-vdi-Don-t-take-address-of-fields-in-packed-str.patch \
-            file://0015-uuid-Make-qemu_uuid_bswap-take-and-return-a-QemuUUID.patch \
-            file://0016-block-vpc-Don-t-take-address-of-fields-in-packed-str.patch \
-            file://0017-hw-acpi-Use-QEMU_NONSTRING-for-non-NUL-terminated-ar.patch \
-            file://compile-time-stubdom-flag.patch \
+SRC_URI += "file://compile-time-stubdom-flag.patch \
             file://generic-xenstore-extensions.patch \
             file://readonly-ide.patch \
             file://hvm-param-dm-domain.patch \
@@ -62,8 +45,8 @@ SRC_URI += "file://0001-configure-use-valid-args-testing-sem_timedwait.patch \
             file://round-pci-region-sizes.patch \
             "
 
-SRC_URI[md5sum] = "8a75cfd18460143d1b352234e437ca8d"
-SRC_URI[sha256sum] = "98fee0c86b299ebaf08587ba8df1dc8bb7152708d62937a0631875d95cc8d921"
+SRC_URI[md5sum] = "5862fc984bb955c4c24427d3bceddca5"
+SRC_URI[sha256sum] = "49f0de77410d4d0f7d0321ff2c2888b281381f06e1e2dac9ec4d061e3934f4ae"
 
 S = "${WORKDIR}/qemu-${PV}"
 
@@ -88,44 +71,49 @@ PACKAGES += "${PN}-extra-keymaps ${PN}-extra-roms"
 PACKAGES =+ "${PN}-utils"
 
 EXTRA_OECONF += " \
-    --enable-xen \
     --target-list=i386-softmmu \
-    --disable-sdl \
-    --disable-vnc \
-    --disable-docs \
-    --disable-strip \
-    --disable-virtfs \
     --disable-bluez \
-    --disable-guest-agent \
-    --disable-curses \
-    --disable-slirp \
-    --disable-curl \
-    --disable-kvm \
-    --disable-tools \
-    --disable-fdt \
-    --disable-qom-cast-debug \
-    --disable-tcg-interpreter \
-    --disable-tcg \
-    --disable-vhost-net \
-    --disable-vhost-crypto \
-    --disable-vhost-scsi \
-    --disable-vhost-vsock \
-    --disable-vhost-user \
     --disable-bzip2 \
-    --disable-libusb \
-    --disable-usb-redir \
-    --disable-lzo \
-    --disable-gnutls \
-    --disable-nettle \
+    --disable-curl \
+    --disable-curses \
+    --disable-docs \
+    --disable-fdt \
     --disable-gcrypt \
+    --disable-gnutls \
+    --disable-guest-agent \
+    --disable-iconv \
+    --disable-kvm \
+    --disable-libusb \
+    --disable-lzo \
+    --disable-nettle \
+    --disable-opengl \
+    --disable-pvrdma \
+    --disable-qom-cast-debug \
+    --disable-rdma \
+    --disable-sdl \
+    --disable-slirp \
+    --disable-spice \
+    --disable-strip \
+    --disable-tcg \
+    --disable-tcg-interpreter \
+    --disable-tools \
     --disable-tpm \
-    --enable-pie \
-    --enable-werror \
+    --disable-usb-redir \
+    --disable-vhost-crypto \
+    --disable-vhost-net \
+    --disable-vhost-scsi \
+    --disable-vhost-user \
+    --disable-vhost-vsock \
+    --disable-virtfs \
+    --disable-vnc \
     --enable-atapi-pt \
     --enable-atapi-pt-argo \
-    --enable-readonly-ide \
     --enable-debug-info \
+    --enable-pie \
+    --enable-readonly-ide \
     --enable-trace-backends=nop \
+    --enable-werror \
+    --enable-xen \
     --extra-cflags=-DXC_WANT_COMPAT_DEVICEMODEL_API \
 "
 
@@ -182,6 +170,8 @@ do_compile_prepend() {
 	dev_disable CONFIG_VIRTIO
 	dev_disable CONFIG_VIRTIO_9P
 	dev_disable CONFIG_VIRTIO_BALLOON
+	dev_disable CONFIG_VIRTIO_PMEM
+	dev_disable CONFIG_VIRTIO_PMEM_SUPPORTED
 	dev_disable CONFIG_VIRTIO_BLK
 	dev_disable CONFIG_VIRTIO_CRYPTO
 	dev_disable CONFIG_VIRTIO_GPU
@@ -190,7 +180,11 @@ do_compile_prepend() {
 	dev_disable CONFIG_VIRTIO_RNG
 	dev_disable CONFIG_VIRTIO_SCSI
 	dev_disable CONFIG_VIRTIO_SERIAL
+	dev_disable CONFIG_VIRTIO_INPUT_HOST
+	dev_disable CONFIG_VFIO
+	dev_disable CONFIG_VFIO_PCI
 	dev_disable CONFIG_USB_OHCI
+	dev_disable CONFIG_USB_OHCI_PCI
 	# Things blow up without xhci
 	#dev_disable CONFIG_USB_XHCI
 	dev_disable CONFIG_NE2000_PCI
@@ -211,6 +205,7 @@ do_compile_prepend() {
 	dev_disable CONFIG_NVME_PCI
 	dev_disable CONFIG_SD
 	dev_disable CONFIG_SDHCI
+	dev_disable CONFIG_SDHCI_PCI
 	dev_disable CONFIG_EDU
 	dev_disable CONFIG_IVSHMEM
 	dev_disable CONFIG_ROCKER
