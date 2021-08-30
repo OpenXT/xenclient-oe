@@ -56,7 +56,6 @@ IMAGE_INSTALL = " \
     linux-firmware-bnx2 \
     xenclient-ndvm-tweaks \
     rsyslog \
-    argo-module \
     xen-tools-libxenstore \
     xen-tools-xenstore \
     wget \

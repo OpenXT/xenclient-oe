@@ -24,7 +24,6 @@ IMAGE_INSTALL += " \
     openssh \
     rsyslog \
     usbutils \
-    argo-module \
     grub-xen-conf \
     kernel-modules \
     vusb-daemon-stub \
