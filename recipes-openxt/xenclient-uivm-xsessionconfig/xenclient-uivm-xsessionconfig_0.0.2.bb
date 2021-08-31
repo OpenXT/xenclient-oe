@@ -17,7 +17,6 @@ SRC_URI = " \
     file://nm-applets-agent \
     file://uim-toolbar-gtk-agent \
     file://keymap-agent \
-    file://resize-agent \
     file://xdg-open \
     file://Xft.xrdb \
     file://xsettings.xml \
@@ -82,7 +81,6 @@ do_install () {
     install -m 755 ${WORKDIR}/nm-applets-agent ${D}${bindir}/
     install -m 755 ${WORKDIR}/uim-toolbar-gtk-agent ${D}${bindir}/
     install -m 755 ${WORKDIR}/keymap-agent ${D}${bindir}/
-    install -m 755 ${WORKDIR}/resize-agent ${D}${bindir}/
     install -m 755 ${WORKDIR}/xdg-open ${D}${bindir}/
     install -m 755 ${WORKDIR}/keyboard ${D}${bindir}/
 }
@@ -104,6 +102,5 @@ RDEPENDS_${PN} += " \
     xrdb \
     bash \
     dbus \
-    xrandr \
     xen-tools-xenstore \
 "
