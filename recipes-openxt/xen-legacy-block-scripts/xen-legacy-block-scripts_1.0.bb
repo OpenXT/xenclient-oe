@@ -10,7 +10,7 @@ SRC_URI = " \
 
 S = "${WORKDIR}"
 
-inherit multilib-allarch
+inherit allarch
 
 do_install() {
     install -m 0755 -d ${D}${sysconfdir}/udev

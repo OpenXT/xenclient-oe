@@ -8,7 +8,7 @@ SRC_URI = " \
     file://init.sh \
 "
 
-inherit multilib-allarch
+inherit allarch
 
 do_install() {
     install -m 0755 ${WORKDIR}/init.sh ${D}/init

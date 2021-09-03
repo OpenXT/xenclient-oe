@@ -7,7 +7,7 @@ SRCREV = "03608115df2071fff4eaaff1605768c275e5f81f"
 
 S = "${WORKDIR}/git"
 
-inherit multilib-allarch
+inherit allarch
 
 do_install () {
     ${S}/install.sh ${D}/${exec_prefix}
