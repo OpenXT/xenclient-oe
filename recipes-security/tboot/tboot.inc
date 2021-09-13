@@ -77,3 +77,32 @@ FILES_${PN}-pcr-calc = " \
     ${sbindir}/pcr-calc \
     ${sbindir}/acmmatch \
 "
+
+RPROVIDES_${PN}-lcptools += " \
+    lcp_readpol \
+    lcp_writepol \
+    tb_polgen \
+    tpmnv_defindex \
+    tpmnv_getcap \
+    tpmnv_lock \
+    tpmnv_relindex \
+"
+
+RPROVIDES_${PN}-lcptools-v2 += " \
+    lcp2_mlehash \
+    lcp2_crtpol \
+    lcp2_crtpollist \
+    lcp2_crtpolelt \
+"
+
+RPROVIDES_${PN}-utils += " \
+    txt-stat \
+    parse_err \
+    acminfo \
+"
+
+RPROVIDES_${PN}-pcr-calc += " \
+    module_hash \
+    pcr-calc \
+    acmmatch \
+"
