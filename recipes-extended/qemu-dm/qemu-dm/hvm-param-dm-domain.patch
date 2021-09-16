@@ -6,12 +6,6 @@ Enables QEMU stubdom support
 ################################################################################
 LONG DESCRIPTION: 
 ################################################################################
-QEMU 1.4 currently doesn't work in a stubdomain. When it's booting, the 
-event channel bind functions will fail. This is because Xen expects the 
-device model to be in dom0. To correct this problem, we added some code to 
-QEMU that basically tells the hypervisor what the domid is of the device
-model. 
-
 The second piece of code that was added was a switch to turn off the backend 
 drivers. Since we are in a stubdomain, we do not need to turn on the backend
 drivers because dom0 is doing that fo us. 
@@ -38,6 +32,8 @@ CHANGELOG
 ################################################################################
 Intial Commit: Rian Quinn, quinnr@ainfosec.com, 3/16/2015
 Port 2.6.2: Ross Philipson, philipsonr@ainfosec.com, 10/13/2016
+Port 4.1: Remove HVM_PARAM_DM_DOMAIN since xen_get_ioreq_server_info()
+          makes it unnecessary.
 
 ################################################################################
 REMOVAL 
@@ -67,21 +63,7 @@ PATCHES
 ################################################################################
 --- a/hw/i386/xen/xen-hvm.c
 +++ b/hw/i386/xen/xen-hvm.c
-@@ -1326,6 +1326,13 @@ static int xen_map_ioreq_server(XenIOSta
-         return -1;
-     }
- 
-+    /*
-+     * We need to tell the hypervisor what the domid of the device model is.
-+     * Usually, it's expecting dom0, but with a stubdomain, that is not the
-+     * case.
-+     */
-+    xc_set_hvm_param(xen_xc, xen_domid, HVM_PARAM_DM_DOMAIN, DOMID_SELF);
-+
-     rc = xen_get_ioreq_server_info(xen_domid, state->ioservid,
-                                    (state->shared_page == NULL) ?
-                                    &ioreq_pfn : NULL,
-@@ -1484,7 +1491,11 @@ void xen_hvm_init(PCMachineState *pcms,
+@@ -1495,7 +1502,11 @@ void xen_hvm_init(PCMachineState *pcms,
          error_report("xen backend core setup failed");
          goto err;
      }
