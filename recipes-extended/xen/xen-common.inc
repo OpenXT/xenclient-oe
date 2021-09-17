@@ -117,6 +117,11 @@ SRC_URI_append = " \
     file://0002-Linux-locking.sh-Use-cmp-fd-file-inode-for-lock-chec.patch \
     file://ocamlfind-static.patch \
     file://ocaml-makefiles-sysroot.patch \
+    file://0001-efi-remove-old-SetVirtualAddressMap-arrangement.patch \
+    file://0002-efi-optionally-call-SetVirtualAddressMap.patch \
+    file://0003-efi-use-directmap-to-access-runtime-services-table.patch \
+    file://0004-efi-do-not-use-runtime-services-table-with-efi-no-rs.patch \
+    file://patch-xen-disable-efi-gettime.patch \
 "
 
 PACKAGECONFIG =+ "xsm"
