@@ -1,0 +1,4365 @@
+From 4ca069edde470b45edf03d2cc0a6eca9264e8424 Mon Sep 17 00:00:00 2001
+From: Eric Chanudet <chanudete@ainfosec.com>
+Date: Mon, 13 Aug 2018 12:10:22 -0400
+Subject: [PATCH] pcr-calc: Add pcr calculator tool.
+
+This changeset includes the tools required to handle forward-sealing of
+TXT measured installations.
+
+module_hash [-hjz] [-e hash_str] -c cmd_line module_file
+ -h Help: will print out this help message.
+ -j module is compressed with BZip2
+ -z module is compressed with GZip
+ -e hash_str Extend Hash: has to be extended with module hash.
+ -c cmd_line Command Line: the command line passed.
+ -a hash algorithm to use.
+ module_file: file name of module to hash.
+
+acmmatch [-h] ACM [ACMs]
+Parse the given ACMs and display which match the current platform on
+stdout.
+ -h  Display this help.
+ -d didvid   Provide the didvid value to be used (instead of reading TXT
+             public configuration registers).
+ -f fsbif    Provide the fsbif value to be used (instead of reading TXT
+             public configuration registers).
+ -q qpiif    Provide the qpiif value to be used (instead of reading TXT
+             public configuration registers).
+ -p msr-pid  Provide the MSR platform ID value to be used (instead of
+             reading MSR devnodes).
+ -s cpuid    Provide the cpuid signature value to be used (instead of
+             running CPUID).
+
+pcr-calc [-h2dclvqe] [-a sha1|sha256] -p policy_file -m hash_str
+ -h Help: will print out this help message.
+ -2 TPM 2.0.
+ -d D/A mode.
+ -c Calculate from TPM eventlog.
+ -l Print TPM eventlog.
+ -v Print calculated TPM eventlog.
+ -q Hash start quirk mode.
+ -a alg Alogrithm: select what hash alogrithm to use.
+ -p policy_file Tboot Policy: the policy that was/will be used.
+ -m hash_str Multiboot Module: include module hash (MLE first).
+ -e evt_type:<hash_str>|emulate Override PCR events type found in the
+    logs with the provided value or emulate the value entirely (emulation
+    requires TBoot version and ACM to be provided).
+ -F file Use the given file as tpm event log (replace
+    /sys/kernel/security/txt/*_binary_evtlog).
+ -A acm-path Path to the ACM that will be used to emulate events for PCR
+    calculations (see -e).
+ -V tboot-version TBoot version targeted to emulate events for PCR
+    calculations (see -e).
+ -o Assume the event-log to be formated using the legacy format (prior
+    TCG PC Client Platform. EFI Protocol Specification).
+
+Signed-off-by: Daniel P. Smith <dpsmith@apertussolutions.com>
+Signed-off-by: Eric Chanudet <chanudete@ainfosec.com>
+---
+ Makefile                |   2 +-
+ pcr-calc/Makefile       |  73 ++++++
+ pcr-calc/acm.c          | 214 ++++++++++++++++
+ pcr-calc/acm.h          | 139 +++++++++++
+ pcr-calc/acmmatch.c     | 323 ++++++++++++++++++++++++
+ pcr-calc/eventlog.c     | 356 +++++++++++++++++++++++++++
+ pcr-calc/eventlog.h     |  63 +++++
+ pcr-calc/eventlog_tcg.h |  86 +++++++
+ pcr-calc/hash.c         | 236 ++++++++++++++++++
+ pcr-calc/heap.h         | 354 ++++++++++++++++++++++++++
+ pcr-calc/module_hash.c  | 436 ++++++++++++++++++++++++++++++++
+ pcr-calc/pcr-calc.c     | 446 +++++++++++++++++++++++++++++++++
+ pcr-calc/platform.c     | 106 ++++++++
+ pcr-calc/platform.h     |  68 +++++
+ pcr-calc/tb_policy.c    |  83 +++++++
+ pcr-calc/tb_policy.h    |  43 ++++
+ pcr-calc/tboot.h        |  11 +
+ pcr-calc/tpm.c          | 534 ++++++++++++++++++++++++++++++++++++++++
+ pcr-calc/tpm.h          | 200 +++++++++++++++
+ pcr-calc/txt.h          |  51 ++++
+ pcr-calc/util.c         | 188 ++++++++++++++
+ pcr-calc/util.h         |  49 ++++
+ pcr-calc/uuid.h         |  53 ++++
+ 23 files changed, 4113 insertions(+), 1 deletion(-)
+ create mode 100644 pcr-calc/Makefile
+ create mode 100644 pcr-calc/acm.c
+ create mode 100644 pcr-calc/acm.h
+ create mode 100644 pcr-calc/acmmatch.c
+ create mode 100644 pcr-calc/eventlog.c
+ create mode 100644 pcr-calc/eventlog.h
+ create mode 100644 pcr-calc/eventlog_tcg.h
+ create mode 100644 pcr-calc/hash.c
+ create mode 100644 pcr-calc/heap.h
+ create mode 100644 pcr-calc/module_hash.c
+ create mode 100644 pcr-calc/pcr-calc.c
+ create mode 100644 pcr-calc/platform.c
+ create mode 100644 pcr-calc/platform.h
+ create mode 100644 pcr-calc/tb_policy.c
+ create mode 100644 pcr-calc/tb_policy.h
+ create mode 100644 pcr-calc/tboot.h
+ create mode 100644 pcr-calc/tpm.c
+ create mode 100644 pcr-calc/tpm.h
+ create mode 100644 pcr-calc/txt.h
+ create mode 100644 pcr-calc/util.c
+ create mode 100644 pcr-calc/util.h
+ create mode 100644 pcr-calc/uuid.h
+
+diff --git a/Makefile b/Makefile
+index 2ef127e..d896740 100644
+--- a/Makefile
++++ b/Makefile
+@@ -14,7 +14,7 @@ export ROOTDIR=$(CURDIR)
+ include Config.mk
+ 
+ # (txt-test is not included because it requires pathing to Linux src)
+-SUBDIRS := tboot safestringlib lcptools lcptools-v2 tb_polgen utils docs
++SUBDIRS := tboot safestringlib lcptools lcptools-v2 tb_polgen utils pcr-calc docs
+ 
+ #
+ # build rules
+diff --git a/pcr-calc/Makefile b/pcr-calc/Makefile
+new file mode 100644
+index 0000000..9bf514e
+--- /dev/null
++++ b/pcr-calc/Makefile
+@@ -0,0 +1,73 @@
++# Copyright (c) 2006-2010, Intel Corporation
++# All rights reserved.
++
++# -*- mode: Makefile; -*-
++
++#
++# utils makefile
++#
++
++ROOTDIR ?= $(CURDIR)/..
++
++include $(ROOTDIR)/Config.mk
++
++TARGETS := pcr-calc module_hash acmmatch
++
++CFLAGS += -D_LARGEFILE64_SOURCE
++
++LIBS += -lcrypto -lz $(ROOTDIR)/safestringlib/libsafestring.a
++
++ifdef HAVE_BZIP
++BZIP_LIB := -lbz2
++else
++BZIP_LIB :=
++endif
++
++#
++# universal targets
++#
++build : $(TARGETS)
++
++
++dist : install
++
++
++install :
++	@set -e; for i in $(TARGETS);\
++	do \
++		$(MAKE) DISTDIR=$(DISTDIR) INST_TARGET=$(DISTDIR)/usr/sbin/$$i do_install; \
++	done
++
++.PHONY: do_install
++do_install : $(INST_TARGET)
++
++$(INST_TARGET) : $(notdir $(INST_TARGET))
++	[ -d $(DISTDIR)/usr/sbin ] || $(INSTALL_DIR) $(DISTDIR)/usr/sbin
++	$(INSTALL_PROG) -t $(DISTDIR)/usr/sbin $^
++
++
++clean :
++	rm -f $(TARGETS) *~ *.o *.mod.* *.symvers
++
++
++distclean : clean
++
++
++#
++# dependencies
++#
++
++BUILD_DEPS := $(ROOTDIR)/Config.mk $(CURDIR)/Makefile
++
++
++pcr-calc : acm.o eventlog.o pcr-calc.o tpm.o util.o hash.o tb_policy.o
++	$(CC) $(CFLAGS) $(LDFLAGS) $^ $(LIBS) -o $@
++
++module_hash : module_hash.o hash.o
++	$(CC) $(CFLAGS) $(LDFLAGS) $^ $(LIBS) $(BZIP_LIB) -o $@
++
++acmmatch : acm.o acmmatch.o platform.o
++	$(CC) $(CFLAGS) $(LDFLAGS) $^ $(LIBS) -o $@
++
++%.o : %.c $(BUILD_DEPS)
++	$(CC) $(CFLAGS) -DNO_TBOOT_LOGLVL -c $< -o $@
+diff --git a/pcr-calc/acm.c b/pcr-calc/acm.c
+new file mode 100644
+index 0000000..f740f2a
+--- /dev/null
++++ b/pcr-calc/acm.c
+@@ -0,0 +1,214 @@
++#include <stdio.h>
++#include <stdlib.h>
++#include <errno.h>
++#include <unistd.h>
++#include <fcntl.h>
++#include <string.h>
++#include <inttypes.h>
++#include <sys/mman.h>
++#include <sys/stat.h>
++
++#include "uuid.h"
++#include "acm.h"
++
++#ifdef DEBUG
++# define DEBUG_PRINTD 1
++#else /* !DEBUG */
++# define DEBUG_PRINTD 0
++#endif /* DEBUG */
++
++#define printd(fmt, ...)					\
++	do { if (DEBUG_PRINTD)					\
++		fprintf(stdout, fmt "\n", ##__VA_ARGS__);	\
++	} while (0)
++
++static acm_hdr_t *get_acm_header(void *p)
++{
++	uint32_t res;
++	acm_hdr_t *hdr = p;
++
++	if (__builtin_umul_overflow(hdr->size, 4, &res))
++		return NULL;
++	if (hdr->module_type != MODULE_TYPE_CHIPSET)
++		return NULL;
++	if (hdr->module_vendor != ACM_VENDOR_INTEL)
++		return NULL;
++
++	return hdr;
++}
++
++static acm_info_table_t *get_acm_info_table(const acm_hdr_t *hdr)
++{
++	uint32_t res;
++	uint32_t offset;
++	acm_info_table_t *infotable;
++
++	/* Check infotable is in ACM. */
++	if (__builtin_uadd_overflow(hdr->header_len, hdr->scratch_size, &res))
++		return NULL;
++	if (__builtin_umul_overflow(res, 4, &res))
++		return NULL;
++	if (res > hdr->size * 4)
++		return NULL;
++
++	offset = (hdr->header_len + hdr->scratch_size) * 4;
++
++	/* Check infotable does not outbound ACM. */
++	if (__builtin_uadd_overflow(res, sizeof (*infotable), &res))
++		return NULL;
++	if (res > hdr->size * 4)
++		return NULL;
++
++	return (acm_info_table_t *)((void *)hdr + offset);
++}
++
++static acm_processor_id_list_t *get_acm_processor_list(const acm_hdr_t *hdr,
++		const acm_info_table_t *infotable)
++{
++	uint32_t res1, res2;
++	uint32_t offset;
++	acm_processor_id_list_t *proclist;
++
++	offset = infotable->processor_id_list;
++	proclist = (acm_processor_id_list_t *)((void *)hdr + offset);
++
++	/* Check proclist is contained in ACM size. */
++	if (__builtin_umul_overflow(
++		proclist->count, sizeof (acm_processor_id_t), &res1))
++		return NULL;
++	if (__builtin_uadd_overflow(offset, sizeof (proclist->count), &res2))
++		return NULL;
++	if (__builtin_uadd_overflow(res1, res2, &res1))
++		return NULL;
++	if (res1 > hdr->size * 4)
++		return NULL;
++
++	return proclist;
++}
++
++static acm_chipset_id_list_t *get_acm_chipset_list(const acm_hdr_t *hdr,
++		const acm_info_table_t *infotable)
++{
++	uint32_t res1, res2;
++	uint32_t offset;
++	acm_chipset_id_list_t *chiplist;
++
++	offset = infotable->chipset_id_list;
++	chiplist = (acm_chipset_id_list_t *)((void *)hdr + offset);
++
++	/* Check chiplist is contained in ACM size. */
++	if (__builtin_umul_overflow(
++		chiplist->count, sizeof (acm_chipset_id_t), &res1))
++		return NULL;
++	if (__builtin_uadd_overflow(offset, sizeof (chiplist->count), &res2))
++		return NULL;
++	if (__builtin_uadd_overflow(res1, res2, &res1))
++		return NULL;
++	if (res1 > hdr->size * 4)
++		return NULL;
++
++	return chiplist;
++}
++
++static int uuids_equal(const uuid_t *u1, const uuid_t *u2)
++{
++	return (u1->data1 == u2->data1 &&
++		u1->data2 == u2->data2 &&
++		u1->data3 == u2->data3 &&
++		u1->data4 == u2->data4 &&
++		u1->data5[0] == u2->data5[0] &&
++		u1->data5[1] == u2->data5[1] &&
++		u1->data5[2] == u2->data5[2] &&
++		u1->data5[3] == u2->data5[3] &&
++		u1->data5[4] == u2->data5[4] &&
++		u1->data5[5] == u2->data5[5]);
++}
++
++struct acm *acm_load(const char *path)
++{
++	int fd;
++	void *p;
++	struct stat sb;
++	struct acm *acm;
++
++	fd = open(path, O_RDONLY);
++	if (fd < 0) {
++		printd("Failed to open file `%s': %s", path, strerror(errno));
++		return NULL;
++	}
++
++	if (fstat(fd, &sb)) {
++		printd("Failed to get file `%s' status: %s", path, strerror(errno));
++		goto fail_stat;
++	}
++
++	acm = malloc(sizeof (*acm));
++	if (!acm) {
++		printd("malloc failed: %s", strerror(errno));
++		goto fail_alloc;
++	}
++
++	acm->size = sb.st_size;
++	if (acm->size < sizeof (acm_hdr_t)) {
++		printd("Invalid ACM %s: Too small.", path);
++		goto fail_sanity;
++	}
++
++	p = mmap(NULL, acm->size, PROT_READ, MAP_PRIVATE, fd, 0);
++	if (p == MAP_FAILED) {
++		printd("mmap failed: %s", strerror(errno));
++		goto fail_map;
++	}
++	close(fd);
++
++	acm->header = get_acm_header(p);
++	if (acm->header == NULL) {
++		printd("Invalid ACM %s: Header cannot be found.", path);
++		goto fail_map;
++	}
++
++	acm->infotable = get_acm_info_table(acm->header);
++	if (acm->infotable == NULL) {
++		printd("Invalid ACM %s: Info table cannot be found.", path);
++		goto fail_map;
++	}
++
++	if (!uuids_equal(&acm->infotable->uuid, &ACM_UUID_V3)) {
++		printd("Invalid ACM %s: UUID mismatch.", path);
++		goto fail_map;
++	}
++
++	acm->chiplist = get_acm_chipset_list(acm->header, acm->infotable);
++	if (acm->chiplist == NULL) {
++		printd("Invalid ACM %s: Chipset list cannot be found.", path);
++		goto fail_map;
++	}
++
++	if (acm->infotable->version < 4)
++		acm->cpulist = NULL;
++	else {
++		acm->cpulist = get_acm_processor_list(acm->header, acm->infotable);
++		if (acm->cpulist == NULL) {
++			printd("Invalid ACM %s: Processor list cannot be found.", path);
++			goto fail_map;
++		}
++	}
++
++	return acm;
++
++fail_map:
++	munmap(acm->header, acm->size);
++fail_sanity:
++	free(acm);
++fail_alloc:
++fail_stat:
++	close(fd);
++
++	return NULL;
++}
++
++void acm_unload(struct acm *acm)
++{
++	munmap(acm->header, acm->size);
++	free(acm);
++}
+diff --git a/pcr-calc/acm.h b/pcr-calc/acm.h
+new file mode 100644
+index 0000000..ee738aa
+--- /dev/null
++++ b/pcr-calc/acm.h
+@@ -0,0 +1,139 @@
++#ifndef _ACM_H_
++# define _ACM_H_
++
++# include <stddef.h>
++# include <inttypes.h>
++
++# include "../include/mle.h"
++
++/*
++ * ACM flags; tboot:acmod.h
++ */
++typedef union {
++	uint16_t raw;
++	struct {
++		uint16_t  reserved       : 14;
++		uint16_t  pre_production : 1;
++		uint16_t  debug_signed   : 1;
++	};
++} acm_flags_t;
++
++/*
++ * ACM header; tboot:acmod.h
++ */
++typedef struct {
++#define MODULE_TYPE_CHIPSET 0x02
++	uint16_t     module_type;
++
++#define ACM_SUBTYPE_RESET   0x01
++	uint16_t     module_subtype;
++
++	uint32_t     header_len;
++	uint32_t     header_ver;    /* currently 0.0 */
++	uint16_t     chipset_id;
++	acm_flags_t  flags;
++
++#define ACM_VENDOR_INTEL    0x8086
++	uint32_t     module_vendor;
++
++	uint32_t     date;
++	uint32_t     size;
++	uint16_t     txt_svn;
++	uint16_t     se_svn;
++	uint32_t     code_control;
++	uint32_t     error_entry_point;
++	uint32_t     gdt_limit;
++	uint32_t     gdt_base;
++	uint32_t     seg_sel;
++	uint32_t     entry_point;
++	uint8_t      reserved2[64];
++	uint32_t     key_size;
++	uint32_t     scratch_size;
++	uint8_t      rsa2048_pubkey[256];
++	uint32_t     pub_exp;
++	uint8_t      rsa2048_sig[256];
++	uint32_t     scratch[143];
++	uint8_t      user_area[];
++}__attribute__((packed)) acm_hdr_t;
++
++/*
++ * ACM Info table; tboot:acmod.h
++ */
++typedef struct {
++#define ACM_UUID_V3	((uuid_t){0x7fc03aaa, 0x46a7, 0x18db, 0xac2e, \
++		{0x69, 0x8f, 0x8d, 0x41, 0x7f, 0x5a}})
++	uuid_t     uuid;
++
++#define ACM_TYPE_BIOS               0x0
++#define ACM_TYPE_SINIT              0x1
++#define ACM_TYPE_MASK               0x7
++#define ACM_TYPE_REVOCATION_MASK    0x8
++	uint8_t    chipset_acm_type;
++	uint8_t    version;             /* currently 4 */
++	uint16_t   length;
++	uint32_t   chipset_id_list;
++	uint32_t   os_sinit_data_ver;
++	uint32_t   min_mle_hdr_ver;
++	txt_caps_t capabilities;
++	uint8_t    acm_ver;
++	uint8_t    reserved[3];
++	/* versions>= 4 */
++	uint32_t   processor_id_list;
++	/* versions>= 5 */
++	uint32_t   tpm_info_list_off;
++}__attribute__((packed)) acm_info_table_t;
++
++/*
++ * ACM Processor IDs; tboot:acmod.h
++ */
++typedef struct {
++	uint32_t fms;
++	uint32_t fms_mask;
++	uint64_t platform_id;
++	uint64_t platform_mask;
++}__attribute__((packed)) acm_processor_id_t;
++
++/*
++ * ACM Processor ID list; tboot:acmod.h
++ */
++typedef struct {
++	uint32_t             count;
++	acm_processor_id_t   processor_ids[];
++}__attribute__((packed)) acm_processor_id_list_t;
++
++/*
++ * ACM Chipset IDs; tboot:acmod.h
++ */
++typedef struct {
++#define CHIPSET_FLAGS_REVISION_MASK 0x1
++	uint32_t flags;
++	uint16_t vendor_id;
++	uint16_t device_id;
++	uint16_t revision_id;
++	uint16_t reserved;
++	uint32_t extended_id;
++}__attribute__((packed)) acm_chipset_id_t;
++
++/*
++ * ACM Chipset IDs list; tboot:acmod.h
++ */
++typedef struct {
++	uint32_t            count;
++	acm_chipset_id_t    chipset_ids[];
++}__attribute__((packed)) acm_chipset_id_list_t;
++
++/*
++ * ACM main abstraction struct.
++ */
++struct acm {
++	acm_hdr_t *header;
++	acm_info_table_t *infotable;
++	acm_processor_id_list_t *cpulist;
++	acm_chipset_id_list_t *chiplist;
++	size_t size;
++};
++
++struct acm *acm_load(const char *path);
++void acm_unload(struct acm *acm);
++
++#endif /* _ACM_H_ */
+diff --git a/pcr-calc/acmmatch.c b/pcr-calc/acmmatch.c
+new file mode 100644
+index 0000000..8dc63e1
+--- /dev/null
++++ b/pcr-calc/acmmatch.c
+@@ -0,0 +1,323 @@
++#include <errno.h>
++#include <assert.h>
++#include <string.h>
++#include <getopt.h>
++#include <stdio.h>
++#include <stdlib.h>
++
++#include "platform.h"
++#include "uuid.h"
++#include "acm.h"
++#include "txt.h"
++
++#define printe(fmt, ...)         fprintf(stderr, fmt "\n", ##__VA_ARGS__)
++
++int parse_u32(const char *s, uint32_t *v)
++{
++	size_t len;
++	char *end;
++	unsigned long a;
++
++	len = strnlen(s, 11);   /* 0xVVVVVVVV\0 */
++	if (len >= 11)
++		return -EINVAL;
++
++	a = strtoul(s, &end, 0);
++	if (end != (s + len)) {
++		*v = 0;
++		return -EINVAL;
++	}
++
++	*v = a;
++	return 0;
++}
++
++int parse_u64(const char *s, uint64_t *v)
++{
++	size_t len;
++	char *end;
++	unsigned long long a;
++
++	len = strnlen(s, 19);   /* 0xVVVVVVVVVVVVVVVV\0 */
++	if (len >= 19)
++		return -EINVAL;
++
++	a = strtoull(s, &end, 0);
++	if (end != (s + len)) {
++		*v = 0;
++		return -EINVAL;
++	}
++
++	*v = a;
++	return 0;
++}
++
++static int acm_is_debug(const struct acm *acm,
++		const txt_cr_ver_fsbif_t *fsbif,
++		const txt_cr_ver_qpiif_t *qpiif)
++{
++	acm_hdr_t *header = acm->header;
++
++	switch (fsbif->raw) {
++		case 0xffffffff:
++		case 0x00000000:
++			return header->flags.debug_signed == qpiif->debug;
++		default:
++			return header->flags.debug_signed == fsbif->debug;
++	}
++}
++
++static int acm_is_sinit(const struct acm *acm)
++{
++	acm_hdr_t *header = acm->header;
++	acm_info_table_t *infotable = acm->infotable;
++
++	return header->module_type == MODULE_TYPE_CHIPSET &&
++		!(infotable->chipset_acm_type & ACM_TYPE_REVOCATION_MASK) &&
++		infotable->chipset_acm_type == ACM_TYPE_SINIT;
++}
++
++static int acm_match_chipset(const struct acm *acm,
++		const txt_cr_didvid_t *didvid)
++{
++	acm_chipset_id_list_t *chiplist = acm->chiplist;
++	unsigned int i;
++	int match = 0;
++
++	for (i = 0; !match && i < chiplist->count; ++i) {
++		acm_chipset_id_t *chipset = &chiplist->chipset_ids[i];
++
++		if (chipset->vendor_id == didvid->vid &&
++		    chipset->device_id == didvid->did) {
++			if (chipset->flags & CHIPSET_FLAGS_REVISION_MASK)
++				match = !!(chipset->revision_id & didvid->rid);
++			else
++				match = chipset->revision_id == didvid->rid;
++		}
++	}
++
++	return match;
++}
++
++static int acm_match_cpu(struct acm *acm,
++		const cpuid_proc_sig_eax_t *sig,
++		const msr_ia32_platform_id_t *msr)
++{
++	acm_processor_id_list_t *cpulist = acm->cpulist;
++	unsigned int i;
++	int match = 0;
++
++	for (i = 0; !match && i < cpulist->count; ++i) {
++		acm_processor_id_t *cpu = &cpulist->processor_ids[i];
++
++		if (cpu->fms == (sig->raw & cpu->fms_mask) &&
++		    cpu->platform_id == (msr->raw & cpu->platform_mask))
++			match = 1;
++	}
++
++	return match;
++}
++
++/*
++ * Attempts to load the file at path as an ACM.
++ * Return -EINVAL, if the ACM is invalid
++ *        -ENOSYS, if the platform does not provide the necessary information,
++ * 0 if the ACM matches the current platform,
++ * 1 if the ACM _does not_ match the current platform.
++ */
++int platform_match_acm(const char *path,
++	const txt_cr_didvid_t *didvid,
++	const txt_cr_ver_fsbif_t *fsbif,
++	const txt_cr_ver_qpiif_t *qpiif,
++	const cpuid_proc_sig_eax_t *sig,
++	const msr_ia32_platform_id_t *msr)
++{
++	struct acm *acm;
++	int rc;
++
++	assert(path != NULL);
++
++	acm = acm_load(path);
++	if (acm == NULL)
++		return -EINVAL;
++
++	if (acm_is_debug(acm, fsbif, qpiif)) {
++		rc = 1;
++		goto out;
++	}
++
++	if (!acm_is_sinit(acm)) {
++		rc = 1;
++		goto out;
++	}
++
++	if (!acm_match_chipset(acm, didvid)) {
++		rc = 1;
++		goto out;
++	}
++
++	if (acm->cpulist != NULL)
++		/* Only infotables version 4 and above include a cpulist. */
++		if (!acm_match_cpu(acm, sig, msr)) {
++			rc = 1;
++			goto out;
++		}
++
++	rc = 0;
++
++out:
++	acm_unload(acm);
++	return rc;
++}
++
++static void usage(const char *name)
++{
++	assert(name != NULL);
++	printf("Usage: %s [-h] ACM [ACMs]\n", name);
++	printf("Parse the given ACMs and display which match the current"
++		" platform on stdout.\n");
++	printf("    -h  Display this help.\n");
++	printf("    -d didvid   Provide the didvid value to be used (instead of reading TXT public configuration registers).\n");
++	printf("    -f fsbif    Provide the fsbif value to be used (instead of reading TXT public configuration registers).\n");
++	printf("    -q qpiif    Provide the qpiif value to be used (instead of reading TXT public configuration registers).\n");
++	printf("    -p msr-pid  Provide the MSR platform ID value to be used (instead of reading MSR devnodes).\n");
++	printf("    -s cpuid    Provide the cpuid signature value to be used (instead of running CPUID).\n");
++}
++
++enum {
++	FLAG_DIDVID	= 1 << 0,
++	FLAG_FSBIF	= 1 << 1,
++	FLAG_QPIIF	= 1 << 2,
++	FLAG_CPUID_SIG	= 1 << 3,
++	FLAG_MSR_PID	= 1 << 4,
++};
++
++int main(int argc, char *argv[])
++{
++	int rc, opt, i, match = 0;
++	uint32_t flags = 0;
++	const uint32_t fmask = FLAG_DIDVID | FLAG_FSBIF | FLAG_QPIIF;
++	txt_cr_didvid_t didvid = { 0 };
++	txt_cr_ver_fsbif_t fsbif = { 0 };
++	txt_cr_ver_qpiif_t qpiif = { 0 };
++	cpuid_proc_sig_eax_t sig;
++	msr_ia32_platform_id_t msr;
++
++	do {
++		opt = getopt(argc, argv, "hd:q:f:p:s:");
++		switch (opt) {
++			case 'h':
++				usage(argv[0]);
++				return 0;
++			case -1:
++				continue;
++			case 'd':
++				rc = parse_u64(optarg, &didvid.raw);
++				if (rc < 0) {
++					printe("Invalid DIDVID value provided to -d.");
++					return rc;
++				}
++				flags |= FLAG_DIDVID;
++			break;
++			case 'q':
++				rc = parse_u32(optarg, &qpiif.raw);
++				if (rc < 0) {
++					printe("Invalid QPIIF value provided to -q.");
++					return rc;
++				}
++				flags |= FLAG_QPIIF;
++				break;
++			case 'f':
++				rc = parse_u32(optarg, &fsbif.raw);
++				if (rc < 0) {
++					printe("Invalid FSBIF value provided to -f.");
++					return rc;
++				}
++				flags |= FLAG_FSBIF;
++				break;
++			case 'p':
++				rc = parse_u64(optarg, &msr.raw);
++				if (rc < 0) {
++					printe("Invalid MSR platform ID value provided to -p.");
++					return rc;
++				}
++				flags |= FLAG_MSR_PID;
++				break;
++			case 's':
++				rc = parse_u32(optarg, &sig.raw);
++				if (rc < 0) {
++					printe("Invalid CPUID signature value provided to -s.");
++					return rc;
++				}
++				flags |= FLAG_CPUID_SIG;
++			break;
++
++			default:
++				usage(argv[0]);
++				return EINVAL;
++		}
++	} while (opt != -1);
++
++	if (optind >= argc) {
++		printe("Missing path(s) to ACM file(s).");
++		usage(argv[0]);
++		return EINVAL;
++	}
++
++	if (!flags || ((flags & fmask) != fmask)) {
++		if (!access_txt_crs()) {
++			printe("Cannot access TXT control registers."
++				" Is module txt loaded?");
++			return ENOENT;
++		}
++
++		if (!(flags & FLAG_DIDVID)) {
++			if (read_txt_cr_didvid(&didvid) < 0)
++				return ENOSYS;
++		}
++		if (!(flags & FLAG_FSBIF)) {
++			if (read_txt_cr_ver_fsbif(&fsbif) < 0)
++				return ENOSYS;
++		}
++		if (!(flags & FLAG_QPIIF)) {
++			if (read_txt_cr_ver_qpiif(&qpiif) < 0)
++				return ENOSYS;
++		}
++	}
++
++	if (!(flags & FLAG_CPUID_SIG))
++		sig.raw = cpuid_eax(0x1);
++
++	if (!(flags & FLAG_MSR_PID)) {
++		if (!access_msr_devnode()) {
++			printe("Cannot access MSRs. Is module msr loaded?");
++			return ENOENT;
++		}
++		msr.raw = rdmsr(MSR_IA32_PLATFORM_ID);
++	}
++
++	for (i = optind; i < argc; ++i) {
++		rc = platform_match_acm(argv[i],
++					&didvid, &fsbif, &qpiif, &sig, &msr);
++		if (rc < 0) {
++			switch (rc) {
++				case -EINVAL:
++					printe("Invalid ACM: %s.", argv[i]);
++					break;
++				case -ENOSYS:
++					printe("Could not read platform data."
++						"You may need to load modules:"
++						" msr, txt_info.");
++					return rc;
++				default:
++					printe("Error while loading ACM: %s.", strerror(-rc));
++					return rc;
++			}
++		} else if (!rc) {
++			match = 1;
++			printf("Platform matches ACM %s.\n", argv[i]);
++		}
++	}
++
++	return match ? 0 : 1;
++}
+diff --git a/pcr-calc/eventlog.c b/pcr-calc/eventlog.c
+new file mode 100644
+index 0000000..b96447f
+--- /dev/null
++++ b/pcr-calc/eventlog.c
+@@ -0,0 +1,356 @@
++/*
++ *
++ * Copyright (c) 2017 Daniel P. Smith
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ *
++ *   * Redistributions of source code must retain the above copyright
++ *     notice, this list of conditions and the following disclaimer.
++ *   * Redistributions in binary form must reproduce the above
++ *     copyright notice, this list of conditions and the following
++ *     disclaimer in the documentation and/or other materials provided
++ *     with the distribution.
++ *   * Neither the name of the Intel Corporation nor the names of its
++ *     contributors may be used to endorse or promote products derived
++ *     from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
++ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
++ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
++ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
++ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
++ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
++ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
++ * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED
++ * OF THE POSSIBILITY OF SUCH DAMAGE.
++ *
++ */
++
++#include <stdio.h>
++#include <stdint.h>
++#include <stdbool.h>
++#include <openssl/evp.h>
++
++#include "uuid.h"
++#include "heap.h"
++#include "acm.h"
++#include "tpm.h"
++#include "eventlog.h"
++
++#define error_msg(fmt, ...)         fprintf(stderr, fmt, ##__VA_ARGS__)
++
++static int get_ossinit_caps_tboot_common(const txt_caps_t *acm_caps,
++		const txt_caps_t *mle_hdr, const txt_caps_t *mask,
++		uint8_t tpmver, txt_caps_t *caps)
++{
++	txt_caps_t ossinit_data_caps;
++
++	ossinit_data_caps._raw = mle_hdr->_raw & ~mask->_raw;
++
++	if (acm_caps->rlp_wake_monitor)
++		ossinit_data_caps.rlp_wake_monitor = 1;
++	else if (acm_caps->rlp_wake_getsec)
++		ossinit_data_caps.rlp_wake_getsec = 1;
++	else
++		return -1;
++
++	/* TODO: Can be forced on cmdline too. */
++	switch (tpmver) {
++		case TPM12:
++			ossinit_data_caps.tcg_event_log_format = 0;
++			break;
++		case TPM20:
++			/* TODO: Can be forced to legacy on cmdline. */
++			if (acm_caps->tcg_event_log_format)
++				ossinit_data_caps.tcg_event_log_format = 1;
++			break;
++		default:
++			return -1;
++	}
++
++	/* XXX: Forced to 0 for now (and masked anyway). May change? */
++	ossinit_data_caps.ecx_pgtbl = 0;
++
++	switch (tpmver) {
++		case TPM12:
++			ossinit_data_caps.pcr_map_no_legacy = 1;
++			ossinit_data_caps.pcr_map_da = 0;
++			/* TODO: Has to be enabled on cmdline (pcr_map). */
++			if (acm_caps->pcr_map_da && 0)
++				ossinit_data_caps.pcr_map_da = 1;
++			else if (!acm_caps->pcr_map_no_legacy)
++				ossinit_data_caps.pcr_map_no_legacy = 0;
++			else if (acm_caps->pcr_map_da)
++				ossinit_data_caps.pcr_map_da = 1;
++			else
++				return -1;
++			break;
++		case TPM20:
++			/* PCR mapping selection MUST be zero in TPM2.0 mode
++			 * since D/A mapping is the only supported by TPM2.0 */
++			ossinit_data_caps.pcr_map_no_legacy = 0;
++			ossinit_data_caps.pcr_map_da = 0;
++			break;
++		default:
++			return -1;
++	}
++
++	caps->_raw = ossinit_data_caps._raw;
++
++	return 0;
++}
++
++/* See tboot/txt/txt.c, include/mle.h */
++static int get_ossinit_caps_tboot_1_9_6(const struct acm *acm, uint8_t tpmver,
++		txt_caps_t *caps)
++{
++	const txt_caps_t mle_hdr = {
++		.rlp_wake_getsec = 1,
++		.rlp_wake_monitor = 1,
++		.ecx_pgtbl = 1,
++		.stm = 0,
++		.pcr_map_no_legacy = 0,
++		.pcr_map_da = 1,
++		.platform_type = 0,
++		.max_phy_addr = 0,
++		.tcg_event_log_format = 1,
++		.reserved1 = 0,
++	};  /* MLE_HDR_CAPS: 0x227 */
++	const txt_caps_t mask = {
++		.rlp_wake_getsec = 1,
++		.rlp_wake_monitor = 1,
++		.ecx_pgtbl = 0,
++		.stm = 0,
++		.pcr_map_no_legacy = 0,
++		.pcr_map_da = 1,
++		.platform_type = 0,
++		.max_phy_addr = 0,
++		.tcg_event_log_format = 0,
++		.reserved1 = 0,
++	};
++	txt_caps_t acm_caps = acm->infotable->capabilities;
++
++	return get_ossinit_caps_tboot_common(&acm_caps, &mle_hdr, &mask,
++			tpmver, caps);
++}
++
++/* See tboot/txt/txt.c, include/mle.h */
++/* Since 1.9.6: tcg_event_log_format is now masked before processing, so the
++ * value from the MLE header defined in TBoot is ignored. */
++static int get_ossinit_caps_tboot_1_9_9(const struct acm *acm, uint8_t tpmver,
++		txt_caps_t *caps)
++{
++	const txt_caps_t mle_hdr = {
++		.rlp_wake_getsec = 1,
++		.rlp_wake_monitor = 1,
++		.ecx_pgtbl = 1,
++		.stm = 0,
++		.pcr_map_no_legacy = 0,
++		.pcr_map_da = 1,
++		.platform_type = 0,
++		.max_phy_addr = 0,
++		.tcg_event_log_format = 1,
++		.reserved1 = 0,
++	};  /* MLE_HDR_CAPS: 0x227 */
++	const txt_caps_t mask = {
++		.rlp_wake_getsec = 1,
++		.rlp_wake_monitor = 1,
++		.ecx_pgtbl = 0,
++		.stm = 0,
++		.pcr_map_no_legacy = 0,
++		.pcr_map_da = 1,
++		.platform_type = 0,
++		.max_phy_addr = 0,
++		.tcg_event_log_format = 1,
++		.reserved1 = 0,
++	};
++	txt_caps_t acm_caps = acm->infotable->capabilities;
++
++	return get_ossinit_caps_tboot_common(&acm_caps, &mle_hdr, &mask,
++			tpmver, caps);
++}
++
++static int event_ossinit_data_cap_hash(const struct acm *acm, uint16_t alg,
++		uint8_t tpmver, const tb_version_t *tbver, tb_hash_t *hash)
++{
++	txt_caps_t caps;
++	int rc;
++
++	if (tbver->major <= 1 && tbver->minor <= 9 && tbver->micro <= 6)
++		rc = get_ossinit_caps_tboot_1_9_6(acm, tpmver, &caps);
++	else
++		rc = get_ossinit_caps_tboot_1_9_9(acm, tpmver, &caps);
++
++	if (!hash_buffer((unsigned char *)&caps, sizeof (caps), hash, alg))
++		return -1;
++
++	return rc;
++}
++
++int emulate_event(const struct acm *acm, uint16_t alg,
++		uint8_t tpmver, const tb_version_t *tbver, struct pcr_event *evt)
++{
++	int rc;
++
++	switch (evt->type) {
++		case EVTYPE_OSSINITDATA_CAP_HASH:
++			rc = event_ossinit_data_cap_hash(acm, alg, tpmver, tbver,
++					&evt->digest);
++			break;
++		default:
++			rc = -1;
++			break;
++	}
++
++	return rc;
++}
++
++struct tpm *parse_tpm12_log(char *buffer, size_t size)
++{
++	struct tpm *t;
++	tpm12_pcr_event_t *c, *n;
++	event_log_container_t *log = (event_log_container_t *) buffer;
++
++	t = new_tpm(TPM12);
++	if (!t){
++		goto out;
++	}
++	/* TODO: check for signature */
++
++	c = (tpm12_pcr_event_t *)((void*)log + log->pcr_events_offset);
++	n = (tpm12_pcr_event_t *)((void*)log + log->next_event_offset);
++
++	if ((char *) n > (buffer + size)){
++		goto out_free;
++	}
++
++	while (c < n) {
++		if (!tpm_record_event(t, TB_HALG_SHA1, (void *) c)) {
++			goto out_free;
++		}
++		c = (void *)c + sizeof(*c) + c->data_size;
++	}
++
++	return t;
++out_free:
++	destroy_tpm(t);
++out:
++	return NULL;
++}
++
++struct tpm *parse_tpm20_log_legacy(char *buffer, size_t size)
++{
++	struct tpm *t;
++	void *c, *n;
++	uint32_t hash_size, data_size;
++	heap_event_log_descr_t *log = (heap_event_log_descr_t *) buffer;
++
++	t = new_tpm(TPM20);
++	if (!t)
++		goto out;
++
++	hash_size = get_hash_size(log->alg);
++
++	/* point at start of log */
++	buffer += sizeof(heap_event_log_descr_t);
++	c = buffer + log->pcr_events_offset;
++	n = buffer + log->next_event_offset;
++
++	if ((char *) n > (buffer + size))
++		goto out_free;
++
++	/* non-sha1 logs first entry is a no-op sha1 entry,
++	 * so skip the first event
++	 */
++	if (log->alg != TB_HALG_SHA1){
++		c += sizeof(tpm12_pcr_event_t) + sizeof(tpm20_log_descr_t);
++	}
++
++	while (c < n) {
++		if (!tpm_record_event(t, log->alg, c))
++			goto out_free;
++		data_size = *(uint32_t *)(c + 2*sizeof(uint32_t) + hash_size);
++		c += 3*sizeof(uint32_t) + hash_size + data_size;
++	}
++
++	return t;
++out_free:
++	destroy_tpm(t);
++out:
++	return NULL;
++}
++
++/*
++ * Agile log structure helpers.
++ */
++static inline const TCG_EfiSpecIdEventAlgorithmSizes *
++	tcg_header_algorithms(const TCG_EfiSpecIdEventStructHeader *hdr)
++{
++	/* TCG_EfiSpecIdEventAlgorithmSizes follows the static header
++	 * immediately. */
++	return ((void*)hdr) + sizeof (*hdr);
++}
++
++static inline size_t tcg_pcr_event_size(const TCG_PCR_EVENT *h)
++{
++	return sizeof (*h) + h->EventSize;
++}
++
++static size_t parse_tcg_pcr_event2(struct tpm *t, const TCG_PCR_EVENT2_HDR *h,
++	const TCG_EfiSpecIdEventAlgorithmSizes *algs)
++{
++	const TPML_DIGEST_VALUES *digests;
++	const TCG_PCR_EVENT2_EVT *event;
++	unsigned int n, c = sizeof (*h);
++
++	digests = ((void*)h) + c;
++	n = tpm_record_event_tcg(t, h->PCRIndex, h->EventType, digests, algs);
++	if (!n)
++		return 0;
++
++	c += n;
++	event = ((void*)h) + c;
++	/* Skip the Event content for now. */
++	n = sizeof (event->EventSize) +
++		sizeof (event->Event[0]) * event->EventSize;
++	c += n;
++
++	return c;
++}
++
++struct tpm *parse_tpm20_log_tcg(void *buffer, size_t size)
++{
++	struct tpm *t;
++	const TCG_PCR_EVENT *hdr = buffer;
++	const TCG_EfiSpecIdEventAlgorithmSizes *algs;
++	unsigned int n, c;
++
++	t = new_tpm(TPM20);
++	if (!t)
++		return NULL;
++
++	if (hdr->PCRIndex != PCR_INDEX_HEADER ||
++	    hdr->EventType != EV_NO_ACTION)
++		goto out;
++
++	algs = tcg_header_algorithms((void*)hdr->Event);
++	c = tcg_pcr_event_size(hdr);
++
++	for (; c < size; c += n) {
++		n = parse_tcg_pcr_event2(t, buffer + c, algs);
++		if (!n)
++			goto out;
++	}
++
++	return t;
++out:
++	destroy_tpm(t);
++
++	return NULL;
++}
+diff --git a/pcr-calc/eventlog.h b/pcr-calc/eventlog.h
+new file mode 100644
+index 0000000..9d36d56
+--- /dev/null
++++ b/pcr-calc/eventlog.h
+@@ -0,0 +1,63 @@
++/*
++ * eventlog.h: TXT TPM event log definitions
++ *
++ * Copyright (c) 2017 Daniel P. Smith
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ *
++ *   * Redistributions of source code must retain the above copyright
++ *     notice, this list of conditions and the following disclaimer.
++ *   * Redistributions in binary form must reproduce the above
++ *     copyright notice, this list of conditions and the following
++ *     disclaimer in the documentation and/or other materials provided
++ *     with the distribution.
++ *   * Neither the name of the Intel Corporation nor the names of its
++ *     contributors may be used to endorse or promote products derived
++ *     from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
++ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
++ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
++ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
++ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
++ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
++ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
++ * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED
++ * OF THE POSSIBILITY OF SUCH DAMAGE.
++ *
++ */
++
++#ifndef __EVENTLOG_H__
++#define __EVENTLOG_H__
++
++#include "tboot.h"
++
++typedef enum {
++	EVTYPE_BASE                 = 0x400,
++	EVTYPE_PCRMAPPING           = EVTYPE_BASE + 1,
++	EVTYPE_HASH_START           = EVTYPE_BASE + 2,
++	EVTYPE_MLE_HASH             = EVTYPE_BASE + 4,
++	EVTYPE_BIOSAC_REG_DATA      = EVTYPE_BASE + 10,
++	EVTYPE_CPU_SCRTM_STAT       = EVTYPE_BASE + 11,
++	EVTYPE_LCP_CONTROL_HASH     = EVTYPE_BASE + 12,
++	EVTYPE_ELEMENTS_HASH        = EVTYPE_BASE + 13,
++	EVTYPE_STM_HASH             = EVTYPE_BASE + 14,
++	EVTYPE_OSSINITDATA_CAP_HASH = EVTYPE_BASE + 15,
++	EVTYPE_SINIT_PUBKEY_HASH    = EVTYPE_BASE + 16,
++	EVTYPE_LCP_HASH             = EVTYPE_BASE + 17,
++} txt_event_type_t;
++
++int emulate_event(const struct acm *acm, uint16_t alg, uint8_t tpmver,
++	const tb_version_t *tbver, struct pcr_event *evt);
++
++struct tpm *parse_tpm12_log(char *buffer, size_t size);
++struct tpm *parse_tpm20_log_legacy(char *buffer, size_t size);
++struct tpm *parse_tpm20_log_tcg(void *buffer, size_t size);
++
++#endif
+diff --git a/pcr-calc/eventlog_tcg.h b/pcr-calc/eventlog_tcg.h
+new file mode 100644
+index 0000000..89d2ff0
+--- /dev/null
++++ b/pcr-calc/eventlog_tcg.h
+@@ -0,0 +1,86 @@
++#ifndef _EVENTLOG_TCG_H_
++# define _EVENTLOG_TCG_H_
++
++# include <stdint.h>
++
++/*
++ * To match with specification definition:
++ *
++ * struct tdTCG_EfiSpecIDEventStruct {
++ *     TCG_EfiSpecIdEventStructHeader hdr;
++ *     TCG_EfiSpecIdEventAlgorithmSizes algs;
++ *     TCG_EfiSpecIdEventVendorInfo vinfo
++ * } TCG_EfiSpecIDEventStruct;
++ *
++ * This makes it easier to parse/print the different components with dynamic
++ * sizes.
++ */
++
++typedef struct tdTCG_EfiSpecIdEventStructHeader {
++	uint8_t signature[16];
++	uint32_t platformClass;
++	uint8_t specVersionMinor;
++	uint8_t specVersionMajor;
++	uint8_t specErrata;
++	uint8_t uintnSize;
++}__attribute__((packed)) TCG_EfiSpecIdEventStructHeader;
++
++typedef struct tdTCG_EfiSpecIdEventAlgorithmSize {
++	uint16_t algorithmId;
++	uint16_t digestSize;
++}__attribute__((packed)) TCG_EfiSpecIdEventAlgorithmSize;
++
++typedef struct tdTCG_EfiSpecIdEventAlgorithmSizes {
++	uint32_t numberOfAlgorithms;
++	TCG_EfiSpecIdEventAlgorithmSize digestSizes[];
++}__attribute__((packed)) TCG_EfiSpecIdEventAlgorithmSizes;
++
++typedef struct tdTCG_EfiSpecIdEventVendorInfo {
++	uint8_t vendorInfoSize;
++	uint8_t vendorInfo[];
++}__attribute__((packed)) TCG_EfiSpecIdEventVendorInfo;
++
++/*
++ * SHA1 Event Log Entry Format.
++ */
++typedef struct tdTCG_PCR_EVENT {
++#define PCR_INDEX_HEADER    0x0
++	uint32_t PCRIndex;
++#define EV_NO_ACTION    0x3
++	uint32_t EventType;
++	uint8_t Digest[20];
++	uint32_t EventSize;
++	uint8_t Event[];
++}__attribute__((packed)) TCG_PCR_EVENT;
++
++/*
++ * Crypto Agile Log Entry Format.
++ *
++ * typedef struct tdTCG_PCR_EVENT2 {
++ *     TCG_PCR_EVENT2_HDR hdr;
++ *     TPML_DIGEST_VALUES digests;
++ *     TCG_PCR_EVENT2_EVT event;
++ * } TCG_PCR_EVENT2;
++ */
++typedef struct tdTCG_PCR_EVENT2_HDR {
++	uint32_t PCRIndex;
++	uint32_t EventType;
++}__attribute__((packed)) TCG_PCR_EVENT2_HDR;
++
++typedef struct tdTPMT_HA {
++	uint16_t AlgorithmId;
++	uint8_t Digest[];
++}__attribute__((packed)) TPMT_HA;
++
++typedef struct tdTPML_DIGEST_VALUES {
++	uint32_t Count;
++	TPMT_HA Digests[];
++}__attribute__((packed)) TPML_DIGEST_VALUES;
++
++typedef struct tdTCG_PCR_EVENT2_EVT {
++	uint32_t EventSize;
++	uint8_t Event[];
++}__attribute__((packed)) TCG_PCR_EVENT2_EVT;
++
++#endif /* !_EVENTLOG_TCG_H_ */
++
+diff --git a/pcr-calc/hash.c b/pcr-calc/hash.c
+new file mode 100644
+index 0000000..6c6e4e8
+--- /dev/null
++++ b/pcr-calc/hash.c
+@@ -0,0 +1,236 @@
++/*
++ * hash.c: support functions for tb_hash_t type
++ *
++ * Copyright (c) 2014, Intel Corporation
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ *
++ *   * Redistributions of source code must retain the above copyright
++ *     notice, this list of conditions and the following disclaimer.
++ *   * Redistributions in binary form must reproduce the above
++ *     copyright notice, this list of conditions and the following
++ *     disclaimer in the documentation and/or other materials provided
++ *     with the distribution.
++ *   * Neither the name of the Intel Corporation nor the names of its
++ *     contributors may be used to endorse or promote products derived
++ *     from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
++ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
++ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
++ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
++ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
++ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
++ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
++ * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED
++ * OF THE POSSIBILITY OF SUCH DAMAGE.
++ *
++ */
++
++#include <stdio.h>
++#include <stdlib.h>
++#include <stdint.h>
++#include <stdbool.h>
++#include <string.h>
++#include <safe_lib.h>
++#include <openssl/evp.h>
++#define PRINT   printf
++#include "../include/config.h"
++#include "../include/hash.h"
++
++/*
++ * are_hashes_equal
++ *
++ * compare whether two hash values are equal.
++ *
++ */
++bool are_hashes_equal(const tb_hash_t *hash1, const tb_hash_t *hash2,
++		      uint16_t hash_alg)
++{
++    int diff;
++    errno_t err;
++    rsize_t len;
++
++    if ( ( hash1 == NULL ) || ( hash2 == NULL ) )
++        return false;
++
++    switch ( hash_alg ) {
++        case TB_HALG_SHA1:
++            len = SHA1_LENGTH;
++            break;
++        case TB_HALG_SHA256:
++            len = SHA256_LENGTH;
++            break;
++        case TB_HALG_SM3:
++            len = SM3_LENGTH;
++            break;
++        case TB_HALG_SHA384:
++            len = SHA384_LENGTH;
++            break;
++        case TB_HALG_SHA512:
++            len = SHA512_LENGTH;
++            break;
++        default:
++            return false;
++    }
++
++    err = memcmp_s(hash1, sizeof(tb_hash_t), hash2, len, &diff);
++    if ( err )
++        return false;
++
++    return !diff;
++}
++
++/*
++ * hash_buffer
++ *
++ * hash the buffer according to the algorithm
++ *
++ */
++bool hash_buffer(const unsigned char* buf, size_t size, tb_hash_t *hash,
++		 uint16_t hash_alg)
++{
++    EVP_MD_CTX *ctx;
++    const EVP_MD *md;
++    bool ret = false;
++
++    if ( hash == NULL )
++        return false;
++
++    ctx = EVP_MD_CTX_create();
++    if ( ctx == NULL )
++        return false;
++
++    if ( hash_alg == TB_HALG_SHA1 ) {
++        md = EVP_sha1();
++        EVP_DigestInit(ctx, md);
++        EVP_DigestUpdate(ctx, buf, size);
++        EVP_DigestFinal(ctx, hash->sha1, NULL);
++        ret = true;
++    }
++    else if (hash_alg == TB_HALG_SHA256) {
++        md = EVP_sha256();
++        EVP_DigestInit(ctx, md);
++        EVP_DigestUpdate(ctx, buf, size);
++        EVP_DigestFinal(ctx, hash->sha256, NULL);
++        ret = true;
++    }
++    else if (hash_alg == TB_HALG_SHA384) {
++        md = EVP_sha384();
++        EVP_DigestInit(ctx, md);
++        EVP_DigestUpdate(ctx, buf, size);
++        EVP_DigestFinal(ctx, hash->sha384, NULL);
++        ret = true;
++    }
++
++    EVP_MD_CTX_destroy(ctx);
++
++    return ret;
++}
++
++/*
++ * extend_hash
++ *
++ * perform "extend" of two hashes (i.e. hash1 = SHA(hash1 || hash2)
++ *
++ */
++bool extend_hash(tb_hash_t *hash1, const tb_hash_t *hash2, uint16_t hash_alg)
++{
++    uint8_t buf[2*sizeof(tb_hash_t)];
++    EVP_MD_CTX *ctx;
++    const EVP_MD *md;
++    bool ret = false;
++
++    if ( hash1 == NULL || hash2 == NULL )
++        return false;
++
++    ctx = EVP_MD_CTX_create();
++    if ( ctx == NULL )
++        return false;
++
++    if ( hash_alg == TB_HALG_SHA1 ) {
++        memcpy_s(buf, sizeof(buf), &(hash1->sha1), sizeof(hash1->sha1));
++        memcpy_s(buf + sizeof(hash1->sha1), sizeof(buf) - sizeof(hash1->sha1),
++                 &(hash2->sha1), sizeof(hash1->sha1));
++        md = EVP_sha1();
++        EVP_DigestInit(ctx, md);
++        EVP_DigestUpdate(ctx, buf, 2*sizeof(hash1->sha1));
++        EVP_DigestFinal(ctx, hash1->sha1, NULL);
++        ret = true;
++    }
++    else if (hash_alg == TB_HALG_SHA256) {
++        memcpy_s(buf, sizeof(buf), &(hash1->sha256), sizeof(hash1->sha256));
++        memcpy_s(buf + sizeof(hash1->sha256), sizeof(buf) - sizeof(hash1->sha256),
++                 &(hash2->sha256), sizeof(hash1->sha256));
++        md = EVP_sha256();
++        EVP_DigestInit(ctx, md);
++        EVP_DigestUpdate(ctx, buf, 2*sizeof(hash1->sha256));
++        EVP_DigestFinal(ctx, hash1->sha256, NULL);
++        ret = true;
++    }
++
++    EVP_MD_CTX_destroy(ctx);
++
++    return ret;
++}
++
++void print_hash(const tb_hash_t *hash, uint16_t hash_alg)
++{
++    unsigned int hash_size = get_hash_size(hash_alg);
++    unsigned int i;
++    const uint8_t *b = (const uint8_t *)hash;
++
++    if ( hash == NULL )
++        return;
++
++    switch (hash_alg) {
++        case TB_HALG_SHA1_LG:
++        case TB_HALG_SHA1:
++        case TB_HALG_SHA256:
++        case TB_HALG_SM3:
++        case TB_HALG_SHA384:
++        case TB_HALG_SHA512:
++            break;
++        default:
++            return;
++    }
++
++    for (i = 0; i < hash_size - 1; ++i)
++        printf("%02x ", b[i]);
++
++    printf("%02x\n", b[i]);
++}
++
++void copy_hash(tb_hash_t *dest_hash, const tb_hash_t *src_hash,
++               uint16_t hash_alg)
++{
++    unsigned int len;
++
++    if ( dest_hash == NULL || src_hash == NULL ) {
++        printf("hash copy: hashes are NULL\n");
++        return;
++    }
++
++    len = get_hash_size(hash_alg);
++    if ( len > 0 )
++        memcpy_s(dest_hash, sizeof(tb_hash_t), src_hash, len);
++    else
++        printf("unsupported hash alg (%u)\n", hash_alg);
++}
++
++
++/*
++ * Local variables:
++ * mode: C
++ * c-set-style: "BSD"
++ * c-basic-offset: 4
++ * tab-width: 4
++ * indent-tabs-mode: nil
++ * End:
++ */
+diff --git a/pcr-calc/heap.h b/pcr-calc/heap.h
+new file mode 100644
+index 0000000..c7bf9b7
+--- /dev/null
++++ b/pcr-calc/heap.h
+@@ -0,0 +1,354 @@
++/*
++ * heap.h: Intel(r) TXT heap definitions
++ *
++ * Copyright (c) 2003-2011, Intel Corporation
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ *
++ *   * Redistributions of source code must retain the above copyright
++ *     notice, this list of conditions and the following disclaimer.
++ *   * Redistributions in binary form must reproduce the above
++ *     copyright notice, this list of conditions and the following
++ *     disclaimer in the documentation and/or other materials provided
++ *     with the distribution.
++ *   * Neither the name of the Intel Corporation nor the names of its
++ *     contributors may be used to endorse or promote products derived
++ *     from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
++ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
++ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
++ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
++ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
++ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
++ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
++ * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED
++ * OF THE POSSIBILITY OF SUCH DAMAGE.
++ *
++ */
++
++#ifndef __TXT_HEAP_H__
++#define __TXT_HEAP_H__
++
++#include "../include/mle.h"
++#include "../include/hash.h"
++
++#ifndef __packed
++#define __packed   __attribute__ ((packed))
++#endif
++
++/*
++ * Extensible TXT heap data structure
++ */
++
++typedef struct __packed {
++    uint32_t   type;
++    uint32_t   size;
++    uint8_t    data[];
++} heap_ext_data_element_t;
++
++/*
++ * HEAP_END_ELEMENT
++ */
++#define HEAP_EXTDATA_TYPE_END             0
++
++/* size == 8; there is no data[] */
++
++/*
++ * HEAP_BIOS_SPEC_VER_ELEMENT
++ */
++#define HEAP_EXTDATA_TYPE_BIOS_SPEC_VER   1
++
++typedef struct __packed {
++    uint16_t   spec_ver_major;
++    uint16_t   spec_ver_minor;
++    uint16_t   spec_ver_rev;
++} heap_bios_spec_ver_elt_t;
++
++/*
++ * HEAP_ACM_ELEMENT
++ */
++#define HEAP_EXTDATA_TYPE_ACM             2
++
++typedef struct __packed {
++    uint32_t   num_acms;
++    uint64_t   acm_addrs[];
++} heap_acm_elt_t;
++
++/*
++ * HEAP_CUSTOM_ELEMENT
++ */
++#define HEAP_EXTDATA_TYPE_CUSTOM          4
++
++typedef struct __packed {
++    uuid_t     uuid;
++    uint8_t    data[];
++} heap_custom_elt_t;
++
++/*
++ * HEAP_EVENT_LOG_POINTER_ELEMENT
++ */
++#define HEAP_EXTDATA_TYPE_TPM_EVENT_LOG_PTR   5
++
++typedef struct __packed {
++    uint64_t   event_log_phys_addr;
++} heap_event_log_ptr_elt_t;
++
++typedef struct __packed {
++    uint32_t pcr_index;
++    uint32_t type;
++    sha1_hash_t digest;
++    uint32_t data_size;
++    uint8_t data[];
++} tpm12_pcr_event_t;
++
++#define EVTLOG_SIGNATURE "TXT Event Container\0"
++#define EVTLOG_CNTNR_MAJOR_VER 1
++#define EVTLOG_CNTNR_MINOR_VER 0
++#define EVTLOG_EVT_MAJOR_VER 1
++#define EVTLOG_EVT_MINOR_VER 0
++typedef struct __packed {
++    uint8_t signature[20];
++    uint8_t reserved[12];
++    uint8_t container_ver_major;
++    uint8_t container_ver_minor;
++    uint8_t pcr_event_ver_major;
++    uint8_t pcr_event_ver_minor;
++    uint32_t size;
++    uint32_t pcr_events_offset;
++    uint32_t next_event_offset;
++    tpm12_pcr_event_t pcr_events[];
++} event_log_container_t;
++
++/*
++ * HEAP_EVENT_LOG_POINTER_ELEMENT2
++ */
++#define HEAP_EXTDATA_TYPE_TPM_EVENT_LOG_PTR_2  7
++
++#define DIGEST_ALG_ID_SHA_1       0x00000001
++#define DIGEST_ALG_ID_SHA_256     0x00000002
++#define DIGEST_ALG_ID_SHA_384     0x00000003
++#define DIGEST_ALG_ID_SHA_512     0x00000004
++#define DIGEST_ALG_ID_SM3         0x00000005
++static inline unsigned int get_evtlog_digest_id(uint16_t hash_alg)
++{
++    if ( hash_alg == TB_HALG_SHA1 )
++        return DIGEST_ALG_ID_SHA_1;
++    else if ( hash_alg == TB_HALG_SHA256 )
++        return DIGEST_ALG_ID_SHA_256;
++    else if ( hash_alg == TB_HALG_SM3 )
++        return DIGEST_ALG_ID_SM3;
++    else if ( hash_alg == TB_HALG_SHA384 )
++        return DIGEST_ALG_ID_SHA_384;
++    else if ( hash_alg == TB_HALG_SHA512 )
++        return DIGEST_ALG_ID_SHA_512;
++    else
++        return 0;
++}
++
++typedef struct __packed {
++    uint8_t    signature[16];
++    uint32_t   revision;
++    uint32_t   digest_id;
++    uint32_t   digest_size;
++} tpm20_log_descr_t;
++
++typedef struct __packed {
++    uint16_t   alg;
++    uint16_t   reserved;
++    uint64_t   phys_addr;
++    uint32_t   size;
++    uint32_t   pcr_events_offset;
++    uint32_t   next_event_offset;
++} heap_event_log_descr_t;
++
++typedef struct __packed {
++    uint32_t   count;
++    heap_event_log_descr_t event_log_descr[];
++} heap_event_log_ptr_elt2_t;
++
++/*
++ * data-passing structures contained in TXT heap:
++ *   - BIOS
++ *   - OS/loader to MLE
++ *   - OS/loader to SINIT
++ *   - SINIT to MLE
++ */
++
++/*
++ * BIOS structure
++ */
++typedef struct __packed {
++    uint32_t  version;              /* currently 2-4 */
++    uint32_t  bios_sinit_size;
++    uint64_t  lcp_pd_base;
++    uint64_t  lcp_pd_size;
++    uint32_t  num_logical_procs;
++    /* versions >= 3 */
++    uint64_t  flags;
++    /* versions >= 4 */
++    heap_ext_data_element_t  ext_data_elts[];
++} bios_data_t;
++
++/*
++ * OS/loader to MLE structure
++ *   - private to tboot (so can be any format we need)
++ */
++#define MAX_LCP_PO_DATA_SIZE     64*1024  /* 64k */
++#define MAX_EVENT_LOG_SIZE       4*1024   /* 4k */
++
++
++#define MIN_OS_SINIT_DATA_VER    4
++#define MAX_OS_SINIT_DATA_VER    6
++/*
++ * OS/loader to SINIT structure
++ */
++typedef struct __packed {
++    uint32_t    version;           /* currently 4-6 */
++    uint32_t    reserved;
++    uint64_t    mle_ptab;
++    uint64_t    mle_size;
++    uint64_t    mle_hdr_base;
++    uint64_t    vtd_pmr_lo_base;
++    uint64_t    vtd_pmr_lo_size;
++    uint64_t    vtd_pmr_hi_base;
++    uint64_t    vtd_pmr_hi_size;
++    uint64_t    lcp_po_base;
++    uint64_t    lcp_po_size;
++    txt_caps_t  capabilities;
++    /* versions >= 5 */
++    uint64_t    efi_rsdt_ptr;
++    /* versions >= 6 */
++    heap_ext_data_element_t  ext_data_elts[];
++} os_sinit_data_t;
++
++/*
++ * SINIT to MLE structure
++ */
++#define MDR_MEMTYPE_GOOD                0x00
++#define MDR_MEMTYPE_SMM_OVERLAY         0x01
++#define MDR_MEMTYPE_SMM_NONOVERLAY      0x02
++#define MDR_MEMTYPE_PCIE_CONFIG_SPACE   0x03
++#define MDR_MEMTYPE_PROTECTED           0x04
++
++typedef struct __packed {
++    uint64_t  base;
++    uint64_t  length;
++    uint8_t   mem_type;
++    uint8_t   reserved[7];
++} sinit_mdr_t;
++
++typedef struct __packed {
++    uint32_t     version;             /* currently 6-8 */
++    sha1_hash_t  bios_acm_id;
++    uint32_t     edx_senter_flags;
++    uint64_t     mseg_valid;
++    sha1_hash_t  sinit_hash;
++    sha1_hash_t  mle_hash;
++    sha1_hash_t  stm_hash;
++    sha1_hash_t  lcp_policy_hash;
++    uint32_t     lcp_policy_control;
++    uint32_t     rlp_wakeup_addr;
++    uint32_t     reserved;
++    uint32_t     num_mdrs;
++    uint32_t     mdrs_off;
++    uint32_t     num_vtd_dmars;
++    uint32_t     vtd_dmars_off;
++    /* versions >= 8 */
++    uint32_t     proc_scrtm_status;
++} sinit_mle_data_t;
++
++
++/*
++ * TXT heap data format and field accessor fns
++ */
++
++/*
++ * offset                 length                      field
++ * ------                 ------                      -----
++ *  0                      8                          bios_data_size
++ *  8                      bios_data_size - 8      bios_data
++ *
++ *  bios_data_size      8                          os_mle_data_size
++ *  bios_data_size +    os_mle_data_size - 8       os_mle_data
++ *   8
++ *
++ *  bios_data_size +    8                          os_sinit_data_size
++ *   os_mle_data_size
++ *  bios_data_size +    os_sinit_data_size - 8     os_sinit_data
++ *   os_mle_data_size +
++ *   8
++ *
++ *  bios_data_size +    8                          sinit_mle_data_size
++ *   os_mle_data_size +
++ *   os_sinit_data_size
++ *  bios_data_size +    sinit_mle_data_size - 8    sinit_mle_data
++ *   os_mle_data_size +
++ *   os_sinit_data_size +
++ *   8
++ */
++
++typedef void   txt_heap_t;
++
++
++static inline uint64_t get_bios_data_size(const txt_heap_t *heap)
++{
++    return *(uint64_t *)heap;
++}
++
++static inline bios_data_t *get_bios_data_start(const txt_heap_t *heap)
++{
++    return (bios_data_t *)((char*)heap + sizeof(uint64_t));
++}
++
++static inline uint64_t get_os_mle_data_size(const txt_heap_t *heap)
++{
++    return *(uint64_t *)(heap + get_bios_data_size(heap));
++}
++
++static inline uint64_t get_os_sinit_data_size(const txt_heap_t *heap)
++{
++    return *(uint64_t *)(heap + get_bios_data_size(heap) +
++                         get_os_mle_data_size(heap));
++}
++
++static inline os_sinit_data_t *get_os_sinit_data_start(const txt_heap_t *heap)
++{
++    return (os_sinit_data_t *)(heap + get_bios_data_size(heap) +
++                               get_os_mle_data_size(heap) +
++                               sizeof(uint64_t));
++}
++
++static inline uint64_t get_sinit_mle_data_size(const txt_heap_t *heap)
++{
++    return *(uint64_t *)(heap + get_bios_data_size(heap) +
++                         get_os_mle_data_size(heap) +
++                         get_os_sinit_data_size(heap));
++}
++
++static inline sinit_mle_data_t *get_sinit_mle_data_start(const txt_heap_t *heap)
++{
++    return (sinit_mle_data_t *)(heap + get_bios_data_size(heap) +
++                                get_os_mle_data_size(heap) +
++                                get_os_sinit_data_size(heap) +
++                                sizeof(uint64_t));
++}
++
++
++#endif      /* __TXT_HEAP_H__ */
++
++
++/*
++ * Local variables:
++ * mode: C
++ * c-basic-offset: 4
++ * tab-width: 4
++ * indent-tabs-mode: nil
++ * End:
++ */
+diff --git a/pcr-calc/module_hash.c b/pcr-calc/module_hash.c
+new file mode 100644
+index 0000000..35a16d0
+--- /dev/null
++++ b/pcr-calc/module_hash.c
+@@ -0,0 +1,436 @@
++/*
++ *
++ * Copyright (c) 2015-2017 Daniel P. Smith
++ * Copyright (c) 2017 Chris Rogers
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ *
++ *   * Redistributions of source code must retain the above copyright
++ *     notice, this list of conditions and the following disclaimer.
++ *   * Redistributions in binary form must reproduce the above
++ *     copyright notice, this list of conditions and the following
++ *     disclaimer in the documentation and/or other materials provided
++ *     with the distribution.
++ *   * Neither the name of the Intel Corporation nor the names of its
++ *     contributors may be used to endorse or promote products derived
++ *     from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
++ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
++ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
++ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
++ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
++ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
++ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
++ * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED
++ * OF THE POSSIBILITY OF SUCH DAMAGE.
++ *
++ */
++
++#include <stdio.h>
++#include <stdlib.h>
++#include <memory.h>
++#include <stdbool.h>
++#include <stdint.h>
++#include <stdarg.h>
++#include <getopt.h>
++#include <safe_lib.h>
++#include <zlib.h>
++#include <sys/stat.h>
++#include <openssl/evp.h>
++#include "../include/hash.h"
++
++#if HAVE_BZIP
++#include <bzlib.h>
++#endif
++
++#define error_msg(fmt, ...)         fprintf(stderr, fmt, ##__VA_ARGS__)
++
++#define BUFFER_SIZE 1024
++
++#define NO_COMPRESSION 1
++#define GZ_COMPRESSION 1<<1
++#if HAVE_BZIP
++#define BZ_COMPRESSION 1<<2
++#endif
++
++
++#if HAVE_BZIP
++static bool read_bzip2(const char *path, FILE *dest_fd, size_t *len)
++{
++	FILE *fd;
++	BZFILE *bzfd;
++	char buf[BUFFER_SIZE];
++	size_t bytes;
++	int bzerror;
++
++	*len = 0;
++	if (!dest_fd)
++		goto fail;
++
++	fd = fopen(path, "r");
++	if (!fd) {
++		goto fail;
++	}
++
++	bzfd = BZ2_bzReadOpen(&bzerror, fd, 0, 0, NULL, 0 );
++	if (bzerror != BZ_OK) {
++		goto fail_bzfd;
++	}
++
++	bzerror = BZ_OK;
++	while (bzerror == BZ_OK) {
++		bytes = BZ2_bzRead(&bzerror, bzfd, buf, BUFFER_SIZE);
++		if (bzerror == BZ_OK || bzerror == BZ_STREAM_END) {
++			*len += bytes;
++			if (fwrite(buf, 1, bytes, dest_fd) != bytes)
++				goto fail_bzfd;
++		} else {
++			goto fail_bzfd;
++		}
++	}
++
++	BZ2_bzReadClose(&bzerror, bzfd);
++	fclose(fd);
++	return true;
++
++fail_bzfd:
++	BZ2_bzReadClose(&bzerror, bzfd);
++	fclose(fd);
++fail:
++	return false;
++}
++#endif
++
++static bool read_gzip(const char *path, FILE *dest_fd, size_t *len)
++{
++	gzFile gzfd = NULL;
++	char buf[BUFFER_SIZE];
++	size_t bytes;
++
++	*len = 0;
++
++	gzfd = gzopen(path, "rb");
++	if (!gzfd)
++		goto fail;
++
++	while (!gzeof(gzfd)) {
++		bytes = gzread(gzfd, buf, BUFFER_SIZE);
++		*len += bytes;
++		if (fwrite(buf, 1, bytes, dest_fd) != bytes)
++			goto fail_gz;
++	}
++
++	gzclose(gzfd);
++	return true;
++
++fail_gz:
++	gzclose(gzfd);
++fail:
++	return false;
++}
++
++static bool read_module(const char *path, char **buffer, size_t *len, uint8_t flag)
++{
++	FILE *tmpfd = NULL;
++	struct stat st;
++
++	*len = 0;
++	*buffer = NULL;
++
++	if (stat(path, &st))
++		goto fail;
++
++	tmpfd = tmpfile();
++	if (!tmpfd)
++		goto fail;
++
++	if ((flag & NO_COMPRESSION) || (flag & GZ_COMPRESSION)) {
++		if (read_gzip(path, tmpfd, len) == false)
++			goto fail_tmp;
++#if HAVE_BZIP
++	} else if (flag & BZ_COMPRESSION) {
++		if (read_bzip2(path, tmpfd, len) == false)
++			goto fail_tmp;
++#endif
++	} else {
++		goto fail_tmp;
++	}
++
++	if (*len > 0)
++		fseek(tmpfd, 0, SEEK_SET);
++	else
++		goto fail_tmp;
++
++	*buffer = malloc(*len);
++	if (*buffer == NULL)
++		goto fail_tmp;
++	memset_s(*buffer, *len, 0);
++
++	if (fread(*buffer, 1, *len, tmpfd) != *len)
++		goto fail_buf;
++
++	fclose(tmpfd);
++	return true;
++
++fail_buf:
++	free(*buffer);
++fail_tmp:
++	fclose(tmpfd);
++fail:
++	return false;
++}
++
++static bool hash_module(tb_hash_t *hash, const char* cmdline, const char *module,
++	         size_t size, uint16_t hash_alg)
++{
++	tb_hash_t img_hash;
++
++	if (cmdline == NULL)
++		cmdline = "";
++
++	if (module == NULL) {
++		error_msg("passed an empty module for hashing\n");
++		return false;
++	}
++
++	if (!hash_buffer((const unsigned char *)cmdline, strlen(cmdline), hash,
++	      hash_alg)) {
++		error_msg("failed to hash cmdline\n");
++		return false;
++	}
++
++	/* hash image and extend into cmdline hash */
++	if (!hash_buffer((const unsigned char *)module, size, &img_hash, hash_alg)) {
++		error_msg("failed to hash module\n");
++		return false;
++	}
++	if (!extend_hash(hash, &img_hash, hash_alg)) {
++		error_msg("failed to extend cmdline hash with  module hash\n");
++		return false;
++	}
++
++	return true;
++}
++
++static void print_sha256(tb_hash_t *hash)
++{
++	int i;
++
++	if (hash == NULL)
++		return;
++
++	for (i = 0; i < SHA256_LENGTH; i++)
++		printf("%02x", hash->sha256[i]);
++
++	printf("\n");
++}
++
++static void print_sha1(tb_hash_t *hash)
++{
++	int i;
++
++	if (hash == NULL)
++		return;
++
++	for (i = 0; i < SHA1_LENGTH; i++)
++		printf("%02x", hash->sha1[i]);
++
++	printf("\n");
++}
++
++static void print_hash_val(tb_hash_t *hash, uint16_t hash_alg)
++{
++
++	switch (hash_alg) {
++		case TB_HALG_SHA1:
++			print_sha1(hash);
++			break;
++		case TB_HALG_SHA256:
++			print_sha256(hash);
++			break;
++		default:
++			printf("Error: Unsupported hash algorithm\n");
++			break;
++	}
++}
++
++static bool read_hash(const char *hexstr, tb_hash_t *hash, uint16_t hash_alg)
++{
++	int len = strlen(hexstr);
++	int i = 0, j = 0;
++	int hash_length = 0;
++	unsigned char *buf = NULL;
++
++	switch (hash_alg) {
++		case TB_HALG_SHA1:
++			hash_length = SHA1_LENGTH;
++			buf = (unsigned char *)hash->sha1;
++			break;
++		case TB_HALG_SHA256:
++			hash_length = SHA256_LENGTH;
++			buf = (unsigned char *)hash->sha256;
++			break;
++		default:
++			hash_length = SHA1_LENGTH;
++			buf = (unsigned char *)hash->sha1;
++			break;
++	}
++
++	if (len == 1 && hexstr[0] == '0') {
++		memset_s(buf, hash_length, 0);
++		return true;
++	}
++
++	if (len/2 != hash_length)
++		return false;
++
++	if (len % 2 == 1) {
++		if (sscanf(&(hexstr[0]), "%1hhx", &(buf[0])) != 1)
++			return false;
++
++		i = j = 1;
++	}
++
++	for (; i < len; i+=2, j++) {
++		if (sscanf(&(hexstr[i]), "%2hhx", &(buf[j])) != 1)
++			return false;
++	}
++
++	return true;
++}
++
++static void print_help(void)
++{
++	error_msg("module_hash [-hjz] [-e hash_str] -c cmd_line module_file\n"
++		"\t-h Help: will print out this help message.\n"
++		"\t-j module is compressed with BZip2\n"
++		"\t-z module is compressed with GZip\n"
++		"\t-e hash_str Extend Hash: has to be extended with module hash.\n"
++		"\t-c cmd_line Command Line: the command line passed.\n"
++		"\t-a hash algorithm to use.\n"
++		"\tmodule_file: file name of module to hash.\n");
++}
++
++int main(int argc, char *argv[])
++{
++	extern int optind;
++	int opt, rc;
++	size_t mod_len;
++	char *module_path = NULL;
++	char *cmdline = NULL;
++	size_t cmdline_len;
++	char *ext_str = NULL;
++	size_t ext_str_len;
++	char *mod_buf = NULL;
++	uint16_t hash_alg = TB_HALG_SHA1;
++	uint8_t flags = NO_COMPRESSION;
++	tb_hash_t mod_hash, ext_hash;
++	errno_t err;
++
++	while ((opt = getopt(argc, (char ** const)argv, "he:c:a:jz")) != -1) {
++		switch (opt) {
++			case 'c':
++				cmdline_len = strlen(optarg);
++				cmdline = calloc(cmdline_len + 1, sizeof (char));
++				if ( cmdline == NULL ) {
++					printf("Out of memory\n");
++					return 1;
++				}
++				err = strcpy_s(cmdline, cmdline_len + 1, optarg);
++				if (err != EOK)
++					return 1;
++			break;
++			case 'e':
++				ext_str_len = strlen(optarg);
++				ext_str = calloc(ext_str_len + 1, sizeof (char));
++				if ( ext_str == NULL ) {
++					printf("Out of memory\n");
++					return 1;
++				}
++				err = strcpy_s(ext_str, ext_str_len + 1, optarg);
++				if (err != EOK)
++					return 1;
++			break;
++#ifdef HAVE_BZIP
++			case 'j':
++				if (flags & GZ_COMPRESSION) {
++					print_help();
++					error_msg("Error: -j cannot be used inconjunction with -z");
++					return 1;
++				} else {
++					flags = BZ_COMPRESSION;
++				}
++			break;
++#endif
++			case 'z':
++#ifdef HAVE_BZIP
++				if (flags & BZ_COMPRESSION) {
++					print_help();
++					error_msg("Error: -z cannot be used inconjunction with -j");
++					return 1;
++				} else {
++					flags = GZ_COMPRESSION;
++				}
++#else
++				flags = GZ_COMPRESSION;
++#endif
++			break;
++			case 'h':
++				print_help();
++				free(cmdline);
++				return 1;
++			case 'a':
++				hash_alg = TB_HALG_SHA1;
++				err = strcmp_s(optarg, sizeof ("sha256"), "sha256", &rc);
++				if (err != EOK)
++					return 1;
++				if (!rc)
++					hash_alg = TB_HALG_SHA256;
++			break;
++			default:
++			break;
++		}
++	}
++
++	module_path = argv[optind];
++
++	if(read_module(module_path, &mod_buf, &mod_len, flags) == false) {
++		error_msg("failed to read in the module\n");
++		goto fail;
++	}
++
++	if (hash_module(&mod_hash, cmdline, mod_buf, mod_len, hash_alg) == false) {
++		error_msg("failed to hash the module\n");
++		goto fail;
++	}
++
++	if (ext_str != NULL) {
++		if (read_hash(ext_str, &ext_hash, hash_alg) == false) {
++			error_msg("failed to pass valid hash to -e\n");
++			goto fail;
++		}
++		if (extend_hash(&ext_hash, &mod_hash, hash_alg) == false) {
++			error_msg("failed to extend hash\n");
++			goto fail;
++		}
++
++		print_hash_val(&ext_hash, hash_alg);
++	} else {
++		print_hash_val(&mod_hash, hash_alg);
++	}
++
++	if (ext_str != NULL) free(ext_str);
++	if (cmdline != NULL) free(cmdline);
++	return 0;
++fail:
++	if (ext_str != NULL) free(ext_str);
++	if (cmdline != NULL) free(cmdline);
++	return 1;
++}
+diff --git a/pcr-calc/pcr-calc.c b/pcr-calc/pcr-calc.c
+new file mode 100644
+index 0000000..f3dbb90
+--- /dev/null
++++ b/pcr-calc/pcr-calc.c
+@@ -0,0 +1,446 @@
++/*
++ *
++ * Copyright (c) 2017 Daniel P. Smith
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ *
++ *   * Redistributions of source code must retain the above copyright
++ *     notice, this list of conditions and the following disclaimer.
++ *   * Redistributions in binary form must reproduce the above
++ *     copyright notice, this list of conditions and the following
++ *     disclaimer in the documentation and/or other materials provided
++ *     with the distribution.
++ *   * Neither the name of the Intel Corporation nor the names of its
++ *     contributors may be used to endorse or promote products derived
++ *     from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
++ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
++ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
++ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
++ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
++ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
++ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
++ * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED
++ * OF THE POSSIBILITY OF SUCH DAMAGE.
++ *
++ */
++
++#include <stdio.h>
++#include <stdlib.h>
++#include <memory.h>
++#include <stdbool.h>
++#include <stdint.h>
++#include <stdarg.h>
++#include <getopt.h>
++#include <zlib.h>
++#include <sys/stat.h>
++#include <openssl/evp.h>
++
++#include "../include/hash.h"
++#include "uuid.h"
++#include "tb_policy.h"
++#include "acm.h"
++#include "tpm.h"
++#include "util.h"
++#include "eventlog.h"
++
++
++/* flags */
++#define FLAG_TPM12	1
++#define FLAG_TPM20	1<<1
++#define FLAG_DA		1<<2
++#define FLAG_CURRENT	1<<3
++#define FLAG_LOG	1<<4
++#define FLAG_VERBOSE	1<<5
++#define FLAG_EVTLOG_OLD 1<<6
++
++#define TPM12_LOG "/sys/kernel/security/txt/tpm12_binary_evtlog"
++#define TPM20_LOG_OLD "/sys/kernel/security/txt/tpm20_binary_evtlog"
++#define TPM20_LOG_LEGACY "/sys/kernel/security/txt/tpm20_binary_evtlog_legacy"
++#define TPM20_LOG "/sys/kernel/security/txt/tpm20_binary_evtlog_tcg"
++
++#define error_msg(fmt, ...)         fprintf(stderr, fmt, ##__VA_ARGS__)
++
++bool __hash_start_use_extend = false;
++
++static void print_help(void) {
++	error_msg("pcr-calc [-h2dclvqe] [-a sha1|sha256] -p policy_file -m hash_str\n"
++		"\t-h Help: will print out this help message.\n"
++		"\t-2 TPM 2.0.\n"
++		"\t-d D/A mode.\n"
++		"\t-c Calculate from TPM eventlog.\n"
++		"\t-l Print TPM eventlog.\n"
++		"\t-v Print calculated TPM eventlog.\n"
++		"\t-q Hash start quirk mode.\n"
++		"\t-a alg Alogrithm: select what hash alogrithm to use.\n"
++		"\t-p policy_file Tboot Policy: the policy that was/will be used.\n"
++		"\t-m hash_str Multiboot Module: include module hash (MLE first).\n"
++		"\t-e evt_type:<hash_str>|emulate Override PCR events type found in the logs with the provided value or emulate the value entirely (emulation requires TBoot version and ACM to be provided).\n"
++		"\t-F file Use the given file as tpm event log (replace /sys/kernel/security/txt/*_binary_evtlog).\n"
++		"\t-A acm-path Path to the ACM that will be used to emulate events for PCR calculations (see -e).\n"
++		"\t-V tboot-version TBoot version targeted to emulate events for PCR calculations (see -e).\n"
++		"\t-o Assume the event-log to be formated using the legacy format (prior TCG PC Client Platform. EFI Protocol Specification).\n");
++}
++
++static bool apply_lg_policy(struct tpm *t, tb_policy_t *policy, size_t pol_size,
++			    tb_hash_t *mb, int mb_count) {
++	tb_hash_t *pol_hash;
++	struct pcr *p;
++	struct pcr_event *pe;
++	int i, bnum, pnum;
++
++	if (!tpm_clear_all_event(t, policy->hash_alg, TPM_EVT_TBOOT_HASH))
++		goto out;
++
++	pe = tpm_find_event(t, policy->hash_alg, TPM_EVT_MLE_HASH, 1);
++	pe->digest = mb[0];
++
++	if (!tpm_recalculate(t))
++		goto out;
++
++	pol_hash = tb_policy_hash(policy, pol_size, policy->hash_alg);
++	if (!pol_hash)
++		goto out;
++
++	bnum = alg_to_bank(policy->hash_alg);
++
++	p = &t->banks[bnum].pcrs[17];
++	if (!pcr_record_event(p, policy->hash_alg, TPM_EVT_TBOOT_HASH, pol_hash))
++		goto out_pol;
++
++	p = &t->banks[bnum].pcrs[18];
++	if (!pcr_record_event(p, policy->hash_alg, TPM_EVT_TBOOT_HASH, &mb[1]))
++		goto out_pol;
++
++	for (i = 1; i < mb_count; i++) {
++		tb_policy_entry_t *e = find_policy_entry(policy, i-1);
++
++		pnum = (e == NULL) ? 18 : e->pcr;
++		if (pnum == TB_POL_PCR_NONE)
++			continue;
++
++		p = &t->banks[bnum].pcrs[pnum];
++		if (!pcr_record_event(p, policy->hash_alg,
++		    TPM_EVT_TBOOT_HASH, &mb[i]))
++			goto out_pol;
++	}
++
++	free(pol_hash);
++	return true;
++
++out_pol:
++	free(pol_hash);
++out:
++	return false;
++}
++
++static bool apply_da_policy(struct tpm *t, tb_policy_t *policy, size_t pol_size,
++			    tb_hash_t *mb, int mb_count) {
++	tb_hash_t *pol_hash;
++	struct pcr *p;
++	struct pcr_event *pe;
++	int i, bnum, pnum;
++	uint16_t hash_alg;
++
++	hash_alg = t->alg == 0 ? policy->hash_alg : t->alg;
++
++	if (!tpm_clear_all_event(t, hash_alg, TPM_EVT_TBOOT_HASH))
++		goto out;
++
++	pe = tpm_find_event(t, hash_alg, TPM_EVT_MLE_HASH, 1);
++	pe->digest = mb[0];
++
++	if (!tpm_recalculate(t))
++		goto out;
++
++	pol_hash = tb_policy_hash(policy, pol_size, hash_alg);
++	if (!pol_hash)
++		goto out;
++
++	bnum = alg_to_bank(hash_alg);
++
++	p = &t->banks[bnum].pcrs[17];
++	if (!pcr_record_event(p, hash_alg, TPM_EVT_TBOOT_HASH, pol_hash))
++		goto out_pol;
++
++	p = &t->banks[bnum].pcrs[18];
++	if (!pcr_record_event(p, hash_alg, TPM_EVT_TBOOT_HASH, pol_hash))
++		goto out_pol;
++
++	p = &t->banks[bnum].pcrs[17];
++	if (!pcr_record_event(p, hash_alg, TPM_EVT_TBOOT_HASH, &mb[1]))
++		goto out_pol;
++
++	for (i = 1; i < mb_count; i++) {
++		tb_policy_entry_t *e = find_policy_entry(policy, i - 1);
++
++		pnum = (e == NULL) ? 17 : e->pcr;
++		if (pnum == TB_POL_PCR_NONE)
++			continue;
++
++		p = &t->banks[bnum].pcrs[pnum];
++		if (!pcr_record_event(p, hash_alg,
++		    TPM_EVT_TBOOT_HASH, &mb[i]))
++			goto out_pol;
++	}
++
++	free(pol_hash);
++	return true;
++
++out_pol:
++	free(pol_hash);
++out:
++	return false;
++}
++
++int main(int argc, char *argv[]) {
++	extern int optind;
++	int opt, flags, i, mb_count = 0, evt_count = 0, ret = 0;
++	tb_hash_t mb[20] = { 0 };
++	struct pcr_event evt[20];
++	struct tpm *t = NULL;
++	uint16_t alg_override = 0;
++	size_t pol_size = 0;
++	tb_policy_t *policy_file = NULL;
++	struct acm *acm = NULL;
++	tb_version_t tbver = TB_VERSION_DEFAULT;
++	const char *eventlog = NULL;
++
++	flags = FLAG_TPM12;
++
++	while ((opt = getopt(argc, (char ** const)argv, "h2dclvqa:p:m:e:F:A:V:o")) != -1) {
++		switch (opt) {
++			case 'm':
++				if (mb_count >= 20) {
++					error_msg("passed max number of hashes to -m\n");
++					ret = 1;
++					goto out;
++				}
++				if (read_hash(optarg, &mb[mb_count]) == false) {
++					error_msg("failed to pass valid hash to -m\n");
++					ret = 1;
++					goto out;
++				}
++				mb_count++;
++			break;
++			case 'p':
++				pol_size = read_file((char *) optarg,
++						     (char **) &policy_file);
++				if ( pol_size == 0 ) {
++					error_msg("failed to read in policy file\n");
++					ret = 1;
++					goto out;
++				}
++			break;
++			case 'a':
++				if (strcmp(optarg, "sha1") == 0) {
++					alg_override = TB_HALG_SHA1;
++				} else if (strcmp(optarg, "sha256") == 0) {
++					alg_override = TB_HALG_SHA256;
++				} else {
++					error_msg("unsupported hash algorithm\n");
++					ret = 1;
++					goto out;
++				}
++
++			break;
++			case '2':
++				flags &= ~FLAG_TPM12;
++				flags |= FLAG_TPM20;
++				flags |= FLAG_DA;
++			break;
++			case 'd':
++				flags |= FLAG_DA;
++			break;
++			case 'c':
++				flags |= FLAG_CURRENT;
++			break;
++			case 'l':
++				flags |= FLAG_LOG;
++			break;
++			case 'v':
++				flags |= FLAG_VERBOSE;
++			break;
++			case 'q':
++				set_hash_start_extend();
++			break;
++			case 'e':
++				if (evt_count >= 20) {
++					error_msg("passed max number of pcr events to -e\n");
++					ret = 1;
++					goto out;
++				}
++				if (read_pcr_event(optarg, &evt[evt_count]) <= 0) {
++					error_msg("failed to pass valid pcr event to -e\n");
++					ret = 1;
++					goto out;
++				}
++				++evt_count;
++			break;
++			case 'F':
++				eventlog = optarg;
++			break;
++			case 'A':
++				if (acm != NULL) {
++					error_msg("ACM path was already set.\n");
++					ret = 1;
++					goto out;
++				}
++				acm = acm_load(optarg);
++				if (!acm) {
++					error_msg("failed to load ACM:%s.\n", optarg);
++					ret = 1;
++					goto out;
++				}
++			break;
++			case 'V':
++				if (parse_tboot_version(optarg, &tbver)) {
++					error_msg("invalid tboot version: %s.\n", optarg);
++					ret = 1;
++					goto out;
++				}
++			break;
++			case 'o':
++				flags |= FLAG_EVTLOG_OLD;
++			break;
++			case 'h':
++				print_help();
++				ret = 1;
++				goto out;
++			default:
++			break;
++		}
++	}
++	if (!policy_file) {
++		if (!(flags & FLAG_CURRENT) && !(flags & FLAG_LOG)) {
++			error_msg("the policy file must be provided!\n");
++			ret = 1;
++			goto out;
++		} else if (alg_override == 0) {
++			error_msg("an hash algorithm must be provided!\n");
++			ret = 1;
++			goto out;
++		}
++	}
++
++	if (flags & FLAG_TPM12) {
++		char *buffer;
++		size_t size;
++
++		size = read_file(eventlog ? eventlog : TPM12_LOG, &buffer);
++		if (size > 0) {
++			t = parse_tpm12_log(buffer, size);
++			free(buffer);
++		}
++
++		if (!t) {
++			error_msg("failed to parse TPM 1.2 event log.\n");
++			ret = 1;
++			goto out;
++		}
++
++		t->alg = TB_HALG_SHA1;
++	} else {
++		char *buffer;
++		size_t size;
++
++		if (eventlog == NULL) {
++			if (!access(TPM20_LOG, R_OK))
++				eventlog = TPM20_LOG;
++			else if (!access(TPM20_LOG_LEGACY, R_OK)) {
++				eventlog = TPM20_LOG_LEGACY;
++				flags |= FLAG_EVTLOG_OLD;
++			} else if (!access(TPM20_LOG_OLD, R_OK)) {
++				eventlog = TPM20_LOG_OLD;
++				flags |= FLAG_EVTLOG_OLD;
++			} else {
++				error_msg("failed to find TPM 2.0 event log.\n");
++				goto out;
++			}
++		}
++
++		size = read_file(eventlog, &buffer);
++		if (size > 0) {
++			if (flags & FLAG_EVTLOG_OLD)
++				t = parse_tpm20_log_legacy(buffer, size);
++			else
++				t = parse_tpm20_log_tcg(buffer, size);
++			free(buffer);
++		}
++
++		if (!t) {
++			error_msg("failed to parse TPM 2.0 event log.\n");
++			ret = 1;
++			goto out;
++		}
++		t->alg = alg_override != 0 ? alg_override : policy_file->hash_alg;
++	}
++	/* t->alg is set from here, since alg_override == 0 && policy_file ==
++	 * NULL cannot pass the previous sanity check. */
++
++	if (flags & FLAG_CURRENT) {
++		tpm_print(t, t->alg);
++		goto out;
++	}
++
++	if (flags & FLAG_LOG) {
++		tpm_dump(t, t->alg);
++		goto out;
++	}
++
++	/* Event-type emulation sanity check. */
++	for (i = 0; i < evt_count; ++i)
++		if (evt[i].emulate && acm == NULL) {
++			error_msg("event-type emulation requires valid ACM passed as argument (-A).\n");
++			ret = 1;
++			goto out;
++		}
++
++
++	/* Change/Emulate events in the log according the cmdline. */
++	if (!tpm_substitute_all_events(t, t->alg, evt, evt_count)) {
++		error_msg("failed to apply event substitutions to the event log.\n");
++		ret = 1;
++		goto out;
++	}
++	if (!tpm_emulate_all_events(t, t->alg, evt, evt_count, acm, &tbver)) {
++		error_msg("failed to emulate events in the event log.\n");
++		ret = 1;
++		goto out;
++	}
++
++	if (flags & FLAG_DA) {
++		if (!apply_da_policy(t, policy_file, pol_size, mb, mb_count)) {
++			error_msg("failed applying DA policy.\n");
++			ret = 1;
++			goto out;
++		}
++	} else {
++		if (!apply_lg_policy(t, policy_file, pol_size, mb, mb_count)) {
++			error_msg("failed applying LG policy.\n");
++			ret = 1;
++			goto out;
++		}
++	}
++
++	if (flags & FLAG_VERBOSE)
++		tpm_dump(t, t->alg);
++	else
++		tpm_print(t, t->alg);
++
++out:
++	if (t != NULL)
++		destroy_tpm(t);
++
++	if (acm != NULL)
++		acm_unload(acm);
++
++	return ret;
++}
+diff --git a/pcr-calc/platform.c b/pcr-calc/platform.c
+new file mode 100644
+index 0000000..6a3ecf2
+--- /dev/null
++++ b/pcr-calc/platform.c
+@@ -0,0 +1,106 @@
++#include <errno.h>
++#include <string.h>
++#include <fcntl.h>
++#include <unistd.h>
++#include <sys/types.h>
++#include <stdio.h>
++#include <stdlib.h>
++
++#include "platform.h"
++
++#define printe(fmt, ...)         fprintf(stderr, fmt "\n", ##__VA_ARGS__)
++
++int read_u32(const char *path, uint32_t *v)
++{
++	int fd;
++	ssize_t rc = 0;
++	char buf[12] = { 0 };   /* "0xVVVVVVVV\n\0" */
++	char *end;
++	unsigned long a;
++
++	fd = open(path, O_RDONLY);
++	if (fd < 0)
++		return -errno;
++
++	rc = read(fd, buf, sizeof (buf));
++	if (rc < 0) {
++		rc = -errno;
++		goto out;
++	}
++
++	a = strtoul(buf, &end, 0);
++	if (end != (buf + rc - 1)) {
++		rc = -EINVAL;
++		goto out;
++	}
++
++	*v = a;
++
++out:
++	close(fd);
++	return rc;
++}
++
++int read_u64(const char *path, uint64_t *v)
++{
++	int fd;
++	ssize_t rc = 0;
++	char buf[19] = { 0 };   /* "0xVVVVVVVVVVVVVVVV\n\0" */
++	char *end;
++	unsigned long long a;
++
++	fd = open(path, O_RDONLY);
++	if (fd < 0)
++		return -errno;
++
++	rc = read(fd, buf, sizeof (buf));
++	if (rc < 0) {
++		rc = -errno;
++		goto out;
++	}
++
++	a = strtoull(buf, &end, 0);
++	if (end != (buf + rc - 1)) {
++		rc = -EINVAL;
++		goto out;
++	}
++
++	*v = a;
++
++out:
++	close(fd);
++	return rc;
++}
++
++uint64_t rdmsr(int msr)
++{
++	int fd, rc;
++	uint64_t val;
++
++	fd = open(MSR_DEVNODE, O_RDONLY);
++	if (fd < 0) {
++		printe("open failed: %s. Is module `msr' loaded?",
++			strerror(errno));
++		return -1ULL;
++	}
++
++	rc = lseek(fd, msr, SEEK_SET);
++	if (rc < 0) {
++		printe("lseek failed: %s.", strerror(errno));
++		return -1ULL;
++	} else if (rc != msr) {
++		printe("failed to seek msr value in " MSR_DEVNODE ".");
++		return -1ULL;
++	}
++
++	rc = read(fd, &val, sizeof (val));
++	if (rc < 0) {
++		printe("read failed: %s.", strerror(errno));
++		return -1ULL;
++	} else if (rc != sizeof (val)) {
++		printe("failed to read msr value in " MSR_DEVNODE ".");
++		return -1ULL;
++	}
++
++	return val;
++}
+diff --git a/pcr-calc/platform.h b/pcr-calc/platform.h
+new file mode 100644
+index 0000000..4f7c6fa
+--- /dev/null
++++ b/pcr-calc/platform.h
+@@ -0,0 +1,68 @@
++#ifndef _PLATFORM_H_
++# define _PLATFORM_H_
++
++# include <inttypes.h>
++# include <unistd.h>
++
++/*
++ * Low-level helpers.
++ */
++/* MSR devnode exposed by the Linux msr module. */
++# define MSR_DEVNODE "/dev/cpu/0/msr"
++/* See Intel SDM Vol3A 9.11.4. */
++# define MSR_IA32_PLATFORM_ID    0x17U
++
++static inline void __cpuid(unsigned int ax, uint32_t *p)
++{
++	asm volatile (
++		"cpuid"
++		: "=a" (p[0]), "=b" (p[1]), "=c" (p[2]), "=d" (p[3]) /* outputs */
++		: "0" (ax)                                           /* inputs */
++	);
++}
++
++/* Output in EAX of CPUID EAX=1. */
++typedef union {
++	uint32_t raw;
++	struct {
++		uint32_t step:4;
++		uint32_t model:4;
++		uint32_t family:4;
++		uint32_t type:2;
++		uint32_t _res0:2;
++		uint32_t model_ext:4;
++		uint32_t family_ext:8;
++		uint32_t _res1:4;
++	};
++} cpuid_proc_sig_eax_t;
++
++/* RDMDR 0x17: IA32_PLATFORM_ID. */
++typedef union {
++	uint64_t raw;
++	struct {
++		uint64_t _res0:50;
++		uint32_t id:3;
++		uint32_t _res1:11;
++	};
++} msr_ia32_platform_id_t;
++
++static inline uint32_t cpuid_eax(unsigned int op)
++{
++	uint32_t regs[4] = { 0 };
++
++	__cpuid(op, regs);
++
++	return regs[0];
++}
++
++static inline int access_msr_devnode(void)
++{
++	return !access(MSR_DEVNODE, R_OK);
++}
++
++int read_u32(const char *path, uint32_t *v);
++int read_u64(const char *path, uint64_t *v);
++uint64_t rdmsr(int msr);
++
++#endif /* !_PLATFORM_H_ */
++
+diff --git a/pcr-calc/tb_policy.c b/pcr-calc/tb_policy.c
+new file mode 100644
+index 0000000..4215342
+--- /dev/null
++++ b/pcr-calc/tb_policy.c
+@@ -0,0 +1,83 @@
++/*
++ * Copyright (c) 2015-2017, Daniel P. Smith
++ * Copyright (c) 2006-2008, Intel Corporation
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ *
++ *   * Redistributions of source code must retain the above copyright
++ *     notice, this list of conditions and the following disclaimer.
++ *   * Redistributions in binary form must reproduce the above
++ *     copyright notice, this list of conditions and the following
++ *     disclaimer in the documentation and/or other materials provided
++ *     with the distribution.
++ *   * Neither the name of the Intel Corporation nor the names of its
++ *     contributors may be used to endorse or promote products derived
++ *     from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
++ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
++ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
++ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
++ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
++ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
++ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
++ * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED
++ * OF THE POSSIBILITY OF SUCH DAMAGE.
++ *
++ */
++
++
++#include <stdio.h>
++#include <stdint.h>
++#include <stdbool.h>
++#include <stdlib.h>
++#include <string.h>
++#include <safe_lib.h>
++#include <sys/types.h>
++#include <sys/stat.h>
++#include <fcntl.h>
++#include <unistd.h>
++#include <sys/mman.h>
++
++#include "uuid.h"
++#include "../include/hash.h"
++#include "../include/tb_policy.h"
++
++tb_hash_t *tb_policy_hash(tb_policy_t *pol, size_t size, uint16_t alg)
++{
++	tb_hash_t *hash;
++	uint8_t buf[sizeof(pol->policy_control) + sizeof(tb_hash_t)];
++	uint32_t hash_size = get_hash_size(alg);
++
++	if (pol == NULL)
++		goto out;
++
++	hash = (tb_hash_t *) malloc(sizeof(tb_hash_t));
++	if (!hash)
++		goto out;
++
++	memset_s(buf, sizeof(buf), 0);
++	memcpy_s(buf, sizeof(buf), &pol->policy_control, sizeof(pol->policy_control));
++
++	if ( pol->policy_control & TB_POLCTL_EXTEND_PCR17 )
++		if ( !hash_buffer((unsigned char *)pol, size,
++                     (tb_hash_t *)&buf[sizeof(pol->policy_control)],
++		     alg))
++			goto out_free;
++
++	if ( !hash_buffer(buf, hash_size + sizeof(pol->policy_control),
++	     hash, alg) )
++		goto out_free;
++
++	return hash;
++out_free:
++	free(hash);
++out:
++	return NULL;
++}
+diff --git a/pcr-calc/tb_policy.h b/pcr-calc/tb_policy.h
+new file mode 100644
+index 0000000..cc23f2f
+--- /dev/null
++++ b/pcr-calc/tb_policy.h
+@@ -0,0 +1,43 @@
++/*
++ *
++ * Copyright (c) 2017 Daniel P. Smith
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ *
++ *   * Redistributions of source code must retain the above copyright
++ *     notice, this list of conditions and the following disclaimer.
++ *   * Redistributions in binary form must reproduce the above
++ *     copyright notice, this list of conditions and the following
++ *     disclaimer in the documentation and/or other materials provided
++ *     with the distribution.
++ *   * Neither the name of the Intel Corporation nor the names of its
++ *     contributors may be used to endorse or promote products derived
++ *     from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
++ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
++ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
++ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
++ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
++ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
++ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
++ * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED
++ * OF THE POSSIBILITY OF SUCH DAMAGE.
++ *
++ */
++
++#ifndef __CALC_TB_POLICY_H__
++#define __CALC_TB_POLICY_H__
++
++#include "../include/hash.h"
++#include "../include/tb_policy.h"
++
++tb_hash_t *tb_policy_hash(tb_policy_t *pol, size_t size, uint16_t alg);
++
++#endif
+diff --git a/pcr-calc/tboot.h b/pcr-calc/tboot.h
+new file mode 100644
+index 0000000..72b872c
+--- /dev/null
++++ b/pcr-calc/tboot.h
+@@ -0,0 +1,11 @@
++#ifndef _TBOOT_H_
++# define _TBOOT_H_
++
++typedef struct {
++    unsigned int major, minor, micro;
++} tb_version_t;
++
++#define TB_VERSION_DEFAULT { .major = 1, .minor = 9, .micro = 12 }
++
++#endif /* !_TBOOT_H_ */
++
+diff --git a/pcr-calc/tpm.c b/pcr-calc/tpm.c
+new file mode 100644
+index 0000000..45aac9b
+--- /dev/null
++++ b/pcr-calc/tpm.c
+@@ -0,0 +1,534 @@
++/*
++ *
++ * Copyright (c) 2017 Daniel P. Smith
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ *
++ *   * Redistributions of source code must retain the above copyright
++ *     notice, this list of conditions and the following disclaimer.
++ *   * Redistributions in binary form must reproduce the above
++ *     copyright notice, this list of conditions and the following
++ *     disclaimer in the documentation and/or other materials provided
++ *     with the distribution.
++ *   * Neither the name of the Intel Corporation nor the names of its
++ *     contributors may be used to endorse or promote products derived
++ *     from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
++ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
++ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
++ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
++ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
++ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
++ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
++ * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED
++ * OF THE POSSIBILITY OF SUCH DAMAGE.
++ *
++ */
++
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <safe_lib.h>
++#include <stdbool.h>
++#include <stdint.h>
++#include <stdarg.h>
++#include <sys/stat.h>
++#include <openssl/evp.h>
++
++#include "../include/hash.h"
++#include "uuid.h"
++#include "acm.h"
++#include "tpm.h"
++#include "eventlog.h"
++
++
++#define error_msg(fmt, ...)         fprintf(stderr, fmt, ##__VA_ARGS__)
++
++void pcr_print(struct pcr *p, uint16_t alg)
++{
++	int i;
++
++	if (!p) {
++		return;
++	}
++
++	printf("log: \n");
++	for (i = 0; i < p->log_idx; i++) {
++		printf("[%02d] %03x: ",i, p->log[i].type);
++		print_hash(&p->log[i].digest, alg);
++	}
++	printf("value: ");
++	print_hash(&p->value, alg);
++}
++
++bool pcr_recalculate(struct pcr *p, uint16_t alg)
++{
++	int i;
++
++	if (!p) {
++		return false;
++	}
++
++	if (p->log_idx == 0)
++		return true;
++
++	memset_s(&p->value, sizeof(tb_hash_t), 0);
++
++	for (i = 0; i < p->log_idx; i++) {
++		struct pcr_event *e = &p->log[i];
++		if (e->type == 0)
++			continue;
++
++		if (e->type == TPM_EVT_HASH_START) {
++			if (extend_hash_start()) {
++				memset_s(&p->value, sizeof(tb_hash_t), 0);
++				if (!extend_hash(&p->value, &e->digest, alg))
++					return false;
++			} else {
++				memcpy_s(&p->value, sizeof(tb_hash_t), &e->digest, sizeof(tb_hash_t));
++			}
++		} else if (!extend_hash(&p->value, &e->digest, alg)) {
++			return false;
++		}
++	}
++
++	return true;
++}
++
++bool pcr_record_event(struct pcr *p, uint16_t alg, uint32_t type,
++		      tb_hash_t *hash)
++{
++	struct pcr_event *evt;
++
++	if (!p || !hash) {
++		return false;
++	}
++
++	if (p->log_idx == MAX_LOG) {
++		error_msg("PCR%d log is full!\n", p->num);
++		return false;
++	}
++
++	if (type == TPM_EVT_HASH_START) {
++		if (extend_hash_start()) {
++			memset_s(&p->value, sizeof(tb_hash_t), 0);
++			if (!extend_hash(&p->value, hash, alg)) {
++				error_msg("failed to extend PCR%d with hash\n",
++					p->num);
++				return false;
++			}
++
++		} else {
++			memcpy_s(&p->value, sizeof(tb_hash_t), hash, sizeof(tb_hash_t));
++		}
++	} else if (!extend_hash(&p->value, hash, alg)) {
++		error_msg("failed to extend PCR%d with hash\n", p->num);
++		return false;
++	}
++
++	evt = &p->log[p->log_idx];
++	evt->type = type;
++	memcpy_s(&evt->digest, sizeof(tb_hash_t), hash, sizeof(tb_hash_t));
++	p->log_idx++;
++
++	return true;
++}
++
++struct tpm *new_tpm(uint8_t version)
++{
++	int i, j, banks;
++	struct tpm *t;
++
++	switch (version) {
++		case TPM12: banks = TPM12_BANKS;
++			    break;
++		case TPM20: banks = TPM20_BANKS;
++			    break;
++		default:
++			    return NULL;
++	}
++
++	t = calloc(1, sizeof(*t));
++	if (!t) {
++		return NULL;
++	}
++
++	t->version = version;
++	t->banks = calloc(banks, sizeof(struct pcr_bank));
++	if (!t->banks) {
++		free(t);
++		return NULL;
++	}
++
++	for (i = 0; i < banks; i++) {
++		for (j = 0; j < MAX_PCR; j++)
++			t->banks[i].pcrs[j].num = j;
++	}
++
++	return t;
++}
++
++void destroy_tpm(struct tpm *t)
++{
++	free(t->banks);
++	free(t);
++}
++
++bool tpm_record_event(struct tpm *t, uint16_t alg, void *e)
++{
++	int bnum = alg_to_bank(alg);
++	struct pcr_bank *bank;
++	struct pcr *p;
++	uint32_t type;
++	tb_hash_t *evt_hash;
++
++	if (!t || !e) {
++		return false;
++	}
++
++	bank = &t->banks[bnum];
++
++	switch (t->version) {
++		case TPM12: {
++			tpm12_pcr_event_t *event = e;
++
++			if (event->pcr_index == 255)
++				return true;
++
++			if (event->pcr_index >= MAX_PCR)
++				return false;
++
++			p = &bank->pcrs[event->pcr_index];
++
++			type = event->type;
++			evt_hash = (tb_hash_t *) event->digest;
++			break;
++		}
++		case TPM20: {
++			uint32_t pcr_num;
++
++			pcr_num = *((uint32_t *) e);
++			if (pcr_num >= MAX_PCR) {
++				if (pcr_num == 255)
++					return true;
++				else
++					return false;
++			}
++
++			p = &bank->pcrs[pcr_num];
++
++			e += sizeof(uint32_t);
++			type = *((uint32_t *) e);
++
++			e += sizeof(uint32_t);
++			evt_hash = (tb_hash_t *) e;
++			break;
++		}
++		default:
++			return false;
++	}
++
++	if (!pcr_record_event(p, alg, type, evt_hash))
++		return false;
++
++	t->active_banks |= alg_to_mask(alg);
++	return true;
++}
++
++/*
++ * Agile log structure helper.
++ */
++static size_t algorithms_get_digest_size(uint16_t id,
++	const TCG_EfiSpecIdEventAlgorithmSizes *algs)
++{
++	unsigned int i;
++
++	for (i = 0; i < algs->numberOfAlgorithms; ++i)
++		if (algs->digestSizes[i].algorithmId == id)
++			return algs->digestSizes[i].digestSize;
++
++	return 0;
++}
++
++size_t tpm_record_event_tcg(struct tpm *t, uint32_t pcr, uint32_t type,
++	const TPML_DIGEST_VALUES *v,
++	const TCG_EfiSpecIdEventAlgorithmSizes *algs)
++{
++	size_t i, n = sizeof (v->Count);
++
++	for (i = 0; i < v->Count; ++i) {
++		const TPMT_HA *ha = ((void*)v) + n;
++		int bnum = alg_to_bank(ha->AlgorithmId);
++		struct pcr_bank *bank = &t->banks[bnum];
++		size_t size;
++
++		size = algorithms_get_digest_size(ha->AlgorithmId, algs);
++		if (size == 0)
++			return 0;
++
++		if (pcr < MAX_PCR) {
++			if (!pcr_record_event(&bank->pcrs[pcr],
++				ha->AlgorithmId, type, (tb_hash_t*)ha->Digest))
++				return 0;
++
++			t->active_banks |= alg_to_mask(ha->AlgorithmId);
++		}
++
++		n += sizeof (ha->AlgorithmId) + size;
++	}
++
++	return n;
++}
++
++int tpm_count_event(struct tpm *t, uint16_t alg, uint32_t evt_type)
++{
++	int i, j, count = 0;
++	struct pcr_bank *b;
++
++	if (!t)
++		return 0;
++
++	b = tpm_get_bank(t, alg);
++	if (!b)
++		return 0;
++
++	for (i = 0; i < MAX_PCR; i++) {
++		struct pcr *p = &b->pcrs[i];
++
++		for (j = 0; j < p->log_idx; j++) {
++			if (p->log[j].type == evt_type)
++				count++;
++		}
++	}
++
++	return count;
++
++}
++
++struct pcr_event *tpm_find_event(struct tpm *t, uint16_t alg,
++				uint32_t evt_type, int n)
++{
++	int i, j, count = 1;
++	struct pcr_bank *b;
++
++	if (!t)
++		return NULL;
++
++	b = tpm_get_bank(t, alg);
++	if (!b)
++		return NULL;
++
++	for (i = 0; i < MAX_PCR; i++) {
++		struct pcr *p = &b->pcrs[i];
++
++		for (j = 0; j < p->log_idx; j++) {
++			if (p->log[j].type == evt_type) {
++				if (count == n)
++					return &p->log[j];
++				else
++					count++;
++			}
++		}
++	}
++
++	return NULL;
++}
++
++bool tpm_substitute_event(struct tpm *t, uint16_t alg,
++			  const struct pcr_event *evt)
++{
++	unsigned int i, j;
++	struct pcr_bank *b;
++
++	if (!t || !evt)
++		return false;
++
++	b = tpm_get_bank(t, alg);
++	if (!b)
++		return false;
++
++	for (i = 0; i < MAX_PCR; ++i) {
++		struct pcr *p = &b->pcrs[i];
++
++		for (j = 0; j < p->log_idx; ++j) {
++			if (p->log[j].type == evt->type) {
++				p->log[j].digest = evt->digest;
++			}
++		}
++	}
++
++	return true;
++}
++
++bool tpm_substitute_all_events(struct tpm *t, uint16_t alg,
++				const struct pcr_event *evt,
++				unsigned int evt_count)
++{
++	unsigned int i;
++
++	for (i = 0; i < evt_count; ++i)
++		if (!evt[i].emulate)
++			if (!tpm_substitute_event(t, alg, &evt[i]))
++				return false;
++
++	return true;
++}
++
++bool tpm_emulate_event(struct tpm *t, uint16_t alg,
++		       const struct pcr_event *evt,
++		       const struct acm *acm, const tb_version_t *tbver)
++{
++	unsigned int i, j;
++	struct pcr_bank *b;
++
++	if (!t || !evt)
++		return false;
++
++	b = tpm_get_bank(t, alg);
++	if (!b)
++		return false;
++
++	for (i = 0; i < MAX_PCR; ++i) {
++		struct pcr *p = &b->pcrs[i];
++
++		for (j = 0; j < p->log_idx; ++j)
++			if (p->log[j].type == evt->type)
++				if (emulate_event(acm, alg, t->version, tbver,
++						  &p->log[j]))
++					return false;
++	}
++
++	return true;
++}
++
++bool tpm_emulate_all_events(struct tpm *t, uint16_t alg,
++			    const struct pcr_event *evt, unsigned int evt_count,
++			    const struct acm *acm, const tb_version_t *tbver)
++{
++	unsigned int i;
++
++	for (i = 0; i < evt_count; ++i)
++		if (evt[i].emulate)
++			if (!tpm_emulate_event(t, alg, &evt[i], acm, tbver))
++				return false;
++
++	return true;
++}
++
++bool tpm_clear_all_event(struct tpm *t, uint16_t alg, uint32_t evt_type)
++{
++	int i, j;
++	struct pcr_bank *b;
++
++	if (!t)
++		return false;
++
++	b = tpm_get_bank(t, alg);
++	if (!b)
++		return false;
++
++	for (i = 0; i < MAX_PCR; i++) {
++		struct pcr *p = &b->pcrs[i];
++
++		for (j = 0; j < p->log_idx; j++) {
++			if (p->log[j].type == evt_type)
++				memset_s(&p->log[j], sizeof(struct pcr_event), 0);
++		}
++	}
++
++	return true;
++}
++
++bool tpm_recalculate(struct tpm *t)
++{
++	int i,j;
++	struct pcr_bank *b;
++
++	if (!t) {
++		return false;
++	}
++
++	for (i = 0; 1<<i < ALG_MASK_LAST; i++) {
++		if (!(t->active_banks & 1<<i))
++			continue;
++
++		b = &t->banks[i];
++
++		for (j=0; j<MAX_PCR; j++) {
++			if (!pcr_recalculate(&b->pcrs[j], bank_to_alg(i)))
++				return false;
++		}
++	}
++
++	return true;
++}
++
++void tpm_print(struct tpm *t, uint16_t alg)
++{
++	int i,bnum = alg_to_bank(alg);
++	unsigned int hash_size = get_hash_size(alg);
++	struct pcr_bank *bank;
++	tb_hash_t null_hash;
++
++	if (!t)
++		return;
++
++	bank = &(t->banks[bnum]);
++
++	memset_s(&null_hash, sizeof(tb_hash_t), 0);
++
++	for (i = 0; i < MAX_PCR; i++) {
++		int diff;
++		errno_t err;
++
++		err = memcmp_s(&(bank->pcrs[i].value), hash_size,
++				&null_hash, hash_size, &diff);
++		if (err) {
++			error_msg("Invalid value in PCR%d.", i);
++			break;
++		}
++		if (!diff)
++			continue;
++
++		printf("%02d:",bank->pcrs[i].num);
++		print_hash(&bank->pcrs[i].value, alg);
++	}
++}
++
++void tpm_dump(struct tpm *t, uint16_t alg)
++{
++	int i,bnum = alg_to_bank(alg);
++	unsigned int hash_size = get_hash_size(alg);
++	struct pcr_bank *bank;
++	tb_hash_t null_hash;
++
++	if (!t)
++		return;
++
++	bank = &(t->banks[bnum]);
++
++	memset_s(&null_hash, sizeof(tb_hash_t), 0);
++
++	for (i = 0; i < MAX_PCR; i++) {
++		int diff;
++		errno_t err;
++
++		err = memcmp_s(&(bank->pcrs[i].value), hash_size,
++				&null_hash, hash_size, &diff);
++		if (err) {
++			error_msg("Invalid value in PCR%d.", i);
++			break;
++		}
++		if (!diff)
++			continue;
++
++		pcr_print(&bank->pcrs[i], alg);
++	}
++}
+diff --git a/pcr-calc/tpm.h b/pcr-calc/tpm.h
+new file mode 100644
+index 0000000..bb5f30e
+--- /dev/null
++++ b/pcr-calc/tpm.h
+@@ -0,0 +1,200 @@
++/*
++ * pcr.h: pcr definitions
++ *
++ * Copyright (c) 2017 Daniel P. Smith
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ *
++ *   * Redistributions of source code must retain the above copyright
++ *     notice, this list of conditions and the following disclaimer.
++ *   * Redistributions in binary form must reproduce the above
++ *     copyright notice, this list of conditions and the following
++ *     disclaimer in the documentation and/or other materials provided
++ *     with the distribution.
++ *   * Neither the name of the Intel Corporation nor the names of its
++ *     contributors may be used to endorse or promote products derived
++ *     from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
++ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
++ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
++ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
++ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
++ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
++ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
++ * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED
++ * OF THE POSSIBILITY OF SUCH DAMAGE.
++ *
++ */
++
++#ifndef __PCR_H__
++#define __PCR_H__
++
++#include <stdint.h>
++#include <stdio.h>
++#include <string.h>
++#include <stdbool.h>
++#include "../include/config.h"
++#include "../include/hash.h"
++#include "heap.h"
++#include "tboot.h"
++#include "eventlog_tcg.h"
++
++
++#define TPM_EVT_HASH_START	0x402
++#define TPM_EVT_MLE_HASH	0x404
++#define TPM_EVT_TBOOT_HASH	0x501
++
++struct pcr_event {
++	uint32_t type;
++	tb_hash_t digest;
++	int emulate;
++};
++
++#define MAX_PCR 24
++#define MAX_LOG 50
++struct pcr {
++	uint8_t num;
++	uint8_t log_idx;
++	tb_hash_t value;
++	struct pcr_event log[MAX_LOG];
++};
++
++#define SHA1_BANK 0
++#define SHA256_BANK 1
++#define SM3_BANK 2
++#define SHA384_BANK 3
++#define SHA512_BANK 4
++
++struct pcr_bank {
++	struct pcr pcrs[MAX_PCR];
++};
++
++#define TPM12 0x12
++#define TPM20 0x20
++#define TPM12_BANKS 1
++#define TPM20_BANKS 5
++
++struct tpm {
++	uint8_t version;
++	uint16_t alg;
++	uint8_t active_banks;
++	struct pcr_bank *banks;
++};
++
++static inline int alg_to_bank(uint16_t alg)
++{
++	if ( alg == TB_HALG_SHA1 )
++		return SHA1_BANK;
++	else if ( alg == TB_HALG_SHA256 )
++		return SHA256_BANK;
++	else if ( alg == TB_HALG_SM3 )
++		return SM3_BANK;
++	else if ( alg == TB_HALG_SHA384 )
++		return SHA384_BANK;
++	else if ( alg == TB_HALG_SHA512 )
++		return SHA512_BANK;
++	else
++		return -1;
++}
++
++static inline int bank_to_alg(int bank)
++{
++	if ( bank == SHA1_BANK )
++		return TB_HALG_SHA1 ;
++	else if ( bank == SHA256_BANK )
++		return TB_HALG_SHA256;
++	else if ( bank == SM3_BANK )
++		return TB_HALG_SM3 ;
++	else if ( bank == SHA384_BANK )
++		return TB_HALG_SHA384 ;
++	else if ( bank == SHA512_BANK )
++		return TB_HALG_SHA512;
++	else
++		return -1;
++}
++
++#define ALG_MASK_SHA1	1
++#define ALG_MASK_SHA256 1<<1
++#define ALG_MASK_SM3	1<<2
++#define ALG_MASK_SHA384 1<<3
++#define ALG_MASK_SHA512 1<<4
++#define ALG_MASK_LAST	1<<5
++
++static inline int alg_to_mask(uint16_t alg)
++{
++	if ( alg == TB_HALG_SHA1 )
++		return ALG_MASK_SHA1;
++	else if ( alg == TB_HALG_SHA256 )
++		return ALG_MASK_SHA256;
++	else if ( alg == TB_HALG_SM3 )
++		return ALG_MASK_SM3;
++	else if ( alg == TB_HALG_SHA384 )
++		return ALG_MASK_SHA384;
++	else if ( alg == TB_HALG_SHA512 )
++		return ALG_MASK_SHA512;
++	else
++		return 0;
++}
++
++static inline struct pcr_bank *tpm_get_bank(const struct tpm *t, uint16_t alg)
++{
++	int bank;
++
++	if (!t)
++		return NULL;
++
++	bank = alg_to_bank(alg);
++	if (bank < 0)
++		return NULL;
++
++	if (!(t->active_banks & alg_to_mask(alg)))
++		return NULL;
++
++	return &t->banks[bank];
++}
++
++extern bool __hash_start_use_extend;
++static inline void set_hash_start_extend(void)
++{
++	__hash_start_use_extend = true;
++}
++
++static inline bool extend_hash_start(void)
++{
++	return __hash_start_use_extend;
++}
++
++struct tpm *new_tpm(uint8_t version);
++void destroy_tpm(struct tpm *t);
++bool tpm_record_event(struct tpm *t, uint16_t alg, void *e);
++size_t tpm_record_event_tcg(struct tpm *t, uint32_t pcr, uint32_t type,
++	const TPML_DIGEST_VALUES *v,
++	const TCG_EfiSpecIdEventAlgorithmSizes *algs);
++int tpm_count_event(struct tpm *t, uint16_t alg, uint32_t evt_type);
++struct pcr_event *tpm_find_event(struct tpm *t, uint16_t alg,
++				uint32_t evt_type, int n);
++bool tpm_substitute_event(struct tpm *t, uint16_t alg,
++			  const struct pcr_event *evt);
++bool tpm_substitute_all_events(struct tpm *t, uint16_t alg,
++				const struct pcr_event *evt,
++				unsigned int evt_count);
++bool tpm_emulate_event(struct tpm *t, uint16_t alg,
++		       const struct pcr_event *evt,
++		       const struct acm *acm, const tb_version_t *tbver);
++bool tpm_emulate_all_events(struct tpm *t, uint16_t alg,
++			    const struct pcr_event *evt, unsigned int evt_count,
++			    const struct acm *acm, const tb_version_t *tbver);
++bool tpm_clear_all_event(struct tpm *t, uint16_t alg, uint32_t evt_type);
++bool tpm_recalculate(struct tpm *t);
++void tpm_print(struct tpm *t, uint16_t alg);
++void tpm_dump(struct tpm *t, uint16_t alg);
++bool pcr_record_event(struct pcr *p, uint16_t alg, uint32_t type, tb_hash_t *hash);
++
++#endif
+diff --git a/pcr-calc/txt.h b/pcr-calc/txt.h
+new file mode 100644
+index 0000000..adf9c9c
+--- /dev/null
++++ b/pcr-calc/txt.h
+@@ -0,0 +1,51 @@
++#ifndef _TXT_H_
++# define _TXT_H_
++
++# include <inttypes.h>
++# include <unistd.h>
++
++# define TXT_INFO_SYSFS "/sys/devices/platform/txt/"
++
++typedef union {
++	uint64_t raw;
++	struct {
++		uint16_t vid    : 16;
++		uint16_t did    : 16;
++		uint16_t rid    : 16;
++		uint16_t ext    : 16;
++	};
++} txt_cr_didvid_t;
++
++typedef union {
++	uint32_t raw;
++	struct {
++		uint32_t _res   : 31;
++		uint8_t debug   : 1;
++	};
++} txt_cr_ver_fsbif_t;
++
++typedef union {
++	uint32_t raw;
++	struct {
++		uint32_t _res   : 31;
++		uint8_t debug   : 1;
++	};
++} txt_cr_ver_qpiif_t;
++
++# define DECLARE_READ_TXT(entry, size)                          \
++	static inline int read_txt_cr_##entry(txt_cr_##entry##_t *e)    \
++{                                                               \
++	return read_##size(TXT_INFO_SYSFS #entry, &e->raw);         \
++}
++DECLARE_READ_TXT(didvid, u64);
++DECLARE_READ_TXT(ver_fsbif, u32);
++DECLARE_READ_TXT(ver_qpiif, u32);
++
++static inline int access_txt_crs(void)
++{
++	return !access(TXT_INFO_SYSFS "didvid", R_OK) &&
++		!access(TXT_INFO_SYSFS "ver_fsbif", R_OK) &&
++		!access(TXT_INFO_SYSFS "ver_qpiif", R_OK);
++}
++
++#endif /* _TXT_H_ */
+diff --git a/pcr-calc/util.c b/pcr-calc/util.c
+new file mode 100644
+index 0000000..cc76f0d
+--- /dev/null
++++ b/pcr-calc/util.c
+@@ -0,0 +1,188 @@
++/*
++ *
++ * Copyright (c) 2017 Daniel P. Smith
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ *
++ *   * Redistributions of source code must retain the above copyright
++ *     notice, this list of conditions and the following disclaimer.
++ *   * Redistributions in binary form must reproduce the above
++ *     copyright notice, this list of conditions and the following
++ *     disclaimer in the documentation and/or other materials provided
++ *     with the distribution.
++ *   * Neither the name of the Intel Corporation nor the names of its
++ *     contributors may be used to endorse or promote products derived
++ *     from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
++ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
++ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
++ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
++ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
++ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
++ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
++ * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED
++ * OF THE POSSIBILITY OF SUCH DAMAGE.
++ *
++ */
++
++#include <stdint.h>
++#include <stdlib.h>
++#include <string.h>
++#include <stdio.h>
++#include <stdbool.h>
++#include <sys/types.h>
++#include <sys/stat.h>
++#include <fcntl.h>
++#include <unistd.h>
++#include <limits.h>
++#include <safe_lib.h>
++
++#include "../include/hash.h"
++#include "uuid.h"
++#include "acm.h"
++#include "tpm.h"
++
++#define error_msg(fmt, ...)         fprintf(stderr, fmt, ##__VA_ARGS__)
++
++bool read_hash(const char *hexstr, tb_hash_t *hash)
++{
++	size_t len = strlen(hexstr);
++	int i, j;
++	unsigned char *buf = (unsigned char *)hash;
++
++	if (len == 1 && hexstr[0] == '0') {
++		memset_s(hash, sizeof(tb_hash_t), 0);
++		return true;
++	}
++
++	if (len / 2 >= sizeof(tb_hash_t))
++		return false;
++	if (len % 2 == 1)
++		return false;
++
++	for (i=0, j=0; i < (int) len; i+=2, j++) {
++		if (sscanf(&(hexstr[i]), "%2hhx", &(buf[j])) != 1)
++			return false;
++	}
++
++	return true;
++}
++
++#define BLOCK_SIZE 1024
++size_t read_file(const char *path, char **buffer)
++{
++	char *top, *insert;
++	int fd, count;
++	size_t allocated = 0, total = 0;
++
++	if (access(path, F_OK) == -1) {
++		error_msg("no access to file: %s\n",path);
++		goto out;
++	}
++
++	allocated += 4*BLOCK_SIZE;
++	*buffer = (char *) malloc(allocated);
++	if (!*buffer) {
++		error_msg("unable to allocate memory\n");
++		goto out;
++	}
++
++	top = *buffer;
++	insert = *buffer;
++
++	fd = open(path, O_RDONLY);
++	if (fd == -1) {
++		error_msg("unable to open file: %s\n",path);
++		goto out_free;
++	}
++
++	while ((count = read(fd, insert, BLOCK_SIZE)) != 0) {
++		if (count == -1) {
++			error_msg("read failed\n");
++			goto out_fd;
++		}
++
++		total += count;
++		insert += count;
++
++		if ((total + BLOCK_SIZE) > allocated) {
++			allocated += BLOCK_SIZE;
++			*buffer = realloc(*buffer, allocated);
++			if (! *buffer) {
++				error_msg("failed to resize buffer\n");
++				/* reset buffer to free original */
++				*buffer = top;
++				goto out_fd;
++			}
++			top = *buffer;
++			insert = top + total;
++		}
++	}
++
++	close(fd);
++	return total;
++
++out_fd:
++	close(fd);
++out_free:
++	free(*buffer);
++out:
++	return 0;
++}
++
++/*
++ * Parse a string representing a pcr event.
++ * Format: <event-id>:<hash>|"emulate"
++ * e.g, for sha256: '0x40f:5a3e80a37915b1601c363acd1601df7ef257d5d32c664004a2ec0484a4f60628'
++ * e.g, for sha512: '0x40f:be688838ca8686e5c90689bf2ab585cef1137c999b48c70b92f67a5c34dc15697b5d11c982ed6d71be1e1e7f7b4e0733884aa97c3f7a339a8ed03577cf74be09
++ * e.g, for emulation: '0x40f:emulate'
++ */
++#define PCREVT_BUF_LEN 135
++int read_pcr_event(const char *s, struct pcr_event *evt)
++{
++	size_t len = strnlen(s, PCREVT_BUF_LEN);
++	char *end = NULL;
++	unsigned long type;
++	tb_hash_t digest;
++	int rc;
++
++	if (len >= PCREVT_BUF_LEN)
++		return -1;
++
++	memset_s(&digest, sizeof (tb_hash_t), 0);
++
++	type = strtoul(s, &end, 0);
++	if (type == ULONG_MAX)
++		return -1;
++	if (!end || *end != ':' || s == end)
++		return -1;
++
++	if (strcmp_s(&end[1], sizeof ("emulate"), "emulate", &rc) == EOK && !rc)
++		evt->emulate = 1;
++	else if (read_hash(&end[1], &digest))
++		evt->emulate = 0;
++	else
++		return -1;
++
++	evt->type = type;
++	evt->digest = digest;
++	return len;
++}
++
++int parse_tboot_version(const char *s, tb_version_t *tbver)
++{
++	int n;
++
++	n = sscanf(s, "%u.%u.%u", &tbver->major, &tbver->minor, &tbver->micro);
++	if (n != 3)
++		return errno ? -errno : -EINVAL;
++
++	return 0;
++}
+diff --git a/pcr-calc/util.h b/pcr-calc/util.h
+new file mode 100644
+index 0000000..506bb78
+--- /dev/null
++++ b/pcr-calc/util.h
+@@ -0,0 +1,49 @@
++/*
++ *
++ * Copyright (c) 2017 Daniel P. Smith
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ *
++ *   * Redistributions of source code must retain the above copyright
++ *     notice, this list of conditions and the following disclaimer.
++ *   * Redistributions in binary form must reproduce the above
++ *     copyright notice, this list of conditions and the following
++ *     disclaimer in the documentation and/or other materials provided
++ *     with the distribution.
++ *   * Neither the name of the Intel Corporation nor the names of its
++ *     contributors may be used to endorse or promote products derived
++ *     from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
++ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
++ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
++ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
++ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
++ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
++ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
++ * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED
++ * OF THE POSSIBILITY OF SUCH DAMAGE.
++ *
++ */
++
++#ifndef __UTIL_H__
++#define __UTIL_H__
++
++#include <stdbool.h>
++#include <sys/types.h>
++
++bool read_hash(const char *hexstr, tb_hash_t *hash);
++size_t read_file(const char *path, char **buffer);
++int read_pcr_event(const char *s, struct pcr_event *evt);
++
++int parse_tboot_version(const char *s, tb_version_t *ver);
++int read_pcr_event_emulate(const char *s,
++	 struct acm **acm, tb_version_t *ver, struct pcr_event *evt);
++
++#endif
+diff --git a/pcr-calc/uuid.h b/pcr-calc/uuid.h
+new file mode 100644
+index 0000000..7cd7e28
+--- /dev/null
++++ b/pcr-calc/uuid.h
+@@ -0,0 +1,53 @@
++/*
++ * heap.h: Intel(r) TXT heap definitions
++ *
++ * Copyright (c) 2003-2011, Intel Corporation
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ *
++ *   * Redistributions of source code must retain the above copyright
++ *     notice, this list of conditions and the following disclaimer.
++ *   * Redistributions in binary form must reproduce the above
++ *     copyright notice, this list of conditions and the following
++ *     disclaimer in the documentation and/or other materials provided
++ *     with the distribution.
++ *   * Neither the name of the Intel Corporation nor the names of its
++ *     contributors may be used to endorse or promote products derived
++ *     from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
++ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
++ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
++ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
++ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
++ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
++ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
++ * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED
++ * OF THE POSSIBILITY OF SUCH DAMAGE.
++ *
++ */
++
++#ifndef __UUID_H__
++#define __UUID_H__
++
++#ifndef __packed
++#define __packed   __attribute__ ((packed))
++#endif
++
++/* define uuid_t here in case uuid.h wasn't pre-included */
++/* (i.e. so tboot.h can be self-sufficient) */
++typedef struct __packed {
++  uint32_t    data1;
++  uint16_t    data2;
++  uint16_t    data3;
++  uint16_t    data4;
++  uint8_t     data5[6];
++} uuid_t;
++
++#endif
+-- 
+2.17.1
+

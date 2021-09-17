@@ -1,7 +1,7 @@
-From ed59e49b48ff88dee26beb10b932cd6bc4650792 Mon Sep 17 00:00:00 2001
+From 12e105e94c330e1a657223dc6fff4d9e06f5d367 Mon Sep 17 00:00:00 2001
 From: Eric Chanudet <chanudete@ainfosec.com>
 Date: Mon, 13 Aug 2018 14:02:07 -0400
-Subject: [PATCH 10/14] tboot: Export TPM event log to VMM/Kernel.
+Subject: [PATCH 08/10] tboot: Export TPM event log to VMM/Kernel.
 
 Create a copy of the TPM event log outside of the TXT heap for the Xen
 use case to safe past the log down to a VM (see relevant Xen patch
@@ -9,14 +9,14 @@ introducing the hypercall to access the log).
 
 Signed-off-by: Daniel P. Smith <dpsmith@apertussolutions.com>
 ---
- include/tboot.h         |   4 ++
- tboot/common/tboot.c    |  20 +++++++
+ include/tboot.h         |  21 +++++
+ tboot/common/tboot.c    |  23 ++++++
  tboot/include/txt/txt.h |   1 +
- tboot/txt/txt.c         | 129 ++++++++++++++++++++++++++++++++++++++++
- 4 files changed, 154 insertions(+)
+ tboot/txt/txt.c         | 177 +++++++++++++++++++++++++++++++++++++++-
+ 4 files changed, 220 insertions(+), 2 deletions(-)
 
 diff --git a/include/tboot.h b/include/tboot.h
-index abb1ca4..4e7c7be 100644
+index abb1ca4..3bec9e8 100644
 --- a/include/tboot.h
 +++ b/include/tboot.h
 @@ -109,6 +109,14 @@ typedef struct __packed {
@@ -34,7 +34,7 @@ index abb1ca4..4e7c7be 100644
  } tboot_shared_t;
  
  #define TB_SHUTDOWN_REBOOT      0
-@@ -150,6 +158,16 @@ static inline bool tboot_in_measured_env
+@@ -150,6 +158,16 @@ static inline bool tboot_in_measured_env(void)
      return (g_tboot_shared != NULL);
  }
  
@@ -51,7 +51,7 @@ index abb1ca4..4e7c7be 100644
  static inline void print_tboot_shared(const tboot_shared_t *tboot_shared)
  {
      printk(TBOOT_DETA"tboot_shared data:\n");
-@@ -163,6 +181,9 @@ static inline void print_tboot_shared(co
+@@ -163,6 +181,9 @@ static inline void print_tboot_shared(const tboot_shared_t *tboot_shared)
      printk(TBOOT_DETA"\t flags: 0x%8.8x\n", tboot_shared->flags);
      printk(TBOOT_DETA"\t ap_wake_addr: 0x%08x\n", (uint32_t)tboot_shared->ap_wake_addr);
      printk(TBOOT_DETA"\t ap_wake_trigger: %u\n", tboot_shared->ap_wake_trigger);
@@ -62,12 +62,12 @@ index abb1ca4..4e7c7be 100644
  
  #endif    /* __TBOOT_H__ */
 diff --git a/tboot/common/tboot.c b/tboot/common/tboot.c
-index ed7397f..1514e8a 100644
+index 37a2923..e5abe56 100644
 --- a/tboot/common/tboot.c
 +++ b/tboot/common/tboot.c
-@@ -215,6 +215,15 @@ static void post_launch(void)
-     if ( !e820_protect_region(base, size, mem_type) )      
+@@ -220,6 +220,17 @@ static void post_launch(void)
          apply_policy(TB_ERR_FATAL);
+     }
  
 +    /* if using memory logging, reserve log area */
 +    if ( g_log_targets & TBOOT_LOG_TARGET_MEMORY ) {
@@ -76,12 +76,14 @@ index ed7397f..1514e8a 100644
 +        printk(TBOOT_INFO"reserving tboot memory log (%Lx - %Lx) in e820 table\n", base, (base + size - 1));
 +        if ( !e820_protect_region(base, size, E820_RESERVED) )
 +            apply_policy(TB_ERR_FATAL);
++        if (!efi_memmap_reserve(base, size))
++            apply_policy(TB_ERR_FATAL);
 +    }
 +
      /*
       * verify modules against policy
       */
-@@ -259,6 +268,18 @@ static void post_launch(void)
+@@ -264,6 +275,18 @@ static void post_launch(void)
          printk(TBOOT_ERR"ap_wake_mwait specified but the CPU doesn't support it.\n");
      }
  
@@ -101,7 +103,7 @@ index ed7397f..1514e8a 100644
  
      launch_kernel(true);
 diff --git a/tboot/include/txt/txt.h b/tboot/include/txt/txt.h
-index 28eb6e3..ff29cbf 100644
+index 28eb6e3..40ce20a 100644
 --- a/tboot/include/txt/txt.h
 +++ b/tboot/include/txt/txt.h
 @@ -62,6 +62,7 @@ extern void txt_shutdown(void);
@@ -113,10 +115,10 @@ index 28eb6e3..ff29cbf 100644
  extern uint32_t g_using_da;
  #endif      /* __TXT_TXT_H__ */
 diff --git a/tboot/txt/txt.c b/tboot/txt/txt.c
-index 037609b..79dc733 100644
+index 0b7c814..9f255d0 100644
 --- a/tboot/txt/txt.c
 +++ b/tboot/txt/txt.c
-@@ -372,6 +372,43 @@ bool evtlog_append_tpm12(uint8_t pcr, tb_hash_t *hash, uint32_t type)
+@@ -374,6 +374,43 @@ bool evtlog_append_tpm12(uint8_t pcr, tb_hash_t *hash, uint32_t type)
      return true;
  }
  
@@ -137,9 +139,9 @@ index 037609b..79dc733 100644
 +        goto fail;
 +
 +    reserve = PAGE_UP(*size);
-+    get_highest_sized_ram(reserve, 0x100000000ULL, &ram_start, &ram_size);
-+    if (ram_start == 0)
-+        goto fail;
++    if (!efi_memmap_get_highest_sized_ram(reserve, 0x100000000ULL, &ram_start, &ram_size))
++        if (!e820_get_highest_sized_ram(reserve, 0x100000000ULL, &ram_start, &ram_size))
++            goto fail;
 +
 +    *log = (ram_start + ram_size) - reserve;
 +    dst = (void *)(uint32_t) *log;
@@ -160,7 +162,7 @@ index 037609b..79dc733 100644
  void dump_event_2(void)
  {
      heap_event_log_descr_t *log_descr;
-@@ -477,8 +514,7 @@ bool evtlog_append_tpm2_tcg(uint8_t pcr,
+@@ -479,8 +516,7 @@ bool evtlog_append_tpm2_tcg(uint8_t pcr, uint32_t type, hash_list_t *hl)
          return false;
      }
  
@@ -170,7 +172,7 @@ index 037609b..79dc733 100644
      event->pcr_index = pcr;
      event->event_type = type;
      event->event_size = 0;  // No event data passed by tboot.
-@@ -499,6 +535,121 @@ bool evtlog_append_tpm2_tcg(uint8_t pcr,
+@@ -501,6 +537,121 @@ bool evtlog_append_tpm2_tcg(uint8_t pcr, uint32_t type, hash_list_t *hl)
      return true;
  }
  
@@ -198,9 +200,9 @@ index 037609b..79dc733 100644
 +        goto fail;
 +
 +    reserve = PAGE_UP(*size);
-+    get_highest_sized_ram(reserve, 0x100000000ULL, &ram_start, &ram_size);
-+    if (ram_start == 0)
-+        goto fail;
++    if (!efi_memmap_get_highest_sized_ram(reserve, 0x100000000ull, &ram_start, &ram_size))
++        if (!e820_get_highest_sized_ram(reserve, 0x100000000ull, &ram_start, &ram_size))
++            goto fail;
 +
 +    /* place log as the last n pages of ram section */
 +    *log = (ram_start + ram_size) - reserve;
@@ -266,9 +268,9 @@ index 037609b..79dc733 100644
 +    reserve = PAGE_UP(*size);
 +
 +    /* Find a RAM region below 4G. */
-+    get_highest_sized_ram(reserve, 0x100000000ULL, &ram_start, &ram_size);
-+    if ( ram_start == 0 )
-+        goto fail;
++    if (!efi_memmap_get_highest_sized_ram(reserve, 0x100000000ULL, &ram_start, &ram_size))
++        if (!e820_get_highest_sized_ram(reserve, 0x100000000ULL, &ram_start, &ram_size))
++            goto fail;
 +
 +    /* Log in the last n pages of the RAM section. */
 +    *log = ram_start + ram_size - reserve;
@@ -292,7 +294,7 @@ index 037609b..79dc733 100644
  bool evtlog_append(uint8_t pcr, hash_list_t *hl, uint32_t type)
  {
      int log_type = get_evtlog_type();
-@@ -525,6 +676,28 @@ bool evtlog_append(uint8_t pcr, hash_lis
+@@ -527,6 +678,28 @@ bool evtlog_append(uint8_t pcr, hash_list_t *hl, uint32_t type)
      return true;
  }
  
@@ -322,5 +324,5 @@ index 037609b..79dc733 100644
  __data acm_hdr_t *g_sinit = 0;
  
 -- 
-2.20.1
+2.17.1
 
