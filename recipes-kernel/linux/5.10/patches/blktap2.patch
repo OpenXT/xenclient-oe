@@ -42,9 +42,9 @@ PATCHES
 ################################################################################
 --- a/drivers/block/Kconfig
 +++ b/drivers/block/Kconfig
-@@ -469,4 +469,13 @@ config BLK_DEV_RSXX
- 	  To compile this driver as a module, choose M here: the
- 	  module will be called rsxx.
+@@ -461,4 +461,13 @@ config BLK_DEV_RSXX
+ 
+ source "drivers/block/rnbd/Kconfig"
  
 +config BLK_DEV_TAP
 +       tristate "Blktap userspace devices"
@@ -58,7 +58,7 @@ PATCHES
  endif # BLK_DEV
 --- a/drivers/block/Makefile
 +++ b/drivers/block/Makefile
-@@ -25,6 +25,7 @@ obj-$(CONFIG_BLK_DEV_UMEM)	+= umem.o
+@@ -28,6 +28,7 @@ obj-$(CONFIG_BLK_DEV_UMEM)	+= umem.o
  obj-$(CONFIG_BLK_DEV_NBD)	+= nbd.o
  obj-$(CONFIG_BLK_DEV_CRYPTOLOOP) += cryptoloop.o
  obj-$(CONFIG_VIRTIO_BLK)	+= virtio_blk.o
@@ -1927,12 +1927,12 @@ PATCHES
 +	unsigned long uaddr;
 +	int ret;
 +
-+	down_write(&ring->vma->vm_mm->mmap_sem);
++	mmap_write_lock(ring->vma->vm_mm);
 +
 +	uaddr = MMAP_VADDR(ring->user_vstart, request->usr_idx, seg);
 +	ret = vm_insert_page(ring->vma, uaddr, request->pages[seg]);
 +
-+	up_write(&ring->vma->vm_mm->mmap_sem);
++	mmap_write_unlock(ring->vma->vm_mm);
 +
 +	return ret;
 +}
@@ -2521,20 +2521,20 @@ PATCHES
 +
 +	for (usr_idx = 0; usr_idx < BLKTAP_RING_SIZE; usr_idx++) {
 +		struct blktap_request *request;
-+		struct timeval t;
++		struct timespec64 t;
 +
 +		request = ring->pending[usr_idx];
 +		if (!request)
 +			continue;
 +
-+		jiffies_to_timeval(jiffies, &t);
++		jiffies_to_timespec64(jiffies, &t);
 +
 +		s += snprintf(s, end - s,
 +			      "%02d: usr_idx:%02d "
 +			      "op:%x nr_pages:%02d time:%lu.%09lu\n",
 +			      usr_idx, request->usr_idx,
 +			      request->operation, request->nr_pages,
-+			      t.tv_sec, t.tv_usec);
++			      t.tv_sec, t.tv_nsec);
 +	}
 +
 +	s += snprintf(s, end - s, "end pending\n");

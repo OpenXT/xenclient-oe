@@ -20,7 +20,7 @@ PATCHES
 ################################################################################
 --- a/drivers/net/xen-netfront.c
 +++ b/drivers/net/xen-netfront.c
-@@ -387,13 +387,13 @@ static void xennet_tx_buf_gc(struct netf
+@@ -399,13 +399,13 @@ static void xennet_tx_buf_gc(struct netf
  		rmb(); /* Ensure we see responses up to 'rp'. */
  
  		for (cons = queue->tx.rsp_cons; cons != prod; cons++) {
@@ -38,7 +38,7 @@ PATCHES
  			BUG_ON(id >= NET_TX_RING_SIZE);
  			skb = queue->tx_skbs[id].skb;
  			if (unlikely(gnttab_query_foreign_access(
-@@ -742,7 +742,7 @@ static int xennet_get_extras(struct netf
+@@ -817,7 +817,7 @@ static int xennet_get_extras(struct netf
  			     RING_IDX rp)
  
  {
@@ -47,7 +47,7 @@ PATCHES
  	struct device *dev = &queue->info->netdev->dev;
  	RING_IDX cons = queue->rx.rsp_cons;
  	int err = 0;
-@@ -758,24 +758,23 @@ static int xennet_get_extras(struct netf
+@@ -833,24 +833,23 @@ static int xennet_get_extras(struct netf
  			break;
  		}
  
@@ -79,26 +79,33 @@ PATCHES
  
  	queue->rx.rsp_cons = cons;
  	return err;
-@@ -785,28 +784,28 @@ static int xennet_get_responses(struct n
- 				struct netfront_rx_info *rinfo, RING_IDX rp,
- 				struct sk_buff_head *list)
+@@ -908,8 +907,8 @@ static int xennet_get_responses(struct n
+ 				struct sk_buff_head *list,
+ 				bool *need_xdp_flush)
  {
 -	struct xen_netif_rx_response *rx = &rinfo->rx;
+-	int max = XEN_NETIF_NR_SLOTS_MIN + (rx->status <= RX_COPY_THRESHOLD);
 +	struct xen_netif_rx_response rx = rinfo->rx;
- 	struct xen_netif_extra_info *extras = rinfo->extras;
- 	struct device *dev = &queue->info->netdev->dev;
++	int max = XEN_NETIF_NR_SLOTS_MIN + (rx.status <= RX_COPY_THRESHOLD);
  	RING_IDX cons = queue->rx.rsp_cons;
  	struct sk_buff *skb = xennet_get_rx_skb(queue, cons);
- 	grant_ref_t ref = xennet_get_rx_ref(queue, cons);
--	int max = XEN_NETIF_NR_SLOTS_MIN + (rx->status <= RX_COPY_THRESHOLD);
-+	int max = XEN_NETIF_NR_SLOTS_MIN + (rx.status <= RX_COPY_THRESHOLD);
- 	int slots = 1;
+ 	struct xen_netif_extra_info *extras = rinfo->extras;
+@@ -922,25 +921,25 @@ static int xennet_get_responses(struct n
  	int err = 0;
- 	unsigned long ret;
+ 	u32 verdict;
  
 -	if (rx->flags & XEN_NETRXF_extra_info) {
 +	if (rx.flags & XEN_NETRXF_extra_info) {
  		err = xennet_get_extras(queue, extras, rp);
+ 		if (!err) {
+ 			if (extras[XEN_NETIF_EXTRA_TYPE_XDP - 1].type) {
+ 				struct xen_netif_extra_info *xdp;
+ 
+ 				xdp = &extras[XEN_NETIF_EXTRA_TYPE_XDP - 1];
+-				rx->offset = xdp->u.xdp.headroom;
++				rx.offset = xdp->u.xdp.headroom;
+ 			}
+ 		}
  		cons = queue->rx.rsp_cons;
  	}
  
@@ -108,14 +115,13 @@ PATCHES
 +		if (unlikely(rx.status < 0 ||
 +			     rx.offset + rx.status > XEN_PAGE_SIZE)) {
  			if (net_ratelimit())
--				dev_warn(dev, "rx->offset: %u, size: %d\n",
+ 				dev_warn(dev, "rx->offset: %u, size: %d\n",
 -					 rx->offset, rx->status);
-+				dev_warn(dev, "rx.offset: %u, size: %d\n",
 +					 rx.offset, rx.status);
  			xennet_move_rx_slot(queue, skb, ref);
  			err = -EINVAL;
  			goto next;
-@@ -820,7 +819,7 @@ static int xennet_get_responses(struct n
+@@ -954,7 +953,7 @@ static int xennet_get_responses(struct n
  		if (ref == GRANT_INVALID_REF) {
  			if (net_ratelimit())
  				dev_warn(dev, "Bad rx response id %d.\n",
@@ -124,16 +130,30 @@ PATCHES
  			err = -EINVAL;
  			goto next;
  		}
-@@ -833,7 +832,7 @@ static int xennet_get_responses(struct n
- 		__skb_queue_tail(list, skb);
- 
+@@ -967,11 +966,11 @@ static int xennet_get_responses(struct n
+ 		rcu_read_lock();
+ 		xdp_prog = rcu_dereference(queue->xdp_prog);
+ 		if (xdp_prog) {
+-			if (!(rx->flags & XEN_NETRXF_more_data)) {
++			if (!(rx.flags & XEN_NETRXF_more_data)) {
+ 				/* currently only a single page contains data */
+ 				verdict = xennet_run_xdp(queue,
+ 							 skb_frag_page(&skb_shinfo(skb)->frags[0]),
+-							 rx, xdp_prog, &xdp, need_xdp_flush);
++							 &rx, xdp_prog, &xdp, need_xdp_flush);
+ 				if (verdict != XDP_PASS)
+ 					err = -EINVAL;
+ 			} else {
+@@ -982,7 +981,7 @@ static int xennet_get_responses(struct n
+ 		rcu_read_unlock();
  next:
+ 		__skb_queue_tail(list, skb);
 -		if (!(rx->flags & XEN_NETRXF_more_data))
 +		if (!(rx.flags & XEN_NETRXF_more_data))
  			break;
  
  		if (cons + slots == rp) {
-@@ -843,7 +842,7 @@ next:
+@@ -992,7 +991,7 @@ next:
  			break;
  		}
  
@@ -142,7 +162,7 @@ PATCHES
  		skb = xennet_get_rx_skb(queue, cons + slots);
  		ref = xennet_get_rx_ref(queue, cons + slots);
  		slots++;
-@@ -898,9 +897,9 @@ static int xennet_fill_frags(struct netf
+@@ -1047,9 +1046,9 @@ static int xennet_fill_frags(struct netf
  	struct sk_buff *nskb;
  
  	while ((nskb = __skb_dequeue(list))) {
@@ -154,7 +174,7 @@ PATCHES
  
  		if (skb_shinfo(skb)->nr_frags == MAX_SKB_FRAGS) {
  			unsigned int pull_to = NETFRONT_SKB_CB(skb)->pull_to;
-@@ -916,7 +915,7 @@ static int xennet_fill_frags(struct netf
+@@ -1065,7 +1064,7 @@ static int xennet_fill_frags(struct netf
  
  		skb_add_rx_frag(skb, skb_shinfo(skb)->nr_frags,
  				skb_frag_page(nfrag),
@@ -163,7 +183,7 @@ PATCHES
  
  		skb_shinfo(nskb)->nr_frags = 0;
  		kfree_skb(nskb);
-@@ -1014,7 +1013,7 @@ static int xennet_poll(struct napi_struc
+@@ -1164,7 +1163,7 @@ static int xennet_poll(struct napi_struc
  	i = queue->rx.rsp_cons;
  	work_done = 0;
  	while ((i != rp) && (work_done < budget)) {
@@ -171,4 +191,4 @@ PATCHES
 +		RING_COPY_RESPONSE(&queue->rx, i, rx);
  		memset(extras, 0, sizeof(rinfo.extras));
  
- 		err = xennet_get_responses(queue, &rinfo, rp, &tmpq);
+ 		err = xennet_get_responses(queue, &rinfo, rp, &tmpq,

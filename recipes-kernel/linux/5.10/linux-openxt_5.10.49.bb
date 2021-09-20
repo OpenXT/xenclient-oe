@@ -9,7 +9,6 @@ PV_MAJOR = "${@"${PV}".split('.', 3)[0]}"
 
 FILESEXTRAPATHS_prepend := "${THISDIR}/patches:${THISDIR}/defconfigs:"
 SRC_URI += "${KERNELORG_MIRROR}/linux/kernel/v${PV_MAJOR}.x/linux-${PV}.tar.xz;name=kernel \
-    file://0001-xen-gntdev-switch-from-kcalloc-to-kvcalloc.patch \
     file://bridge-carrier-follow-prio0.patch \
     file://xenkbd-tablet-resolution.patch \
     file://acpi-video-delay-init.patch \
@@ -26,7 +25,6 @@ SRC_URI += "${KERNELORG_MIRROR}/linux/kernel/v${PV_MAJOR}.x/linux-${PV}.tar.xz;n
     file://netback-skip-frontend-wait-during-shutdown.patch \
     file://xenbus-move-otherend-watches-on-relocate.patch \
     file://netfront-support-backend-relocate.patch \
-    file://konrad-ioperm.patch \
     file://usbback-base.patch \
     file://hvc-kgdb-fix.patch \
     file://pciback-restrictive-attr.patch \
