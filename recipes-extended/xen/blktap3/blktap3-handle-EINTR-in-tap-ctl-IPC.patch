@@ -1,0 +1,90 @@
+From b6ef33c0d9888998b20fedb6a2bf588c879881bb Mon Sep 17 00:00:00 2001
+From: Mark Syms <mark.syms@citrix.com>
+Date: Wed, 14 Jul 2021 14:25:09 +0100
+Subject: [PATCH] CA-356508: handle EINTR in tap-ctl IPC
+
+Signed-off-by: Mark Syms <mark.syms@citrix.com>
+---
+ control/tap-ctl-ipc.c     | 13 +++++++++----
+ drivers/tapdisk-control.c | 11 ++++++++---
+ 2 files changed, 17 insertions(+), 7 deletions(-)
+
+--- a/tools/blktap3/control/tap-ctl-ipc.c
++++ b/tools/blktap3/control/tap-ctl-ipc.c
+@@ -49,6 +49,11 @@
+ 
+ int tap_ctl_debug = 0;
+ 
++#define eintr_retry(res, op) \
++	do {		     \
++		res = op;    \
++	} while (res == -1 && errno == EINTR);
++
+ int
+ tap_ctl_read_raw(int fd, void *buf, size_t size, struct timeval *timeout)
+ {
+@@ -60,11 +65,11 @@ tap_ctl_read_raw(int fd, void *buf, size
+ 		FD_ZERO(&readfds);
+ 		FD_SET(fd, &readfds);
+ 
+-		ret = select(fd + 1, &readfds, NULL, NULL, timeout);
++		eintr_retry(ret, select(fd + 1, &readfds, NULL, NULL, timeout))
+ 		if (ret == -1)
+ 			break;
+ 		else if (FD_ISSET(fd, &readfds)) {
+-			ret = read(fd, (char*)buf + offset, size - offset);
++			eintr_retry(ret, read(fd, (char*)buf + offset, size - offset))
+ 			if (ret <= 0)
+ 				break;
+ 			offset += ret;
+@@ -116,11 +121,11 @@ tap_ctl_write_message(int fd, tapdisk_me
+ 		/* we don't bother reinitializing tv. at worst, it will wait a
+ 		 * bit more time than expected. */
+ 
+-		ret = select(fd + 1, NULL, &writefds, NULL, timeout);
++		eintr_retry(ret, select(fd + 1, NULL, &writefds, NULL, timeout))
+ 		if (ret == -1)
+ 			break;
+ 		else if (FD_ISSET(fd, &writefds)) {
+-			ret = write(fd, (char*)message + offset, len - offset);
++			eintr_retry(ret, write(fd, (uint8_t*)message + offset, len - offset))
+ 			if (ret <= 0)
+ 				break;
+ 			offset += ret;
+--- a/tools/blktap3/drivers/tapdisk-control.c
++++ b/tools/blktap3/drivers/tapdisk-control.c
+@@ -78,6 +78,11 @@
+ 			__FILE__, __LINE__, #_p);			\
+ 	}
+ 
++#define eintr_retry(res, op) \
++	do {		     \
++		res = op;    \
++	} while (res == -1 && errno == EINTR);
++
+ struct tapdisk_ctl_conn {
+ 	int                          fd;
+ 
+@@ -314,7 +319,7 @@ tapdisk_ctl_conn_drain(struct tapdisk_ct
+ 		FD_ZERO(&wfds);
+ 		FD_SET(conn->fd, &wfds);
+ 
+-		n = select(conn->fd + 1, NULL, &wfds, NULL, &tv);
++		eintr_retry(n, select(conn->fd + 1, NULL, &wfds, NULL, &tv))
+ 		if (n < 0)
+ 			break;
+ 
+@@ -491,11 +496,11 @@ tapdisk_control_read_message(int fd, tap
+ 		FD_ZERO(&readfds);
+ 		FD_SET(fd, &readfds);
+ 
+-		ret = select(fd + 1, &readfds, NULL, NULL, t);
++		eintr_retry(ret, select(fd + 1, &readfds, NULL, NULL, t))
+ 		if (ret == -1)
+ 			break;
+ 		else if (FD_ISSET(fd, &readfds)) {
+-			ret = read(fd, message + offset, len - offset);
++			eintr_retry(ret, read(fd, message + offset, len - offset))
+ 			if (ret <= 0)
+ 				break;
+ 			offset += ret;

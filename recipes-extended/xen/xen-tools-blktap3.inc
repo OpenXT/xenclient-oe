@@ -18,6 +18,7 @@ SRC_URI_append = " \
     file://fix-encryption.patch \
     file://gcc9-compilation.patch \
     file://openssl-1.1.x.patch \
+    file://blktap3-handle-EINTR-in-tap-ctl-IPC.patch \
 "
 
 SRCREV_blktap3 = "a7832564b4d7e540d2d5a85e2556f571b7f9d89b"
