@@ -1,0 +1,909 @@
+################################################################################
+SHORT DESCRIPTION:
+################################################################################
+Add the OpenXT db as a varstored storage mechanism.
+ 
+################################################################################
+LONG DESCRIPTION:
+################################################################################
+varstored can store EFI variables in an arbitrary format. This patch replaces
+the current storage backend (XAPI db) with the OpenXT db. The OpenXT db was
+the preferred choice as it already propagates across host upgrades, which means
+we don't need to worry about carrying EFI guest information over to upgraded
+installs.
+
+Also, remove `unshare` operation in order to avoid granting varstored SYS_ADMIN
+capabilities. We don't need this feature and we want to keep varstored as limited
+as possible (SYS_ADMIN would be too permissive).
+
+Finally, introduce minor Makefile changes to get varstored building in OE.
+
+################################################################################
+CHANGELOG
+################################################################################
+Ported by: Nicholas Tsirakis <tsirakisn@ainfosec.com> on 9/27/21
+Written by: Joel Upham <uphamj@ainfosec.com>
+ 
+################################################################################
+REMOVAL
+################################################################################
+ 
+################################################################################
+UPSTREAM PLAN
+################################################################################
+ 
+################################################################################
+INTERNAL DEPENDENCIES
+################################################################################
+ 
+################################################################################
+PATCHES
+################################################################################
+--- a/Makefile
++++ b/Makefile
+@@ -5,17 +5,21 @@ OBJS :=	guid.o \
+ 	handler.o \
+ 	io_port.o \
+ 	varstored.o \
++	oxtdb.o \
++	oxtdb-lib.o \
+ 	xapidb.o \
+ 	xapidb-lib.o
+ 
+-CC = gcc
++CC ?= gcc
+ 
+-CFLAGS  = -I$(shell pwd)/include
++CFLAGS += -I$(shell pwd)/include
+ 
+ # _GNU_SOURCE for asprintf.
+ CFLAGS += -D_LARGEFILE_SOURCE -D_LARGEFILE64_SOURCE -D_GNU_SOURCE
+ 
+-CFLAGS += $$(pkg-config --cflags libxml-2.0)
++CFLAGS += $$(pkg-config --cflags libxml-2.0) \
++          $$(pkg-config --cflags dbus-1) \
++          $$(pkg-config --cflags glib-2.0)
+ 
+ CFLAGS += -g -O2 -std=gnu99 \
+           -Wall \
+@@ -28,6 +32,12 @@ ifeq ($(shell uname),Linux)
+ LDLIBS := -lutil -lrt
+ endif
+ 
++OXT_LIBS := -levent \
++            -lgobject-2.0 \
++            -lglib-2.0 \
++            -ldbus-glib-1 \
++            -lxcdbus
++
+ LDLIBS += -lxenstore \
+           -lxenctrl \
+           -lxenforeignmemory \
+@@ -36,7 +46,8 @@ LDLIBS += -lxenstore \
+           -lxentoolcore \
+           -lcrypto \
+           -lseccomp \
+-          $$(pkg-config --libs libxml-2.0)
++          $$(pkg-config --libs libxml-2.0) \
++          $(OXT_LIBS)
+ 
+ # Get the compiler to generate the dependencies for us.
+ CFLAGS   += -Wp,-MD,$(@D)/.$(@F).d -MT $(@D)/$(@F)
+@@ -44,7 +55,7 @@ CFLAGS   += -Wp,-MD,$(@D)/.$(@F).d -MT $
+ SUBDIRS  = $(filter-out ./,$(dir $(OBJS) $(LIBS)))
+ DEPS     = .*.d tools/.*.d
+ 
+-LDFLAGS := -g 
++LDFLAGS ?= -g 
+ 
+ all: $(TARGET) tools
+ 
+@@ -56,12 +67,14 @@ $(TARGET): $(LIBS) $(OBJS)
+ %.o: %.c
+ 	$(CC) -o $@ $(CFLAGS) -c $<
+ 
+-TOOLLIBS := -lcrypto -lseccomp $$(pkg-config --libs libxml-2.0)
++TOOLLIBS := -lcrypto -lseccomp $$(pkg-config --libs libxml-2.0) $(OXT_LIBS)
+ TOOLOBJS := tools/xapidb-cmdline.o \
++            tools/oxtdb-cmdline.o \
+             tools/tool-lib.o \
+             depriv.o \
+             guid.o \
+             handler.o \
++            oxtdb-lib.o \
+             xapidb-lib.o
+ TOOLS := tools/varstore-ls \
+          tools/varstore-get \
+--- a/depriv.c
++++ b/depriv.c
+@@ -117,14 +117,6 @@ drop_privileges(const char *opt_chroot,
+         }
+     }
+ 
+-    if (opt_depriv) {
+-        if (unshare(CLONE_NEWNS | CLONE_NEWIPC |
+-                    CLONE_NEWNET | CLONE_NEWUTS) < 0) {
+-            ERR("Failed to unshare namespaces: %d, %s\n", errno, strerror(errno));
+-            return false;
+-        }
+-    }
+-
+     if (opt_gid) {
+         if (setgid(opt_gid) < 0) {
+             ERR("Failed to set gid to %u: %d, %s\n", opt_gid,
+--- a/include/backend.h
++++ b/include/backend.h
+@@ -55,6 +55,8 @@ struct backend {
+ };
+ 
+ extern const struct backend *db;
++extern const struct backend oxtdb;
++extern const struct backend oxtdb_cmdline;
+ extern const struct backend xapidb;
+ extern const struct backend xapidb_cmdline;
+ 
+--- a/include/debug.h
++++ b/include/debug.h
+@@ -25,7 +25,7 @@
+  * NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+  */
+-
++#include <syslog.h>
+ #ifndef  _DEBUG_H
+ #define  _DEBUG_H
+ 
+@@ -53,6 +53,7 @@ extern const enum log_level log_level;
+             fprintf(stderr, "%s: ", __func__);  \
+             fprintf(stderr, __VA_ARGS__);       \
+             fflush(stderr);                     \
++            syslog(LOG_ERR, __VA_ARGS__);       \
+         }                                       \
+     } while (0)
+ 
+@@ -62,6 +63,7 @@ extern const enum log_level log_level;
+             fprintf(stderr, "%s: ", __func__);  \
+             fprintf(stderr, __VA_ARGS__);       \
+             fflush(stderr);                     \
++            syslog(LOG_WARNING, __VA_ARGS__);   \
+         }                                       \
+     } while (0)
+ 
+@@ -71,6 +73,7 @@ extern const enum log_level log_level;
+             printf("%s: ", __func__);           \
+             printf(__VA_ARGS__);                \
+             fflush(stdout);                     \
++            syslog(LOG_INFO, __VA_ARGS__);      \
+         }                                       \
+     } while (0)
+ 
+@@ -80,6 +83,7 @@ extern const enum log_level log_level;
+             printf("%s: ", __func__);           \
+             printf(__VA_ARGS__);                \
+             fflush(stdout);                     \
++            syslog(LOG_DEBUG, __VA_ARGS__);     \
+         }                                       \
+     } while (0)
+ 
+--- /dev/null
++++ b/include/oxtdb.h
+@@ -0,0 +1,54 @@
++/*
++ * Copyright (c) Citrix Systems, Inc
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ *
++ * Redistributions of source code must retain the above copyright notice,
++ * this list of conditions and the following disclaimer.
++ *
++ * Redistributions in binary form must reproduce the above copyright
++ * notice, this list of conditions and the following disclaimer in the
++ * documentation and/or other materials provided with the distribution.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
++ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
++ * HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
++ * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED
++ * TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
++ * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
++ * LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
++ * NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
++ * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#ifndef OXTDB_H
++#define OXTDB_H
++
++#include <stdint.h>
++#include <stdbool.h>
++
++#include "backend.h"
++#include "efi.h"
++
++#define DB_MAGIC "VARS"
++#define DB_VERSION 1
++/* magic, version, count, data length */
++#define DB_HEADER_LEN \
++    (strlen(DB_MAGIC) + sizeof(UINT32) + sizeof(UINTN) + sizeof(UINTN))
++
++#define MAX_FILE_SIZE (128 * 1024)
++
++extern char *oxtdb_arg_uuid;
++
++size_t oxtdb_serialize_variables(uint8_t **out, size_t *len, bool only_nv);
++bool oxtdb_set_variable(void);
++bool oxtdb_parse_blob(uint8_t **buf, int len);
++enum backend_init_status oxtdb_init(void);
++bool oxtdb_sb_notify(void);
++
++#endif // OXTDB_H
+--- a/include/xapidb.h
++++ b/include/xapidb.h
+@@ -53,4 +53,7 @@ enum backend_init_status xapidb_init(voi
+ enum backend_init_status xapidb_file_init(void);
+ bool xapidb_sb_notify(void);
+ 
++// expose this fn over xapidb API so we can use it.
++bool base64_encode(const uint8_t *buf, size_t len, char **out);
++
+ #endif
+--- /dev/null
++++ b/oxtdb-lib.c
+@@ -0,0 +1,398 @@
++/*
++ * Copyright (c) Citrix Systems, Inc
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ *
++ * Redistributions of source code must retain the above copyright notice,
++ * this list of conditions and the following disclaimer.
++ *
++ * Redistributions in binary form must reproduce the above copyright
++ * notice, this list of conditions and the following disclaimer in the
++ * documentation and/or other materials provided with the distribution.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
++ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
++ * HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
++ * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED
++ * TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
++ * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
++ * LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
++ * NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
++ * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#include <stdlib.h>
++#include <stdint.h>
++#include <stdio.h>
++#include <string.h>
++#include <errno.h>
++#include <time.h>
++#include <sys/types.h>
++#include <sys/socket.h>
++#include <sys/stat.h>
++#include <sys/un.h>
++#include <unistd.h>
++
++#include <libxml/parser.h>
++#include <libxml/xpath.h>
++#include <openssl/bio.h>
++#include <openssl/evp.h>
++
++#include <debug.h>
++#include <efi.h>
++#include <serialize.h>
++#include <oxtdb.h>
++#include <xapidb.h>
++
++// db over dbus
++#include <xcdbus.h>
++#include <dbus/dbus.h>
++#include <dbus/dbus-glib.h>
++#include <event.h>
++#include "rpcgen/db_client.h"
++
++#define OXTDB_DBUS_SERVICE "com.citrix.xenclient.db"
++#define OXTDB_DBUS_PATH    "/"
++
++#define MAX_OXTDB_PATH_SIZE 512
++#define MAX_OXTDB_VALUE_SIZE 16
++
++static xcdbus_conn_t * xcdbus_conn = NULL;
++
++/* The VM's uuid. Used for saving to the db. */
++char *oxtdb_arg_uuid;
++
++// DoS protection
++#define MAX_CREDIT        100
++#define CREDIT_PER_SECOND 2
++#define NS_PER_CREDIT (1000000000 / CREDIT_PER_SECOND)
++static time_t last_time; /* Time of the last send. */
++static unsigned int send_credit = MAX_CREDIT; /* Number of allowed fast sends. */
++
++static void
++maybe_sleep(void)
++{
++    time_t cur_time, diff_time;
++
++    /*
++     * To avoid a DoS by the VM, rate limit writes.
++     * Normal usage should never hit this.
++     */
++    cur_time = time(NULL);
++    diff_time = cur_time - last_time;
++    last_time = cur_time;
++    send_credit += diff_time * CREDIT_PER_SECOND;
++    if (send_credit > MAX_CREDIT)
++        send_credit = MAX_CREDIT;
++
++    if (send_credit > 0) {
++        send_credit--;
++    } else {
++        /* If no credit, wait the correct amount of time to get a credit. */
++        struct timespec ts = {0, NS_PER_CREDIT};
++
++        nanosleep(&ts, NULL);
++        last_time = time(NULL);
++    }
++}
++
++static int oxtdb_dbus_init(void) {
++    GError * err = NULL;
++    DBusGConnection * gdbus_conn;
++
++    if (xcdbus_conn) {
++        return 0;
++    }
++
++    event_init();
++    g_type_init();
++
++    gdbus_conn = dbus_g_bus_get(DBUS_BUS_SYSTEM, &err);
++
++    if (!gdbus_conn) {
++        g_error_free(err);
++        ERR("Unable to initialize dbus connection\n");
++        return -1;
++    }
++
++    xcdbus_conn = xcdbus_init_event("com.citrix.xenclient.db", gdbus_conn);
++    if (!xcdbus_conn) {
++        ERR("Unable to initialize xcdbus service\n");
++        return -1;
++    }
++
++    return 0;
++}
++
++// Write a value to the specified DB path.
++static bool oxtdb_write(char * value, const char * path_format, ...) {
++
++    va_list args;
++    char * path = malloc(MAX_OXTDB_PATH_SIZE);
++
++    if (!path) {
++        ERR("Out of memory!\n");
++        goto err;
++    }
++
++    if (oxtdb_dbus_init() == -1 || !xcdbus_conn) {
++        goto err;
++    }
++
++    va_start(args, path_format);
++    vsnprintf(path, MAX_OXTDB_PATH_SIZE, path_format, args);
++    va_end(args);
++
++    if (!com_citrix_xenclient_db_write_(xcdbus_conn, OXTDB_DBUS_SERVICE, OXTDB_DBUS_PATH, path, value)) {
++        ERR("db_write op failed. tried writing %s to %s\n", value, path);
++        goto err;
++    }
++
++    // success
++    free(path);
++    return true;
++
++err:
++    if (path)
++        free(path);
++    return false;
++}
++
++// Determine if db node exists.
++static bool oxtdb_exists(const char * path_format, ...) {
++
++    int found = false;
++
++    va_list args;
++    char * path = malloc(MAX_OXTDB_PATH_SIZE);
++
++    if (!path) {
++        ERR("Out of memory!\n");
++        goto err;
++    }
++
++    if (oxtdb_dbus_init() == -1 || !xcdbus_conn) {
++        goto err;
++    }
++
++    va_start(args, path_format);
++    vsnprintf(path, MAX_OXTDB_PATH_SIZE, path_format, args);
++    va_end(args);
++
++    if (!com_citrix_xenclient_db_exists_(xcdbus_conn, OXTDB_DBUS_SERVICE, OXTDB_DBUS_PATH, path, &found)) {
++        ERR("db_exists op failed. path attempted: %s\n", path);
++        goto err;
++    }
++
++    // success
++    free(path);
++    return (bool)found;
++
++err:
++    if (path)
++        free(path);
++    return false;
++}
++
++// Allocates memory!
++// Gets the value of the specified DB key.
++// The string returned should be freed.
++static char * oxtdb_read(const char * path_format, ...) {
++    char * string;
++    va_list args;
++    char * path = malloc(MAX_OXTDB_PATH_SIZE);
++
++    if (!path) {
++        ERR("Out of memory!\n");
++        goto err;
++    }
++
++    if (oxtdb_dbus_init() == -1 || !xcdbus_conn) {
++        goto err;
++    }
++
++    va_start(args, path_format);
++    vsnprintf(path, MAX_OXTDB_PATH_SIZE, path_format, args);
++    va_end(args);
++
++    if (!com_citrix_xenclient_db_read_(xcdbus_conn, OXTDB_DBUS_SERVICE, OXTDB_DBUS_PATH, path, &string)) {
++        ERR("db_read op failed. path attempted: %s\n", path);
++        goto err;
++    }
++
++    // success
++    free(path);
++    return string;
++
++err:
++    if (path)
++        free(path);
++    return NULL;
++}
++
++size_t
++oxtdb_serialize_variables(uint8_t **out, size_t *len, bool only_nv)
++{
++    return xapidb_serialize_variables(out, len, only_nv);
++}
++
++static bool
++write_all(const char *buf)
++{
++    bool check = false;
++    check = oxtdb_exists("/vm/%s/varstored-efivar-blob/0", oxtdb_arg_uuid);
++    if (check) {
++        char *temp = oxtdb_read("/vm/%s/varstored-efivar-blob/0", oxtdb_arg_uuid);
++        if (!temp) {
++            ERR("unable to read oxtdb");
++            return false;
++        }
++        if (strcmp(buf, temp) == 0) {
++            free(temp);
++            ERR("found match in write");
++            return false;
++        }
++        if (temp != NULL) {
++            free(temp);
++        }
++    }
++    return oxtdb_write((char *)buf, "/vm/%s/varstored-efivar-blob/0", oxtdb_arg_uuid);
++}
++
++static void
++read_all(char **buf)
++{
++    bool ret = false;
++
++    ret = oxtdb_exists("/vm/%s/varstored-efivar-blob/0", oxtdb_arg_uuid);
++    if (ret) {
++        DBG("attempting to cat %d\n");
++        *buf = oxtdb_read("/vm/%s/varstored-efivar-blob/0", oxtdb_arg_uuid);
++    } else {
++        *buf = NULL;
++    }
++}
++
++bool
++oxtdb_set_variable(void)
++{
++    uint8_t *buf;
++    char *encoded;
++    size_t len;
++    bool ret = false;
++
++    if (!oxtdb_arg_uuid)
++        return true;
++
++    oxtdb_serialize_variables(&buf, &len, true);
++    if (len == 0)
++        return false;
++
++    if (!base64_encode(buf, len, &encoded)) {
++        free(buf);
++        return false;
++    }
++    free(buf);
++
++    // DoS protection
++    maybe_sleep();
++
++    ret = write_all(encoded);
++    free(encoded);
++
++    return ret;
++}
++
++bool
++oxtdb_parse_blob(uint8_t **buf, int len) {
++    return xapidb_parse_blob(buf, len);
++}
++
++enum backend_init_status
++oxtdb_init(void)
++{
++    char *encoded = NULL;
++    uint8_t *buf, *ptr = NULL;
++    BIO *bio, *b64 = NULL;
++    int max_len, n, total = 0;
++    int ret = 0;
++
++    if (!oxtdb_exists("/vm/%s/varstored-efivar-blob/0", oxtdb_arg_uuid)) {
++        return BACKEND_INIT_FIRSTBOOT;
++    }
++
++    read_all(&encoded);
++
++    if (!encoded) {
++        goto err;
++    }
++
++    max_len = strlen(encoded) * 3 / 4;
++
++    buf = malloc(max_len);
++    if (!buf) {
++        ERR("Failed to allocate memory\n");
++        goto err;
++    }
++
++    bio = BIO_new_mem_buf(encoded, -1);
++    if (!bio) {
++        ERR("Failed to create BIO\n");
++        goto err;
++    }
++    b64 = BIO_new(BIO_f_base64());
++    if (!b64) {
++        ERR("Failed to create BIO\n");
++        goto err;
++    }
++    BIO_push(b64, bio);
++    BIO_set_flags(b64, BIO_FLAGS_BASE64_NO_NL);
++
++    for (;;) {
++        n = BIO_read(b64, buf + total, max_len - total);
++        if (n <= 0)
++            break;
++        total += n;
++    }
++
++    ptr = buf;
++    DBG("total: %d\n", total);
++    ret = oxtdb_parse_blob(&ptr, total);
++
++    if (!ret) {
++        ERR("oxtdb parse operation failed\n");
++        goto err;
++    }
++
++    // success
++    BIO_free_all(b64);
++    free(buf);
++    free(encoded);
++
++    return BACKEND_INIT_SUCCESS;
++
++err:
++    if (bio) {
++        if (b64)
++            BIO_free_all(b64);
++        else
++            BIO_free_all(bio);
++    }
++    if (buf)
++        free(buf);
++    if (encoded)
++        free(encoded);
++    return BACKEND_INIT_FAILURE;
++}
++
++bool
++oxtdb_sb_notify(void)
++{
++    ERR("The VM failed to pass Secure Boot verification.");
++    return true;
++}
+--- /dev/null
++++ b/oxtdb.c
+@@ -0,0 +1,104 @@
++/*
++ * Copyright (c) Citrix Systems, Inc
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ *
++ * Redistributions of source code must retain the above copyright notice,
++ * this list of conditions and the following disclaimer.
++ *
++ * Redistributions in binary form must reproduce the above copyright
++ * notice, this list of conditions and the following disclaimer in the
++ * documentation and/or other materials provided with the distribution.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
++ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
++ * HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
++ * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED
++ * TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
++ * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
++ * LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
++ * NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
++ * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#include <stdlib.h>
++#include <stdint.h>
++#include <stdio.h>
++#include <string.h>
++#include <errno.h>
++#include <sys/types.h>
++#include <sys/stat.h>
++#include <unistd.h>
++#include <sys/types.h>
++#include <sys/wait.h>
++
++#include <backend.h>
++#include <debug.h>
++#include <oxtdb.h>
++#include <xapidb.h>
++
++#include "option.h"
++
++/* Path to the file used for resuming. */
++static char *arg_resume;
++/* Path to the file used for saving. */
++static char *arg_save;
++
++static bool
++oxtdb_parse_arg(const char *name, const char *val)
++{
++    if (!strcmp(name, "resume"))
++        arg_resume = strdup(val);
++    else if (!strcmp(name, "save"))
++        arg_save = strdup(val);
++    else if (!strcmp(name, "uuid"))
++        oxtdb_arg_uuid = strdup(val);
++    else
++        return false;
++
++    return true;
++}
++
++static bool
++oxtdb_check_args(void)
++{
++    if (!oxtdb_arg_uuid) {
++        fprintf(stderr, "Backend arg 'uuid' is required\n");
++        return false;
++    }
++    if (!opt_resume && arg_resume) {
++        fprintf(stderr, "Backend arg 'resume' is invalid when not resuming\n");
++        return false;
++    }
++
++    return true;
++}
++
++static bool
++oxtdb_save(void)
++{
++    /* not supported or used on OpenXT */
++    return false;
++}
++
++static bool
++oxtdb_resume(void)
++{
++    /* not supported or used on OpenXT */
++    return false;
++}
++
++const struct backend oxtdb = {
++    .parse_arg = oxtdb_parse_arg,
++    .check_args = oxtdb_check_args,
++    .init = oxtdb_init,
++    .save = oxtdb_save,
++    .resume = oxtdb_resume,
++    .set_variable = oxtdb_set_variable,
++    .sb_notify = oxtdb_sb_notify,
++};
+--- /dev/null
++++ b/tools/oxtdb-cmdline.c
+@@ -0,0 +1,67 @@
++/*
++ * Copyright (c) Citrix Systems, Inc
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ *
++ * Redistributions of source code must retain the above copyright notice,
++ * this list of conditions and the following disclaimer.
++ *
++ * Redistributions in binary form must reproduce the above copyright
++ * notice, this list of conditions and the following disclaimer in the
++ * documentation and/or other materials provided with the distribution.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
++ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
++ * HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
++ * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED
++ * TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
++ * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
++ * LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
++ * NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
++ * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#include <stdlib.h>
++#include <stdio.h>
++#include <string.h>
++
++#include <backend.h>
++#include <debug.h>
++#include <oxtdb.h>
++
++static bool
++oxtdb_cmdline_parse_arg(const char *name, const char *val)
++{
++    if (!strcmp(name, "uuid"))
++        oxtdb_arg_uuid = strdup(val);
++    else if (!strcmp(name, "socket")) {
++        INFO("Socket not used, continue");
++    } else {
++        return false;
++    }
++
++    return true;
++}
++
++static bool
++oxtdb_cmdline_check_args(void)
++{
++    if (!oxtdb_arg_uuid) {
++        ERR("VM UUID must be specified\n");
++        return false;
++    }
++
++    return true;
++}
++
++const struct backend oxtdb_cmdline = {
++    .parse_arg = oxtdb_cmdline_parse_arg,
++    .check_args = oxtdb_cmdline_check_args,
++    .init = oxtdb_init,
++    .set_variable = oxtdb_set_variable,
++};
+--- a/tools/varstore-get.c
++++ b/tools/varstore-get.c
+@@ -40,7 +40,7 @@
+ 
+ #include "tool-lib.h"
+ 
+-const struct backend *db = &xapidb_cmdline;
++const struct backend *db = &oxtdb_cmdline;
+ const enum log_level log_level = LOG_LVL_INFO;
+ 
+ static void
+--- a/tools/varstore-ls.c
++++ b/tools/varstore-ls.c
+@@ -40,7 +40,7 @@
+ 
+ #include "tool-lib.h"
+ 
+-const struct backend *db = &xapidb_cmdline;
++const struct backend *db = &oxtdb_cmdline;
+ const enum log_level log_level = LOG_LVL_INFO;
+ 
+ static void
+--- a/tools/varstore-rm.c
++++ b/tools/varstore-rm.c
+@@ -46,7 +46,7 @@
+ 
+ #define CLONE_RM_DIR "/etc/xapi.d/efi-clone"
+ 
+-const struct backend *db = &xapidb_cmdline;
++const struct backend *db = &oxtdb_cmdline;
+ const enum log_level log_level = LOG_LVL_INFO;
+ 
+ struct clone_variable
+--- a/tools/varstore-sb-state.c
++++ b/tools/varstore-sb-state.c
+@@ -44,7 +44,7 @@
+ 
+ #include "tool-lib.h"
+ 
+-const struct backend *db = &xapidb_cmdline;
++const struct backend *db = &oxtdb_cmdline;
+ const enum log_level log_level = LOG_LVL_INFO;
+ 
+ static void
+--- a/tools/varstore-set.c
++++ b/tools/varstore-set.c
+@@ -43,7 +43,7 @@
+ 
+ #include "tool-lib.h"
+ 
+-const struct backend *db = &xapidb_cmdline;
++const struct backend *db = &oxtdb_cmdline;
+ const enum log_level log_level = LOG_LVL_INFO;
+ 
+ static void
+--- a/varstored.c
++++ b/varstored.c
+@@ -652,6 +652,8 @@ main(int argc, char **argv)
+         case VARSTORED_OPT_BACKEND:
+             if (!strcmp(optarg, "xapidb")) {
+                 db = &xapidb;
++            } else if(!strcmp(optarg, "oxtdb")) {
++                db = &oxtdb;
+             } else {
+                 fprintf(stderr, "Invalid backend '%s'\n", optarg);
+                 usage();
+--- a/xapidb-lib.c
++++ b/xapidb-lib.c
+@@ -421,7 +421,7 @@ out:
+     return ret;
+ }
+
+-static bool
++bool
+ base64_encode(const uint8_t *buf, size_t len, char **out)
+ {
+     BIO *b64, *bio;
