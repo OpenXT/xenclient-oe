@@ -1768,7 +1768,7 @@ PATCHES
 +}
 --- /dev/null
 +++ b/drivers/block/blktap/ring.c
-@@ -0,0 +1,814 @@
+@@ -0,0 +1,819 @@
 +
 +#include <linux/device.h>
 +#include <linux/signal.h>
@@ -2115,6 +2115,36 @@ PATCHES
 +	ring->ring.req_prod_pvt++;
 +}
 +
++static void
++blktap_destroy_work_common(struct blktap *tap)
++{
++	if (blktap_device_try_destroy(tap)) {
++		schedule_delayed_work(&tap->destroy_work,
++				      BLKTAP_DESTROY_RETRY_PERIOD);
++	}
++}
++
++static void
++blktap_destroy_work(struct work_struct *work)
++{
++	struct blktap *tap
++		= container_of(work, struct blktap, destroy_work.work);
++
++	blktap_destroy_work_common(tap);
++}
++
++static int
++blktap_ring_release(struct inode *inode, struct file *filp)
++{
++	struct blktap *tap = filp->private_data;
++
++	tap->ring.task = NULL;
++
++	blktap_destroy_work_common(tap);
++
++	return 0;
++}
++
 +static int
 +blktap_ring_open(struct inode *inode, struct file *filp)
 +{
@@ -2137,32 +2167,7 @@ PATCHES
 +
 +	filp->private_data = tap;
 +	tap->ring.task = current;
-+
-+	return 0;
-+}
-+
-+static void
-+blktap_destroy_work(struct work_struct *work)
-+{
-+        struct blktap *tap
-+                = container_of(work, struct blktap, destroy_work.work);
-+
-+	if (blktap_device_try_destroy(tap)) {
-+		schedule_delayed_work(&tap->destroy_work, BLKTAP_DESTROY_RETRY_PERIOD);
-+	}
-+}
-+
-+static int
-+blktap_ring_release(struct inode *inode, struct file *filp)
-+{
-+	struct blktap *tap = filp->private_data;
-+
-+	tap->ring.task = NULL;
-+
-+	if (blktap_device_try_destroy(tap)) {
-+		INIT_DELAYED_WORK(&tap->destroy_work, blktap_destroy_work);
-+		schedule_delayed_work(&tap->destroy_work, BLKTAP_DESTROY_RETRY_PERIOD);
-+	}
++	INIT_DELAYED_WORK(&tap->destroy_work, blktap_destroy_work);
 +
 +	return 0;
 +}
