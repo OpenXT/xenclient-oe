@@ -122,6 +122,7 @@ SRC_URI_append = " \
     file://0003-efi-use-directmap-to-access-runtime-services-table.patch \
     file://0004-efi-do-not-use-runtime-services-table-with-efi-no-rs.patch \
     file://patch-xen-disable-efi-gettime.patch \
+    file://libxl-add-ovmf-varstored.patch \
 "
 
 PACKAGECONFIG =+ "xsm"

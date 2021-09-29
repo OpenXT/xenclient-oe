@@ -12,6 +12,7 @@ SRC_URI_append = "\
 RDEPENDS_${PN}-xl += " ${PN}-scripts-block"
 RDEPENDS_${PN}-scripts-common += " ${PN}-cmp-fd-file-inode"
 RDEPENDS_${PN}-scripts-block += " udev"
+RDEPENDS_${PN}-libxenlight += " varstored-watch"
 
 PACKAGES += " \
     ${PN}-cmp-fd-file-inode \
