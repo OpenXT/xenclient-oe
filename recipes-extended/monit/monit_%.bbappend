@@ -8,8 +8,17 @@ SRC_URI += " \
     file://volatiles \
 "
 
+SRC_URI_append_xenclient-dom0 = " \
+    file://dom0-cfg \
+"
+
 do_install_append() {
     install -d -m 700 ${D}${sysconfdir}/default/volatiles
     install -m 600 ${WORKDIR}/volatiles \
         ${D}${sysconfdir}/default/volatiles/50_monit
+}
+
+do_install_append_xenclient-dom0() {
+    install -d -m 700 ${D}${sysconfdir}/monit.d/
+    install -m 600 ${WORKDIR}/dom0-cfg ${D}${sysconfdir}/monit.d/
 }
