@@ -19,6 +19,12 @@ RDEPENDS_${PN} += "python3-core \
                    curl \
                    xen-tools-xenstore"
 
+RDEPENDS_sync-cmd += " \
+    python3-core \
+    python3-dbus \
+    pyicbinn \
+"
+
 PV = "0+git${SRCPV}"
 
 SRCREV = "${AUTOREV}"
@@ -34,6 +40,13 @@ inherit distutils3
 inherit update-rc.d
 
 FILES_${PN} += "/etc/init.d/${INITSCRIPT_NAME}"
+
+PACKAGE_BEFORE_PN = "sync-cmd"
+
+FILES_sync-cmd = " \
+       ${bindir}/sync-cmd \
+       ${PYTHON_SITEPACKAGES_DIR}/pysynchronizer \
+"
 
 do_install_append() {
     install -d ${D}${sysconfdir}/init.d
