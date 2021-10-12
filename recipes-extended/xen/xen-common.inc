@@ -41,6 +41,9 @@ SRC_URI_append = " \
     file://tboot-xen-evtlog-support.patch \
     file://disable-cpuid-hle-rtm.patch \
     file://add-xc-hypercall-page.patch \
+    file://honor-multiple-per-device-pci.patch \
+    file://establish-per-device-reserved-memory.patch \
+    file://dont-report-highmem-in-use.patch \
     file://libxl-do-not-destroy-in-use-tapdevs.patch \
     file://libxl-syslog.patch \
     file://libxl-RFC-4of7-Add-stubdomain-version-tools-domain-build-info.patch \
