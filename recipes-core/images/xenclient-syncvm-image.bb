@@ -38,6 +38,7 @@ IMAGE_INSTALL = "\
     openssh \
     wget \
     sync-client \
+    busybox-ifplugd \
     xenclient-syncvm-tweaks \
     ${@bb.utils.contains('DISTRO_FEATURES', 'blktap2', 'xen-tools-blktap', 'xen-tools-blktap3', d)} \
 "
