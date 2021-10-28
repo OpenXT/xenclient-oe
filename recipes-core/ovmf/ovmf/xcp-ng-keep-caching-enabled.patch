@@ -1,0 +1,85 @@
+CA-297688, CA-293634: Keep caching enabled during SEC phase
+
+This eventually slows down UEFI guest booting significantly
+on Intel with PCI passthrough and on AMD all the time.
+
+On AMD there is no other way to avoid having caches disabled
+at this point except to keep it enabled in guest itself
+(since we cannot keep caching enabled in the hypervisor
+on AMD while code is executed exactly in OVMF high region).
+
+This alone doesn't fix Intel case as guest MTRRs are implemented
+in Xen for this platform and architectually guest CR0.CD doesn't
+affect guest caching (it's specifically emulated in Xen with
+guest PAT).
+
+For Intel case, temporary remove all variable MTRRs that might
+cover areas of memory SEC phase is operating on during FV
+decompression (which results in a lot of back-to-back memory
+operations) and make sure they are WB. Restore previous
+MTRR state right before jumping into PEI Core which is located
+in low memory and should be WB already.
+
+--- a/OvmfPkg/Sec/SecMain.c
++++ b/OvmfPkg/Sec/SecMain.c
+@@ -27,6 +27,7 @@
+ #include <Library/CpuExceptionHandlerLib.h>
+ #include <Register/Amd/Ghcb.h>
+ #include <Register/Amd/Msr.h>
++#include <Library/MtrrLib.h>
+ 
+ #include <Ppi/TemporaryRamSupport.h>
+ 
+@@ -1003,10 +1004,22 @@ SecStartupPhase2(
+   EFI_SEC_PEI_HAND_OFF        *SecCoreData;
+   EFI_FIRMWARE_VOLUME_HEADER  *BootFv;
+   EFI_PEI_CORE_ENTRY_POINT    PeiCoreEntryPoint;
++  MTRR_SETTINGS               SavedMtrrSettings;
++  MTRR_SETTINGS               MtrrSettings;
+ 
+   SecCoreData = (EFI_SEC_PEI_HAND_OFF *) Context;
+ 
+   //
++  // Temporary make all memory above 1MB WB cacheable during FV decompression.
++  // Restore the original settings back right before jumping into PEI Core.
++  //
++  MtrrGetAllMtrrs (&SavedMtrrSettings);
++  CopyMem (&MtrrSettings, &SavedMtrrSettings, sizeof MtrrSettings);
++  ZeroMem (&MtrrSettings.Variables, sizeof MtrrSettings.Variables);
++  MtrrSettings.MtrrDefType = (MtrrSettings.MtrrDefType & ~0xff) | MTRR_CACHE_WRITE_BACK;
++  MtrrSetAllMtrrs (&MtrrSettings);
++
++  //
+   // Find PEI Core entry point. It will report SEC and Pei Core debug information if remote debug
+   // is enabled.
+   //
+@@ -1015,6 +1028,8 @@ SecStartupPhase2(
+   SecCoreData->BootFirmwareVolumeBase = BootFv;
+   SecCoreData->BootFirmwareVolumeSize = (UINTN) BootFv->FvLength;
+ 
++  MtrrSetAllMtrrs (&SavedMtrrSettings);
++
+   //
+   // Transfer the control to the PEI core
+   //
+--- a/OvmfPkg/Sec/SecMain.inf
++++ b/OvmfPkg/Sec/SecMain.inf
+@@ -51,6 +51,7 @@
+   ExtractGuidedSectionLib
+   LocalApicLib
+   CpuExceptionHandlerLib
++  MtrrLib
+ 
+ [Ppis]
+   gEfiTemporaryRamSupportPpiGuid                # PPI ALWAYS_PRODUCED
+--- a/UefiCpuPkg/ResetVector/Vtf0/Ia16/Real16ToFlat32.asm
++++ b/UefiCpuPkg/ResetVector/Vtf0/Ia16/Real16ToFlat32.asm
+@@ -7,7 +7,7 @@
+ ;
+ ;------------------------------------------------------------------------------
+ 
+-%define SEC_DEFAULT_CR0  0x40000023
++%define SEC_DEFAULT_CR0  0x00000023
+ %define SEC_DEFAULT_CR4  0x640
+ 
+ BITS    16

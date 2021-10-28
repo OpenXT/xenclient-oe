@@ -61,6 +61,22 @@ type audio_helper_tmpfs_t;
 files_tmpfs_file(audio_helper_tmpfs_t)
 fs_tmpfs_filetrans(audio_helper_t, audio_helper_tmpfs_t, file)
 
+# varstored & varstored-watch
+type varstored_t;
+type varstored_exec_t;
+domain_type(varstored_t);
+domain_entry_file(varstored_t, varstored_exec_t);
+role system_r types varstored_t;
+
+type varstored_watch_t;
+type varstored_watch_exec_t;
+domain_type(varstored_watch_t);
+domain_entry_file(varstored_watch_t, varstored_watch_exec_t);
+role system_r types varstored_watch_t;
+
+type varstored_auth_t;
+files_type(varstored_auth_t)
+
 ########################################
 #
 # Local Policy: atapi_helper
@@ -119,3 +135,45 @@ allow audio_helper_t self:shm create_shm_perms;
 init_dontaudit_use_fds(audio_helper_t)
 init_dontaudit_use_script_fds(audio_helper_t)
 xc_dontaudit_read_etc_files(audio_helper_t)
+
+########################################
+#
+# Local Policy: varstored/varstored-watch
+#
+
+dontaudit varstored_t initrc_t:fd use;
+dontaudit varstored_t xend_t:fd use;
+dontaudit varstored_watch_t initrc_t:fd use;
+
+# varstored-watch executing & monitoring varstored
+allow varstored_watch_t bin_t:dir search;
+varstored_domtrans(varstored_watch_t)
+
+# dbus access for talking to db
+dbd_dbus_chat(varstored_t)
+dbus_connect_system_bus(varstored_t)
+dbus_system_bus_client(varstored_t)
+
+# pid creation
+allow varstored_t var_run_t:dir add_entry_dir_perms;
+allow varstored_t var_run_t:file manage_file_perms;
+allow varstored_t var_run_t:lnk_file read;
+
+# privcmd & xenstore access for checking VM configs.
+# both the watch and varstored also need to write their
+# pid to the xenstore.
+dev_rw_xen(varstored_t)
+xen_stream_connect_xenstore(varstored_t)
+xen_stream_connect_xenstore(varstored_watch_t)
+
+# logging
+logging_send_syslog_msg(varstored_t)
+logging_send_syslog_msg(varstored_watch_t)
+
+# accessing EFI auth files (/usr/share/varstored)
+allow varstored_t varstored_auth_t:dir search_dir_perms;
+allow varstored_t varstored_auth_t:file read_file_perms;
+
+# --depriv functionality
+allow varstored_t self:capability { setgid setuid };
+allow varstored_t self:process setrlimit;

@@ -1,0 +1,206 @@
+--- a/tools/libxl/libxl_dm.c
++++ b/tools/libxl/libxl_dm.c
+@@ -21,6 +21,7 @@
+ 
+ #include <xc_dom.h>
+ #include <xen/hvm/e820.h>
++#include <sys/stat.h>
+ #include <sys/types.h>
+ #include <pwd.h>
+ #include <grp.h>
+@@ -2185,6 +2186,45 @@ static void fork_helper(libxl__gc *gc, c
+                          "%d", pid);
+ }
+ 
++static void start_varstored_helper(libxl__gc *gc, const char *helper_path,
++                             int guest_domid, const char *guest_uuid)
++{
++    pid_t pid;
++    libxl_ctx *ctx = libxl__gc_owner(gc);
++
++    struct stat st = {0};
++    if (stat(GCSPRINTF("/var/run/varstored-root-%d", guest_domid), &st) == -1) {
++        mkdir(GCSPRINTF("/var/run/varstored-root-%d", guest_domid), 0700);
++    }
++
++    pid = fork();
++    if (pid == -1) {
++        LOG(ERROR, "Failed to fork");
++    } else if (pid == 0) {
++        execl(helper_path, GCSPRINTF("varstored-watch-%d", guest_domid),
++                       "--domid",
++                        GCSPRINTF("%d", guest_domid),
++                        "--uuid",
++                        GCSPRINTF("%s", guest_uuid),
++                        NULL);
++    }
++    //Wait for a PID from varstored to be created.
++    unsigned int timeout;
++    char *ready = NULL;
++    const char *varstored_path =
++        GCSPRINTF("%s/varstored-pid",
++                  libxl__xs_get_dompath(gc, guest_domid));
++    for (timeout = 0; !ready && timeout < 4; ++timeout) {
++        ready = xs_read(ctx->xsh, XBT_NULL, varstored_path, NULL);
++        if (ready) {
++            free(ready);
++            break;
++        }
++        sleep(1);
++    }
++
++}
++
+ void libxl__spawn_stub_dm(libxl__egc *egc, libxl__stub_dm_spawn_state *sdss)
+ {
+     STATE_AO_GC(sdss->dm.spawn.ao);
+@@ -2342,6 +2382,21 @@ void libxl__spawn_stub_dm(libxl__egc *eg
+         fork_helper(gc, AUDIO_HELPER_PATH, XS_AUDIO_PID, guest_domid, dm_domid);
+     }
+ 
++    if (guest_config->b_info.u.hvm.bios == LIBXL_BIOS_TYPE_OVMF) {
++        const char *dom_path = libxl__xs_get_dompath(gc, guest_domid);
++        const char *guest_dom_path;
++        const char *guest_uuid;
++        /* Find uuid. */
++        do {
++            t = xs_transaction_start(ctx->xsh);
++            guest_dom_path = libxl__xs_read(gc, t, GCSPRINTF("%s/vm", dom_path));
++            guest_uuid = libxl__xs_read(gc, t, GCSPRINTF("%s/uuid", guest_dom_path));
++        } while (!xs_transaction_end(ctx->xsh, t, 0) && errno == EAGAIN);
++
++        start_varstored_helper(gc, VARSTORED_HELPER_PATH, guest_domid, guest_uuid);
++    }
++
++
+     libxl__store_libxl_entry(gc, guest_domid, "dm-version",
+         libxl_device_model_version_to_string(dm_config->b_info.device_model_version));
+     libxl__store_libxl_entry(gc, dm_domid, "stubdom-version",
+--- a/tools/libxl/libxl_domain.c
++++ b/tools/libxl/libxl_domain.c
+@@ -1065,7 +1065,7 @@ static void domain_destroy_domid_cb(libx
+                                     libxl__ev_child *destroyer,
+                                     pid_t pid, int status);
+ 
+-static void kill_openxt_helpers(libxl__gc *gc, uint32_t dm_domid)
++static void kill_openxt_helpers(libxl__gc *gc, uint32_t dm_domid, uint32_t domid)
+ {
+     char *pid;
+     int rc;
+@@ -1096,6 +1096,23 @@ static void kill_openxt_helpers(libxl__g
+         if (rc < 0)
+             LOG(ERROR, "Failed to kill audio_helper for domain %d", dm_domid);
+     }
++    /* Kill varstored watch */
++    pid = libxl__xs_read(gc, XBT_NULL,
++                         GCSPRINTF("/local/domain/%d/"XS_VARSTORED_WATCH_PID, domid));
++    if (pid) {
++        rc = kill(strtol(pid, NULL, 10), SIGKILL);
++        if (rc < 0)
++            LOG(ERROR, "Failed to kill varstored for domain %d", domid);
++    }
++    /* Kill varstored */
++    pid = libxl__xs_read(gc, XBT_NULL,
++                         GCSPRINTF("/local/domain/%d/"XS_VARSTORED_PID, domid));
++    if (pid) {
++        /* Send SIGTERM to allow varstored to clean up the ioreq server */
++        rc = kill(strtol(pid, NULL, 10), SIGTERM);
++        if (rc < 0)
++            LOG(ERROR, "Failed to kill varstored for domain %d", domid);
++    }
+ }
+ 
+ void libxl__destroy_domid(libxl__egc *egc, libxl__destroy_domid_state *dis)
+@@ -1164,7 +1181,7 @@ void libxl__destroy_domid(libxl__egc *eg
+     } else {
+         /* OpenXT: if the domain has a stubdom, we kill the stubdom helpers here */
+         if (stubdom_id)
+-            kill_openxt_helpers(gc, stubdom_id);
++            kill_openxt_helpers(gc, stubdom_id, domid);
+         dm_destroy_cb(egc, &dis->ddms, 0);
+         return;
+     }
+--- a/tools/libxl/libxl_internal.h
++++ b/tools/libxl/libxl_internal.h
+@@ -138,9 +138,12 @@
+ #define QMP_HELPER_PATH "/usr/lib/xen/bin/qmp_helper"
+ #define ATAPI_PT_HELPER_PATH "/usr/lib/xen/bin/atapi_pt_helper"
+ #define AUDIO_HELPER_PATH "/usr/lib/xen/bin/audio_helper_start"
++#define VARSTORED_HELPER_PATH "/usr/sbin/varstored-watch"
+ #define XS_QMP_PID "qmp-helper-pid"
+ #define XS_ATAPI_PT_PID "atapi-pt-helper-pid"
+ #define XS_AUDIO_PID "audio-helper-pid"
++#define XS_VARSTORED_PID "varstored-pid"
++#define XS_VARSTORED_WATCH_PID "varstored-watch-pid"
+ 
+ #define ROUNDUP(_val, _order)                                           \
+     (((unsigned long)(_val)+(1UL<<(_order))-1) & ~((1UL<<(_order))-1))
+--- a/tools/libxl/libxl_dom.c
++++ b/tools/libxl/libxl_dom.c
+@@ -972,6 +972,20 @@ static int hvm_build_set_xs_values(libxl
+             goto err;
+     }
+ 
++    /* Set a few extra xenstore entries if the bios is OVMF
++     * such as secureboot and authenticated modules are supported.
++     * These values are needed to be read by varstored. */
++    if (info->u.hvm.bios == LIBXL_BIOS_TYPE_OVMF) {
++        path = GCSPRINTF("/local/domain/%d", domid);
++
++       libxl__xs_printf(gc, XBT_NULL,
++              GCSPRINTF("%s/platform/secureboot", path),
++              "%s", libxl_defbool_val(info->u.hvm.secureboot) ? "true" : "false");
++       libxl__xs_printf(gc, XBT_NULL,
++               GCSPRINTF("%s/platform/auth-enforce", path),
++               "%s", libxl_defbool_val(info->u.hvm.authenforce) ? "true" : "false");
++    }
++
+     return 0;
+ 
+ err:
+--- a/tools/libxl/libxl_types.idl
++++ b/tools/libxl/libxl_types.idl
+@@ -570,6 +570,8 @@ libxl_domain_build_info = Struct("domain
+                                        ("acpi_s3",          libxl_defbool),
+                                        ("acpi_s4",          libxl_defbool),
+                                        ("acpi_laptop_slate",libxl_defbool),
++                                       ("secureboot",       libxl_defbool),
++                                       ("authenforce",      libxl_defbool),
+                                        ("nx",               libxl_defbool),
+                                        ("viridian",         libxl_defbool),
+                                        ("viridian_enable",  libxl_bitmap),
+--- a/tools/xl/xl_parse.c
++++ b/tools/xl/xl_parse.c
+@@ -1626,6 +1626,8 @@ void parse_config_data(const char *confi
+         xlu_cfg_get_defbool(config, "acpi_s3", &b_info->u.hvm.acpi_s3, 0);
+         xlu_cfg_get_defbool(config, "acpi_s4", &b_info->u.hvm.acpi_s4, 0);
+         xlu_cfg_get_defbool(config, "acpi_laptop_slate", &b_info->u.hvm.acpi_laptop_slate, 0);
++        xlu_cfg_get_defbool(config, "secureboot", &b_info->u.hvm.secureboot, 0);
++        xlu_cfg_get_defbool(config, "authenforce", &b_info->u.hvm.authenforce, 0);
+         xlu_cfg_get_defbool(config, "nx", &b_info->u.hvm.nx, 0);
+         xlu_cfg_get_defbool(config, "hpet", &b_info->u.hvm.hpet, 0);
+         xlu_cfg_get_defbool(config, "vpt_align", &b_info->u.hvm.vpt_align, 0);
+--- a/tools/xl/xl_sxp.c
++++ b/tools/xl/xl_sxp.c
+@@ -94,6 +94,10 @@ void printf_info_sexp(int domid, libxl_d
+                libxl_defbool_to_string(b_info->apic));
+         fprintf(fh, "\t\t\t(acpi %s)\n",
+                libxl_defbool_to_string(b_info->u.hvm.acpi));
++        fprintf(fh, "\t\t\t(secureboot %s)\n",
++               libxl_defbool_to_string(b_info->u.hvm.secureboot));
++        fprintf(fh, "\t\t\t(authenforce %s)\n",
++               libxl_defbool_to_string(b_info->u.hvm.authenforce));
+         fprintf(fh, "\t\t\t(nx %s)\n", libxl_defbool_to_string(b_info->u.hvm.nx));
+         fprintf(fh, "\t\t\t(viridian %s)\n",
+                libxl_defbool_to_string(b_info->u.hvm.viridian));
+--- a/tools/libxl/libxl_create.c
++++ b/tools/libxl/libxl_create.c
+@@ -327,6 +327,8 @@ int libxl__domain_build_info_setdefault(
+         libxl_defbool_setdefault(&b_info->u.hvm.acpi_s3,            true);
+         libxl_defbool_setdefault(&b_info->u.hvm.acpi_s4,            true);
+         libxl_defbool_setdefault(&b_info->u.hvm.acpi_laptop_slate,  false);
++        libxl_defbool_setdefault(&b_info->u.hvm.secureboot,         false);
++        libxl_defbool_setdefault(&b_info->u.hvm.authenforce,        true);
+         libxl_defbool_setdefault(&b_info->u.hvm.nx,                 true);
+         libxl_defbool_setdefault(&b_info->u.hvm.viridian,           false);
+         libxl_defbool_setdefault(&b_info->u.hvm.hpet,               true);
