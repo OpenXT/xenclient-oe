@@ -28,7 +28,7 @@ RDEPENDS_sync-cmd += " \
 PV = "0+git${SRCPV}"
 
 SRCREV = "${AUTOREV}"
-SRC_URI = "git://github.com/OpenXT/sync-client.git \
+SRC_URI = "git://github.com/OpenXT/sync-client.git;protocol=https \
            file://sync-client-daemon.initscript"
 
 INITSCRIPT_NAME = "sync-client-daemon"

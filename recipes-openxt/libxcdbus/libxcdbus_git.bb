@@ -9,7 +9,7 @@ DEPENDS = " \
 PV = "0+git${SRCPV}"
 
 SRCREV = "${AUTOREV}"
-SRC_URI = "git://github.com/OpenXT/libxcdbus.git"
+SRC_URI = "git://github.com/OpenXT/libxcdbus.git;protocol=https"
 
 S = "${WORKDIR}/git"
 

@@ -1,3 +1,3 @@
 PV = "0+git${SRCPV}"
-SRC_URI = "git://github.com/OpenXT/manager.git"
+SRC_URI = "git://github.com/OpenXT/manager.git;protocol=https"
 SRCREV = "${AUTOREV}"
