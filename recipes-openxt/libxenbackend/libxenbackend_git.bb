@@ -6,7 +6,7 @@ DEPENDS = "xen-tools"
 PV = "0+git${SRCPV}"
 
 SRCREV = "${AUTOREV}"
-SRC_URI = "git://github.com/OpenXT/libxenbackend.git"
+SRC_URI = "git://github.com/OpenXT/libxenbackend.git;protocol=https"
 
 S = "${WORKDIR}/git"
 

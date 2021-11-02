@@ -7,7 +7,7 @@ XEN_REL ?= "4.12"
 PV = "${XEN_REL}+git${SRCPV}"
 
 SRCREV = "${AUTOREV}"
-SRC_URI = "git://github.com/OpenXT/xsm-policy.git"
+SRC_URI = "git://github.com/OpenXT/xsm-policy.git;protocol=https"
 
 S = "${WORKDIR}/git"
 

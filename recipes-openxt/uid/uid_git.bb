@@ -11,7 +11,7 @@ DEPENDS = " \
 PV = "0+git${SRCPV}"
 
 SRCREV = "${AUTOREV}"
-SRC_URI = "git://github.com/OpenXT/uid.git"
+SRC_URI = "git://github.com/OpenXT/uid.git;protocol=https"
 
 SRC_URI += " \
     file://uid_dbus.conf \
