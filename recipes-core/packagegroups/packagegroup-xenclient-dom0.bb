@@ -110,6 +110,7 @@ RDEPENDS_${PN} = " \
     udev-extraconf-dom0 \
     vglass \
     disman \
+    busybox-ifplugd \
 "
 
 # OE upgrade - temporarly disabled:
