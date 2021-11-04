@@ -163,6 +163,7 @@ SRC_URI += " \
     file://patches/add-missing-dbusd-permissions.patch \
     file://patches/xl-sysadm-interfaces.patch \
     file://patches/policy.modules.admin.bootloader.diff \
+    file://patches/ifplugd-tweaks.patch \
 "
 
 DEPENDS_append += " \
