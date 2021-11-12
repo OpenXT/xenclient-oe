@@ -44,7 +44,6 @@ SRC_URI_append = " \
     file://libxl-move-extra-qemu-args-to-the-end.patch \
     file://libxl-stubdom-options.patch \
     file://libxl-support-hvm-readonly-disks.patch \
-    file://libxl-pci-passthrough-fixes.patch \
     file://libxl-vwif-support.patch \
     file://libxl-atapi-pt.patch \
     file://libxl-avoid-creating-unusable-cdrom-vbd-xs-nodes.patch \
