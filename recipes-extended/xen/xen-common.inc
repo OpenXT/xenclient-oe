@@ -21,7 +21,6 @@ SRC_URI_append = " \
     file://xenconsoled-syslog.patch;patch=1 \
     file://Dell-980-txt-shutdown-acpi-access-width.patch;patch=1 \
     file://parse-video-from-mbi.patch;patch=1 \
-    file://openxt-xci-cpuid-signature.patch;patch=1 \
     file://allow-mwait-cstate.patch;patch=1 \
     file://opt-disable-vmcs-shadowing.patch;patch=1 \
     file://hvmloader-legacy-seabios-optionroms.patch;patch=1 \
@@ -40,7 +39,6 @@ SRC_URI_append = " \
     file://libxl-vif-cleanup.patch \
     file://libxl-vif-make-ioemu-and-stubdom-mac-addresses-configurable.patch \
     file://libxl-openxt-helpers.patch \
-    file://libxl-openxt-xci-cpuid-signature.patch \
     file://libxl-openxt-tweaks.patch \
     file://libxl-domain-state.patch \
     file://libxl-fixup-cmdline-ops.patch \
