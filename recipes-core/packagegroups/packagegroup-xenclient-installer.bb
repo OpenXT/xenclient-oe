@@ -72,5 +72,5 @@ RDEPENDS_${PN} = " \
     xen-tools-libxlutil \
     xen-tools-xenstat \
     xen-tools-xl \
-    ${@bb.utils.contains('DISTRO_FEATURES', 'blktap2', 'xen-tools-blktap xen-tools-libblktapctl xen-tools-libvhd', 'xen-tools-blktap3', d)} \
+    xen-tools-blktap3 \
 "

@@ -82,18 +82,14 @@ pkg_prerm_${PN}-xenstored () {
 }
 
 do_configure() {
-    if [ ${@bb.utils.contains('DISTRO_FEATURES', 'blktap2', 'blktap2', 'blktap3', d)} \
-            = "blktap3" ]
-    then
-        # The xen-tools recipe includes the xen-tools-blktap3.inc which will
-        # cause ${S}/tools/blktap3 to be populated for that recipe; this recipe
-        # needs an alternative.
-        # We just need a Makefile there sufficient to pass this configure step.
-        mkdir -p ${S}/tools/blktap3
-        cat >${S}/tools/blktap3/Makefile <<EOF
+    # The xen-tools recipe includes the xen-tools-blktap3.inc which will
+    # cause ${S}/tools/blktap3 to be populated for that recipe; this recipe
+    # needs an alternative.
+    # We just need a Makefile there sufficient to pass this configure step.
+    mkdir -p ${S}/tools/blktap3
+    cat >${S}/tools/blktap3/Makefile <<EOF
 clean:
 EOF
-    fi
 
     do_configure_common
 }

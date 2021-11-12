@@ -6,7 +6,7 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=bbb4b1bdc2c3b6743da3c39d03249095"
 SRC_URI = "git://xenbits.xen.org/xen.git;branch=${XEN_BRANCH}"
 
 require xen-common.inc
-require ${@bb.utils.contains('DISTRO_FEATURES', 'blktap2', 'xen-tools-blktap2.inc', 'xen-tools-blktap3.inc', d)}
+require xen-tools-blktap3.inc
 require xen-tools-openxt.inc
 
 # Workaround for setuptools3 overriding autotools-brokensep

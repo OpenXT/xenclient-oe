@@ -87,28 +87,13 @@ SRC_URI_append = " \
     file://libxl-block-scripts-log-to-syslog.patch \
     file://domain-reboot.patch \
     file://libxl-retry-qmp-pci-add.patch \
-    ${@bb.utils.contains('DISTRO_FEATURES', 'blktap2', \
-       'file://blktap-resume-fix.patch \
-        file://blktap2-miscellaneous-oxt-fixes.patch \
-        file://blktap2-libvhd-atomic-write-helpers.patch \
-        file://blktap2-vhd-marker-flag.patch \
-        file://blktap2-vhd-print-allocated-virtblock-list.patch \
-        file://blktap2-tap-ctl-optional-pid-ro-mount.patch \
-        file://blktap2-vhd-keyhash-support.patch \
-        file://blktap2-vhd-encryption-support.patch \
-        file://blktap2-vhd-icbinn-support.patch \
-        file://blktap2-libxl-crypto-key-dir.patch \
-        file://blktap2-newer-openssl.patch \
-        file://blktap2-fix-warnings.patch \
-    ', \
-       'file://libxl-blktap3-support.patch \
-        file://libxl-crypto-key-dir.patch \
-        file://libxl-blktap3-do-not-destroy-in-use-tapdevs.patch \
-        file://libxl-blktap3-iso-hotswap.patch \
-        file://enable-blktap3-within-tree.patch \
-        file://blktap3-build-integration.patch \
-    ', d) \
-  } file://efi-hardcode-openxt-cfg.patch \
+    file://libxl-blktap3-support.patch \
+    file://libxl-crypto-key-dir.patch \
+    file://libxl-blktap3-do-not-destroy-in-use-tapdevs.patch \
+    file://libxl-blktap3-iso-hotswap.patch \
+    file://enable-blktap3-within-tree.patch \
+    file://blktap3-build-integration.patch \
+    file://efi-hardcode-openxt-cfg.patch \
     file://shim-support-for-shim-lock-measure.patch \
     file://efi-require-shim.patch \
     file://tboot-measure-and-launch-from-xen-efi.patch \
