@@ -31,7 +31,6 @@ SRC_URI_append = " \
     file://increase-ap-startup-time.patch;patch=1 \
     file://acpi-slic-support.patch \
     file://tboot-xen-evtlog-support.patch \
-    file://disable-cpuid-hle-rtm.patch \
     file://add-xc-hypercall-page.patch \
     file://honor-multiple-per-device-pci.patch \
     file://establish-per-device-reserved-memory.patch \
