@@ -10,18 +10,14 @@ SRC_URI_append = "\
 "
 
 RDEPENDS_${PN}-xl += " ${PN}-scripts-block"
-RDEPENDS_${PN}-scripts-common += " ${PN}-cmp-fd-file-inode"
 RDEPENDS_${PN}-scripts-block += " udev"
 RDEPENDS_${PN}-libxenlight += " varstored-watch"
 
 PACKAGES += " \
-    ${PN}-cmp-fd-file-inode \
     ${PN}-toolstack-headers \
     "
 
 PROVIDES =+ "virtual/xenstored"
-
-FILES_${PN}-cmp-fd-file-inode = "${libdir}/xen/bin/cmp-fd-file-inode"
 
 # OpenXT uses init scripts rather than systemd
 FILES_${PN}-console += "${INIT_D_DIR}/xenconsoled"

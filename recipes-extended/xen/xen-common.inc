@@ -85,8 +85,6 @@ SRC_URI_append = " \
     file://argo-quiet-xsm-check-during-init.patch \
     file://libxl-seabios-ipxe.patch \
     file://memory-scrub-on-domain-shutdown.patch \
-    file://0001-tools-helpers-Introduce-cmp-fd-file-inode-utility.patch \
-    file://0002-Linux-locking.sh-Use-cmp-fd-file-inode-for-lock-chec.patch \
     file://ocamlfind-static.patch \
     file://ocaml-makefiles-sysroot.patch \
     file://0001-efi-remove-old-SetVirtualAddressMap-arrangement.patch \
