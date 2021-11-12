@@ -8,7 +8,6 @@ SRC_URI_append = " \
     file://defconfig \
     file://0001-python-pygrub-pass-DISTUTILS-xen.4.12.patch \
     file://0001-tools-firmware-Build-firmware-as-ffreestanding.patch \
-    file://kconfig-grant-table.patch \
     file://kconfig-grant-table-v2-interface.patch \
     file://kconfig-grant-table-exotic.patch \
     file://hvm-pm-hibernate-s-state.patch;patch=1 \
