@@ -29,7 +29,6 @@ SRC_URI_append = " \
     file://stubdomain-msi-irq-access.patch;patch=1 \
     file://xen-x86-Fix-up-rules-when-forcing-mno-sse.patch;patch=1 \
     file://increase-ap-startup-time.patch;patch=1 \
-    file://xenstat-disable-tmem-use.patch;patch=1 \
     file://acpi-slic-support.patch \
     file://tboot-xen-evtlog-support.patch \
     file://disable-cpuid-hle-rtm.patch \
