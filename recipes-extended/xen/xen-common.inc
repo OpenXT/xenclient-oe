@@ -36,7 +36,6 @@ SRC_URI_append = " \
     file://dont-report-highmem-in-use.patch \
     file://libxl-do-not-destroy-in-use-tapdevs.patch \
     file://libxl-syslog.patch \
-    file://libxl-rulesmk-opt-ldlibs.patch \
     file://libxl-tapdisk-cdrom.patch \
     file://libxl-vif-cleanup.patch \
     file://libxl-vif-make-ioemu-and-stubdom-mac-addresses-configurable.patch \
