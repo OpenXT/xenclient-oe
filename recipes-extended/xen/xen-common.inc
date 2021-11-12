@@ -65,7 +65,6 @@ SRC_URI_append = " \
     file://libxl-allow-non-qdisk-cdrom.patch \
     file://libxl-fix-flr.patch \
     file://libxl-disable-vnc-query-when-disabled.patch \
-    file://xl-shutdown-wait-for-domain-death.patch \
     file://libxl-allow-save-vnuma.patch \
     file://libxl-block-scripts-log-to-syslog.patch \
     file://domain-reboot.patch \
