@@ -28,7 +28,6 @@ SRC_URI_append = " \
     file://acpi-slic-support.patch \
     file://tboot-xen-evtlog-support.patch \
     file://add-xc-hypercall-page.patch \
-    file://libxl-do-not-destroy-in-use-tapdevs.patch \
     file://libxl-syslog.patch \
     file://libxl-tapdisk-cdrom.patch \
     file://libxl-vif-cleanup.patch \
