@@ -33,7 +33,6 @@ SRC_URI_append = " \
     file://opt-disable-vmcs-shadowing.patch;patch=1 \
     file://hvmloader-legacy-seabios-optionroms.patch;patch=1 \
     file://gpt-s3-resume-reason.patch;patch=1 \
-    file://fix-memcpy-in-x86-emulate.patch;patch=1 \
     file://stubdomain-msi-irq-access.patch;patch=1 \
     file://xen-x86-Fix-up-rules-when-forcing-mno-sse.patch;patch=1 \
     file://increase-ap-startup-time.patch;patch=1 \
