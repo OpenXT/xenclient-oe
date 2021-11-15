@@ -1,6 +1,6 @@
 DESCRIPTION = "Xen hypervisor ocaml libs and xenstore components"
 
-XEN_REL = "4.12"
+XEN_REL = "4.14"
 XEN_BRANCH ?= "stable-${XEN_REL}"
 SRCREV ?= "${AUTOREV}"
 
@@ -10,7 +10,7 @@ SRC_URI = " \
     file://oxenstored.conf \
     "
 
-LIC_FILES_CHKSUM ?= "file://COPYING;md5=bbb4b1bdc2c3b6743da3c39d03249095"
+LIC_FILES_CHKSUM ?= "file://COPYING;md5=419739e325a50f3d7b4501338e44a4e5"
 
 PV = "${XEN_REL}+git${SRCPV}"
 
