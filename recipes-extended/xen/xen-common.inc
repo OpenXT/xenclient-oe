@@ -73,6 +73,7 @@ SRC_URI_append = " \
     file://ocaml-makefiles-sysroot.patch \
     file://patch-xen-disable-efi-gettime.patch \
     file://libxl-add-ovmf-varstored.patch \
+    file://libxl-const-stubdom-is-linux.patch \
 "
 
 # Unset variables inherited from meta-virt dunfell to avoid multilib
