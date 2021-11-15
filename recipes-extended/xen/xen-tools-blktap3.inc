@@ -109,6 +109,7 @@ do_compile_append() {
 }
 
 do_install_append() {
+    oe_runmake -C tools/blktap3 DESTDIR="${D}" install
     if ${@bb.utils.contains('DISTRO_FEATURES', 'systemd', 'false', 'true', d)}; then
         rm -rf ${D}/usr/lib/systemd
     fi
