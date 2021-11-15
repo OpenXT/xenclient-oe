@@ -14,7 +14,7 @@ SRC_URI = " \
 do_install() {
         install -d ${D}${libdir}/xen/boot
         install -m 0644 ${WORKDIR}/${STUBDOMAIN_KERNEL}-${STUBDOMAIN_MACHINE}.bin \
-            ${D}${libdir}/xen/boot/stubdomain-bzImage
+            ${D}${libdir}/xen/boot/qemu-stubdom-linux-kernel
 }
 
 do_checkimage() {
@@ -24,5 +24,5 @@ do_checkimage() {
 }
 addtask checkimage before do_fetch
 
-FILES_${PN} = "${libdir}/xen/boot/stubdomain-bzImage"
+FILES_${PN} = "${libdir}/xen/boot/qemu-stubdom-linux-kernel"
 
