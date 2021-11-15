@@ -54,10 +54,6 @@ SRC_URI_append = " \
     file://libxl-allow-save-vnuma.patch \
     file://libxl-block-scripts-log-to-syslog.patch \
     file://domain-reboot.patch \
-    file://libxl-blktap3-support.patch \
-    file://libxl-crypto-key-dir.patch \
-    file://libxl-blktap3-do-not-destroy-in-use-tapdevs.patch \
-    file://libxl-blktap3-iso-hotswap.patch \
     file://enable-blktap3-within-tree.patch \
     file://blktap3-build-integration.patch \
     file://efi-hardcode-openxt-cfg.patch \
