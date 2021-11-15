@@ -98,6 +98,9 @@ do_compile() {
     export EXTRA_CFLAGS_XEN_TOOLS="-I${STAGING_INCDIR}/blktap ${EXTRA_CFLAGS_XEN_TOOLS}"
 
     oe_runmake -C tools/libs subdir-all-toolcore
+    oe_runmake -C tools/libs subdir-all-toollog
+    oe_runmake -C tools/libs subdir-all-call
+    oe_runmake -C tools/libs subdir-all-hypfs
     oe_runmake -C tools subdir-all-include
     oe_runmake LDLIBS_libxenctrl='-lxenctrl' \
 		       LDLIBS_libxenstore='-lxenstore' \
