@@ -15,6 +15,8 @@ RDEPENDS_${PN}-libxenlight += " varstored-watch"
 
 PACKAGES += " \
     ${PN}-toolstack-headers \
+    ${PN}-libxenhypfs \
+    ${PN}-libxenhypfs-dev \
     "
 
 PROVIDES =+ "virtual/xenstored"
@@ -40,6 +42,17 @@ FILES_${PN}-xenstored = " \
     ${INIT_D_DIR}/xenstored.${PN}-xenstored \
     ${sysconfdir}/xen/xenstored.conf \
     "
+
+FILES_${PN}-libxenhypfs = " \
+    ${libdir}/libxenhypfs.so.* \
+"
+RDPENDS_${PN} += "${PN}-libxenhypfs"
+
+FILES_${PN}-libxenhypfs-dev = " \
+    ${libdir}/libxenhypfs.so \
+    ${libdir}/pkgconfig/xenhypfs.pc \
+    ${datadir}/pkgconfig/xenhypfs.pc \
+"
 
 # This init script is added by OpenXT and runs the xen-init-dom0 script
 # that meta-virtualization has packaged in the ${PN}-xl package.
