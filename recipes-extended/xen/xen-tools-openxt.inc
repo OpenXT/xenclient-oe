@@ -53,6 +53,15 @@ FILES_${PN}-libxenhypfs-dev = " \
     ${libdir}/pkgconfig/xenhypfs.pc \
     ${datadir}/pkgconfig/xenhypfs.pc \
 "
+FILES_${PN}-xenhypfs = " \
+    ${sbindir}/xenhypfs \
+"
+PACKAGES += "${PN}-xenhypfs"
+
+FILES_${PN}-xen-ucode = " \
+    ${sbindir}/xen-ucode \
+"
+PACKAGES += "${PN}-xen-ucode"
 
 # This init script is added by OpenXT and runs the xen-init-dom0 script
 # that meta-virtualization has packaged in the ${PN}-xl package.
