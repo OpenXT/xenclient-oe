@@ -72,6 +72,7 @@ SRC_URI_append = " \
     file://libxl-add-ovmf-varstored.patch \
     file://libxl-const-stubdom-is-linux.patch \
     file://libxl-disable-dom0-qemu.patch \
+    file://libxl-xen-disable-dom0-qemu.patch \
 "
 
 # Unset variables inherited from meta-virt dunfell to avoid multilib
