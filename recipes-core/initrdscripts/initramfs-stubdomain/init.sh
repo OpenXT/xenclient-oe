@@ -77,8 +77,18 @@ export INTEL_DBUS=1
 echo "Starting qemu directly."
 target="$( xenstore-read target )"
 vm_uuid="$( xenstore-read /local/domain/${target}/vm )"
-dmargs="$( xenstore-read ${vm_uuid}/image/dmargs )"
+
+dmargs=$( xenstore-read $(xenstore-list -p "$vm_uuid/image/dm-argv" | sort ))
 echo "target $target vm_uuid $vm_uuid"
 echo "Invoking qemu with dmargs       = ${dmargs}"
-/usr/bin/qemu-system-i386 ${dmargs}
+
+/usr/bin/qemu-system-i386 ${dmargs} -chardev socket,server,nowait,path=/tmp/qemu.qmp,id=m2 -mon chardev=m2,mode=control &
+
+device_model="device-model/$target"
+
+echo "Starting vchan-socket-proxy"
+vchan-socket-proxy -m server 0 $device_model/qmp-vchan /tmp/qemu.qmp &
+
+wait
+
 poweroff -f

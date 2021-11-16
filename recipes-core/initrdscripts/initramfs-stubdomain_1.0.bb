@@ -17,3 +17,8 @@ do_install() {
 FILES_${PN} = " \
     /init \
 "
+RDEPENDS_${PN} += " \
+    qemu-dm-stubdom \
+    vchan-socket-proxy \
+    xen-tools-xenstore \
+"
