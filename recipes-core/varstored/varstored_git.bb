@@ -67,8 +67,8 @@ do_compile_append() {
     openssl x509 -inform DER -in ${WORKDIR}/MicWinProPCA2011_2011-10-19.crt -outform PEM -out ${S}/MicWinProPCA2011_2011-10-19.pem -text
     openssl x509 -inform DER -in ${WORKDIR}/MicCorKEKCA2011_2011-06-24.crt -outform PEM -out ${S}/MicCorKEKCA2011_2011-06-24.pem
 
-    echo ${S}/MicCorKEKCA2011_2011-06-24.pem >> ${S}/KEK.list
-    echo ${S}/MicWinProPCA2011_2011-10-19.pem >> ${S}/db.list
+    echo ${S}/MicCorKEKCA2011_2011-06-24.pem > ${S}/KEK.list
+    echo ${S}/MicWinProPCA2011_2011-10-19.pem > ${S}/db.list
     echo ${S}/MicCorUEFCA2011_2011-06-27.pem >> ${S}/db.list
 
     oe_runmake auth
