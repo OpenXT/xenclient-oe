@@ -32,7 +32,6 @@ SRC_URI += "file://compile-time-stubdom-flag.patch \
             file://msix-cap-disable.patch \
             file://openxtaudio.patch \
             file://nic-link-state-propagation.patch \
-            file://stubdom-read-gsi-from-device-config-space.patch \
             file://acpi-pm-feature.patch \
             file://maintain-time-offset.patch \
             file://openxt-misc-fixes.patch \
