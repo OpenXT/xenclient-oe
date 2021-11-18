@@ -201,10 +201,16 @@ file_con_fixup (data_t *data)
                 return -1;
         }
         for (i = 0; data->files [i] != NULL; ++i) {
-                if (getfilecon (data->files [i], &sec_con) == -1) {
+                const char *prefix = "vhd:";
+                char *file = data->files[i];
+
+                if (strncmp(file, prefix, strlen(prefix)) == 0) {
+                        file += strlen(prefix);
+                }
+                if (getfilecon (file, &sec_con) == -1) {
                         syslog (LOG_CRIT,
                                 "error getting context from file: %s, error %s",
-                                data->files [i], strerror (errno));
+                                file, strerror (errno));
                         continue;
                 }
                 con = context_new (sec_con);
@@ -223,8 +229,8 @@ file_con_fixup (data_t *data)
                         goto err_confree;
                 }
                 syslog (LOG_INFO, "Setting context for file %s to %s",
-                        data->files [i], context_str (con));
-                ret = setfilecon (data->files [i], context_str (con));
+                        file, context_str (con));
+                ret = setfilecon (file, context_str (con));
                 if (ret != 0)
                         syslog (LOG_CRIT, "setfilecon error:%s",
                                 strerror (errno));
