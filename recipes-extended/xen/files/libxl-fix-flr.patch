@@ -52,40 +52,39 @@ PATCHES
 ################################################################################
 --- a/tools/libxl/libxl_internal.h
 +++ b/tools/libxl/libxl_internal.h
-@@ -1554,14 +1554,21 @@ _hidden int libxl__pci_topology_init(lib
+@@ -1722,12 +1722,20 @@ _hidden int libxl__pci_topology_init(lib
+                                      int num_devs);
  
  /* from libxl_pci */
- 
 +typedef struct libxl_pci_dev_wrap {
 +    libxl_device_pci *pcidevs;
 +    int num_devs;
 +} libxl_pci_dev_wrap;
-+
- _hidden int libxl__device_pci_add(libxl__gc *gc, uint32_t domid, libxl_device_pci *pcidev, int starting);
- _hidden int libxl__create_pci_backend(libxl__gc *gc, uint32_t domid,
-                                       libxl_device_pci *pcidev, int num);
--_hidden int libxl__device_pci_destroy_all(libxl__gc *gc, uint32_t domid);
-+_hidden int libxl__device_pci_destroy_all(libxl__gc *gc, uint32_t domid, libxl_pci_dev_wrap **pciw);
+ 
+ _hidden void libxl__device_pci_add(libxl__egc *egc, uint32_t domid,
+                                    libxl_device_pci *pcidev, bool starting,
+                                    libxl__ao_device *aodev);
+ _hidden void libxl__device_pci_destroy_all(libxl__egc *egc, uint32_t domid,
+-                                           libxl__multidev *);
++                                           libxl__multidev *,
++					   libxl_pci_dev_wrap **pciw);
++_hidden int libxl__device_pci_reset(libxl__gc *gc, unsigned int domain,
++                                    unsigned int bus, unsigned int dev,
++                                    unsigned int func);
  _hidden int libxl__device_pci_setdefault(libxl__gc *gc, uint32_t domid,
                                           libxl_device_pci *pci, bool hotplug);
  _hidden bool libxl__is_igd_vga_passthru(libxl__gc *gc,
-                                         const libxl_domain_config *d_config);
-+_hidden int libxl__device_pci_reset(libxl__gc *gc, unsigned int domain, 
-+                                    unsigned int bus, unsigned int dev, unsigned int func);
- 
- /* from libxl_dtdev */
- 
-@@ -3916,6 +3923,7 @@ struct libxl__destroy_domid_state {
+@@ -4075,6 +4083,7 @@ struct libxl__destroy_domid_state {
      libxl__devices_remove_state drs;
      libxl__destroy_devicemodel_state ddms;
      libxl__ev_child destroyer;
 +    libxl_pci_dev_wrap *pciw;
      bool soft_reset;
+     libxl__multidev multidev;
  };
- 
 --- a/tools/libxl/libxl_pci.c
 +++ b/tools/libxl/libxl_pci.c
-@@ -215,7 +215,7 @@ static int libxl__device_pci_remove_xens
+@@ -221,7 +221,7 @@ static int libxl__device_pci_remove_xens
          return ERROR_FAIL;
  
      if (domtype == LIBXL_DOMAIN_TYPE_PV) {
@@ -94,7 +93,7 @@ PATCHES
              LOGD(DEBUG, domid, "pci backend at %s is not ready", be_path);
              return ERROR_FAIL;
          }
-@@ -238,13 +238,12 @@ static int libxl__device_pci_remove_xens
+@@ -244,13 +244,12 @@ static int libxl__device_pci_remove_xens
  retry_transaction:
      t = xs_transaction_start(ctx->xsh);
      xs_write(ctx->xsh, t, GCSPRINTF("%s/state-%d", be_path, i), GCSPRINTF("%d", XenbusStateClosing), 1);
@@ -109,8 +108,8 @@ PATCHES
              LOGD(DEBUG, domid, "pci backend at %s is not ready", be_path);
              return ERROR_FAIL;
          }
-@@ -1142,13 +1141,13 @@ out:
-     return rc;
+@@ -1446,13 +1445,13 @@ out:
+     pas->callback(egc, pas, rc);
  }
  
 -static int libxl__device_pci_reset(libxl__gc *gc, unsigned int domain, unsigned int bus,
@@ -125,41 +124,44 @@ PATCHES
      fd = open(reset, O_WRONLY);
      if (fd >= 0) {
          char *buf = GCSPRINTF(PCI_BDF, domain, bus, dev, func);
-@@ -1501,10 +1500,6 @@ skip1:
-         fclose(f);
-     }
- out:
+@@ -2169,11 +2168,6 @@ static void pci_remove_detatched(libxl__
+ 
+     isstubdom = libxl_is_stubdom(CTX, domid, &domainid);
+ 
 -    /* don't do multiple resets while some functions are still passed through */
 -    if ( (pcidev->vdevfn & 0x7) == 0 ) {
 -        libxl__device_pci_reset(gc, pcidev->domain, pcidev->bus, pcidev->dev, pcidev->func);
 -    }
- 
-     if (!isstubdom) {
-         rc = xc_deassign_device(ctx->xch, domid, pcidev_encode_bdf(pcidev));
-@@ -1669,7 +1664,7 @@ out:
-     return pcidevs;
- }
- 
--int libxl__device_pci_destroy_all(libxl__gc *gc, uint32_t domid)
-+int libxl__device_pci_destroy_all(libxl__gc *gc, uint32_t domid, libxl_pci_dev_wrap **pciw)
- {
-     libxl_ctx *ctx = libxl__gc_owner(gc);
-     libxl_device_pci *pcidevs;
-@@ -1687,8 +1682,9 @@ int libxl__device_pci_destroy_all(libxl_
-         if (libxl__device_pci_remove_common(gc, domid, pcidevs + i, 1) < 0)
-             rc = ERROR_FAIL;
-     }
 -
--    free(pcidevs);
-+    *pciw = malloc(sizeof(libxl_pci_dev_wrap));
-+    (*pciw)->pcidevs = pcidevs;
-+    (*pciw)->num_devs = num;
-     return rc;
+     if (!isstubdom) {
+         rc = xc_deassign_device(CTX->xch, domid, pcidev_encode_bdf(pcidev));
+         if (rc < 0 && (prs->hvm || errno != ENOSYS))
+@@ -2419,7 +2413,8 @@ out:
  }
  
+ void libxl__device_pci_destroy_all(libxl__egc *egc, uint32_t domid,
+-                                   libxl__multidev *multidev)
++                                   libxl__multidev *multidev,
++                                   libxl_pci_dev_wrap **pciw)
+ {
+     STATE_AO_GC(multidev->ao);
+     libxl_device_pci *pcidevs;
+@@ -2439,6 +2434,12 @@ void libxl__device_pci_destroy_all(libxl
+         libxl__device_pci_remove_common(egc, domid, pcidevs + i, true,
+                                         aodev);
+     }
++
++    *pciw = malloc(sizeof(libxl_pci_dev_wrap));
++    if (*pciw) {
++        (*pciw)->pcidevs = pcidevs;
++        (*pciw)->num_devs = num;
++    }
+ }
+ 
+ int libxl__grant_vga_iomem_permission(libxl__gc *gc, const uint32_t domid,
 --- a/tools/libxl/libxl_domain.c
 +++ b/tools/libxl/libxl_domain.c
-@@ -1030,6 +1030,15 @@ static void domain_destroy_callback(libx
+@@ -1187,6 +1187,15 @@ static void domain_destroy_callback(libx
          dds->rc = rc;
      }
  
@@ -167,7 +169,7 @@ PATCHES
 +        for (int i = 0; i < dis->pciw->num_devs; i++) {
 +            libxl_device_pci *pcidev = &dis->pciw->pcidevs[i];
 +            libxl__device_pci_reset(gc, pcidev->domain, pcidev->bus, pcidev->dev, pcidev->func);
-+        } 
++        }
 +        free(dis->pciw->pcidevs);
 +        free(dis->pciw);
 +    }
@@ -175,16 +177,12 @@ PATCHES
      dds->domain_finished = 1;
      destroy_finish_check(egc, dds);
  }
-@@ -1135,8 +1144,11 @@ void libxl__destroy_domid(libxl__egc *eg
-         goto out;
-     }
+@@ -1269,7 +1278,7 @@ void libxl__destroy_domid(libxl__egc *eg
  
--    if (libxl__device_pci_destroy_all(gc, domid) < 0)
-+    rc = libxl__device_pci_destroy_all(gc, domid, &(dis->pciw));
-+    if (rc < 0) {
-         LOGD(ERROR, domid, "Pci shutdown failed");
-+    }
-+
-     rc = xc_domain_pause(ctx->xch, domid);
-     if (rc < 0) {
-         LOGEVD(ERROR, rc, domid, "xc_domain_pause failed");
+     libxl__multidev_begin(ao, &dis->multidev);
+     dis->multidev.callback = destroy_domid_pci_done;
+-    libxl__device_pci_destroy_all(egc, domid, &dis->multidev);
++    libxl__device_pci_destroy_all(egc, domid, &dis->multidev, &dis->pciw);
+     libxl__multidev_prepared(egc, &dis->multidev, 0);
+     return;
+ 
