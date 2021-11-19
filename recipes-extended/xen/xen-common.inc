@@ -55,6 +55,7 @@ SRC_URI_append = " \
     file://libxl-block-scripts-log-to-syslog.patch \
     file://0001-convert-block-tap-for-shared.patch \
     file://domain-reboot.patch \
+    file://libxl-retry-qmp-pci-add.patch \
     file://efi-hardcode-openxt-cfg.patch \
     file://shim-support-for-shim-lock-measure.patch \
     file://efi-require-shim.patch \
