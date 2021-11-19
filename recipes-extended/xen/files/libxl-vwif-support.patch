@@ -57,7 +57,7 @@ PATCHES
 ################################################################################
 --- a/tools/libxl/libxl_device.c
 +++ b/tools/libxl/libxl_device.c
-@@ -789,7 +789,8 @@ int libxl__device_destroy(libxl__gc *gc,
+@@ -765,7 +765,8 @@ int libxl__device_destroy(libxl__gc *gc,
              libxl__xs_path_cleanup(gc, t, be_path);
          }
  
@@ -67,7 +67,7 @@ PATCHES
              libxl__xs_path_cleanup(gc, t, be_path);
          }
  
-@@ -1337,7 +1338,9 @@ static void device_destroy_be_watch_cb(l
+@@ -1310,7 +1311,9 @@ static void device_destroy_be_watch_cb(l
       * in xenstore. NDVM doesn't do that, so let's not wait forever
       * here. libxl will take care of the xenstore nodes later
       */
@@ -78,7 +78,7 @@ PATCHES
          /* backend path still exists, wait a little longer... */
          return;
      }
-@@ -1470,6 +1473,15 @@ int libxl__device_nextid(libxl__gc *gc,
+@@ -1443,6 +1446,15 @@ int libxl__device_nextid(libxl__gc *gc,
      else
          nextid = strtoul(l[nb - 1], NULL, 10) + 1;
  
@@ -94,55 +94,27 @@ PATCHES
      return nextid;
  }
  
-@@ -1608,9 +1620,11 @@ static int add_device(libxl__egc *egc, l
- 
-     switch(dev->backend_kind) {
-     case LIBXL__DEVICE_KIND_VBD:
-+    case LIBXL__DEVICE_KIND_VWIF:
-     case LIBXL__DEVICE_KIND_VIF:
--        if (dev->backend_kind == LIBXL__DEVICE_KIND_VBD) dguest->num_vbds++;
--        if (dev->backend_kind == LIBXL__DEVICE_KIND_VIF) dguest->num_vifs++;
-+        if (dev->backend_kind == LIBXL__DEVICE_KIND_VBD)  dguest->num_vbds++;
-+        if (dev->backend_kind == LIBXL__DEVICE_KIND_VWIF) dguest->num_vifs++;
-+        if (dev->backend_kind == LIBXL__DEVICE_KIND_VIF)  dguest->num_vifs++;
- 
-         GCNEW(aodev);
-         libxl__prepare_ao_device(ao, aodev);
-@@ -1656,9 +1670,11 @@ static int remove_device(libxl__egc *egc
- 
-     switch(ddev->dev->backend_kind) {
-     case LIBXL__DEVICE_KIND_VBD:
-+    case LIBXL__DEVICE_KIND_VWIF:
-     case LIBXL__DEVICE_KIND_VIF:
--        if (dev->backend_kind == LIBXL__DEVICE_KIND_VBD) dguest->num_vbds--;
--        if (dev->backend_kind == LIBXL__DEVICE_KIND_VIF) dguest->num_vifs--;
-+        if (dev->backend_kind == LIBXL__DEVICE_KIND_VBD)  dguest->num_vbds--;
-+        if (dev->backend_kind == LIBXL__DEVICE_KIND_VWIF) dguest->num_vifs--;
-+        if (dev->backend_kind == LIBXL__DEVICE_KIND_VIF)  dguest->num_vifs--;
- 
-         GCNEW(aodev);
-         libxl__prepare_ao_device(ao, aodev);
 --- a/tools/libxl/libxl_dm.c
 +++ b/tools/libxl/libxl_dm.c
-@@ -1491,9 +1491,12 @@ static int libxl__build_device_model_arg
+@@ -1548,9 +1548,12 @@ static int libxl__build_device_model_arg
                                                  LIBXL_NIC_TYPE_VIF_IOEMU);
                  flexarray_append(dm_args, "-device");
                  flexarray_append(dm_args,
--                   GCSPRINTF("%s,id=vif%d,netdev=net%d,mac=%s",
+-                   GCSPRINTF("%s,id=nic%d,netdev=net%d,mac=%s",
 -                             nics[i].model, nics[i].devid,
 -                             nics[i].devid, smac));
 +                   GCSPRINTF("%s,id=%s%d,netdev=net%d,mac=%s",
 +                             nics[i].model,
-+                             (libxl_defbool_val(nics[i].wireless)) ? "vwif" : "vif",
++                             (libxl_defbool_val(nics[i].wireless)) ? "vwif" : "nic",
 +                             nics[i].devid,
 +                             nics[i].devid,
 +                             smac));
                  flexarray_append(dm_args, "-netdev");
                  flexarray_append(dm_args,
                                   GCSPRINTF("type=tap,id=net%d,ifname=%s,"
-@@ -1997,6 +2000,9 @@ static void libxl__dm_vifs_from_hvm_gues
-         libxl_device_nic_init(&dm_config->nics[i]);
-         libxl_device_nic_copy(ctx, &dm_config->nics[i], &guest_config->nics[i]);
+@@ -2064,6 +2067,9 @@ static void libxl__dm_vifs_from_hvm_gues
+     for (i=0; i<nr; i++) {
+         dm_config->nics[i] = guest_config->nics[i];
          dm_config->nics[i].nictype = LIBXL_NIC_TYPE_VIF;
 +        /* Stubdoms use Linux netfront, which doesn't handle VWIFs */
 +        libxl_defbool_set(&dm_config->nics[i].wireless, false);
@@ -199,7 +171,7 @@ PATCHES
      rc = libxl__backendpath_parse_domid(gc, tmp, &nic->backend_domid);
      if (rc) goto out;
  
-@@ -413,10 +419,17 @@ int libxl_device_nic_getinfo(libxl_ctx *
+@@ -414,10 +420,17 @@ int libxl_device_nic_getinfo(libxl_ctx *
  
      nicinfo->devid = nic->devid;
  
@@ -221,7 +193,7 @@ PATCHES
      nicinfo->backend = xs_read(ctx->xsh, XBT_NULL,
                                  GCSPRINTF("%s/backend", libxl_path), NULL);
      if (!nicinfo->backend) {
-@@ -502,9 +515,73 @@ out:
+@@ -503,9 +516,73 @@ out:
  }
  
  static LIBXL_DEFINE_UPDATE_DEVID(nic)
@@ -299,7 +271,7 @@ PATCHES
  LIBXL_DEFINE_DEVICE_REMOVE(nic)
 --- a/tools/libxl/libxl_types.idl
 +++ b/tools/libxl/libxl_types.idl
-@@ -720,6 +720,7 @@ libxl_device_nic = Struct("device_nic",
+@@ -726,6 +726,7 @@ libxl_device_nic = Struct("device_nic",
      ("rate_bytes_per_interval", uint64),
      ("rate_interval_usecs", uint32),
      ("gatewaydev", string),
@@ -309,11 +281,11 @@ PATCHES
      ("coloft_forwarddev", string),
 --- a/tools/libxl/libxl_types_internal.idl
 +++ b/tools/libxl/libxl_types_internal.idl
-@@ -30,6 +30,7 @@ libxl__device_kind = Enumeration("device
-     (13, "VUART"),
+@@ -32,6 +32,7 @@ libxl__device_kind = Enumeration("device
      (14, "PVCALLS"),
      (15, "VSND"),
-+    (16, "VWIF"),
+     (16, "VINPUT"),
++    (17, "VWIF"),
      ])
  
  libxl__console_backend = Enumeration("console_backend", [
