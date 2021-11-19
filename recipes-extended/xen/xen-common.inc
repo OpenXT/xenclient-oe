@@ -42,7 +42,7 @@ SRC_URI_append = " \
     file://libxl-hard-shutdown.patch \
     file://libxl-argo-xswait.patch \
     file://libxl-move-extra-qemu-args-to-the-end.patch \
-    file://libxl-stubdom-options.patch \
+    file://0001-tools-xl-Add-stubdomain_cmdline-option-to-xl.cfg.patch \
     file://libxl-support-hvm-readonly-disks.patch \
     file://libxl-vwif-support.patch \
     file://libxl-atapi-pt.patch \

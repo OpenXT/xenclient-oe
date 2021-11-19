@@ -1,0 +1,87 @@
+From ce233b10319dfb77ab5e0102202190a5911ae8f3 Mon Sep 17 00:00:00 2001
+From: Scott Davis <scottwd@gmail.com>
+Date: Thu, 22 Jul 2021 12:54:30 -0400
+Subject: [PATCH] tools/xl: Add stubdomain_cmdline option to xl.cfg
+
+This adds an option to the xl domain configuration file syntax for specifying
+a kernel command line for device-model stubdomains. It is intended for use with
+Linux-based stubdomains.
+
+Signed-off-by: Scott Davis <scott.davis@starlab.io>
+Reviewed-by: Jason Andryuk <jandryuk@gmail.com>
+Acked-by: Ian Jackson <iwj@xenproject.org>
+---
+ docs/man/xl.cfg.5.pod.in             |  4 ++++
+ tools/golang/xenlight/helpers.gen.go |  3 +++
+ tools/golang/xenlight/types.gen.go   |  1 +
+ tools/include/libxl.h                | 12 ++++++++++++
+ tools/libs/light/libxl_dm.c          |  1 +
+ tools/libs/light/libxl_types.idl     |  1 +
+ tools/xl/xl_parse.c                  |  2 ++
+ 7 files changed, 24 insertions(+)
+
+--- a/docs/man/xl.cfg.5.pod.in
++++ b/docs/man/xl.cfg.5.pod.in
+@@ -2779,6 +2779,10 @@ In case of B<qemu-xen-traditional> it is
+ image, in case of B<qemu-xen> it is expected to be Linux-based stubdomain
+ kernel.
+ 
++=item B<stubdomain_cmdline="STRING">
++
++Set the device-model stubdomain kernel command line to B<STRING>.
++
+ =item B<stubdomain_ramdisk="PATH">
+ 
+ Override the path to the ramdisk image used as device-model stubdomain.
+--- a/tools/libxl/libxl.h
++++ b/tools/libxl/libxl.h
+@@ -967,6 +967,18 @@ typedef struct libxl__ctx libxl_ctx;
+ #define LIBXL_HAVE_BUILDINFO_KERNEL 1
+ 
+ /*
++ * LIBXL_HAVE_BUILDINFO_DEVICE_MODEL_STUBDOMAIN
++ *
++ * If this is defined, then the libxl_domain_build_info structure will contain
++ * the following fields that specify options for device model stubdomains:
++ *  - stubdomain_memkb:   integer indicating stubdomain RAM size
++ *  - stubdomain_kernel:  string indicating stubdomain kernel image location
++ *  - stubdomain_cmdline: string of parameters to pass to the stubdomain kernel
++ *  - stubdomain_ramdisk: string indicating stubdomain ramdisk location
++ */
++#define LIBXL_HAVE_BUILDINFO_DEVICE_MODEL_STUBDOMAIN 1
++
++/*
+  * LIBXL_HAVE_DEVICE_CHANNEL
+  *
+  * If this is defined, then the libxl_device_channel struct exists
+--- a/tools/libxl/libxl_dm.c
++++ b/tools/libxl/libxl_dm.c
+@@ -2375,6 +2375,7 @@ void libxl__spawn_stub_dm(libxl__egc *eg
+     }
+ 
+     stubdom_state->pv_kernel.path = guest_config->b_info.stubdomain_kernel;
++    stubdom_state->pv_cmdline = guest_config->b_info.stubdomain_cmdline;
+     stubdom_state->pv_ramdisk.path = guest_config->b_info.stubdomain_ramdisk;
+ 
+     /* fixme: this function can leak the stubdom if it fails */
+--- a/tools/libxl/libxl_types.idl
++++ b/tools/libxl/libxl_types.idl
+@@ -526,6 +526,7 @@ libxl_domain_build_info = Struct("domain
+     ("device_model_stubdomain", libxl_defbool),
+     ("stubdomain_memkb",   MemKB),
+     ("stubdomain_kernel",  string),
++    ("stubdomain_cmdline", string),
+     ("stubdomain_ramdisk", string),
+     # if you set device_model you must set device_model_version too
+     ("device_model",     string),
+--- a/tools/xl/xl_parse.c
++++ b/tools/xl/xl_parse.c
+@@ -2547,6 +2547,8 @@ skip_usbdev:
+ 
+     xlu_cfg_replace_string (config, "stubdomain_kernel",
+                             &b_info->stubdomain_kernel, 0);
++    xlu_cfg_replace_string (config, "stubdomain_cmdline",
++                            &b_info->stubdomain_cmdline, 0);
+     xlu_cfg_replace_string (config, "stubdomain_ramdisk",
+                             &b_info->stubdomain_ramdisk, 0);
+     if (!xlu_cfg_get_long (config, "stubdomain_memory", &l, 0))
