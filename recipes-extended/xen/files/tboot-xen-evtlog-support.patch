@@ -31,82 +31,12 @@ INTERNAL DEPENDENCIES
 ################################################################################
 PATCHES
 ################################################################################
---- /dev/null
-+++ b/xen/include/public/txt.h
-@@ -0,0 +1,67 @@
-+/******************************************************************************
-+ * txt.h
-+ *
-+ * Control domain TXT/TPM services.
-+ *
-+ * Copyright (c) 2017 Assured Information Security, Inc
-+ *
-+ * Authors:
-+ * Ross Philipson <philipsonr@ainfosec.com>
-+ *
-+ * Permission is hereby granted, free of charge, to any person obtaining a copy
-+ * of this software and associated documentation files (the "Software"), to
-+ * deal in the Software without restriction, including without limitation the
-+ * rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
-+ * sell copies of the Software, and to permit persons to whom the Software is
-+ * furnished to do so, subject to the following conditions:
-+ *
-+ * The above copyright notice and this permission notice shall be included in
-+ * all copies or substantial portions of the Software.
-+ *
-+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-+ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-+ * DEALINGS IN THE SOFTWARE.
-+ */
-+
-+#ifndef __XEN_PUBLIC_TXT_H__
-+#define __XEN_PUBLIC_TXT_H__
-+
-+#include "xen.h"
-+
-+/* version of ABI */
-+#define TXT_SPEC_VERSION          1
-+
-+/*
-+ * Return TXT TPM event log
-+ *
-+ * @arg == pointer to xen_txt_evtlog_t input/output structure.
-+ */
-+#define TXTOP_evtlog    0
-+
-+struct xen_txt_evtlog {
-+    /* IN/OUT */
-+    uint64_t  size;
-+    /* OUT */
-+    uint8_t format;
-+    uint8_t _pad[7];
-+    /* OUT */
-+    XEN_GUEST_HANDLE(void) buffer;
-+};
-+typedef struct xen_txt_evtlog xen_txt_evtlog_t;
-+DEFINE_XEN_GUEST_HANDLE(xen_txt_evtlog_t);
-+
-+#endif /* __XEN_PUBLIC_TXT_H__ */
-+
-+/*
-+ * Local variables:
-+ * mode: C
-+ * c-file-style: "BSD"
-+ * c-basic-offset: 4
-+ * tab-width: 4
-+ * indent-tabs-mode: nil
-+ * End:
-+ */
 --- a/xen/arch/x86/hvm/hypercall.c
 +++ b/xen/arch/x86/hvm/hypercall.c
-@@ -148,6 +148,9 @@ static const hypercall_table_t hvm_hyper
+@@ -153,6 +153,9 @@ static const hypercall_table_t hvm_hyper
+ #ifdef CONFIG_HYPFS
+     HYPERCALL(hypfs_op),
  #endif
-     HYPERCALL(xenpmu_op),
-     COMPAT_CALL(dm_op),
 +#ifdef CONFIG_TXT_OP
 +    HYPERCALL(txt_op),
 +#endif
@@ -115,21 +45,19 @@ PATCHES
  
 --- a/xen/arch/x86/hypercall.c
 +++ b/xen/arch/x86/hypercall.c
-@@ -74,6 +74,9 @@ const hypercall_args_t hypercall_args_ta
+@@ -68,6 +68,7 @@ const hypercall_args_t hypercall_args_ta
      ARGS(hvm_op, 2),
      ARGS(dm_op, 3),
- #endif
-+#ifdef CONFIG_TXT_OP
+     ARGS(hypfs_op, 5),
 +    ARGS(txt_op, 3),
-+#endif
      ARGS(mca, 1),
      ARGS(arch_1, 1),
  };
 --- a/xen/arch/x86/pv/hypercall.c
 +++ b/xen/arch/x86/pv/hypercall.c
-@@ -87,6 +87,9 @@ const hypercall_table_t pv_hypercall_tab
-     HYPERCALL(hvm_op),
-     COMPAT_CALL(dm_op),
+@@ -88,6 +88,9 @@ const hypercall_table_t pv_hypercall_tab
+ #ifdef CONFIG_HYPFS
+     HYPERCALL(hypfs_op),
  #endif
 +#ifdef CONFIG_TXT_OP
 +    HYPERCALL(txt_op),
@@ -139,15 +67,15 @@ PATCHES
  };
 --- a/xen/arch/x86/tboot.c
 +++ b/xen/arch/x86/tboot.c
-@@ -3,6 +3,7 @@
- #include <xen/lib.h>
+@@ -4,6 +4,7 @@
+ #include <xen/param.h>
  #include <xen/sched.h>
  #include <xen/domain_page.h>
 +#include <xen/guest_access.h>
  #include <xen/iommu.h>
  #include <xen/acpi.h>
  #include <xen/pfn.h>
-@@ -13,6 +14,9 @@
+@@ -14,6 +15,9 @@
  #include <asm/tboot.h>
  #include <asm/setup.h>
  #include <crypto/vmac.h>
@@ -157,7 +85,7 @@ PATCHES
  
  /* tboot=<physical address of shared page> */
  static unsigned long __initdata opt_tboot_pa;
-@@ -119,8 +123,12 @@ void __init tboot_probe(void)
+@@ -120,8 +124,12 @@ void __init tboot_probe(void)
      printk("  shutdown_entry: %#x\n", tboot_shared->shutdown_entry);
      printk("  tboot_base: %#x\n", tboot_shared->tboot_base);
      printk("  tboot_size: %#x\n", tboot_shared->tboot_size);
@@ -245,6 +173,19 @@ PATCHES
  /*
   * Local variables:
   * mode: C
+--- a/xen/common/Kconfig
++++ b/xen/common/Kconfig
+@@ -279,6 +279,10 @@ choice
+ 		bool "SILO" if XSM_SILO
+ endchoice
+ 
++config TXT_OP
++	bool "Compile Xen with the txt_op hypercall"
++	default n
++
+ config LATE_HWDOM
+ 	bool "Dedicated hardware domain"
+ 	default n
 --- a/xen/include/asm-x86/tboot.h
 +++ b/xen/include/asm-x86/tboot.h
 @@ -102,6 +102,15 @@ typedef struct __packed {
@@ -263,40 +204,97 @@ PATCHES
  } tboot_shared_t;
  
  #define TB_SHUTDOWN_REBOOT      0
+--- /dev/null
++++ b/xen/include/public/txt.h
+@@ -0,0 +1,67 @@
++/******************************************************************************
++ * txt.h
++ *
++ * Control domain TXT/TPM services.
++ *
++ * Copyright (c) 2017 Assured Information Security, Inc
++ *
++ * Authors:
++ * Ross Philipson <philipsonr@ainfosec.com>
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining a copy
++ * of this software and associated documentation files (the "Software"), to
++ * deal in the Software without restriction, including without limitation the
++ * rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
++ * sell copies of the Software, and to permit persons to whom the Software is
++ * furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included in
++ * all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
++ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
++ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
++ * DEALINGS IN THE SOFTWARE.
++ */
++
++#ifndef __XEN_PUBLIC_TXT_H__
++#define __XEN_PUBLIC_TXT_H__
++
++#include "xen.h"
++
++/* version of ABI */
++#define TXT_SPEC_VERSION          1
++
++/*
++ * Return TXT TPM event log
++ *
++ * @arg == pointer to xen_txt_evtlog_t input/output structure.
++ */
++#define TXTOP_evtlog    0
++
++struct xen_txt_evtlog {
++    /* IN/OUT */
++    uint64_t  size;
++    /* OUT */
++    uint8_t format;
++    uint8_t _pad[7];
++    /* OUT */
++    XEN_GUEST_HANDLE(void) buffer;
++};
++typedef struct xen_txt_evtlog xen_txt_evtlog_t;
++DEFINE_XEN_GUEST_HANDLE(xen_txt_evtlog_t);
++
++#endif /* __XEN_PUBLIC_TXT_H__ */
++
++/*
++ * Local variables:
++ * mode: C
++ * c-file-style: "BSD"
++ * c-basic-offset: 4
++ * tab-width: 4
++ * indent-tabs-mode: nil
++ * End:
++ */
 --- a/xen/include/public/xen.h
 +++ b/xen/include/public/xen.h
-@@ -121,6 +121,7 @@ DEFINE_XEN_GUEST_HANDLE(xen_ulong_t);
- #define __HYPERVISOR_argo_op              39
+@@ -131,6 +131,7 @@ DEFINE_XEN_GUEST_HANDLE(xen_ulong_t);
  #define __HYPERVISOR_xenpmu_op            40
  #define __HYPERVISOR_dm_op                41
-+#define __HYPERVISOR_txt_op               42
+ #define __HYPERVISOR_hypfs_op             42
++#define __HYPERVISOR_txt_op               43
  
  /* Architecture-specific hypercall definitions. */
  #define __HYPERVISOR_arch_0               48
 --- a/xen/include/xen/hypercall.h
 +++ b/xen/include/xen/hypercall.h
-@@ -157,6 +157,11 @@ do_dm_op(
-     unsigned int nr_bufs,
-     XEN_GUEST_HANDLE_PARAM(xen_dm_op_buf_t) bufs);
+@@ -160,6 +160,11 @@ do_hypfs_op(
+     unsigned long arg4);
+ #endif
  
 +#ifdef CONFIG_TXT_OP 
 +extern long
 +do_txt_op(unsigned int cmd, XEN_GUEST_HANDLE_PARAM(void) arg);
-+
 +#endif
++
  #ifdef CONFIG_COMPAT
  
  extern int
---- a/xen/common/Kconfig
-+++ b/xen/common/Kconfig
-@@ -222,6 +222,10 @@ choice
- 		bool "SILO" if XSM_SILO
- endchoice
- 
-+config TXT_OP
-+	bool "Compile Xen with the txt_op hypercall"
-+	default n
-+
- config LATE_HWDOM
- 	bool "Dedicated hardware domain"
- 	default n
