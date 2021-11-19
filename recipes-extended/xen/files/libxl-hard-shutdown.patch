@@ -33,18 +33,18 @@ PATCHES
 ################################################################################
 --- a/tools/libxl/libxl.h
 +++ b/tools/libxl/libxl.h
-@@ -1549,6 +1549,7 @@ int libxl_domain_remus_start(libxl_ctx *
-                              const libxl_asyncop_how *ao_how)
-                              LIBXL_EXTERNAL_CALLERS_ONLY;
+@@ -1695,6 +1695,7 @@ static inline int libxl_domain_reboot_0x
+ #define libxl_domain_reboot libxl_domain_reboot_0x041200
+ #endif
  
 +int libxl_hard_shutdown(libxl_ctx *ctx, uint32_t domid);
- int libxl_domain_shutdown(libxl_ctx *ctx, uint32_t domid);
- int libxl_domain_reboot(libxl_ctx *ctx, uint32_t domid);
- int libxl_domain_sleep(libxl_ctx *ctx, uint32_t domid);
+ int libxl_domain_sleep(libxl_ctx *ctx, uint32_t domid,
+                         const libxl_asyncop_how *ao_how)
+                         LIBXL_EXTERNAL_CALLERS_ONLY;
 --- a/tools/libxl/libxl_domain.c
 +++ b/tools/libxl/libxl_domain.c
-@@ -703,6 +703,13 @@ static int libxl__domain_pvcontrol(libxl
-     return libxl__domain_pvcontrol_write(gc, XBT_NULL, domid, cmd);
+@@ -835,6 +835,13 @@ int libxl_domain_shutdown(libxl_ctx *ctx
+     return rc ? AO_CREATE_FAIL(rc) : AO_INPROGRESS;
  }
  
 +int libxl_hard_shutdown(libxl_ctx *ctx, uint32_t domid)
@@ -54,10 +54,10 @@ PATCHES
 +    return ret;
 +}
 +
- int libxl_domain_shutdown(libxl_ctx *ctx, uint32_t domid)
+ int libxl_domain_reboot(libxl_ctx *ctx, uint32_t domid,
+                         const libxl_asyncop_how *ao_how)
  {
-     GC_INIT(ctx);
-@@ -972,6 +979,8 @@ void libxl__domain_destroy(libxl__egc *e
+@@ -1129,6 +1136,8 @@ void libxl__domain_destroy(libxl__egc *e
          dds->stubdom.domid = stubdomid;
          dds->stubdom.callback = stubdom_destroy_callback;
          dds->stubdom.soft_reset = false;
@@ -66,6 +66,38 @@ PATCHES
          libxl__destroy_domid(egc, &dds->stubdom);
      } else {
          dds->stubdom_finished = 1;
+--- a/tools/libxl/libxl_internal.h
++++ b/tools/libxl/libxl_internal.h
+@@ -2108,6 +2108,10 @@ typedef struct libxl__qmp_handler libxl_
+  */
+ _hidden libxl__qmp_handler *libxl__qmp_initialize(libxl__gc *gc,
+                                                   uint32_t domid);
++/* Exit QEMU */
++_hidden int libxl__qmp_quit(libxl__gc *gc, int domid);
++/* Suspend QEMU. */
++_hidden int libxl__qmp_stop(libxl__gc *gc, int domid);
+ /* Resume QEMU. */
+ _hidden int libxl__qmp_resume(libxl__gc *gc, int domid);
+ /* Load current QEMU state from file. */
+--- a/tools/libxl/libxl_qmp.c
++++ b/tools/libxl/libxl_qmp.c
+@@ -762,6 +762,16 @@ int libxl__qmp_restore(libxl__gc *gc, in
+                            NULL, NULL);
+ }
+ 
++int libxl__qmp_quit(libxl__gc *gc, int domid)
++{
++    return qmp_run_command(gc, domid, "quit", NULL, NULL, NULL);
++}
++
++int libxl__qmp_stop(libxl__gc *gc, int domid)
++{
++    return qmp_run_command(gc, domid, "stop", NULL, NULL, NULL);
++}
++
+ int libxl__qmp_resume(libxl__gc *gc, int domid)
+ {
+     return qmp_run_command(gc, domid, "cont", NULL, NULL, NULL);
 --- a/tools/xl/xl_vmcontrol.c
 +++ b/tools/xl/xl_vmcontrol.c
 @@ -109,7 +109,7 @@ int main_destroy(int argc, char **argv)
@@ -89,7 +121,7 @@ PATCHES
  
 @@ -185,7 +186,11 @@ static void shutdown_domain(uint32_t dom
      libxl_update_state(ctx, domid, "shutdowning");
-     rc=libxl_domain_shutdown(ctx, domid);
+     rc = libxl_domain_shutdown(ctx, domid, NULL);
      if (rc == ERROR_NOPARAVIRT) {
 -        if (fallback_trigger) {
 +        if (hyper) {
@@ -99,8 +131,8 @@ PATCHES
 +        } else if (fallback_trigger) {
              fprintf(stderr, "PV control interface not available:"
                      " sending ACPI power button event.\n");
-             rc = libxl_send_trigger(ctx, domid, LIBXL_TRIGGER_POWER, 0);
-@@ -282,10 +287,10 @@ static int main_shutdown_or_reboot(int d
+             rc = libxl_send_trigger(ctx, domid, LIBXL_TRIGGER_POWER, 0, NULL);
+@@ -287,10 +292,10 @@ static int main_shutdown_or_reboot(int d
  {
      const char *what = do_reboot ? "reboot" : "shutdown";
      void (*fn)(uint32_t domid,
@@ -113,7 +145,7 @@ PATCHES
      int fallback_trigger = 0;
      static struct option opts[] = {
          {"all", 0, 0, 'a'},
-@@ -293,7 +298,7 @@ static int main_shutdown_or_reboot(int d
+@@ -298,7 +303,7 @@ static int main_shutdown_or_reboot(int d
          COMMON_LONG_OPTS
      };
  
@@ -122,7 +154,7 @@ PATCHES
      case 'a':
          all = 1;
          break;
-@@ -303,6 +308,9 @@ static int main_shutdown_or_reboot(int d
+@@ -308,6 +313,9 @@ static int main_shutdown_or_reboot(int d
      case 'F':
          fallback_trigger = 1;
          break;
@@ -132,7 +164,7 @@ PATCHES
      }
  
      if (!argv[optind] && !all) {
-@@ -325,7 +333,7 @@ static int main_shutdown_or_reboot(int d
+@@ -330,7 +338,7 @@ static int main_shutdown_or_reboot(int d
              if (dominfo[i].domid == 0 || dominfo[i].never_stop)
                  continue;
              fn(dominfo[i].domid, deathws ? &deathws[i] : NULL, i,
@@ -141,7 +173,7 @@ PATCHES
              nrdeathws++;
          }
  
-@@ -339,7 +347,7 @@ static int main_shutdown_or_reboot(int d
+@@ -344,7 +352,7 @@ static int main_shutdown_or_reboot(int d
          libxl_evgen_domain_death *deathw = NULL;
          uint32_t domid = find_domain(argv[optind]);
  
@@ -149,8 +181,8 @@ PATCHES
 +        fn(domid, wait_for_it ? &deathw : NULL, 0, fallback_trigger, hyper);
  
          if (wait_for_it)
-             wait_for_domain_deaths(&deathw, 1);
-@@ -769,8 +777,10 @@ int create_domain(struct domain_create *
+             wait_for_domain_deaths(&deathw, 1, wait_for_it == 1);
+@@ -775,8 +783,10 @@ int create_domain(struct domain_create *
      int notify_pipe[2] = { -1, -1 };
      struct save_file_header hdr;
      uint32_t domid_soft_reset = INVALID_DOMID;
@@ -162,15 +194,15 @@ PATCHES
  
      libxl_domain_config_init(&d_config);
  
-@@ -967,7 +977,6 @@ int create_domain(struct domain_create *
+@@ -973,7 +983,6 @@ int create_domain(struct domain_create *
      if (dom_info->dryrun)
          goto out;
  
 -start:
      assert(domid == INVALID_DOMID);
  
-     rc = acquire_lock();
-@@ -1161,8 +1170,6 @@ start:
+     if (autoballoon) {
+@@ -1173,8 +1182,6 @@ start:
                   */
                  dom_info->console_autoconnect = 0;
  
@@ -179,42 +211,3 @@ PATCHES
                  if (common_domname
                      && strcmp(d_config.c_info.name, common_domname)) {
                      d_config.c_info.name = strdup(common_domname);
---- a/tools/libxl/libxl_qmp.c
-+++ b/tools/libxl/libxl_qmp.c
-@@ -1019,6 +1019,11 @@ int libxl__qmp_system_wakeup(libxl__gc *
-     return qmp_run_command(gc, domid, "system_wakeup", NULL, NULL, NULL);
- }
- 
-+int libxl__qmp_quit(libxl__gc *gc, int domid)
-+{
-+    return qmp_run_command(gc, domid, "quit", NULL, NULL, NULL);
-+}
-+
- int libxl__qmp_restore(libxl__gc *gc, int domid, const char *state_file)
- {
-     libxl__json_object *args = NULL;
-@@ -1047,6 +1052,11 @@ static int qmp_change(libxl__gc *gc, lib
-     return rc;
- }
- 
-+int libxl__qmp_stop(libxl__gc *gc, int domid)
-+{
-+    return qmp_run_command(gc, domid, "stop", NULL, NULL, NULL);
-+}
-+
- int libxl__qmp_resume(libxl__gc *gc, int domid)
- {
-     return qmp_run_command(gc, domid, "cont", NULL, NULL, NULL);
---- a/tools/libxl/libxl_internal.h
-+++ b/tools/libxl/libxl_internal.h
-@@ -1976,6 +1976,10 @@ _hidden int libxl__qmp_pci_del(libxl__gc
-                                libxl_device_pci *pcidev);
- /* Resume hvm domain */
- _hidden int libxl__qmp_system_wakeup(libxl__gc *gc, int domid);
-+/* Exit QEMU */
-+_hidden int libxl__qmp_quit(libxl__gc *gc, int domid);
-+/* Suspend QEMU. */
-+_hidden int libxl__qmp_stop(libxl__gc *gc, int domid);
- /* Resume QEMU. */
- _hidden int libxl__qmp_resume(libxl__gc *gc, int domid);
- /* Load current QEMU state from file. */
