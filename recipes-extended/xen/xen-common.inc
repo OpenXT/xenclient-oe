@@ -55,8 +55,6 @@ SRC_URI_append = " \
     file://libxl-block-scripts-log-to-syslog.patch \
     file://0001-convert-block-tap-for-shared.patch \
     file://domain-reboot.patch \
-    file://enable-blktap3-within-tree.patch \
-    file://blktap3-build-integration.patch \
     file://efi-hardcode-openxt-cfg.patch \
     file://shim-support-for-shim-lock-measure.patch \
     file://efi-require-shim.patch \

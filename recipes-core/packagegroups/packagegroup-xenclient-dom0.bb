@@ -104,7 +104,8 @@ RDEPENDS_${PN} = " \
     xen-tools-xenstore \
     tpm2-tss \
     tpm2-tools \
-    xen-tools-blktap3 xen-tools-tapback \
+    blktap3 \
+    tapback \
     pesign \
     ipxe \
     udev-extraconf-dom0 \

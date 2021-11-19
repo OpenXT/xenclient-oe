@@ -72,5 +72,5 @@ RDEPENDS_${PN} = " \
     xen-tools-libxlutil \
     xen-tools-xenstat \
     xen-tools-xl \
-    xen-tools-blktap3 \
+    blktap3 \
 "
