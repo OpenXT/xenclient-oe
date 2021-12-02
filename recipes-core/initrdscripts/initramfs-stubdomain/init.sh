@@ -82,7 +82,13 @@ dmargs=$( xenstore-read $(xenstore-list -p "$vm_uuid/image/dm-argv" | sort ))
 echo "target $target vm_uuid $vm_uuid"
 echo "Invoking qemu with dmargs       = ${dmargs}"
 
+# $dm_args and $kernel are separated with \n to allow for spaces in arguments.
+OIFS="$IFS"
+IFS=$'\n'
+set -f
 /usr/bin/qemu-system-i386 ${dmargs} -chardev socket,server,nowait,path=/tmp/qemu.qmp,id=m2 -mon chardev=m2,mode=control &
+set +f
+IFS="$OIFS"
 
 device_model="device-model/$target"
 
