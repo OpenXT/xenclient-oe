@@ -67,9 +67,11 @@ INSANE_SKIP_${PN}-extra-roms = "arch"
 FILES_${PN}-utils = "/usr/libexec \
                      /usr/bin/qemu-pr-helper \
 "
+FILES_${PN}-icons = "/usr/share/icons"
 
 PACKAGES += "${PN}-extra-keymaps ${PN}-extra-roms"
 PACKAGES =+ "${PN}-utils"
+PACKAGES =+ "${PN}-icons"
 
 EXTRA_OECONF += " \
     --target-list=i386-softmmu \
