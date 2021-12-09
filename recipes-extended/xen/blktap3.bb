@@ -23,6 +23,7 @@ SRC_URI = "git://github.com/xapi-project/blktap.git;protocol=https \
     file://fix-encryption.patch \
     file://gcc9-compilation.patch \
     file://openssl-1.1.x.patch \
+    file://0001-Set-libvhdio-libtool-version-info.patch \
 "
 
 S = "${WORKDIR}/git"
@@ -50,8 +51,6 @@ do_install_append() {
                     ${D}${INIT_D_DIR}/tapback
 }
 
-# QA dev-elf: libvhdio-3.5.0.so does not honor the SOLIBSDEV format.
-FILES_SOLIBSDEV = ""
 FILES_${PN}-dev += " \
     ${libdir}/libblktapctl.so \
     ${libdir}/libvhd.so \
