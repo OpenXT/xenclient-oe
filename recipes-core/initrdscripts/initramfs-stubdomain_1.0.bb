@@ -6,19 +6,25 @@ COMPATIBLE_MACHINE = "xenclient-stubdomain"
 
 SRC_URI = " \
     file://init.sh \
+    file://qemu-xvdc-add-fd.sh \
 "
 
 inherit allarch
 
 do_install() {
     install -m 0755 ${WORKDIR}/init.sh ${D}/init
+    install -d ${D}${bindir}
+    install -m 0755 ${WORKDIR}/qemu-xvdc-add-fd.sh ${D}${bindir}
 }
 
 FILES_${PN} = " \
     /init \
+    ${bindir} \
 "
 RDEPENDS_${PN} += " \
     qemu-dm-stubdom \
     vchan-socket-proxy \
     xen-tools-xenstore \
+    add-fd \
+    busybox-mdev \
 "

@@ -86,9 +86,12 @@ echo "Invoking qemu with dmargs       = ${dmargs}"
 OIFS="$IFS"
 IFS=$'\n'
 set -f
-/usr/bin/qemu-system-i386 ${dmargs} -chardev socket,server,nowait,path=/tmp/qemu.qmp,id=m2 -mon chardev=m2,mode=control &
+/usr/bin/qemu-system-i386 ${dmargs} -chardev socket,server,nowait,path=/tmp/qemu.qmp,id=m2 -mon chardev=m2,mode=control -chardev socket,server,nowait,path=/tmp/qemu-cdrom.qmp,id=m8675 -mon chardev=m8675,mode=control &
 set +f
 IFS="$OIFS"
+
+echo /sbin/mdev > /proc/sys/kernel/hotplug
+mdev -s
 
 device_model="device-model/$target"
 
