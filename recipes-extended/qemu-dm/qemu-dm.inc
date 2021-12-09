@@ -64,7 +64,7 @@ FILES_${PN}-dbg += "/usr/lib/.debug/* /usr/libexec/.debug/*"
 FILES_${PN}-extra-keymaps = "/usr/share/qemu/keymaps/*"
 FILES_${PN}-extra-roms = "/usr/share/qemu/*"
 INSANE_SKIP_${PN}-extra-roms = "arch"
-FILES_${PN}-utils = "/usr/libexec/* \
+FILES_${PN}-utils = "/usr/libexec \
                      /usr/bin/qemu-pr-helper \
 "
 
