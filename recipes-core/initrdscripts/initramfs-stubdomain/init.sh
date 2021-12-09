@@ -98,6 +98,8 @@ device_model="device-model/$target"
 echo "Starting vchan-socket-proxy"
 vchan-socket-proxy -m server 0 $device_model/qmp-vchan /tmp/qemu.qmp &
 
-wait
-
-poweroff -f
+while true; do
+    printf '==== Press enter for shell ====\n'
+    read
+    setsid /bin/cttyhack /bin/sh
+done

@@ -12,6 +12,7 @@ SRC_URI += " \
     file://netutils.cfg \
     file://poweroff.cfg \
     file://process.cfg \
+    file://setsid.cfg \
     file://shells.cfg \
     file://syslog.cfg \
     file://sysutils.cfg \
