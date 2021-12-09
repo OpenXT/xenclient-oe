@@ -42,7 +42,8 @@ SRC_URI += "file://compile-time-stubdom-flag.patch \
             file://net-Remove-unused-network-options.patch \
             file://round-pci-region-sizes.patch \
             file://ac97-compatibility.patch \
-            file://0001-vnc-stubs-Allow-vnc-none.patch \
+	    file://0001-vnc-stubs-Allow-vnc-none.patch \
+            file://0001-xen-hvm-Allow-disabling-buffer.patch \
             "
 
 SRC_URI[md5sum] = "5862fc984bb955c4c24427d3bceddca5"
