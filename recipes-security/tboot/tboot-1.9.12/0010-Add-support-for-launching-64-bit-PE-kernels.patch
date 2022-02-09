@@ -418,7 +418,7 @@ new file mode 100644
 index 0000000..bafb574
 --- /dev/null
 +++ b/tboot/common/pe.c
-@@ -0,0 +1,221 @@
+@@ -0,0 +1,227 @@
 +/*
 + * pe.c: support functions for manipulating PE binaries
 + */
@@ -606,12 +606,18 @@ index 0000000..bafb574
 +
 +    uint32_t limit = get_lowest_mod_start(lctx);
 +
-+    efi_memmap_get_highest_sized_ram(image_max + (1 << 21), (u32)limit,
-+                          &ram_base, &ram_size);
-+
-+    if ( ram_size < image_max ) {
-+        printk(TBOOT_ERR"Not enough memory to load kernel.\n");
-+        return false;
++    /*  NOTE: the memory maps have been modified already to reserve critical
++        memory regions (tboot memory, etc ...). get_highest_sized_ram
++        will return a range that excludes critical memory regions. */
++    if (!efi_memmap_get_highest_sized_ram(image_max + (1 << 21), (u32)limit,
++                                          &ram_base, &ram_size)) {
++        if (!e820_get_highest_sized_ram(image_max + (1 << 21), (u32)limit,
++                                        &ram_base, &ram_size)) {
++            printk(TBOOT_INFO"ERROR No memory area found for image"
++                             "relocation!\n");
++            printk(TBOOT_INFO"required 0x%X\n", image_max + (1 << 21));
++            return false;
++        }
 +    }
 +
 +    if ( ram_base + ram_size > (u32)image )
