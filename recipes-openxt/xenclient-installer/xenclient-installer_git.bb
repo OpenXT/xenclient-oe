@@ -16,7 +16,7 @@ SRC_URI = " \
 
 S = "${WORKDIR}/git"
 
-inherit multilib-allarch deploy
+inherit allarch deploy
 
 do_install () {
     ${S}/install part1 ${D}/install

@@ -14,6 +14,7 @@ SRC_URI_append = " \
     file://xen-tools-pygrub-change-tabs-into-spaces.patch \
     file://xen-tools-pygrub-py3.patch \
     file://xen-tools-pygrub-fsimage-drop-unused-struct.patch \
+    file://0001-tools-firmware-Build-firmware-as-ffreestanding.patch \
     file://kconfig-grant-table.patch \
     file://kconfig-grant-table-v2-interface.patch \
     file://kconfig-grant-table-exotic.patch \
@@ -127,6 +128,13 @@ SRC_URI_append = " \
     file://patch-xen-disable-efi-gettime.patch \
     file://libxl-add-ovmf-varstored.patch \
 "
+
+# Unset variables inherited from meta-virt dunfell to avoid multilib
+# dependency.  0001-tools-firmware-Build-firmware-as-ffreestanding.patch makes
+# it unnecessary (from Xen 4.15).  These can be removed in OE hardknott or
+# later.
+GLIBC32_x86-64 = ""
+ADD_SYSROOT32_CFLAGS_x86-64 = ""
 
 PACKAGECONFIG =+ "xsm"
 PACKAGECONFIG =+ "hvm"

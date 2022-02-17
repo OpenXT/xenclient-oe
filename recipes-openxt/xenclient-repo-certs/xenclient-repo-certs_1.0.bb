@@ -9,7 +9,7 @@ SRC_URI = "file://${REPO_PROD_CACERT} \
 FILES_${PN} = "${datadir}/xenclient/repo-certs \
                ${bindir}/verify-repo-metadata"
 
-inherit multilib-allarch
+inherit allarch
 
 do_install() {
     CERTDIR_PROD=${D}${datadir}/xenclient/repo-certs/prod

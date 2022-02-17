@@ -136,7 +136,7 @@ SRC_URI = "git://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware
 
 S = "${WORKDIR}/git"
 
-inherit multilib-allarch update-alternatives
+inherit allarch update-alternatives
 
 # OE started complaining about the architecture of the binaries for some reason
 INSANE_SKIP = "arch"

@@ -8,7 +8,7 @@ require argo.inc
 
 S = "${WORKDIR}/git/argo-linux"
 
-inherit multilib-allarch
+inherit allarch
 
 do_install() {
     oe_runmake INSTALL_HDR_PATH=${D}${prefix} headers_install

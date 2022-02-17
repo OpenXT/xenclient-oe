@@ -7,7 +7,7 @@ SRC_URI = " \
     file://populate-certs.sh \
 "
 
-inherit multilib-allarch update-rc.d
+inherit allarch update-rc.d
 
 do_install () {
     install -d ${D}/usr/bin
