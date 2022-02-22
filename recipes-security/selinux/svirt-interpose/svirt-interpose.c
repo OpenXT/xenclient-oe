@@ -582,12 +582,9 @@ read_single_context (char* buf, const char* file_path, size_t size)
 static bool
 do_write (xs_handle_t *xsh, char *path, char *data)
 {
-        static struct expanding_buffer ebuf = { 0, };
-        unsigned len;
+        unsigned len = strlen(data);
 
-        expanding_buffer_ensure (&ebuf, strlen (data) + 1);
-        unsanitise_value (ebuf.buf, &len, data);
-        if (!xs_write (xsh, 0, path, ebuf.buf, len)) {
+        if (!xs_write (xsh, 0, path, data, len)) {
                 syslog (LOG_WARNING,
                         "could not write %s to path %s",
                         data,
@@ -601,8 +598,7 @@ do_write (xs_handle_t *xsh, char *path, char *data)
 static char*
 do_read (xs_handle_t *xsh, char* path)
 {
-        char *val = NULL, *san_val = NULL, *tmp = NULL;
-        static struct expanding_buffer ebuf = { 0, };
+        char *val;
         unsigned len = 0;
 
         val = xs_read (xsh, 0, path, &len);
@@ -612,16 +608,8 @@ do_read (xs_handle_t *xsh, char* path)
                         path);
                 return NULL;
         }
-        san_val = sanitise_value (&ebuf, val, len);
-        if (san_val == NULL) {
-                syslog (LOG_CRIT, "sanitise_value returned NULL");
-                free (val);
-                return NULL;
-        }
-        tmp = strdup (san_val);
-        /*  don't free san_val  */
-        free (val);
-        return tmp;
+
+        return val;
 }
 /*  wrapper around directory listing  
  *  not sure if these values need to be sanitized
