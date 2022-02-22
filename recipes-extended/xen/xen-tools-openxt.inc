@@ -14,7 +14,6 @@ RDEPENDS_${PN}-scripts-block += " udev"
 RDEPENDS_${PN}-libxenlight += " varstored-watch"
 
 PACKAGES += " \
-    ${PN}-toolstack-headers \
     ${PN}-libxenhypfs \
     ${PN}-libxenhypfs-dev \
     "
@@ -28,13 +27,6 @@ FILES_${PN}-scripts-block += " \
     ${sysconfdir}/udev/rules.d/xen-vbd3-backend.rules \
     ${sysconfdir}/xen/scripts/block-vbd3 \
 "
-
-# Export local headers for external toolstack
-FILES_${PN}-toolstack-headers = "\
-    ${includedir}/xc_dom.h \
-    ${includedir}/xen/libelf/libelf.h \
-    ${includedir}/xen/libelf/elfstructs.h \
-    "
 
 FILES_${PN}-xenstored = " \
     ${sbindir}/xenstored.${PN}-xenstored \
@@ -104,14 +96,6 @@ do_install_append() {
     install -d ${D}${sysconfdir}/xen
     install -m 0644 ${WORKDIR}/xl.conf \
                     ${D}${sysconfdir}/xen/xl.conf
-
-    install -d ${D}${includedir}/xen/libelf
-    install -m 0755 ${S}/tools/libxc/include/xc_dom.h \
-                    ${D}${includedir}/xc_dom.h
-    install -m 0755 ${S}/tools/include/xen/libelf/libelf.h \
-                    ${D}${includedir}/xen/libelf/libelf.h
-    install -m 0755 ${S}/tools/include/xen/libelf/elfstructs.h \
-                    ${D}${includedir}/xen/libelf/elfstructs.h
 
     mv ${D}${sbindir}/xenstored ${D}${sbindir}/xenstored.${PN}-xenstored
     install -m 0755 ${WORKDIR}/xenstored.initscript \
