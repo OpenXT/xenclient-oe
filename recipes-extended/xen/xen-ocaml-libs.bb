@@ -1,6 +1,6 @@
 DESCRIPTION = "Xen hypervisor ocaml libs and xenstore components"
 
-XEN_REL = "4.14"
+XEN_REL = "4.16"
 XEN_BRANCH ?= "stable-${XEN_REL}"
 SRCREV ?= "${AUTOREV}"
 
