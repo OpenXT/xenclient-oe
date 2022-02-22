@@ -7,7 +7,6 @@ FILESEXTRAPATHS_prepend := "${THISDIR}/files:"
 SRC_URI_append = " \
     file://defconfig \
     file://0001-python-pygrub-pass-DISTUTILS-xen.4.12.patch \
-    file://0001-tools-firmware-Build-firmware-as-ffreestanding.patch \
     file://kconfig-grant-table-v2-interface.patch \
     file://kconfig-grant-table-exotic.patch \
     file://hvm-pm-hibernate-s-state.patch;patch=1 \
@@ -41,7 +40,6 @@ SRC_URI_append = " \
     file://libxl-hard-shutdown.patch \
     file://libxl-argo-xswait.patch \
     file://libxl-move-extra-qemu-args-to-the-end.patch \
-    file://0001-tools-xl-Add-stubdomain_cmdline-option-to-xl.cfg.patch \
     file://libxl-support-hvm-readonly-disks.patch \
     file://libxl-vwif-support.patch \
     file://libxl-atapi-pt.patch \
@@ -49,7 +47,6 @@ SRC_URI_append = " \
     file://libxl-disable-json-updates.patch \
     file://libxl-allow-non-qdisk-cdrom.patch \
     file://libxl-fix-flr.patch \
-    file://libxl-disable-vnc-query-when-disabled.patch \
     file://libxl-allow-save-vnuma.patch \
     file://libxl-block-scripts-log-to-syslog.patch \
     file://0001-convert-block-tap-for-shared.patch \
