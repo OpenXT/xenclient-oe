@@ -6,21 +6,16 @@ Subject: [PATCH] Shim lock measure
 Support measuring critical components into the TPM using shim_lock->Measure
 
 Signed-off-by: Tamas K Lengyel <lengyelt@ainfosec.com>
----
- xen/common/efi/boot.c    | 49 +++++++++++++++++++++++++++++++++++++++++++-----
- xen/common/efi/runtime.c | 26 +++++++++++++++++++++++++
- xen/include/xen/efi.h    |  1 +
- 3 files changed, 71 insertions(+), 5 deletions(-)
 
 --- a/xen/common/efi/boot.c
 +++ b/xen/common/efi/boot.c
-@@ -44,8 +44,17 @@ typedef EFI_STATUS
-     IN VOID *Buffer,
+@@ -45,8 +45,17 @@ typedef EFI_STATUS
+     IN const VOID *Buffer,
      IN UINT32 Size);
  
 +typedef EFI_STATUS
 +(/* _not_ EFIAPI */ *EFI_SHIM_LOCK_MEASURE) (
-+    IN VOID *Buffer,
++    IN const VOID *Buffer,
 +    IN UINT32 Size,
 +    IN UINT8 Pcr);
 +
@@ -32,7 +27,7 @@ Signed-off-by: Tamas K Lengyel <lengyelt@ainfosec.com>
  } EFI_SHIM_LOCK_PROTOCOL;
  
  struct _EFI_APPLE_PROPERTIES;
-@@ -1147,7 +1156,7 @@ efi_start(EFI_HANDLE ImageHandle, EFI_SY
+@@ -1139,7 +1148,7 @@ efi_start(EFI_HANDLE ImageHandle, EFI_SY
      unsigned int i, argc;
      CHAR16 **argv, *file_name, *cfg_file_name = L"openxt.cfg", *options = NULL;
      UINTN gop_mode = ~0;
@@ -41,7 +36,7 @@ Signed-off-by: Tamas K Lengyel <lengyelt@ainfosec.com>
      EFI_GRAPHICS_OUTPUT_PROTOCOL *gop = NULL;
      union string section = { NULL }, name;
      bool base_video = false;
-@@ -1231,6 +1240,8 @@ efi_start(EFI_HANDLE ImageHandle, EFI_SY
+@@ -1224,6 +1233,8 @@ efi_start(EFI_HANDLE ImageHandle, EFI_SY
      PrintStr(L"Xen " __stringify(XEN_VERSION) "." __stringify(XEN_SUBVERSION)
               XEN_EXTRAVERSION " (c/s " XEN_CHANGESET ") EFI loader\r\n");
  
@@ -50,7 +45,7 @@ Signed-off-by: Tamas K Lengyel <lengyelt@ainfosec.com>
      efi_arch_relocate_image(0);
  
      if ( use_cfg_file )
-@@ -1269,6 +1280,11 @@ efi_start(EFI_HANDLE ImageHandle, EFI_SY
+@@ -1264,6 +1275,11 @@ efi_start(EFI_HANDLE ImageHandle, EFI_SY
          }
          else if ( !read_file(dir_handle, cfg_file_name, &cfg, NULL) )
              blexit(L"Configuration file not found.");
@@ -62,60 +57,61 @@ Signed-off-by: Tamas K Lengyel <lengyelt@ainfosec.com>
          pre_parse(&cfg);
  
          if ( section.w )
-@@ -1306,16 +1322,34 @@ efi_start(EFI_HANDLE ImageHandle, EFI_SY
-         read_file(dir_handle, s2w(&name), &kernel, option_str);
-         efi_bs->FreePool(name.w);
+@@ -1313,6 +1329,11 @@ efi_start(EFI_HANDLE ImageHandle, EFI_SY
+             {
+                 read_file(dir_handle, s2w(&name), &ramdisk, NULL);
+                 efi_bs->FreePool(name.w);
++
++                if ( shim_lock &&
++                    (status = shim_lock->Measure(ramdisk.ptr, ramdisk.size, 8))
++                     != EFI_SUCCESS )
++                        PrintErrMesg(L"ramdisk could not be measured", status);
+             }
+         }
  
--        if ( !EFI_ERROR(efi_bs->LocateProtocol(&shim_lock_guid, NULL,
--                        (void **)&shim_lock)) &&
--             (status = shim_lock->Verify(kernel.ptr, kernel.size)) != EFI_SUCCESS )
--            PrintErrMesg(L"Dom0 kernel image could not be verified", status);
-+        if ( shim_lock )
+@@ -1323,6 +1344,11 @@ efi_start(EFI_HANDLE ImageHandle, EFI_SY
+             {
+                 read_file(dir_handle, s2w(&name), &xsm, NULL);
+                 efi_bs->FreePool(name.w);
++
++                if ( shim_lock &&
++                    (status = shim_lock->Measure(xsm.ptr, xsm.size, 8))
++                     != EFI_SUCCESS)
++                        PrintErrMesg(L"XSM policy could not be measured", status);
+             }
+         }
+ 
+@@ -1386,11 +1412,22 @@ efi_start(EFI_HANDLE ImageHandle, EFI_SY
+      * device tree through the efi_check_dt_boot function, in this stage
+      * verify it.
+      */
+-    if ( kernel.ptr &&
+-         !EFI_ERROR(efi_bs->LocateProtocol(&shim_lock_guid, NULL,
+-                                           (void **)&shim_lock)) &&
+-         (status = shim_lock->Verify(kernel.ptr, kernel.size)) != EFI_SUCCESS )
+-        PrintErrMesg(L"Dom0 kernel image could not be verified", status);
++    if ( kernel.ptr && shim_lock ) {
++        if ( efi_secureboot_enabled() )
 +        {
-+            if ( efi_secureboot_enabled() )
-+            {
-+                if ( (status = shim_lock->Verify(kernel.ptr, kernel.size))
-+                    != EFI_SUCCESS )
-+                    PrintErrMesg(L"Dom0 kernel image could not be verified",
-+                                 status);
-+            }
-+            else
-+            {
-+                if ( (status = shim_lock->Measure(kernel.ptr, kernel.size, 4))
-+                    != EFI_SUCCESS )
-+                    PrintErrMesg(L"Dom0 kernel image could not be measured",
-+                                 status);
-+            }
++            if ( (status = shim_lock->Verify(kernel.ptr, kernel.size))
++                != EFI_SUCCESS )
++                PrintErrMesg(L"Dom0 kernel image could not be verified",
++                             status);
 +        }
++        else
++        {
++            if ( (status = shim_lock->Measure(kernel.ptr, kernel.size, 4))
++                != EFI_SUCCESS )
++                PrintErrMesg(L"Dom0 kernel image could not be measured",
++                             status);
++        }
++    }
  
-         name.s = get_value(&cfg, section.s, "ramdisk");
-         if ( name.s )
-         {
-             read_file(dir_handle, s2w(&name), &ramdisk, NULL);
-             efi_bs->FreePool(name.w);
-+
-+            if ( shim_lock &&
-+                (status = shim_lock->Measure(ramdisk.ptr, ramdisk.size, 8))
-+                 != EFI_SUCCESS )
-+                    PrintErrMesg(L"ramdisk could not be measured", status);
-         }
+     efi_arch_edd();
  
-         name.s = get_value(&cfg, section.s, "xsm");
-@@ -1323,6 +1357,11 @@ efi_start(EFI_HANDLE ImageHandle, EFI_SY
-         {
-             read_file(dir_handle, s2w(&name), &xsm, NULL);
-             efi_bs->FreePool(name.w);
-+
-+            if ( shim_lock &&
-+                (status = shim_lock->Measure(xsm.ptr, xsm.size, 8))
-+                 != EFI_SUCCESS)
-+                    PrintErrMesg(L"XSM policy could not be measured", status);
-         }
- 
-         /*
 --- a/xen/common/efi/runtime.c
 +++ b/xen/common/efi/runtime.c
-@@ -193,6 +193,32 @@ void efi_reset_system(bool warm)
+@@ -211,6 +211,32 @@ void efi_reset_system(bool warm)
      printk(XENLOG_WARNING "EFI: could not reset system (%#lx)\n", status);
  }
  
@@ -150,7 +146,7 @@ Signed-off-by: Tamas K Lengyel <lengyelt@ainfosec.com>
  const CHAR16 *wmemchr(const CHAR16 *s, CHAR16 c, UINTN n)
 --- a/xen/include/xen/efi.h
 +++ b/xen/include/xen/efi.h
-@@ -43,6 +43,7 @@ int efi_runtime_call(struct xenpf_efi_ru
+@@ -44,6 +44,7 @@ int efi_runtime_call(struct xenpf_efi_ru
  #endif
  int efi_compat_get_info(uint32_t idx, union compat_pf_efi_info *);
  int efi_compat_runtime_call(struct compat_pf_efi_runtime_call *);
