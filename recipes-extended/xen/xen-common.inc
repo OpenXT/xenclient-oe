@@ -20,7 +20,6 @@ SRC_URI_append = " \
     file://xenconsoled-syslog.patch;patch=1 \
     file://Dell-980-txt-shutdown-acpi-access-width.patch;patch=1 \
     file://parse-video-from-mbi.patch;patch=1 \
-    file://allow-mwait-cstate.patch;patch=1 \
     file://opt-disable-vmcs-shadowing.patch;patch=1 \
     file://hvmloader-legacy-seabios-optionroms.patch;patch=1 \
     file://gpt-s3-resume-reason.patch;patch=1 \
