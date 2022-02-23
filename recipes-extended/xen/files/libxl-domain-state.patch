@@ -34,9 +34,20 @@ Requires uuid functions added in libxl-fixup-cmdline-ops.patch
 ################################################################################
 PATCHES
 ################################################################################
---- a/tools/libxl/libxl_create.c
-+++ b/tools/libxl/libxl_create.c
-@@ -1243,6 +1243,12 @@ static void initiate_domain_create(libxl
+--- a/tools/include/libxl_utils.h
++++ b/tools/include/libxl_utils.h
+@@ -38,6 +38,8 @@ int libxl_get_stubdom_id(libxl_ctx *ctx,
+ int libxl_is_stubdom(libxl_ctx *ctx, uint32_t domid, uint32_t *target_domid);
+ int libxl_create_logfile(libxl_ctx *ctx, const char *name, char **full_name);
+ int libxl_string_to_backend(libxl_ctx *ctx, char *s, libxl_disk_backend *backend);
++int libxl_update_state(libxl_ctx *ctx, uint32_t domid_in, const char *state);
++int libxl_update_state_direct(libxl_ctx *ctx, libxl_uuid xl_uuid, const char *state);
+ 
+ int libxl_read_file_contents(libxl_ctx *ctx, const char *filename,
+                              void **data_r, int *datalen_r);
+--- a/tools/libs/light/libxl_create.c
++++ b/tools/libs/light/libxl_create.c
+@@ -1277,6 +1277,12 @@ static void initiate_domain_create(libxl
       * libxl__domain_config_setdefault */
  
      /*
@@ -49,8 +60,8 @@ PATCHES
       * Set the dm version quite early so that libxl doesn't have to pass the
       * build info around just to know if the domain has a device model or not.
       */
---- a/tools/libxl/libxl_dom_suspend.c
-+++ b/tools/libxl/libxl_dom_suspend.c
+--- a/tools/libs/light/libxl_dom_suspend.c
++++ b/tools/libs/light/libxl_dom_suspend.c
 @@ -95,6 +95,9 @@ void libxl__domain_suspend_device_model(
          break;
      }
@@ -79,9 +90,9 @@ PATCHES
      libxl__xs_transaction_abort(gc, &t);
      dsps->guest_responded = 1;
      domain_suspend_common_wait_guest(egc,dsps);
---- a/tools/libxl/libxl_domain.c
-+++ b/tools/libxl/libxl_domain.c
-@@ -517,6 +517,8 @@ int libxl_domain_suspend(libxl_ctx *ctx,
+--- a/tools/libs/light/libxl_domain.c
++++ b/tools/libs/light/libxl_domain.c
+@@ -518,6 +518,8 @@ int libxl_domain_suspend(libxl_ctx *ctx,
          goto out_err;
      }
  
@@ -90,7 +101,7 @@ PATCHES
      libxl__domain_save_state *dss;
      GCNEW(dss);
  
-@@ -586,6 +588,8 @@ int libxl_domain_pause(libxl_ctx *ctx, u
+@@ -587,6 +589,8 @@ int libxl_domain_pause(libxl_ctx *ctx, u
          LOGED(ERROR, domid, "Pausing domain");
          return AO_CREATE_FAIL(ERROR_FAIL);
      }
@@ -99,7 +110,7 @@ PATCHES
      libxl__ao_complete(egc, ao, 0);
      return AO_INPROGRESS;
  }
-@@ -637,6 +641,9 @@ int libxl__domain_unpause_deprecated(lib
+@@ -638,6 +642,9 @@ int libxl__domain_unpause_deprecated(lib
          rc = ERROR_FAIL;
          goto out;
      }
@@ -109,7 +120,7 @@ PATCHES
      rc = 0;
  out:
      return rc;
-@@ -689,6 +696,9 @@ static void domain_unpause_done(libxl__e
+@@ -690,6 +697,9 @@ static void domain_unpause_done(libxl__e
          rc = ERROR_FAIL;
          goto out;
      }
@@ -119,8 +130,8 @@ PATCHES
      rc = 0;
  out:
      dmrs->callback(egc, dmrs, rc);
---- a/tools/libxl/libxl_utils.c
-+++ b/tools/libxl/libxl_utils.c
+--- a/tools/libs/light/libxl_utils.c
++++ b/tools/libs/light/libxl_utils.c
 @@ -1209,6 +1209,62 @@ int libxl_domid_valid_guest(uint32_t dom
      return domid > 0 && domid < DOMID_FIRST_RESERVED;
  }
@@ -184,17 +195,6 @@ PATCHES
  void libxl_string_copy(libxl_ctx *ctx, char **dst, char * const*src)
  {
      GC_INIT(ctx);
---- a/tools/libxl/libxl_utils.h
-+++ b/tools/libxl/libxl_utils.h
-@@ -38,6 +38,8 @@ int libxl_get_stubdom_id(libxl_ctx *ctx,
- int libxl_is_stubdom(libxl_ctx *ctx, uint32_t domid, uint32_t *target_domid);
- int libxl_create_logfile(libxl_ctx *ctx, const char *name, char **full_name);
- int libxl_string_to_backend(libxl_ctx *ctx, char *s, libxl_disk_backend *backend);
-+int libxl_update_state(libxl_ctx *ctx, uint32_t domid_in, const char *state);
-+int libxl_update_state_direct(libxl_ctx *ctx, libxl_uuid xl_uuid, const char *state);
- 
- int libxl_read_file_contents(libxl_ctx *ctx, const char *filename,
-                              void **data_r, int *datalen_r);
 --- a/tools/xl/xl_vmcontrol.c
 +++ b/tools/xl/xl_vmcontrol.c
 @@ -45,6 +45,7 @@ static void unpause_domain(uint32_t domi
