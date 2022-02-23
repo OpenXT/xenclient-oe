@@ -19,12 +19,13 @@ Signed-off-by: Jason Andryuk <jandryuk@gmail.com>
  xen/common/argo.c       | 2 +-
  xen/include/xsm/dummy.h | 5 +++++
  xen/include/xsm/xsm.h   | 6 ++++++
+ xen/xsm/dummy.c         | 1 +
  xen/xsm/flask/hooks.c   | 7 +++++++
- 4 files changed, 19 insertions(+), 1 deletion(-)
+ 5 files changed, 20 insertions(+), 1 deletion(-)
 
 --- a/xen/common/argo.c
 +++ b/xen/common/argo.c
-@@ -2584,7 +2584,7 @@ argo_init(struct domain *d)
+@@ -2580,7 +2580,7 @@ argo_init(struct domain *d)
  {
      struct argo_domain *argo;
  
@@ -35,7 +36,7 @@ Signed-off-by: Jason Andryuk <jandryuk@gmail.com>
          return 0;
 --- a/xen/include/xsm/dummy.h
 +++ b/xen/include/xsm/dummy.h
-@@ -727,6 +727,11 @@ static XSM_INLINE int xsm_argo_enable(co
+@@ -767,6 +767,11 @@ static XSM_INLINE int xsm_argo_enable(co
      return 0;
  }
  
@@ -44,31 +45,41 @@ Signed-off-by: Jason Andryuk <jandryuk@gmail.com>
 +    return 0;
 +}
 +
- static XSM_INLINE int xsm_argo_register_single_source(const struct domain *d,
-                                                       const struct domain *t)
+ static XSM_INLINE int xsm_argo_register_single_source(
+     const struct domain *d, const struct domain *t)
  {
 --- a/xen/include/xsm/xsm.h
 +++ b/xen/include/xsm/xsm.h
-@@ -183,6 +183,7 @@ struct xsm_operations {
-     int (*domain_resource_map) (struct domain *d);
+@@ -187,6 +187,7 @@ struct xsm_ops {
+     int (*domain_resource_map)(struct domain *d);
  #ifdef CONFIG_ARGO
-     int (*argo_enable) (const struct domain *d);
-+    int (*argo_enable_noaudit) (const struct domain *d);
-     int (*argo_register_single_source) (const struct domain *d,
-                                         const struct domain *t);
-     int (*argo_register_any_source) (const struct domain *d);
-@@ -711,6 +712,11 @@ static inline int xsm_argo_enable(const
-     return xsm_ops->argo_enable(d);
+     int (*argo_enable)(const struct domain *d);
++    int (*argo_enable_noaudit)(const struct domain *d);
+     int (*argo_register_single_source)(const struct domain *d,
+                                        const struct domain *t);
+     int (*argo_register_any_source)(const struct domain *d);
+@@ -748,6 +749,11 @@ static inline int xsm_argo_enable(const
+     return alternative_call(xsm_ops.argo_enable, d);
  }
  
 +static inline int xsm_argo_enable_noaudit(const struct domain *d)
 +{
-+    return xsm_ops->argo_enable_noaudit(d);
++    return alternative_call(xsm_ops.argo_enable_noaudit, d);
 +}
 +
- static inline int xsm_argo_register_single_source(const struct domain *d,
-                                                   const struct domain *t)
+ static inline int xsm_argo_register_single_source(
+     const struct domain *d, const struct domain *t)
  {
+--- a/xen/xsm/dummy.c
++++ b/xen/xsm/dummy.c
+@@ -151,6 +151,7 @@ void __init xsm_fixup_ops (struct xsm_op
+     set_to_dummy_if_null(ops, domain_resource_map);
+ #ifdef CONFIG_ARGO
+     set_to_dummy_if_null(ops, argo_enable);
++    set_to_dummy_if_null(ops, argo_enable_noaudit);
+     set_to_dummy_if_null(ops, argo_register_single_source);
+     set_to_dummy_if_null(ops, argo_register_any_source);
+     set_to_dummy_if_null(ops, argo_send);
 --- a/xen/xsm/flask/hooks.c
 +++ b/xen/xsm/flask/hooks.c
 @@ -1722,6 +1722,12 @@ static int flask_argo_enable(const struc
@@ -84,7 +95,7 @@ Signed-off-by: Jason Andryuk <jandryuk@gmail.com>
  static int flask_argo_register_single_source(const struct domain *d,
                                               const struct domain *t)
  {
-@@ -1878,6 +1884,7 @@ static struct xsm_operations flask_ops =
+@@ -1877,6 +1883,7 @@ static const struct xsm_ops __initconstr
      .domain_resource_map = flask_domain_resource_map,
  #ifdef CONFIG_ARGO
      .argo_enable = flask_argo_enable,
@@ -92,13 +103,3 @@ Signed-off-by: Jason Andryuk <jandryuk@gmail.com>
      .argo_register_single_source = flask_argo_register_single_source,
      .argo_register_any_source = flask_argo_register_any_source,
      .argo_send = flask_argo_send,
---- a/xen/xsm/dummy.c
-+++ b/xen/xsm/dummy.c
-@@ -154,6 +154,7 @@ void __init xsm_fixup_ops (struct xsm_op
-     set_to_dummy_if_null(ops, domain_resource_map);
- #ifdef CONFIG_ARGO
-     set_to_dummy_if_null(ops, argo_enable);
-+    set_to_dummy_if_null(ops, argo_enable_noaudit);
-     set_to_dummy_if_null(ops, argo_register_single_source);
-     set_to_dummy_if_null(ops, argo_register_any_source);
-     set_to_dummy_if_null(ops, argo_send);
