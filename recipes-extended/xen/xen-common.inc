@@ -6,6 +6,7 @@ FILESEXTRAPATHS_prepend := "${THISDIR}/files:"
 
 SRC_URI_append = " \
     file://defconfig \
+    file://0001-libxl-retry-QMP-PCI-device_add.patch \
     file://0001-python-pygrub-pass-DISTUTILS-xen.4.12.patch \
     file://kconfig-grant-table-v2-interface.patch \
     file://kconfig-grant-table-exotic.patch \
@@ -51,7 +52,6 @@ SRC_URI_append = " \
     file://libxl-block-scripts-log-to-syslog.patch \
     file://0001-convert-block-tap-for-shared.patch \
     file://domain-reboot.patch \
-    file://libxl-retry-qmp-pci-add.patch \
     file://efi-hardcode-openxt-cfg.patch \
     file://shim-support-for-shim-lock-measure.patch \
     file://efi-require-shim.patch \
