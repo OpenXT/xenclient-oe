@@ -92,7 +92,7 @@ do_compile() {
 		       LDLIBS_libxenguest='-lxenguest' \
 		       LDLIBS_libxentoollog='-lxentoollog' \
 		       LDLIBS_libxenevtchn='-lxenevtchn' \
-		       -C tools subdir-all-libxl
+		       -C tools/libs subdir-all-light
 
     oe_runmake V=1 \
        LDLIBS_libxenctrl='-lxenctrl' \
