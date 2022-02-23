@@ -34,9 +34,9 @@ INTERNAL DEPENDENCIES
 ################################################################################
 PATCHES
 ################################################################################
---- a/tools/libxl/libxl.h
-+++ b/tools/libxl/libxl.h
-@@ -1695,6 +1695,12 @@ static inline int libxl_domain_reboot_0x
+--- a/tools/include/libxl.h
++++ b/tools/include/libxl.h
+@@ -1804,6 +1804,12 @@ static inline int libxl_domain_reboot_0x
  #define libxl_domain_reboot libxl_domain_reboot_0x041200
  #endif
  
@@ -49,9 +49,30 @@ PATCHES
  int libxl_domain_destroy(libxl_ctx *ctx, uint32_t domid,
                           const libxl_asyncop_how *ao_how)
                           LIBXL_EXTERNAL_CALLERS_ONLY;
---- a/tools/libxl/libxl_domain.c
-+++ b/tools/libxl/libxl_domain.c
-@@ -866,6 +866,36 @@ static void pvcontrol_cb(libxl__egc *egc
+--- a/tools/include/libxl_utils.h
++++ b/tools/include/libxl_utils.h
+@@ -26,6 +26,9 @@ char *libxl_basename(const char *name);
+ unsigned long libxl_get_required_shadow_memory(unsigned long maxmem_kb, unsigned int smp_cpus);
+   /* deprecated; see LIBXL_HAVE_DOMAIN_NEED_MEMORY_CONFIG in libxl.h */
+ int libxl_name_to_domid(libxl_ctx *ctx, const char *name, uint32_t *domid);
++int libxl_uuid_to_domid(libxl_ctx *ctx, const char *uuid, int32_t *domid);
++int libxl_domid_to_uuid(libxl_ctx *ctx, libxl_uuid *uuid, uint32_t domid);
++int libxl_get_acpi_state(libxl_ctx *ctx, int32_t domid, uint32_t * acpi_state);
+ int libxl_domain_qualifier_to_domid(libxl_ctx *ctx, const char *name, uint32_t *domid);
+ char *libxl_domid_to_name(libxl_ctx *ctx, uint32_t domid);
+ int libxl_cpupool_qualifier_to_cpupoolid(libxl_ctx *ctx, const char *p,
+@@ -185,6 +188,8 @@ void libxl_string_copy(libxl_ctx *ctx, c
+ 
+ #define LIBXL_FILLZERO(object) (memset(&(object), 0, sizeof((object))))
+ 
++#define INVALID_ACPI_STATE ~0
++
+ #endif
+ 
+ /*
+--- a/tools/libs/light/libxl_domain.c
++++ b/tools/libs/light/libxl_domain.c
+@@ -867,6 +867,36 @@ static void pvcontrol_cb(libxl__egc *egc
      libxl__ao_complete(egc, ao, rc);
  }
  
@@ -88,8 +109,8 @@ PATCHES
  static void domain_death_occurred(libxl__egc *egc,
                                    libxl_evgen_domain_death **evg_upd,
                                    const char *why) {
---- a/tools/libxl/libxl_types.idl
-+++ b/tools/libxl/libxl_types.idl
+--- a/tools/libs/light/libxl_types.idl
++++ b/tools/libs/light/libxl_types.idl
 @@ -160,6 +160,7 @@ libxl_trigger = Enumeration("trigger", [
      (4, "INIT"),
      (5, "RESET"),
@@ -98,7 +119,7 @@ PATCHES
      ])
  
  libxl_tsc_mode = Enumeration("tsc_mode", [
-@@ -344,6 +345,7 @@ libxl_dominfo = Struct("dominfo",[
+@@ -347,6 +348,7 @@ libxl_dominfo = Struct("dominfo",[
      #
      # Otherwise set to a value guaranteed not to clash with any valid
      # LIBXL_SHUTDOWN_REASON_* constant.
@@ -106,8 +127,8 @@ PATCHES
      ("shutdown_reason", libxl_shutdown_reason),
      ("outstanding_memkb",  MemKB),
      ("current_memkb",   MemKB),
---- a/tools/libxl/libxl_utils.c
-+++ b/tools/libxl/libxl_utils.c
+--- a/tools/libs/light/libxl_utils.c
++++ b/tools/libs/light/libxl_utils.c
 @@ -94,6 +94,65 @@ int libxl_name_to_domid(libxl_ctx *ctx,
      return ret;
  }
@@ -174,27 +195,6 @@ PATCHES
  int libxl_domain_qualifier_to_domid(libxl_ctx *ctx, const char *name,
                                      uint32_t *domid)
  {
---- a/tools/libxl/libxl_utils.h
-+++ b/tools/libxl/libxl_utils.h
-@@ -26,6 +26,9 @@ char *libxl_basename(const char *name);
- unsigned long libxl_get_required_shadow_memory(unsigned long maxmem_kb, unsigned int smp_cpus);
-   /* deprecated; see LIBXL_HAVE_DOMAIN_NEED_MEMORY_CONFIG in libxl.h */
- int libxl_name_to_domid(libxl_ctx *ctx, const char *name, uint32_t *domid);
-+int libxl_uuid_to_domid(libxl_ctx *ctx, const char *uuid, int32_t *domid);
-+int libxl_domid_to_uuid(libxl_ctx *ctx, libxl_uuid *uuid, uint32_t domid);
-+int libxl_get_acpi_state(libxl_ctx *ctx, int32_t domid, uint32_t * acpi_state);
- int libxl_domain_qualifier_to_domid(libxl_ctx *ctx, const char *name, uint32_t *domid);
- char *libxl_domid_to_name(libxl_ctx *ctx, uint32_t domid);
- int libxl_cpupool_qualifier_to_cpupoolid(libxl_ctx *ctx, const char *p,
-@@ -185,6 +188,8 @@ void libxl_string_copy(libxl_ctx *ctx, c
- 
- #define LIBXL_FILLZERO(object) (memset(&(object), 0, sizeof((object))))
- 
-+#define INVALID_ACPI_STATE ~0
-+
- #endif
- 
- /*
 --- a/tools/xl/xl.h
 +++ b/tools/xl/xl.h
 @@ -138,6 +138,9 @@ int main_unpause(int argc, char **argv);
@@ -209,7 +209,7 @@ PATCHES
  int main_create(int argc, char **argv);
 --- a/tools/xl/xl_cmdtable.c
 +++ b/tools/xl/xl_cmdtable.c
-@@ -77,6 +77,13 @@ struct cmd_spec cmd_table[] = {
+@@ -78,6 +78,13 @@ const struct cmd_spec cmd_table[] = {
        "                        no PV drivers.\n"
        "-w, --wait              Wait for guest(s) to shutdown.\n"
      },
@@ -223,7 +223,7 @@ PATCHES
      { "reboot",
        &main_reboot, 0, 1,
        "Issue a reboot signal to a domain",
-@@ -297,6 +304,16 @@ struct cmd_spec cmd_table[] = {
+@@ -302,6 +309,16 @@ const struct cmd_spec cmd_table[] = {
        "Convert a domain id to domain name",
        "<DomainId>",
      },
