@@ -55,6 +55,35 @@ FILES_${PN}-xen-ucode = " \
 "
 PACKAGES += "${PN}-xen-ucode"
 
+FILES_${PN}-tests = " \
+    ${libdir}/xen/bin/test-* \
+"
+PACKAGES += "${PN}-tests"
+
+FILES_${PN}-misc += " \
+    ${sbindir}/xen-access \
+    ${sbindir}/xen-mceinj \
+    ${sbindir}/xen-memshare \
+    ${sbindir}/xen-vmtrace \
+"
+
+# Python programs we don't want inby default, but they are
+# actually libxl runtime dependencies.
+FILES_${PN}-migration-helpers = " \
+    ${libdir}/xen/bin/convert-legacy-stream \
+    ${libdir}/xen/bin/verify-stream-v2 \
+"
+PACKAGES =+ "${PN}-migration-helpers"
+
+FILES_${PN}-bash-complete = " \
+    ${sysconfdir}/bash_completion.d \
+"
+PACKAGES += "${PN}-bash-complete"
+
+FILES_${PN}-xl-examples += " \
+    ${sysconfdir}/xen/xlexample.pvhlinux \
+"
+
 # This init script is added by OpenXT and runs the xen-init-dom0 script
 # that meta-virtualization has packaged in the ${PN}-xl package.
 FILES_${PN}-xl += " ${INIT_D_DIR}/xen-init-dom0"
