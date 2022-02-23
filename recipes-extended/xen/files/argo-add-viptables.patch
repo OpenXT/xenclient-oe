@@ -13,6 +13,11 @@ CHANGELOG
 Original: Christopher Clark, christopher.w.clark@gmail.com
 Ported: Nicholas Tsirakis, tsirakisn@ainfosec.com
 
+Switch to typdefs to avoid errors with compat header generation.
+In file included from argo.c:34:
+xen/include/compat/argo.h:81:12: error: stray ‘@’ in program
+   81 |     struct @KeeP@xen_argo_addr src;
+
 ################################################################################
 REMOVAL 
 ################################################################################
@@ -30,7 +35,7 @@ PATCHES
 ################################################################################
 --- a/xen/common/argo.c
 +++ b/xen/common/argo.c
-@@ -75,6 +75,8 @@ DEFINE_XEN_GUEST_HANDLE(xen_argo_unregis
+@@ -74,6 +74,8 @@ DEFINE_XEN_GUEST_HANDLE(xen_argo_unregis
  #ifdef CONFIG_COMPAT
  DEFINE_COMPAT_HANDLE(compat_argo_iov_t);
  #endif
@@ -39,7 +44,7 @@ PATCHES
  
  static bool __read_mostly opt_argo;
  static bool __read_mostly opt_argo_mac_permissive;
-@@ -203,6 +205,14 @@ struct argo_domain
+@@ -202,6 +204,14 @@ struct argo_domain
      struct list_head wildcard_pend_list;
  };
  
@@ -54,7 +59,7 @@ PATCHES
  /*
   * Locking is organized as follows:
   *
-@@ -323,6 +333,9 @@ static DEFINE_RWLOCK(L1_global_argo_rwlo
+@@ -322,6 +332,9 @@ static DEFINE_RWLOCK(L1_global_argo_rwlo
  #define argo_dprintk(format, ... ) ((void)0)
  #endif
  
@@ -64,7 +69,7 @@ PATCHES
  /*
   * This hash function is used to distribute rings within the per-domain
   * hash tables (d->argo->ring_hash and d->argo_send_hash). The hash table
-@@ -1958,6 +1971,221 @@ notify(struct domain *currd,
+@@ -1954,6 +1967,221 @@ notify(struct domain *currd,
      return ret;
  }
  
@@ -286,7 +291,7 @@ PATCHES
  static long
  sendv(struct domain *src_d, xen_argo_addr_t *src_addr,
        const xen_argo_addr_t *dst_addr, xen_argo_iov_t *iovs, unsigned int niov,
-@@ -2003,6 +2231,17 @@ sendv(struct domain *src_d, xen_argo_add
+@@ -1999,6 +2227,17 @@ sendv(struct domain *src_d, xen_argo_add
          return ret;
      }
  
@@ -296,7 +301,7 @@ PATCHES
 +                src_addr->domain_id, src_addr->aport,
 +                dst_addr->domain_id, dst_addr->aport);
 +
-+        put_domain(dst_d);
++        rcu_unlock_domain(dst_d);
 +
 +        return -EPERM;
 +    }
@@ -304,7 +309,7 @@ PATCHES
      read_lock(&L1_global_argo_rwlock);
  
      if ( !src_d->argo )
-@@ -2200,6 +2439,52 @@ do_argo_op(unsigned int cmd, XEN_GUEST_H
+@@ -2196,6 +2435,52 @@ do_argo_op(unsigned int cmd, XEN_GUEST_H
          break;
      }
  
@@ -375,8 +380,8 @@ PATCHES
  
 +typedef struct xen_argo_viptables_rule
 +{
-+    struct xen_argo_addr src;
-+    struct xen_argo_addr dst;
++    xen_argo_addr_t src;
++    xen_argo_addr_t dst;
 +    uint32_t accept;
 +} xen_argo_viptables_rule_t;
 +
@@ -384,7 +389,7 @@ PATCHES
 +
 +typedef struct xen_argo_viptables_list
 +{
-+    struct xen_argo_viptables_rule rules[XEN_ARGO_VIPTABLES_LIST_SIZE];
++    xen_argo_viptables_rule_t rules[XEN_ARGO_VIPTABLES_LIST_SIZE];
 +    uint32_t nrules;
 +} xen_argo_viptables_list_t;
 +
