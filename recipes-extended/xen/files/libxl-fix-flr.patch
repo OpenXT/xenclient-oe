@@ -50,19 +50,46 @@ INTERNAL DEPENDENCIES
 ################################################################################
 PATCHES
 ################################################################################
---- a/tools/libxl/libxl_internal.h
-+++ b/tools/libxl/libxl_internal.h
-@@ -1722,12 +1722,20 @@ _hidden int libxl__pci_topology_init(lib
+--- a/tools/libs/light/libxl_domain.c
++++ b/tools/libs/light/libxl_domain.c
+@@ -1188,6 +1188,15 @@ static void domain_destroy_callback(libx
+         dds->rc = rc;
+     }
+ 
++    if(dis->pciw) {
++        for (int i = 0; i < dis->pciw->num_devs; i++) {
++            libxl_device_pci *pci = &dis->pciw->pcis[i];
++            libxl__device_pci_reset(gc, pci->domain, pci->bus, pci->dev, pci->func);
++        }
++        free(dis->pciw->pcis);
++        free(dis->pciw);
++    }
++
+     dds->domain_finished = 1;
+     destroy_finish_check(egc, dds);
+ }
+@@ -1270,7 +1279,7 @@ void libxl__destroy_domid(libxl__egc *eg
+ 
+     libxl__multidev_begin(ao, &dis->multidev);
+     dis->multidev.callback = destroy_domid_pci_done;
+-    libxl__device_pci_destroy_all(egc, domid, &dis->multidev);
++    libxl__device_pci_destroy_all(egc, domid, &dis->multidev, &dis->pciw);
+     libxl__multidev_prepared(egc, &dis->multidev, 0);
+     return;
+ 
+--- a/tools/libs/light/libxl_internal.h
++++ b/tools/libs/light/libxl_internal.h
+@@ -1726,12 +1726,20 @@ _hidden int libxl__pci_topology_init(lib
                                       int num_devs);
  
  /* from libxl_pci */
 +typedef struct libxl_pci_dev_wrap {
-+    libxl_device_pci *pcidevs;
++    libxl_device_pci *pcis;
 +    int num_devs;
 +} libxl_pci_dev_wrap;
  
  _hidden void libxl__device_pci_add(libxl__egc *egc, uint32_t domid,
-                                    libxl_device_pci *pcidev, bool starting,
+                                    libxl_device_pci *pci, bool starting,
                                     libxl__ao_device *aodev);
  _hidden void libxl__device_pci_destroy_all(libxl__egc *egc, uint32_t domid,
 -                                           libxl__multidev *);
@@ -74,7 +101,7 @@ PATCHES
  _hidden int libxl__device_pci_setdefault(libxl__gc *gc, uint32_t domid,
                                           libxl_device_pci *pci, bool hotplug);
  _hidden bool libxl__is_igd_vga_passthru(libxl__gc *gc,
-@@ -4075,6 +4083,7 @@ struct libxl__destroy_domid_state {
+@@ -4092,6 +4100,7 @@ struct libxl__destroy_domid_state {
      libxl__devices_remove_state drs;
      libxl__destroy_devicemodel_state ddms;
      libxl__ev_child destroyer;
@@ -82,9 +109,9 @@ PATCHES
      bool soft_reset;
      libxl__multidev multidev;
  };
---- a/tools/libxl/libxl_pci.c
-+++ b/tools/libxl/libxl_pci.c
-@@ -221,7 +221,7 @@ static int libxl__device_pci_remove_xens
+--- a/tools/libs/light/libxl_pci.c
++++ b/tools/libs/light/libxl_pci.c
+@@ -243,7 +243,7 @@ static int libxl__device_pci_remove_xens
          return ERROR_FAIL;
  
      if (domtype == LIBXL_DOMAIN_TYPE_PV) {
@@ -93,7 +120,7 @@ PATCHES
              LOGD(DEBUG, domid, "pci backend at %s is not ready", be_path);
              return ERROR_FAIL;
          }
-@@ -244,13 +244,12 @@ static int libxl__device_pci_remove_xens
+@@ -266,13 +266,12 @@ static int libxl__device_pci_remove_xens
  retry_transaction:
      t = xs_transaction_start(ctx->xsh);
      xs_write(ctx->xsh, t, GCSPRINTF("%s/state-%d", be_path, i), GCSPRINTF("%d", XenbusStateClosing), 1);
@@ -108,7 +135,7 @@ PATCHES
              LOGD(DEBUG, domid, "pci backend at %s is not ready", be_path);
              return ERROR_FAIL;
          }
-@@ -1446,13 +1445,13 @@ out:
+@@ -1510,13 +1509,13 @@ out:
      pas->callback(egc, pas, rc);
  }
  
@@ -124,19 +151,19 @@ PATCHES
      fd = open(reset, O_WRONLY);
      if (fd >= 0) {
          char *buf = GCSPRINTF(PCI_BDF, domain, bus, dev, func);
-@@ -2169,11 +2168,6 @@ static void pci_remove_detatched(libxl__
+@@ -2214,11 +2213,6 @@ static void pci_remove_detached(libxl__e
  
      isstubdom = libxl_is_stubdom(CTX, domid, &domainid);
  
 -    /* don't do multiple resets while some functions are still passed through */
--    if ( (pcidev->vdevfn & 0x7) == 0 ) {
--        libxl__device_pci_reset(gc, pcidev->domain, pcidev->bus, pcidev->dev, pcidev->func);
+-    if ((pci->vdevfn & 0x7) == 0) {
+-        libxl__device_pci_reset(gc, pci->domain, pci->bus, pci->dev, pci->func);
 -    }
 -
      if (!isstubdom) {
-         rc = xc_deassign_device(CTX->xch, domid, pcidev_encode_bdf(pcidev));
+         rc = xc_deassign_device(CTX->xch, domid, pci_encode_bdf(pci));
          if (rc < 0 && (prs->hvm || errno != ENOSYS))
-@@ -2419,7 +2413,8 @@ out:
+@@ -2469,7 +2463,8 @@ static int libxl__device_pci_get_path(li
  }
  
  void libxl__device_pci_destroy_all(libxl__egc *egc, uint32_t domid,
@@ -145,44 +172,17 @@ PATCHES
 +                                   libxl_pci_dev_wrap **pciw)
  {
      STATE_AO_GC(multidev->ao);
-     libxl_device_pci *pcidevs;
-@@ -2439,6 +2434,12 @@ void libxl__device_pci_destroy_all(libxl
-         libxl__device_pci_remove_common(egc, domid, pcidevs + i, true,
+     libxl_device_pci *pcis;
+@@ -2489,7 +2484,11 @@ void libxl__device_pci_destroy_all(libxl
                                          aodev);
      }
-+
+ 
+-    libxl_device_pci_list_free(pcis, num);
 +    *pciw = malloc(sizeof(libxl_pci_dev_wrap));
 +    if (*pciw) {
-+        (*pciw)->pcidevs = pcidevs;
++        (*pciw)->pcis = pcis;
 +        (*pciw)->num_devs = num;
 +    }
  }
  
  int libxl__grant_vga_iomem_permission(libxl__gc *gc, const uint32_t domid,
---- a/tools/libxl/libxl_domain.c
-+++ b/tools/libxl/libxl_domain.c
-@@ -1187,6 +1187,15 @@ static void domain_destroy_callback(libx
-         dds->rc = rc;
-     }
- 
-+    if(dis->pciw) {
-+        for (int i = 0; i < dis->pciw->num_devs; i++) {
-+            libxl_device_pci *pcidev = &dis->pciw->pcidevs[i];
-+            libxl__device_pci_reset(gc, pcidev->domain, pcidev->bus, pcidev->dev, pcidev->func);
-+        }
-+        free(dis->pciw->pcidevs);
-+        free(dis->pciw);
-+    }
-+
-     dds->domain_finished = 1;
-     destroy_finish_check(egc, dds);
- }
-@@ -1269,7 +1278,7 @@ void libxl__destroy_domid(libxl__egc *eg
- 
-     libxl__multidev_begin(ao, &dis->multidev);
-     dis->multidev.callback = destroy_domid_pci_done;
--    libxl__device_pci_destroy_all(egc, domid, &dis->multidev);
-+    libxl__device_pci_destroy_all(egc, domid, &dis->multidev, &dis->pciw);
-     libxl__multidev_prepared(egc, &dis->multidev, 0);
-     return;
- 
