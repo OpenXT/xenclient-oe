@@ -23,11 +23,8 @@ do_install_append() {
     install -m 0644 ${WORKDIR}/sshd_config_argo ${D}${sysconfdir}/ssh/sshd_config_argo
 
     install -m 0644 ${WORKDIR}/sshd_config_argo ${D}${sysconfdir}/ssh/sshd_config_readonly_argo
-    sed -i -e '/HostKey/d' ${D}${sysconfdir}/ssh/sshd_config_readonly_argo
-    echo "HostKey /var/run/ssh/ssh_host_rsa_key_argo" >> ${D}${sysconfdir}/ssh/sshd_config_readonly_argo
-    echo "HostKey /var/run/ssh/ssh_host_dsa_key_argo" >> ${D}${sysconfdir}/ssh/sshd_config_readonly_argo
-    echo "HostKey /var/run/ssh/ssh_host_ecdsa_key_argo" >> ${D}${sysconfdir}/ssh/sshd_config_readonly_argo
-    echo "HostKey /var/run/ssh/ssh_host_ed25519_key_argo" >> ${D}${sysconfdir}/ssh/sshd_config_readonly_argo
+    sed -i -e 's|^HostKey /etc/ssh/|HostKey /var/run/ssh/|' \
+        ${D}${sysconfdir}/ssh/sshd_config_readonly_argo
 
     install -m 0644 ${WORKDIR}/volatiles.99_ssh-keygen ${D}${sysconfdir}/default/volatiles/99_ssh-keygen
 
