@@ -1,0 +1,4440 @@
+################################################################################
+SHORT DESCRIPTION: 
+################################################################################
+USB backend driver.
+
+################################################################################
+LONG DESCRIPTION: 
+################################################################################
+Para-virtualized USB backend driver...
+
+################################################################################
+CHANGELOG 
+################################################################################
+Original author: unknown
+Contributor: Ross Philipson <philipsonr@ainfosec.com>
+Port to 3.18: Eric Chanudet <chanudete@ainfosec.com>
+Port to 4.14: Richard Turner <turnerr@ainfosec.com>
+Port to 4.19: Richard Turner <turnerr@ainfosec.com>
+
+################################################################################
+REMOVAL 
+################################################################################
+Allow and control access to USB devices from guests using the para-virtualized
+tools.
+
+################################################################################
+UPSTREAM PLAN
+################################################################################
+None.
+
+################################################################################
+INTERNAL DEPENDENCIES 
+################################################################################
+Guest pv-tools.
+UIVM interface.
+Toolstack in general.
+
+################################################################################
+PATCHES 
+################################################################################
+--- a/drivers/scsi/sr.c
++++ b/drivers/scsi/sr.c
+@@ -269,6 +269,15 @@ static unsigned int sr_check_events(stru
+ 	if (!(clearing & DISK_EVENT_MEDIA_CHANGE))
+ 		return events;
+ do_tur:
++	/*
++	 * Earlier GET_EVENT_STATUS_NOTIFICATION and TUR did not agree
++	 * for a couple of times in a row. We rely on TUR only for this
++	 * likely broken device, to prevent generating incorrect media
++	 * changed events for every open().
++	 */
++	if (cd->ignore_get_event)
++		events &= ~DISK_EVENT_MEDIA_CHANGE;
++
+ 	/* let's see whether the media is there with TUR */
+ 	last_present = cd->media_present;
+ 	ret = scsi_test_unit_ready(cd->device, SR_TIMEOUT, MAX_RETRIES, &sshdr);
+@@ -281,8 +290,19 @@ do_tur:
+ 	cd->media_present = scsi_status_is_good(ret) ||
+ 		(scsi_sense_valid(&sshdr) && sshdr.asc != 0x3a);
+ 
+-	if (last_present != cd->media_present)
++	if (last_present != cd->media_present) {
+ 		cd->device->changed = 1;
++	} else if (events & DISK_EVENT_MEDIA_CHANGE) {
++		if (cd->tur_mismatch > 8) {
++			printk("%s: GET_EVENT and TUR disagree continuously, "
++			       "suppress GET_EVENT events\n", cd->cdi.name);
++			cd->ignore_get_event = true;
++		} else {
++			cd->tur_mismatch++;
++		}
++	} else if (!cd->ignore_get_event && cd->tur_mismatch > 0) {
++		cd->tur_mismatch = 0;
++	}
+ 
+ 	if (cd->device->changed) {
+ 		events |= DISK_EVENT_MEDIA_CHANGE;
+--- a/drivers/usb/Kconfig
++++ b/drivers/usb/Kconfig
+@@ -109,6 +109,17 @@ source "drivers/usb/image/Kconfig"
+ 
+ source "drivers/usb/usbip/Kconfig"
+ 
++comment "Xen USB devices"
++
++config XEN_USBDEV_BACKEND
++	tristate "Xen usb-device backend driver"
++	depends on XEN_BACKEND
++	default XEN_BACKEND
++	help
++	  The usb-device backend driver allows the kernel to export its
++	  usb devices to other guests via a high-performance shared-memory
++	  interface.
++
+ endif
+ 
+ source "drivers/usb/cdns3/Kconfig"
+--- a/drivers/usb/Makefile
++++ b/drivers/usb/Makefile
+@@ -66,3 +66,5 @@ obj-$(CONFIG_USBIP_CORE)	+= usbip/
+ obj-$(CONFIG_TYPEC)		+= typec/
+ 
+ obj-$(CONFIG_USB_ROLE_SWITCH)	+= roles/
++
++obj-$(CONFIG_XEN_USBDEV_BACKEND) += xen-usbback/
+--- a/drivers/usb/core/Makefile
++++ b/drivers/usb/core/Makefile
+@@ -7,6 +7,7 @@ usbcore-y := usb.o hub.o hcd.o urb.o mes
+ usbcore-y += config.o file.o buffer.o sysfs.o endpoint.o
+ usbcore-y += devio.o notify.o generic.o quirks.o devices.o
+ usbcore-y += phy.o port.o
++usbcore-y += dusb.o
+ 
+ usbcore-$(CONFIG_OF)		+= of.o
+ usbcore-$(CONFIG_USB_PCI)		+= hcd-pci.o
+--- /dev/null
++++ b/drivers/usb/core/dusb.c
+@@ -0,0 +1,169 @@
++/*****************************************************************************/
++
++/*
++ *      dusb.c  --  Direct communication with USB devices.
++ *
++ *      Copyright (C) 1999-2000  Thomas Sailer (sailer@ife.ee.ethz.ch)
++ *      Copyright (C) 2008-2012  Virtual Computer Inc
++ *
++ *      This program is free software; you can redistribute it and/or modify
++ *      it under the terms of the GNU General Public License as published by
++ *      the Free Software Foundation; either version 2 of the License, or
++ *      (at your option) any later version.
++ *
++ *      This program is distributed in the hope that it will be useful,
++ *      but WITHOUT ANY WARRANTY; without even the implied warranty of
++ *      MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ *      GNU General Public License for more details.
++ *
++ *      You should have received a copy of the GNU General Public License
++ *      along with this program; if not, write to the Free Software
++ *      Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
++ *
++ *
++ *  Derived from usb/core/devio.c
++ *
++ */
++
++/*****************************************************************************/
++
++#include <linux/module.h>
++#include <linux/usb.h>
++#include <linux/dusb.h>
++#include <linux/hid.h>
++#ifdef CONFIG_PROC_FS
++#include <linux/proc_fs.h>
++#include <linux/seq_file.h>
++#endif
++#include <linux/usb/hcd.h>	/* for usbcore internals */
++
++#include "usb.h"
++
++#if 1
++#define dprintk(args...)
++#define dprintk2(args...)
++#else
++#define dprintk printk
++#define dprintk2 printk
++#endif
++
++#define lock_kernel()
++#define unlock_kernel()
++
++static int __match_minor(struct device *dev, const void *data)
++{
++	const int minor = *((const int *)data);
++
++	if (dev->devt == MKDEV(USB_DEVICE_MAJOR, minor))
++		return 1;
++	return 0;
++}
++
++static struct usb_device *usbdev_lookup_by_minor(int minor)
++{
++	struct device *dev;
++
++	dev = bus_find_device(&usb_bus_type, NULL, &minor, __match_minor);
++	if (!dev)
++		return NULL;
++
++	return container_of(dev, struct usb_device, dev);
++}
++
++struct usb_device *dusb_open(unsigned bus, unsigned device)
++{
++	int minor = ((bus - 1) * 128) + (device - 1);
++	struct usb_device *dev = NULL;
++
++	dev = usbdev_lookup_by_minor(minor);
++	if (NULL == dev)
++		goto out;
++
++	usb_lock_device(dev);
++
++	usb_get_dev(dev);
++	put_device(&dev->dev);
++	usb_unlock_device(dev);
++
++out:
++
++	return dev;
++}
++EXPORT_SYMBOL(dusb_open);
++
++void dusb_close(struct usb_device *dev)
++{
++	usb_lock_device(dev);
++
++	/*
++	 * Resetting the device will make sure it gets reprobed and
++	 * another device driver can claim it.
++	 */
++	usb_reset_device(dev);
++	usb_unlock_device(dev);
++
++	usb_put_dev(dev);
++}
++EXPORT_SYMBOL(dusb_close);
++
++int dusb_set_configuration(struct usb_device *dev, int configuration)
++{
++	return usb_set_configuration(dev, configuration);
++}
++EXPORT_SYMBOL(dusb_set_configuration);
++
++void dusb_flush_endpoint(struct usb_device *udev, struct usb_host_endpoint *ep)
++{
++	usb_hcd_flush_endpoint(udev, ep);
++}
++EXPORT_SYMBOL(dusb_flush_endpoint);
++
++int dusb_reenumerate(unsigned bus, unsigned device)
++{
++	int minor = ((bus - 1) * 128) + (device - 1);
++	struct usb_device *udev = NULL;
++
++	udev = usbdev_lookup_by_minor(minor);
++	if (udev) {
++		printk("Forcing re-enumeration of %s - %s\n",
++			udev->product, udev->manufacturer);
++		usb_device_reenumerate(udev);
++		put_device(&udev->dev);
++	}
++
++	return (udev != NULL);
++}
++EXPORT_SYMBOL(dusb_reenumerate);
++
++int dusb_dev_running(struct usb_device *udev)
++{
++	struct usb_hcd *hcd = bus_to_hcd(udev->bus);
++
++	return (hcd ? HCD_RH_RUNNING(hcd) : 0);
++}
++EXPORT_SYMBOL(dusb_dev_running);
++
++static int dusb_hcd_speed_super(struct usb_hcd *hcd)
++{
++	return (hcd->driver->flags & HCD_USB3);
++}
++
++static int dusb_hcd_speed_high(struct usb_hcd *hcd)
++{
++	return (hcd->driver->flags & HCD_USB2);
++}
++
++static int dusb_hcd_speed(struct usb_hcd *hcd)
++{
++	return (dusb_hcd_speed_super(hcd) ? USB_SPEED_SUPER :
++		(dusb_hcd_speed_high(hcd) ? USB_SPEED_HIGH : USB_SPEED_LOW));
++}
++
++int dusb_dev_controller_speed(struct usb_device *udev)
++{
++	struct usb_hcd *hcd = bus_to_hcd(udev->bus);
++
++	return (hcd ? dusb_hcd_speed(hcd) : 0);
++}
++EXPORT_SYMBOL(dusb_dev_controller_speed);
++
+--- a/drivers/usb/core/hub.c
++++ b/drivers/usb/core/hub.c
+@@ -1005,6 +1005,15 @@ int usb_remove_device(struct usb_device
+ 	return 0;
+ }
+ 
++void usb_device_reenumerate(struct usb_device *udev)
++{
++	struct usb_hub  *hub = usb_hub_to_struct_hub(udev->parent);
++	int             port1 = udev->portnum;
++
++	hub_port_logical_disconnect(hub, port1);
++}
++EXPORT_SYMBOL(usb_device_reenumerate);
++
+ enum hub_activation_type {
+ 	HUB_INIT, HUB_INIT2, HUB_INIT3,		/* INITs must come first */
+ 	HUB_POST_RESET, HUB_RESUME, HUB_RESET_RESUME,
+@@ -5907,7 +5916,7 @@ int usb_reset_device(struct usb_device *
+ 			struct usb_driver *drv;
+ 			int unbind = 0;
+ 
+-			if (cintf->dev.driver) {
++			if (cintf && cintf->dev.driver) {
+ 				drv = to_usb_driver(cintf->dev.driver);
+ 				if (drv->pre_reset && drv->post_reset)
+ 					unbind = (drv->pre_reset)(cintf);
+@@ -5928,7 +5937,12 @@ int usb_reset_device(struct usb_device *
+ 		for (i = config->desc.bNumInterfaces - 1; i >= 0; --i) {
+ 			struct usb_interface *cintf = config->interface[i];
+ 			struct usb_driver *drv;
+-			int rebind = cintf->needs_binding;
++			int rebind;
++
++			if (!cintf)
++				continue;
++
++			rebind = cintf->needs_binding;
+ 
+ 			if (!rebind && cintf->dev.driver) {
+ 				drv = to_usb_driver(cintf->dev.driver);
+--- a/drivers/usb/host/xhci-pci.c
++++ b/drivers/usb/host/xhci-pci.c
+@@ -289,6 +289,11 @@ static void xhci_pci_quirks(struct devic
+ 	if (xhci->quirks & XHCI_RESET_ON_RESUME)
+ 		xhci_dbg_trace(xhci, trace_xhci_dbg_quirks,
+ 				"QUIRK: Resetting on resume");
++
++        /* The use of BEI causes deadlock with VUSB
++         * FIXME: BEI should be made to work with VUSB!
++         */
++        xhci->quirks |= XHCI_AVOID_BEI;
+ }
+ 
+ #ifdef CONFIG_ACPI
+--- /dev/null
++++ b/drivers/usb/xen-usbback/Makefile
+@@ -0,0 +1,3 @@
++obj-$(CONFIG_XEN_USBDEV_BACKEND) := usbbk.o
++
++usbbk-y	:= usbback.o xenbus.o interface.o vusb.o buffers.o
+--- /dev/null
++++ b/drivers/usb/xen-usbback/buffers.c
+@@ -0,0 +1,422 @@
++/******************************************************************************
++ * usbback/buffers.c
++ *
++ * Routines for managing virtual usb devices.
++ *
++ * Copyright (c) Citrix Systems Inc.
++ *
++ * This program is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU General Public License version 2
++ * as published by the Free Software Foundation; or, when distributed
++ * separately from the Linux kernel or incorporated into other
++ * software packages, subject to the following license:
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining a copy
++ * of this source file (the "Software"), to deal in the Software without
++ * restriction, including without limitation the rights to use, copy, modify,
++ * merge, publish, distribute, sublicense, and/or sell copies of the Software,
++ * and to permit persons to whom the Software is furnished to do so, subject to
++ * the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included in
++ * all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
++ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
++ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
++ * IN THE SOFTWARE.
++ */
++
++#include <linux/scatterlist.h>
++
++#include "common.h"
++
++#if (DUMP_URB_SZ > 0)
++void dump(uint8_t *buffer, int len)
++{
++	int i;
++
++	if ((buffer != NULL) && (len > 0)) {
++		printk("    data: ");
++		for (i=0; (i < len) && (i < DUMP_URB_SZ); i++) {
++			printk("%02x ", buffer[i]);
++			if ((i & 0x3f) == 0x20)
++				printk("\n");
++		}
++		printk("\n");
++	} else {
++		printk("    data: none\n");
++	}
++}
++
++static void dump_iso_urb(struct urb *urb)
++{
++	struct usb_iso_packet_descriptor *desc = urb->iso_frame_desc;
++	uint8_t *buffer = urb->transfer_buffer;
++	int i;
++
++	for (i=0; i<urb->number_of_packets; i++)
++		dump(&buffer[desc[i].offset], desc[i].length);
++}
++#endif
++
++/*
++ * Move data between DomU and URB buffers
++ */
++static int copy_first_chunk(uint8_t *dst, uint8_t *src, int offset, int remaining)
++{
++	int len;
++
++	if ((PAGE_SIZE - offset) > remaining)
++		len = remaining;
++	else
++		len = (PAGE_SIZE - offset);
++
++	memcpy(dst, src, len);
++
++	return len;
++}
++
++static int copy_chunk(uint8_t *dst, uint8_t *src, int remaining)
++{
++	return copy_first_chunk(dst, src, 0, remaining);
++}
++
++static void copy_out_req(pending_req_t *pending_req)
++{
++	uint8_t *dst, *src;
++	int i, len, remaining, nr_pages;
++
++	remaining = pending_req->urb->transfer_buffer_length;
++	nr_pages = data_pages(pending_req);
++
++	if (!nr_pages)
++		return;
++
++	/* copy first seg */
++	dst = pending_req->urb->transfer_buffer;
++	src = (uint8_t *)vaddr(pending_req, 0) + pending_req->offset;
++
++	len = copy_first_chunk(dst, src, pending_req->offset, remaining);
++
++	dst += len;
++	remaining -= len;
++
++	/* copy remaining segs */
++	for (i = 1; i < nr_pages; i++) {
++		src = (uint8_t *)vaddr(pending_req, i);
++
++		len = copy_chunk(dst, src, remaining);
++
++		dst += len;
++		remaining -= len;
++	}
++
++#if (DUMP_URB_SZ > 0)
++	if (usbback_debug_lvl() >= LOG_LVL_DUMP)
++		dump(pending_req->urb->transfer_buffer,
++			pending_req->urb->transfer_buffer_length);
++#endif
++}
++
++static int setup_sg(struct scatterlist *sg, uint8_t *src, int offset, int remaining)
++{
++	int len;
++
++	if ((PAGE_SIZE - offset) > remaining)
++		len = remaining;
++	else
++		len = (PAGE_SIZE - offset);
++
++	debug_print(LOG_LVL_DEBUG, "  sg: ptr %p len %d\n", src + offset, len);
++
++	sg_set_buf(sg, src + offset, len);
++
++#if (DUMP_URB_SZ > 0)
++	if (usbback_debug_lvl() >= LOG_LVL_DUMP)
++		dump(src + offset, len);
++#endif
++
++	return len;
++}
++
++static void setup_sgs(pending_req_t *pending_req, int iso)
++{
++	struct urb *urb = pending_req->urb;
++	int i, len, remaining;
++	uint8_t *src;
++
++	remaining = urb->transfer_buffer_length;
++	if (iso)
++		urb->num_sgs = data_pages(pending_req) - 1;
++	else
++		urb->num_sgs = data_pages(pending_req);
++
++	sg_init_table(urb->sg, urb->num_sgs);
++
++	/* setup first seg */
++	if (iso)
++		src = (uint8_t *)vaddr(pending_req, 1);
++	else
++		src = (uint8_t *)vaddr(pending_req, 0);
++
++	len = setup_sg(&urb->sg[0], src, pending_req->offset, remaining);
++	debug_print(LOG_LVL_DEBUG, "%d: sg: off %d len %d\n",
++			0, pending_req->offset, len);
++
++	remaining -= len;
++
++	/* setup remaining segs */
++	for (i = 1; i < urb->num_sgs; i++) {
++		if (iso)
++			src = (uint8_t *)vaddr(pending_req, i + 1);
++		else
++			src = (uint8_t *)vaddr(pending_req, i);
++
++		len = setup_sg(&urb->sg[i], src, 0, remaining);
++		debug_print(LOG_LVL_DEBUG, "%d: sg: off %d len %d\n",
++			i, 0, len);
++
++		remaining -= len;
++	}
++}
++
++static int copy_out_iso_descriptors(pending_req_t *pending_req)
++{
++	struct usb_iso_packet_descriptor *desc;
++	usbif_iso_packet_info_t *info;
++	int i, length = 0;
++
++	if (!data_pages(pending_req))
++		return (length);
++
++	/* copy ISO packet descriptors */
++	info = (usbif_iso_packet_info_t *)vaddr(pending_req, 0);
++	desc = pending_req->urb->iso_frame_desc;
++
++	for (i=0; i<pending_req->nr_packets; i++) {
++		int end = info[i].offset + info[i].length;
++
++		debug_print(LOG_LVL_DEBUG, "  %d: iso desc: off %d len %d\n",
++			i, info[i].offset, info[i].length);
++		desc[i].offset        = info[i].offset;
++		desc[i].length        = info[i].length;
++		desc[i].actual_length = 0;
++		desc[i].status        = 0;
++
++		if (end > length)
++			length = end;
++	}
++
++	return (length);
++}
++
++static int copy_out_iso(pending_req_t *pending_req)
++{
++	uint8_t *dst, *src;
++	int i, len, remaining, nr_pages;
++
++	remaining = pending_req->urb->transfer_buffer_length;
++	nr_pages = data_pages(pending_req);
++
++	if (nr_pages < 2)
++		return (0);
++
++	/* copy first seg */
++	dst = pending_req->urb->transfer_buffer;
++	src = (uint8_t *)vaddr(pending_req, 1) + pending_req->offset;
++
++	len = copy_first_chunk(dst, src, pending_req->offset, remaining);
++
++	dst       += len;
++	remaining -= len;
++
++	/* copy remaining segs */
++	for (i = 2; i < nr_pages; i++) {
++		src = (uint8_t *)vaddr(pending_req, i);
++
++		len = copy_chunk(dst, src, remaining);
++
++		dst       += len;
++		remaining -= len;
++	}
++
++#if (DUMP_URB_SZ > 0)
++	if (usbback_debug_lvl() >= LOG_LVL_DUMP)
++		dump_iso_urb(pending_req->urb);
++#endif
++	return (0);
++}
++
++int copy_out(pending_req_t *pending_req)
++{
++	struct urb *urb = pending_req->urb;
++
++	if (pending_req->type == USBIF_T_ISOC) {
++		if (copy_out_iso_descriptors(pending_req) >
++			pending_req->urb->transfer_buffer_length)
++			return (-EINVAL);
++
++		if (urb->sg)
++			setup_sgs(pending_req, 1);
++		else if (!pending_req->direction_in)
++			copy_out_iso(pending_req);
++	} else {
++		if (urb->sg)
++			setup_sgs(pending_req, 0);
++		else if (!pending_req->direction_in)
++			copy_out_req(pending_req);
++	}
++
++	return (0);
++}
++
++static void copy_in_req(pending_req_t *pending_req)
++{
++	uint8_t *dst, *src;
++	int i, len, remaining, nr_pages;
++
++	remaining = pending_req->urb->actual_length;
++	nr_pages = data_pages(pending_req);
++
++	if (!nr_pages)
++		return;
++
++	/* copy first seg */
++	dst = (uint8_t *)vaddr(pending_req, 0) + pending_req->offset;
++	src = pending_req->urb->transfer_buffer;
++
++	len = copy_first_chunk(dst, src, pending_req->offset, remaining);
++
++	src += len;
++	remaining -= len;
++
++	/* copy remaining segs */
++	for (i = 1; i < nr_pages; i++) {
++		dst = (uint8_t *)vaddr(pending_req, i);
++
++		len = copy_chunk(dst, src, remaining);
++
++		src += len;
++		remaining -= len;
++	}
++
++#if (DUMP_URB_SZ > 0)
++	if (usbback_debug_lvl() >= LOG_LVL_DUMP)
++		dump(pending_req->urb->transfer_buffer,
++			pending_req->urb->actual_length);
++#endif
++}
++
++static void cleanup_sgs(pending_req_t *pending_req)
++{
++	struct urb *urb = pending_req->urb;
++	int i;
++
++	debug_print(LOG_LVL_DEBUG, "sgs: total %d mapped %d\n",
++		urb->num_sgs, urb->num_mapped_sgs);
++
++	for (i = 0; i < urb->num_sgs; i++) {
++		struct scatterlist *sg = &urb->sg[i];
++
++		debug_print(LOG_LVL_DEBUG, "  %d: ptr %p len %d\n",
++			i, sg_virt(sg), sg->length);
++
++#if (DUMP_URB_SZ > 0)
++		if (usbback_debug_lvl() >= LOG_LVL_DUMP)
++			dump(sg_virt(sg), sg->length);
++#endif
++	}
++}
++
++static int copy_in_iso_descriptors(pending_req_t *pending_req)
++{
++	struct usb_iso_packet_descriptor *desc;
++	usbif_iso_packet_info_t *info;
++	int i, length = 0;
++
++	if (!data_pages(pending_req))
++		return (length);
++
++	/* copy ISO packet descriptors */
++	info = (usbif_iso_packet_info_t *)vaddr(pending_req, 0);
++	desc = pending_req->urb->iso_frame_desc;
++
++	debug_print(LOG_LVL_DEBUG, "iso descs: %d info %p desc %p\n",
++		pending_req->nr_packets, info, desc);
++
++	for (i=0; i<pending_req->nr_packets; i++) {
++		int end = desc[i].offset + desc[i].actual_length;
++
++		if (pending_req->direction_in) {
++		 	info[i].length = desc[i].actual_length;
++			info[i].status = get_usb_status(desc[i].status);
++		}
++		debug_print(LOG_LVL_DEBUG,
++			"  %d: iso desc: off %d len %d status %d\n",
++			i, desc[i].offset, desc[i].length, desc[i].status);
++
++		if (end > length)
++			length = end;
++	}
++
++	return (length);
++}
++
++static void copy_in_iso(pending_req_t *pending_req, int remaining)
++{
++	uint8_t *dst, *src;
++	int i, len, nr_pages;
++
++	nr_pages = data_pages(pending_req);
++
++	if (data_pages(pending_req) < 2)
++		return;
++
++	/* copy first seg */
++	dst = (uint8_t *)vaddr(pending_req, 1) + pending_req->offset;
++	src = pending_req->urb->transfer_buffer;
++
++	len = copy_first_chunk(dst, src, pending_req->offset, remaining);
++
++	src       += len;
++	remaining -= len;
++
++	/* copy remaining segs */
++	for (i = 2; i < nr_pages; i++) {
++		dst = (uint8_t *)vaddr(pending_req, i);
++
++		len = copy_chunk(dst, src, remaining);
++
++		src       += len;
++		remaining -= len;
++	}
++
++#if (DUMP_URB_SZ > 0)
++	if (usbback_debug_lvl() >= LOG_LVL_DUMP)
++		dump_iso_urb(pending_req->urb);
++#endif
++}
++
++void copy_in(pending_req_t *pending_req)
++{
++	struct urb *urb = pending_req->urb;
++
++	if (pending_req->type == USBIF_T_ISOC) {
++		int remaining = copy_in_iso_descriptors(pending_req);
++
++		if (urb->sg)
++			cleanup_sgs(pending_req);
++		else if (pending_req->direction_in)
++			copy_in_iso(pending_req, remaining);
++	} else {
++		if (urb->sg)
++			cleanup_sgs(pending_req);
++		else if (pending_req->direction_in)
++			copy_in_req(pending_req);
++	}
++}
++
+--- /dev/null
++++ b/drivers/usb/xen-usbback/common.h
+@@ -0,0 +1,362 @@
++/*
++ * Copyright (c) Citrix Systems Inc.
++ *
++ * This program is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU General Public License version 2
++ * as published by the Free Software Foundation; or, when distributed
++ * separately from the Linux kernel or incorporated into other
++ * software packages, subject to the following license:
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining a copy
++ * of this source file (the "Software"), to deal in the Software without
++ * restriction, including without limitation the rights to use, copy, modify,
++ * merge, publish, distribute, sublicense, and/or sell copies of the Software,
++ * and to permit persons to whom the Software is furnished to do so, subject to
++ * the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included in
++ * all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
++ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
++ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
++ * IN THE SOFTWARE.
++ */
++
++#ifndef __USBIF__BACKEND__COMMON_H__
++#define __USBIF__BACKEND__COMMON_H__
++
++#include <linux/version.h>
++#include <linux/module.h>
++#include <linux/interrupt.h>
++#include <linux/slab.h>
++#include <linux/usb.h>
++#include <linux/vmalloc.h>
++#include <linux/wait.h>
++#include <asm/io.h>
++#include <asm/setup.h>
++#include <asm/pgalloc.h>
++#include <asm/hypervisor.h>
++#include <xen/vusb.h>
++#include <xen/grant_table.h>
++#include <xen/xenbus.h>
++#include <xen/evtchn.h>
++
++
++#define DPRINTK(_f, _a...)			\
++	pr_debug("(file=%s, line=%d) " _f,	\
++		 __FILE__ , __LINE__ , ## _a )
++
++#undef VUSB_MANAGE_INTERFACES
++#define USBBK_TIMEOUT (15 * HZ)
++#define USBBCK_NRPACKS 1024
++#define DUMP_URB_SZ 32
++#undef DEBUG_CHECKS
++#define USBBCK_VERSION 3
++#define USBBCK_MAX_URB_SZ (10 * 1024 * 1024)
++
++static inline int usbif_request_type(usbif_request_t *req)
++{
++	return (req->type);
++}
++
++static inline int usbif_request_dir_in(usbif_request_t *req)
++{
++	return ((req->endpoint & USB_ENDPOINT_DIR_MASK) == USB_DIR_IN);
++}
++
++static inline int usbif_request_endpoint_num(usbif_request_t *req)
++{
++	return (req->endpoint & USB_ENDPOINT_NUMBER_MASK);
++}
++
++static inline int usbif_request_offset(usbif_request_t *req)
++{
++	return (req->offset);
++}
++
++static inline int usbif_request_shortok(usbif_request_t *req)
++{
++	return (req->flags & USBIF_F_SHORTOK);
++}
++
++static inline int usbif_request_reset(usbif_request_t *req)
++{
++	return ((req->flags & USBIF_F_RESET) || (req->type == USBIF_T_RESET));
++}
++
++static inline int usbif_request_cycle_port(usbif_request_t *req)
++{
++	return (req->flags & USBIF_F_CYCLE_PORT);
++}
++
++static inline int usbif_request_abort_pipe(usbif_request_t *req)
++{
++	return (req->type == USBIF_T_ABORT_PIPE);
++}
++
++static inline int usbif_request_get_frame(usbif_request_t *req)
++{
++	return (req->type == USBIF_T_GET_FRAME);
++}
++
++static inline int usbif_request_get_speed(usbif_request_t *req)
++{
++	return (req->type == USBIF_T_GET_SPEED);
++}
++
++static inline int usbif_request_cancel(usbif_request_t *req)
++{
++	return (req->type == USBIF_T_CANCEL);
++}
++
++static inline int usbif_request_type_valid(usbif_request_t *req)
++{
++	return (req->type <= USBIF_T_MAX);
++}
++
++static inline int usbif_request_asap(usbif_request_t *req)
++{
++	return (req->flags & USBIF_F_ASAP);
++}
++
++static inline int usbif_request_indirect(usbif_request_t *req)
++{
++	return (req->flags & USBIF_F_INDIRECT);
++}
++
++static inline int usbif_request_timeout(usbif_request_t *req)
++{
++	return ((usbif_request_type(req) == USBIF_T_CNTRL) ||
++		!usbif_request_dir_in(req));
++}
++
++struct usbif_st;
++
++struct vusb {
++	/* what the domain refers to this vusb as */
++	usbif_vdev_t           handle;
++	unsigned               bus;
++	unsigned               device;
++	struct usb_device      *usbdev;
++	struct usb_anchor      anchor;
++	int                    initted;
++	int                    active;
++	int                    canceling_requests;
++	/* maximum sgs supported by HCD this device is attached to */
++	unsigned               max_sgs;
++	int                    hcd_speed;
++	/* device is allowed to suspend */
++	int                    autosuspend : 1;
++	/* copy unaligned transfers? */
++	int                    copy_unaligned : 1;
++	struct kref            kref;
++};
++#define KREF_TO_VUSB(d) container_of(d, struct vusb, kref)
++
++struct backend_info;
++
++typedef struct usbif_stats_st {
++	int st_oo_req;
++	int st_in_req;
++	int st_out_req;
++
++	int st_error;
++	int st_reset;
++
++	int st_in_bandwidth;
++	int st_out_bandwidth;
++
++	int st_cntrl_req;
++	int st_isoc_req;
++	int st_bulk_req;
++	int st_int_req;
++	int st_ind_req;
++} usbif_stats_t;
++
++typedef struct usbif_st {
++	/* Unique identifier for this interface. */
++	domid_t           domid;
++	unsigned int      handle;
++	/* Physical parameters of the comms window. */
++	unsigned int      irq;
++	/* Comms information. */
++	enum usbif_protocol usb_protocol;
++	usbif_back_rings_t usb_rings;
++	void *usb_ring_addr;
++	/* The VUSB attached to this interface. */
++	struct vusb        vusb;
++	/* Back pointer to the backend_info. */
++	struct backend_info *be;
++	/* Private fields. */
++	spinlock_t       usb_ring_lock;
++	atomic_t         refcnt;
++
++	wait_queue_head_t   wq;
++	struct task_struct  *xenusbd;
++	unsigned int        waiting_reqs;
++
++        /* statistics */
++	unsigned long       st_print;
++	usbif_stats_t       stats;
++
++	wait_queue_head_t waiting_to_free;
++} usbif_t;
++
++static inline struct usbif_st *usbif_from_vusb(struct vusb *vusb)
++{
++	return container_of(vusb, struct usbif_st, vusb);
++}
++
++struct backend_info
++{
++	struct xenbus_device *dev;
++	usbif_t *usbif;
++
++	struct xenbus_watch backend_watch;
++	struct xenbus_watch autosuspend_watch;
++	unsigned bus;
++	unsigned device;
++};
++
++typedef struct {
++	struct list_head       free_list;
++	struct page            *page;
++	grant_handle_t         grant_handle;
++} pending_segment_t;
++
++/*
++ * Each outstanding request that we've passed to the lower device layers has a
++ * 'pending_req' allocated to it. When the associated URB completes, the specified domain has a
++ * response queued for it, with the saved 'id' passed back.
++ */
++typedef struct {
++	usbif_t                  *usbif;
++	u64                      id;
++	int                      type;
++	int                      direction_in;
++	uint16_t                 offset;
++	int                      nr_pages;
++	int                      nr_packets;
++	struct list_head         free_list;
++	struct list_head         to_free_list;
++	struct urb               *urb;
++#ifdef USBBK_TIMEOUT
++	struct timer_list        timer;
++#endif
++	pending_segment_t        *pending_segment[USBIF_MAX_SEGMENTS_PER_REQUEST];
++	int                      pending_segments;
++#ifdef INDIRECT_SEGMENTS
++	pending_segment_t        **pending_indirect_segment;
++	int                      pending_indirect_segments;
++	usbif_indirect_request_t *indirect_req[USBIF_MAX_SEGMENTS_PER_REQUEST];
++#endif
++} pending_req_t;
++
++static inline int is_indirect(pending_req_t *req)
++{
++	return (req->pending_indirect_segments > 0);
++}
++
++static inline unsigned long vaddr_base(pending_req_t *req, int seg)
++{
++        unsigned long pfn = page_to_pfn(req->pending_segment[seg]->page);
++        return (unsigned long)pfn_to_kaddr(pfn);
++}
++
++static inline unsigned long vaddr(pending_req_t *req, int seg)
++{
++#ifdef INDIRECT_SEGMENTS
++	struct page *page = is_indirect(req) ?
++		req->pending_indirect_segment[seg]->page :
++		req->pending_segment[seg]->page;
++        unsigned long pfn = page_to_pfn(page);
++        return (unsigned long)pfn_to_kaddr(pfn);
++#else
++	return vaddr_base(req, seg);
++#endif
++}
++
++static inline int data_pages(pending_req_t *req)
++{
++	return (is_indirect(req) ?
++                req->pending_indirect_segments :
++                req->nr_pages);
++}
++
++
++usbif_t *usbif_alloc(domid_t domid);
++void usbif_kill_xenusbd(usbif_t *usbif);
++void usbif_disconnect(usbif_t *usbif, struct xenbus_device *dev);
++void usbif_free(usbif_t *usbif);
++int usbif_map(usbif_t *usbif, grant_ref_t shpage_ref, unsigned int evtchn);
++
++int get_usb_status(int status);
++
++#define usbif_get(_b) (atomic_inc(&(_b)->refcnt))
++#define usbif_put(_b)					\
++	do {						\
++		if (atomic_dec_and_test(&(_b)->refcnt))	\
++			wake_up(&(_b)->waiting_to_free);\
++	} while (0)
++
++static inline int vusb_connected(struct vusb *vusb)
++{
++	return (vusb->usbdev != NULL);
++}
++int vusb_init(void);
++int vusb_create(usbif_t *usbif, usbif_vdev_t vdevice, unsigned bus,
++	       unsigned device);
++void vusb_free(struct vusb *vusb);
++int vusb_setup_urb(struct vusb *vusb, usbif_request_t *req, struct urb *urb);
++static inline int vusb_canceling_requests(struct vusb *vusb)
++{
++	return (vusb->canceling_requests == 1);
++}
++int vusb_reset_device(struct vusb *vusb);
++void vusb_flush(struct vusb *vusb);
++int vusb_flush_endpoint(struct vusb *vusb, usbif_request_t *req);
++int vusb_get_speed(struct vusb *vusb);
++void vusb_free_coherent(struct vusb *vusb, struct urb *urb);
++void *vusb_alloc_coherent(struct vusb *vusb, size_t size, dma_addr_t *dma);
++void vusb_cycle_port(struct vusb *vusb);
++
++/* vusb power management methods */
++void vusb_pm_autosuspend_control(struct vusb *vusb, int enable);
++
++void usbif_interface_init(void);
++
++int usbif_xenbus_init(void);
++
++irqreturn_t usbif_be_int(int irq, void *dev_id);
++int usbif_schedule(void *arg);
++
++int usbback_barrier(struct xenbus_transaction xbt,
++		    struct backend_info *be, int state);
++int usbback_suspend(usbif_t *usbif, int suspended);
++
++unsigned int usbback_debug_lvl(void);
++
++#define LOG_LVL_ERROR  0
++#define LOG_LVL_INFO   1
++#define LOG_LVL_DEBUG  2
++#define LOG_LVL_DUMP   3
++
++#define debug_print(l, _f, ...) \
++	do { if (usbback_debug_lvl() >= (l)) printk((_f), ##__VA_ARGS__); } while(0)
++
++static inline unsigned int buffer_pages(unsigned int length)
++{
++	return ((length + PAGE_SIZE - 1) >> PAGE_SHIFT);
++}
++
++/* buffer handling routines */
++int copy_out(pending_req_t *pending_req);
++void copy_in(pending_req_t *pending_req);
++
++void dump(uint8_t *buffer, int len);
++
++#endif /* __USBIF__BACKEND__COMMON_H__ */
+--- /dev/null
++++ b/drivers/usb/xen-usbback/interface.c
+@@ -0,0 +1,165 @@
++/******************************************************************************
++ *
++ * usb device interface management.
++ *
++ * Copyright (c) 2004, Keir Fraser
++ * Copyright (c) 2008-2012, Virtual Computer Inc.
++ *
++ * This program is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU General Public License version 2
++ * as published by the Free Software Foundation; or, when distributed
++ * separately from the Linux kernel or incorporated into other
++ * software packages, subject to the following license:
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining a copy
++ * of this source file (the "Software"), to deal in the Software without
++ * restriction, including without limitation the rights to use, copy, modify,
++ * merge, publish, distribute, sublicense, and/or sell copies of the Software,
++ * and to permit persons to whom the Software is furnished to do so, subject to
++ * the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included in
++ * all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
++ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
++ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
++ * IN THE SOFTWARE.
++ */
++
++#include <linux/kthread.h>
++#include <xen/interface/xen.h>
++#include <xen/evtchn.h>
++#include <xen/events.h>
++#include <asm/xen/hypercall.h>
++
++#include "common.h"
++
++static struct kmem_cache *usbif_cachep;
++
++usbif_t *usbif_alloc(domid_t domid)
++{
++	usbif_t *usbif;
++
++	usbif = kmem_cache_alloc(usbif_cachep, GFP_KERNEL);
++	if (!usbif)
++		return ERR_PTR(-ENOMEM);
++
++	memset(usbif, 0, sizeof(*usbif));
++	usbif->domid = domid;
++	spin_lock_init(&usbif->usb_ring_lock);
++	atomic_set(&usbif->refcnt, 1);
++	init_waitqueue_head(&usbif->wq);
++	usbif->st_print = jiffies;
++	init_waitqueue_head(&usbif->waiting_to_free);
++
++	return usbif;
++}
++
++int usbif_map(usbif_t *usbif, grant_ref_t shpage_ref, unsigned int evtchn)
++{
++	int err;
++
++	/* Already connected through? */
++	if (usbif->irq)
++		return 0;
++
++	debug_print(LOG_LVL_INFO, "Map shared ring, connect event channel\n");
++
++	/* Call the xenbus function to map the shared page. It handles the case
++	 * where alloc_vm_area is done in a process context that is not init
++	 * but only the init_mm tables are updated. Normally a fault would
++	 * correct this in other processes but the supsequent hypercall blocks
++	 * that fault handling. Therefore in the hypercall it sees the PTE's
++	 * not populated. The xenbus routine also tracks the vm area allocation
++	 * and the op.handle for cleanup.
++	 */
++	err = xenbus_map_ring_valloc(usbif->be->dev,
++			&shpage_ref, 1, &(usbif->usb_ring_addr));
++	if (err)
++		return err;
++
++	switch (usbif->usb_protocol) {
++	case USBIF_PROTOCOL_NATIVE:
++	{
++		struct usbif_sring *sring;
++		sring = (struct usbif_sring *)usbif->usb_ring_addr;
++		BACK_RING_INIT(&usbif->usb_rings.native, sring, PAGE_SIZE);
++		break;
++	}
++	case USBIF_PROTOCOL_X86_32:
++	{
++		struct usbif_x86_32_sring *sring_x86_32;
++		sring_x86_32 = (struct usbif_x86_32_sring *)usbif->usb_ring_addr;
++		BACK_RING_INIT(&usbif->usb_rings.x86_32, sring_x86_32, PAGE_SIZE);
++		break;
++	}
++	case USBIF_PROTOCOL_X86_64:
++	{
++		struct usbif_x86_64_sring *sring_x86_64;
++		sring_x86_64 = (struct usbif_x86_64_sring *)usbif->usb_ring_addr;
++		BACK_RING_INIT(&usbif->usb_rings.x86_64, sring_x86_64, PAGE_SIZE);
++		break;
++	}
++	default:
++		BUG();
++	}
++
++	err = bind_interdomain_evtchn_to_irqhandler_lateeoi(
++		usbif->domid, evtchn, usbif_be_int, 0, "usbif-backend", usbif);
++	if (err < 0)
++	{
++		xenbus_unmap_ring_vfree(usbif->be->dev, usbif->usb_ring_addr);
++		usbif->usb_rings.common.sring = NULL;
++		usbif->usb_ring_addr = NULL;
++		return err;
++	}
++	usbif->irq = err;
++
++	return 0;
++}
++
++void usbif_kill_xenusbd(usbif_t *usbif)
++{
++	struct task_struct *xenusbd = xchg(&usbif->xenusbd, NULL);
++
++	if (xenusbd && !IS_ERR(xenusbd))
++		kthread_stop(xenusbd);
++}
++
++void usbif_disconnect(usbif_t *usbif, struct xenbus_device *dev)
++{
++	debug_print(LOG_LVL_INFO, "Disconnect shared ring and event channel\n");
++	usbif_kill_xenusbd(usbif);
++
++	atomic_dec(&usbif->refcnt);
++	wait_event(usbif->waiting_to_free, atomic_read(&usbif->refcnt) == 0);
++	atomic_inc(&usbif->refcnt);
++
++	if (usbif->irq) {
++		unbind_from_irqhandler(usbif->irq, usbif);
++		usbif->irq = 0;
++	}
++
++	if (usbif->usb_rings.common.sring) {
++		xenbus_unmap_ring_vfree(dev, usbif->usb_ring_addr);
++		usbif->usb_rings.common.sring = NULL;
++		usbif->usb_ring_addr = NULL;
++	}
++}
++
++void usbif_free(usbif_t *usbif)
++{
++	if (!atomic_dec_and_test(&usbif->refcnt))
++		BUG();
++	kmem_cache_free(usbif_cachep, usbif);
++}
++
++void __init usbif_interface_init(void)
++{
++	usbif_cachep = kmem_cache_create("usbif_cache", sizeof(usbif_t),
++					 0, 0, NULL);
++}
+--- /dev/null
++++ b/drivers/usb/xen-usbback/usbback.c
+@@ -0,0 +1,1297 @@
++/******************************************************************************
++ *
++ * Back-end of the driver for virtual block devices. This portion of the
++ * driver exports a 'unified' block-device interface that can be accessed
++ * by any operating system that implements a compatible front end. A
++ * reference front-end implementation can be found in:
++ *  arch/xen/drivers/blkif/frontend
++ *
++ * Back-end of the driver for PV USB.
++ *
++ * Originally based on blkback:
++ * Copyright (c) 2003-2004, Keir Fraser & Steve Hand
++ * Copyright (c) 2005, Christopher Clark
++ *
++ * PV usbback:
++ * Copyright (c) Citrix Systems Inc.
++ *
++ * This program is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU General Public License version 2
++ * as published by the Free Software Foundation; or, when distributed
++ * separately from the Linux kernel or incorporated into other
++ * software packages, subject to the following license:
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining a copy
++ * of this source file (the "Software"), to deal in the Software without
++ * restriction, including without limitation the rights to use, copy, modify,
++ * merge, publish, distribute, sublicense, and/or sell copies of the Software,
++ * and to permit persons to whom the Software is furnished to do so, subject to
++ * the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included in
++ * all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
++ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
++ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
++ * IN THE SOFTWARE.
++ */
++
++/* derived from xen/blkback/blkback.c */
++
++#include <linux/spinlock.h>
++#include <linux/kthread.h>
++#include <linux/freezer.h>
++#include <linux/list.h>
++#include <linux/stacktrace.h>
++#include <linux/scatterlist.h>
++#include <xen/events.h>
++#include <asm/hypervisor.h>
++#include <asm/xen/hypercall.h>
++#include <asm/xen/page.h>
++
++#include "common.h"
++
++static int usbif_reqs = 128;
++module_param_named(reqs, usbif_reqs, int, 0);
++MODULE_PARM_DESC(reqs, "Number of usbback requests to allocate");
++
++/* Run-time switchable: /sys/module/usbback/parameters/ */
++static unsigned int log_stats = 0;
++static unsigned int debug_lvl = 0;
++module_param(log_stats, int, 0644);
++module_param(debug_lvl, int, 0644);
++
++unsigned int usbback_debug_lvl(void)
++{
++	return (debug_lvl);
++}
++static pending_req_t *pending_reqs;
++static struct list_head pending_free;
++static DEFINE_SPINLOCK(pending_free_lock);
++static DECLARE_WAIT_QUEUE_HEAD(pending_free_wq);
++
++#define USBBACK_INVALID_HANDLE (~0)
++
++static struct page **pending_pages;
++static pending_segment_t *pending_segments;
++static struct list_head pending_segments_free;
++static int pending_segments_free_cnt;
++
++static DEFINE_SPINLOCK(pending_to_free_lock);
++static struct list_head pending_to_free;
++static void async_free_reqs(unsigned long);
++static DECLARE_TASKLET(async_free_reqs_task, async_free_reqs, 0);
++
++static int do_usb_io_op(usbif_t *usbif, unsigned int *eoi_flags);
++static void dispatch_usb_io(usbif_t *usbif,
++				 usbif_request_t *req,
++				 pending_req_t *pending_req);
++static void make_response(usbif_t *usbif, u64 id, int actual_length,
++	int startframe, int status, int error_count);
++
++/******************************************************************
++ * misc small helpers
++ */
++static int populate_req(pending_req_t *req)
++{
++	unsigned long flags;
++	int index;
++
++	req->pending_segments = 0;
++#ifdef INDIRECT_SEGMENTS
++	req->pending_indirect_segments = 0;
++#endif
++
++	spin_lock_irqsave(&pending_free_lock, flags);
++	if (req->nr_pages > pending_segments_free_cnt) {
++		spin_unlock_irqrestore(&pending_free_lock, flags);
++		debug_print(LOG_LVL_ERROR,
++			"%s not enough segs (%d) need (%d)\n",
++			__FUNCTION__, pending_segments_free_cnt,
++			req->nr_pages);
++		return -1;
++	}
++
++	for (index=0; index<req->nr_pages; index++) {
++		pending_segment_t *segment =
++			list_entry(pending_segments_free.next,
++				pending_segment_t, free_list);
++		BUG_ON(!segment);
++		list_del(&segment->free_list);
++		pending_segments_free_cnt--;
++
++#ifdef DEBUG_CHECKS
++		debug_print(LOG_LVL_DEBUG,
++			"%s %p seg %d (%d) page %p\n",
++			__FUNCTION__, req, index,
++			pending_segments_free_cnt, segment->page);
++#endif
++		req->pending_segment[index] = segment;
++	}
++	req->pending_segments = req->nr_pages;
++	spin_unlock_irqrestore(&pending_free_lock, flags);
++
++	return 0;
++}
++
++#ifdef INDIRECT_SEGMENTS
++static int populate_indirect(pending_req_t *req, int segs)
++{
++	unsigned long flags;
++	int index;
++
++	spin_lock_irqsave(&pending_free_lock, flags);
++        if (segs > pending_segments_free_cnt) {
++                spin_unlock_irqrestore(&pending_free_lock, flags);
++		debug_print(LOG_LVL_ERROR,
++			"%s not enough segs (%d) need (%d)\n",
++			__FUNCTION__, pending_segments_free_cnt,
++			req->nr_pages);
++                return -1;
++        }
++
++        for (index=0; index<segs; index++) {
++                pending_segment_t *segment =
++                        list_entry(pending_segments_free.next, pending_segment_t, free_list);
++		BUG_ON(!segment);
++                list_del(&segment->free_list);
++                pending_segments_free_cnt--;
++
++#ifdef DEBUG_CHECKS
++                debug_print(LOG_LVL_DEBUG,
++                        "%s req %p seg %d (%d) page %p\n",
++                        __FUNCTION__, req, index, pending_segments_free_cnt,
++                        segment->page);
++#endif
++                req->pending_indirect_segment[index] = segment;
++        }
++
++	req->pending_indirect_segments = segs;
++
++        spin_unlock_irqrestore(&pending_free_lock, flags);
++
++        return 0;
++}
++#endif
++
++static pending_req_t* alloc_req(void)
++{
++	pending_req_t *req = NULL;
++	unsigned long flags;
++
++	spin_lock_irqsave(&pending_free_lock, flags);
++	if (!list_empty(&pending_free)) {
++		req = list_entry(pending_free.next, pending_req_t, free_list);
++		list_del(&req->free_list);
++	}
++	spin_unlock_irqrestore(&pending_free_lock, flags);
++
++	debug_print(LOG_LVL_DEBUG, "%s req %p\n", __FUNCTION__, req);
++
++	return req;
++}
++
++#ifdef INDIRECT_SEGMENTS
++static void free_indirect_segments(pending_req_t *req)
++{
++        int index;
++
++	assert_spin_locked(&pending_free_lock);
++
++	for (index=0; index<req->pending_indirect_segments; index++) {
++                pending_segment_t *segment = req->pending_indirect_segment[index];
++
++		BUG_ON(!segment);
++		req->pending_indirect_segment[index] = NULL;
++                list_add(&segment->free_list, &pending_segments_free);
++                pending_segments_free_cnt++;
++
++#ifdef DEBUG_CHECKS
++                debug_print(LOG_LVL_DEBUG, "%s req %p seg %d (%d) page %p\n",
++                            __FUNCTION__, req, index, pending_segments_free_cnt,
++                            segment->page);
++#endif
++        }
++
++	kfree(req->pending_indirect_segment);
++	req->pending_indirect_segment = NULL;
++	req->pending_indirect_segments = 0;
++}
++#endif
++
++static void free_segments(pending_req_t *req)
++{
++        int index;
++
++	assert_spin_locked(&pending_free_lock);
++
++#ifdef INDIRECT_SEGMENTS
++	if (is_indirect(req))
++		free_indirect_segments(req);
++#endif
++
++        for (index=0; index<req->pending_segments; index++) {
++		pending_segment_t *segment = req->pending_segment[index];
++
++		BUG_ON(!segment);
++		req->pending_segment[index] = NULL;
++
++		list_add(&segment->free_list, &pending_segments_free);
++		pending_segments_free_cnt++;
++
++#ifdef DEBUG_CHECKS
++		debug_print(LOG_LVL_DEBUG, "%s req %p seg %d (%d) page %p\n",
++			__FUNCTION__, req, index, pending_segments_free_cnt,
++			segment->page);
++#endif
++        }
++	req->pending_segments = 0;
++	req->nr_pages = 0;
++}
++
++static void free_req(pending_req_t *req)
++{
++	unsigned long flags;
++	int was_empty;
++	struct urb *urb = req->urb;
++
++	req->urb = NULL;
++	if (urb) {
++		if (urb->transfer_buffer_length) {
++			struct vusb *vusb = &req->usbif->vusb;
++			vusb_free_coherent(vusb, urb);
++		}
++		if (urb->setup_packet) {
++			kfree(urb->setup_packet);
++			urb->setup_packet = NULL;
++		}
++		if (urb->sg) {
++			kfree(urb->sg);
++			urb->sg = NULL;
++		}
++	}
++	req->usbif = NULL;
++
++	debug_print(LOG_LVL_DEBUG, "%s %p\n", __FUNCTION__, req);
++
++	spin_lock_irqsave(&pending_free_lock, flags);
++	free_segments(req);
++	was_empty = list_empty(&pending_free);
++	list_add(&req->free_list, &pending_free);
++	spin_unlock_irqrestore(&pending_free_lock, flags);
++	if (was_empty)
++		wake_up(&pending_free_wq);
++}
++
++static void async_free_reqs(unsigned long data)
++{
++	struct list_head tmp;
++	pending_req_t *req;
++	struct urb *urb;
++	unsigned long flags;
++
++	INIT_LIST_HEAD(&tmp);
++
++	/* Copy to temp list */
++	spin_lock_irqsave(&pending_to_free_lock, flags);
++	list_splice_init(&pending_to_free, &tmp);
++	spin_unlock_irqrestore(&pending_to_free_lock, flags);
++
++	/* Run actual free outside of interrupt context */
++	while (!list_empty(&tmp)) {
++		req = list_entry(tmp.next, pending_req_t, to_free_list);
++		list_del(&req->to_free_list);
++
++		/* Stash the urb and call the real free_req routine */
++		urb = req->urb;
++		free_req(req);
++
++		/*
++		 * The urb had its ref count bumped to keep it alive before being queued for
++		 * cleanup in this bottom half routine. Dropping that ref here will likely
++		 * cleanup and release the urb.
++		 */
++		if (urb)
++			usb_put_urb(urb);
++	}
++}
++
++#ifdef INDIRECT_SEGMENTS
++static void fast_flush_area_indirect(pending_req_t *req)
++{
++        struct gnttab_unmap_grant_ref *unmap;
++        unsigned int i, invcount = 0;
++        grant_handle_t *handle;
++	pending_segment_t *indirect_seg;
++	struct page **pages;
++        int ret;
++
++	debug_print(LOG_LVL_DEBUG, "%s Flushing %d indirect segs!\n",
++                                __FUNCTION__, req->pending_indirect_segments);
++
++	unmap = kmalloc(sizeof(struct gnttab_unmap_grant_ref) *
++			req->pending_indirect_segments, GFP_ATOMIC);
++	if (!unmap) {
++		debug_print(LOG_LVL_ERROR, "%s kmalloc failed for %zu bytes!\n",
++				__FUNCTION__, sizeof(struct gnttab_unmap_grant_ref) *
++                        req->pending_indirect_segments);
++		return;
++	}
++
++	pages = kmalloc_array(req->pending_indirect_segments, sizeof(pages[0]), GFP_ATOMIC);
++	if (!pages) {
++		debug_print(LOG_LVL_ERROR, "%s: req %p malloc %d pages failed\n",
++					__FUNCTION__, req, req->pending_indirect_segments);
++		ret = -1;
++		goto free_unmap;
++	}
++
++	for (i = 0; i < req->pending_indirect_segments; i++) {
++		indirect_seg = req->pending_indirect_segment[i];
++		BUG_ON(!indirect_seg);
++
++		handle = &indirect_seg->grant_handle;
++		if (*handle == USBBACK_INVALID_HANDLE)
++			continue;
++		gnttab_set_unmap_op(&unmap[i], vaddr(req, i),
++					GNTMAP_host_map, *handle);
++		*handle = USBBACK_INVALID_HANDLE;
++		invcount++;
++		pages[i] = indirect_seg->page;
++	}
++	ret = gnttab_unmap_refs(unmap, NULL, pages, invcount);
++	BUG_ON(ret);
++
++	kfree(pages);
++free_unmap:
++	kfree(unmap);
++}
++#endif
++
++static void fast_flush_area(pending_req_t *req)
++{
++	struct gnttab_unmap_grant_ref unmap[USBIF_MAX_SEGMENTS_PER_REQUEST];
++	unsigned int i, invcount = 0;
++	grant_handle_t *handle;
++	struct page **pages;
++	int ret;
++
++#ifdef INDIRECT_SEGMENTS
++	if (is_indirect(req))
++		fast_flush_area_indirect(req);
++#endif
++
++	pages = kmalloc_array(req->nr_pages, sizeof(pages[0]), GFP_ATOMIC);
++	if (!pages) {
++		debug_print(LOG_LVL_ERROR, "%s: req %p malloc %d pages failed\n",
++					__FUNCTION__, req, req->nr_pages);
++		return;
++	}
++
++	debug_print(LOG_LVL_DEBUG, "%s Flushing %d segs!\n",
++                                __FUNCTION__, req->nr_pages);
++
++	for (i = 0; i < req->nr_pages; i++) {
++		handle = &req->pending_segment[i]->grant_handle;
++		if (*handle == USBBACK_INVALID_HANDLE)
++			continue;
++		gnttab_set_unmap_op(&unmap[i], vaddr_base(req, i), GNTMAP_host_map,
++				    *handle);
++		*handle = USBBACK_INVALID_HANDLE;
++		invcount++;
++		pages[i] = req->pending_segment[i]->page;
++	}
++
++	ret = gnttab_unmap_refs(unmap, NULL, pages, invcount);
++	BUG_ON(ret);
++
++	kfree(pages);
++}
++
++/*
++ * This is our special version of usb_kill_anchored_urbs. Our routine
++ * is a bit like that one except it is used to snipe a single URB.
++ */
++static void cancel_urb(struct usb_anchor *anchor, u64 cancel_id)
++{
++	struct urb *victim;
++	bool found = false;
++
++	spin_lock_irq(&anchor->lock);
++	list_for_each_entry(victim, &anchor->urb_list, anchor_list) {
++		if (((pending_req_t*)victim->context)->id == cancel_id) {
++			usb_get_urb(victim);
++			found = true;
++			break;
++		}
++	}
++	spin_unlock_irq(&anchor->lock);
++
++	if (!found)
++		return;
++
++	/*
++	 * Now there is an extra ref of the URB. After killing it, drop the ref
++	 * count. The docs say the URB cannot be deleted within the kill call.
++	 * The ref count will prevent the async cleanup part of the completion
++	 * routines from doing this.
++	 */
++	usb_kill_urb(victim);
++	usb_put_urb(victim);
++}
++
++/******************************************************************
++ * SCHEDULER FUNCTIONS
++ */
++
++static void print_stats(usbif_t *usbif)
++{
++	usbif_stats_t *stats = &usbif->stats;
++
++	printk("%s: oo %3d  |  in %4d (%6d)  |  out %4d (%6d) | cntrl %4d | "
++		"isoc %4d | bulk %4d | int %4d | ind %4d | err %4d | rst %4d\n",
++		current->comm, stats->st_oo_req, stats->st_in_req,
++		stats->st_in_bandwidth, stats->st_out_req,
++		stats->st_out_bandwidth, stats->st_cntrl_req,
++		stats->st_isoc_req, stats->st_bulk_req, stats->st_int_req,
++		stats->st_ind_req, stats->st_error, stats->st_reset);
++	usbif->st_print = jiffies + msecs_to_jiffies(10 * 1000);
++	memset(&usbif->stats, 0, sizeof(usbif_stats_t));
++}
++
++int usbif_schedule(void *arg)
++{
++	usbif_t *usbif = arg;
++	bool do_eoi;
++	unsigned int eoi_flags = XEN_EOI_FLAG_SPURIOUS;
++
++	usbif_get(usbif);
++
++	debug_print(LOG_LVL_INFO, "%s: started\n", current->comm);
++
++	while (!kthread_should_stop()) {
++		if (try_to_freeze())
++			continue;
++
++		wait_event_interruptible(
++			usbif->wq,
++			usbif->waiting_reqs || kthread_should_stop());
++		wait_event_interruptible(
++			pending_free_wq,
++			!list_empty(&pending_free) || kthread_should_stop());
++
++		if (!kthread_should_stop()) {
++			do_eoi = usbif->waiting_reqs;
++			usbif->waiting_reqs = 0;
++			smp_mb(); /* clear flag *before* checking for work */
++
++			if (do_usb_io_op(usbif, &eoi_flags))
++				usbif->waiting_reqs = 1;
++
++			if (do_eoi && !usbif->waiting_reqs) {
++				xen_irq_lateeoi(usbif->irq, eoi_flags);
++				eoi_flags |= XEN_EOI_FLAG_SPURIOUS;
++			}
++
++			if (log_stats && time_after(jiffies, usbif->st_print))
++				print_stats(usbif);
++		}
++	}
++
++	/* cancel any outstanding URBs */
++	vusb_flush(&usbif->vusb);
++
++	if (log_stats)
++		print_stats(usbif);
++
++	debug_print(LOG_LVL_INFO, "%s: exiting\n", current->comm);
++
++	usbif_put(usbif);
++
++	return 0;
++}
++
++static char *get_usb_statmsg(int status)
++{
++	static char unkmsg[28];
++
++	switch (status) {
++	case 0:
++		return "success";
++	case -ENOENT:
++		return "unlinked (sync)";
++	case -EINPROGRESS:
++		return "pending";
++	case -EPROTO:
++		return "bit stuffing error, timeout, or unknown USB error";
++	case -EILSEQ:
++		return "CRC mismatch, timeout, or unknown USB error";
++	case -ETIME:
++		return "timed out";
++	case -EPIPE:
++		return "endpoint stalled";
++	case -ECOMM:
++		return "IN buffer overrun";
++	case -ENOSR:
++		return "OUT buffer underrun";
++	case -EOVERFLOW:
++		return "too much data";
++	case -EREMOTEIO:
++		return "short packet detected";
++	case -ENODEV:
++	case -EHOSTUNREACH:
++		return "device removed";
++	case -EXDEV:
++		return "partial isochronous transfer";
++	case -EINVAL:
++		return "invalid argument";
++	case -ECONNRESET:
++		return "unlinked (async)";
++	case -ESHUTDOWN:
++		return "device shut down";
++	default:
++		snprintf(unkmsg, sizeof(unkmsg), "unknown status %d", status);
++		return unkmsg;
++	}
++}
++
++int get_usb_status(int status)
++{
++	switch (status) {
++	case 0:
++		/* success */
++		return USBIF_RSP_OKAY;
++	case -ENOENT:
++		/* unlinked (sync) */
++		return USBIF_RSP_USB_CANCELED;
++	case -EINPROGRESS:
++		/* pending */
++		return USBIF_RSP_USB_PENDING;
++	case -EPROTO:
++		/* bit stuffing error, timeout, or unknown USB error */
++		return USBIF_RSP_USB_PROTO;
++	case -EILSEQ:
++		/* CRC mismatch, timeout, or unknown USB error */
++		return USBIF_RSP_USB_CRC;
++	case -ETIME:
++		/* timed out */
++		return USBIF_RSP_USB_TIMEOUT;
++	case -EPIPE:
++		/* endpoint stall */
++		return USBIF_RSP_USB_STALLED;
++	case -ECOMM:
++		/* IN buffer overrun */
++		return USBIF_RSP_USB_INBUFF;
++	case -ENOSR:
++		/* OUT buffer underrun */
++		return USBIF_RSP_USB_OUTBUFF;
++	case -EOVERFLOW:
++		/* too much data */
++		return USBIF_RSP_USB_OVERFLOW;
++	case -EREMOTEIO:
++		/* short packet detected */
++		return USBIF_RSP_USB_SHORTPKT;
++	case -ENODEV:
++		/* device removed */
++		return USBIF_RSP_USB_DEVRMVD;
++	case -EXDEV:
++		/* partial isochronous transfer */
++		return USBIF_RSP_USB_PARTIAL;
++	case -EMSGSIZE:
++	case -EINVAL:
++		/* invalid argument */
++		return USBIF_RSP_USB_INVALID;
++	case -ECONNRESET:
++		/* unlinked (async) */
++		return USBIF_RSP_USB_RESET;
++	case -ESHUTDOWN:
++		/* device shut down */
++		return USBIF_RSP_USB_SHUTDOWN;
++	default:
++		return USBIF_RSP_USB_UNKNOWN;
++	}
++}
++
++/*
++ * Handle timeouts
++ */
++#ifdef USBBK_TIMEOUT
++static void timeout_usb_io_op(struct timer_list *t)
++{
++	pending_req_t *req = from_timer(req, t, timer);
++
++	debug_print(LOG_LVL_DEBUG, "%s: urb %p\n", __FUNCTION__, req->urb);
++
++	usb_unlink_urb(req->urb);
++}
++
++static void set_timeout(pending_req_t *pending_req)
++{
++	timer_setup(&pending_req->timer, timeout_usb_io_op, 0);
++	pending_req->timer.expires = jiffies + USBBK_TIMEOUT;
++	add_timer(&pending_req->timer);
++}
++
++static void cancel_timeout(pending_req_t *pending_req)
++{
++	if (timer_pending(&pending_req->timer))
++		del_timer(&pending_req->timer);
++}
++#endif
++
++/*
++ * COMPLETION CALLBACK
++ */
++static void end_usb_io_op(struct urb *urb)
++{
++	pending_req_t *pending_req = (pending_req_t *)urb->context;
++	usbif_t *usbif = pending_req->usbif;
++	int status = vusb_canceling_requests(&usbif->vusb) ?
++		-ECONNRESET : urb->status;
++	unsigned long flags;
++
++	debug_print(LOG_LVL_INFO, "end id %llu len %d status %d %s\n",
++		pending_req->id, urb->actual_length, status,
++		get_usb_statmsg(status));
++
++#ifdef USBBK_TIMEOUT
++	cancel_timeout(pending_req);
++#endif
++
++	/*
++	 * Don't need to unanchor, usb_hcd_giveback_urb has already done it
++	 * before calling this completion routine.
++	 */
++	if ((urb->status != -ENODEV) &&		/* device removed */
++		(urb->status != -ESHUTDOWN) &&	/* device disabled */
++		(urb->status != -EPROTO)) { /* timeout or unknown USB error */
++		copy_in(pending_req);
++
++		if (pending_req->direction_in)
++			usbif->stats.st_in_bandwidth +=
++				urb->transfer_buffer_length;
++		else
++			usbif->stats.st_out_bandwidth +=
++				urb->transfer_buffer_length;
++	}
++
++	fast_flush_area(pending_req);
++	make_response(usbif, pending_req->id, urb->actual_length,
++		urb->start_frame, get_usb_status(status),
++		(pending_req->type == USBIF_T_ISOC) ? urb->error_count : 0);
++	usbif_put(pending_req->usbif);
++
++	/*
++	 * Schedule async free as it causes an oops on 32bit kernel doing dma frees in
++	 * this completion handler with irqs disabled (the WARN_ON(irqs_disabled())
++	 * in dma_free_attrs).  We have to bump the ref count on the urb since it will
++	 * be released after this completion routine returns. See the code in
++	 * hcd.c:usb_hcd_giveback_urb() that call the completion callback.
++	 */
++	urb = usb_get_urb(urb);
++	spin_lock_irqsave(&pending_to_free_lock, flags);
++	list_add_tail(&pending_req->to_free_list, &pending_to_free);
++	spin_unlock_irqrestore(&pending_to_free_lock, flags);
++	tasklet_schedule(&async_free_reqs_task);
++}
++
++/******************************************************************************
++ * NOTIFICATION FROM GUEST OS.
++ */
++
++static void usbif_notify_work(usbif_t *usbif)
++{
++	usbif->waiting_reqs = 1;
++	wake_up(&usbif->wq);
++}
++
++irqreturn_t usbif_be_int(int irq, void *dev_id)
++{
++	usbif_notify_work(dev_id);
++	return IRQ_HANDLED;
++}
++
++
++/******************************************************************
++ * DOWNWARD CALLS -- These interface with the usb-device layer proper.
++ */
++
++static int do_usb_io_op(usbif_t *usbif, unsigned int *eoi_flags)
++{
++	usbif_back_rings_t *usb_rings = &usbif->usb_rings;
++	usbif_request_t req;
++	pending_req_t *pending_req;
++	RING_IDX rc, rp;
++	int more_to_do = 0;
++
++	rc = usb_rings->common.req_cons;
++	rp = usb_rings->common.sring->req_prod;
++	rmb(); /* Ensure we see queued requests up to 'rp'. */
++
++	while ((rc != rp) && !kthread_should_stop()) {
++
++		if (RING_REQUEST_CONS_OVERFLOW(&usb_rings->common, rc))
++			break;
++
++		/* We have a request, clean the spurious flag. */
++		*eoi_flags &= ~XEN_EOI_FLAG_SPURIOUS;
++
++		pending_req = alloc_req();
++		if (NULL == pending_req) {
++			usbif->stats.st_oo_req++;
++			more_to_do = 1;
++			break;
++		}
++
++		switch (usbif->usb_protocol) {
++		case USBIF_PROTOCOL_NATIVE:
++			memcpy(&req, RING_GET_REQUEST(&usb_rings->native, rc), sizeof(req));
++			break;
++		case USBIF_PROTOCOL_X86_32:
++			usbif_get_x86_32_req(&req, RING_GET_REQUEST(&usb_rings->x86_32, rc));
++			break;
++		case USBIF_PROTOCOL_X86_64:
++			usbif_get_x86_64_req(&req, RING_GET_REQUEST(&usb_rings->x86_64, rc));
++			break;
++		default:
++			BUG();
++		}
++		usb_rings->common.req_cons = ++rc; /* before make_response() */
++
++		if (!usbif_request_type_valid(&req)) {
++			debug_print(LOG_LVL_ERROR, "%s: type %d not valid\n",
++				__FUNCTION__, usbif_request_type(&req));
++			make_response(usbif, req.id, 0, 0, USBIF_RSP_ERROR, 0);
++			free_req(pending_req);
++		} else if (usbif_request_reset(&req)) {
++			int ret = vusb_reset_device(&usbif->vusb)
++					? USBIF_RSP_ERROR : USBIF_RSP_OKAY;
++
++			make_response(usbif, req.id, 0, 0, ret, 0);
++			free_req(pending_req);
++		} else if (usbif_request_cycle_port(&req)) {
++			vusb_cycle_port(&usbif->vusb);
++
++			make_response(usbif, req.id, 0, 0, USBIF_RSP_OKAY, 0);
++			free_req(pending_req);
++		} else if (usbif_request_abort_pipe(&req)) {
++			int ret = vusb_flush_endpoint(&usbif->vusb, &req)
++					? USBIF_RSP_ERROR : USBIF_RSP_OKAY;
++
++			make_response(usbif, req.id, 0, 0, ret, 0);
++			free_req(pending_req);
++		} else if (usbif_request_get_frame(&req)) {
++			int frame = usb_get_current_frame_number(usbif->vusb.usbdev);
++
++			if (frame >= 0)
++				make_response(usbif, req.id, 0, frame, 0, 0);
++			else
++				make_response(usbif, req.id, 0, 0, USBIF_RSP_ERROR, 0);
++			free_req(pending_req);
++		} else if (usbif_request_get_speed(&req)) {
++			make_response(usbif, req.id, 0,
++				vusb_get_speed(&usbif->vusb), 0, 0);
++			free_req(pending_req);
++		} else if (usbif_request_cancel(&req)) {
++			cancel_urb(&usbif->vusb.anchor, *((u64*)(&req.u.data[0])));
++
++			make_response(usbif, req.id, 0, 0, USBIF_RSP_OKAY, 0);
++			free_req(pending_req);
++		} else
++			dispatch_usb_io(usbif, &req, pending_req);
++	}
++
++	return more_to_do;
++}
++
++static struct urb * setup_urb(pending_req_t *pending_req, int length, int* err)
++{
++	struct vusb *vusb = &pending_req->usbif->vusb;
++	struct urb *urb = usb_alloc_urb(pending_req->nr_packets, GFP_KERNEL);
++	*err=0;
++
++	pending_req->urb = urb;
++	if (urb == NULL) {
++		*err=1;
++		return (NULL);
++	}
++
++	/* struct urb is pre zeroed, only init to non zero values */
++	urb->context	            = pending_req;
++	urb->complete	            = end_usb_io_op;
++	urb->number_of_packets      = pending_req->nr_packets;
++
++	if (length > 0) {
++		int pages = buffer_pages(pending_req->offset + length);
++
++		/*
++		 * 1. Linux currently only supports scatter gather for bulk
++		 *    transfers.
++		 * 2. Some controllers can't handle unaligned multipage
++		 *    DMA transfers.
++		 */
++		if ((vusb->max_sgs > 0) && (pages <= vusb->max_sgs) &&
++			((pages == 1) || (!vusb->copy_unaligned || !pending_req->offset)) &&
++			(pending_req->type == USBIF_T_BULK)) {
++			urb->sg = kzalloc(pages * sizeof(struct scatterlist),
++				GFP_KERNEL);
++			if (urb->sg == NULL) {
++				*err=2;
++				return (NULL);
++			}
++		} else {
++			urb->transfer_buffer = vusb_alloc_coherent(vusb,
++				length, &urb->transfer_dma);
++			if (urb->transfer_buffer == NULL) {
++				*err=3;
++				return (NULL);
++			}
++
++			urb->transfer_flags = URB_NO_TRANSFER_DMA_MAP;
++		}
++		urb->transfer_buffer_length = length;
++	}
++
++	if (unlikely(pending_req->type == USBIF_T_CNTRL)) {
++		urb->setup_packet =
++			kmalloc(sizeof(struct usb_ctrlrequest), GFP_KERNEL);
++		if (urb->setup_packet == NULL) {
++			*err=4;
++			return (NULL);
++		}
++	}
++
++	return (urb);
++}
++
++static int map_request(pending_req_t *pending_req, int offset, domid_t domid,
++			grant_ref_t *gref, unsigned int nseg, int readonly,
++			int indirect)
++{
++	struct gnttab_map_grant_ref *map;
++	struct page **pages;
++	int i, ret;
++
++	BUG_ON(nseg > USBIF_MAX_SEGMENTS_PER_IREQUEST);
++
++	map = kmalloc(sizeof(struct gnttab_map_grant_ref) * nseg, GFP_KERNEL);
++	if (!map) {
++		debug_print(LOG_LVL_ERROR, "%s: req %p offset %d nseg %d indirect %d\n",
++			__FUNCTION__, pending_req, offset, nseg, indirect);
++		return (-1);
++	}
++
++	pages = kmalloc_array(nseg, sizeof(pages[0]), GFP_KERNEL);
++	if (!pages) {
++		debug_print(LOG_LVL_ERROR, "%s: req %p offset %d nseg %d indirect %d\n",
++					__FUNCTION__, pending_req, offset, nseg, indirect);
++		ret = -1;
++		goto free_map;
++	}
++
++	for (i = 0; i < nseg; i++) {
++		uint32_t flags;
++#ifdef INDIRECT_SEGMENTS
++		int page_nr = i + offset;
++		unsigned long virtual_address = indirect ? vaddr(pending_req, page_nr)
++				: vaddr_base(pending_req, page_nr);
++#else
++		unsigned long virtual_address = vaddr_base(pending_req, i);
++#endif
++
++		if (readonly)
++			flags = (GNTMAP_host_map|GNTMAP_readonly);
++		else
++			flags = GNTMAP_host_map;
++		gnttab_set_map_op(&map[i], virtual_address, flags, gref[i], domid);
++
++		pages[i] = is_indirect(pending_req) ?
++			pending_req->pending_indirect_segment[page_nr]->page :
++			pending_req->pending_segment[page_nr]->page;
++#ifdef DEBUG_CHECKS
++		debug_print(LOG_LVL_DEBUG, "%s: %d of %d gref %x flags %x vaddr %lx\n",
++			__FUNCTION__, i, nseg, gref[i], flags, virtual_address);
++#endif
++	}
++
++	ret = gnttab_map_refs(map, NULL, pages, nseg);
++
++	for (i = 0; i < nseg; i++) {
++		int page_nr = i + offset;
++
++		if (unlikely(map[i].status != 0)) {
++			debug_print(LOG_LVL_ERROR,
++				"invalid buffer -- could not remap it\n");
++			map[i].handle = USBBACK_INVALID_HANDLE;
++			ret |= !ret;
++		}
++
++#ifdef INDIRECT_SEGMENTS
++		if (indirect)
++			pending_req->pending_indirect_segment[page_nr]->grant_handle = map[i].handle;
++		else
++#endif
++			pending_req->pending_segment[i]->grant_handle = map[i].handle;
++	}
++
++	kfree(pages);
++free_map:
++	kfree(map);
++
++	return (ret);
++}
++
++#ifdef INDIRECT_SEGMENTS
++static int setup_indirect(usbif_t *usbif, pending_req_t *pending_req, int segs, int in)
++{
++	unsigned int indirect_req, mapped_segs = 0;
++
++	debug_print(LOG_LVL_DEBUG, "%s req %p segs %d\n", __FUNCTION__, pending_req, segs);
++
++	usbif->stats.st_ind_req++;
++
++	pending_req->pending_indirect_segment = kmalloc(sizeof(pending_segment_t *) * segs, GFP_KERNEL);
++	if (!pending_req->pending_indirect_segment) {
++		debug_print(LOG_LVL_ERROR, "kmalloc indirect segments failed!\n");
++		return (-1);
++	}
++
++	if (populate_indirect(pending_req, segs)) {
++		kfree(pending_req->pending_indirect_segment);
++		pending_req->pending_indirect_segment = NULL;
++		debug_print(LOG_LVL_ERROR, "populate indirect failed!\n");
++                return (-1);
++	}
++
++	for (indirect_req=0; indirect_req<pending_req->nr_pages; indirect_req++) {
++		usbif_indirect_request_t *indirect =
++			(usbif_indirect_request_t *)vaddr_base(pending_req, indirect_req);
++
++		debug_print(LOG_LVL_DEBUG, "%s req %p indirect %d : %p segs %d\n",
++			__FUNCTION__, pending_req, indirect_req, indirect,
++			indirect->nr_segments);
++#if (DUMP_URB_SZ > 0)
++	        if (usbback_debug_lvl() >= LOG_LVL_DUMP)
++			dump((uint8_t *)indirect, PAGE_SIZE);
++#endif
++
++		pending_req->indirect_req[indirect_req] = indirect;
++
++		if ((indirect->nr_segments == 0) ||
++			(indirect->nr_segments > USBIF_MAX_SEGMENTS_PER_IREQUEST)) {
++			debug_print(LOG_LVL_ERROR, "req bad indirect segs!\n");
++			return (-1);
++		}
++
++		if (map_request(pending_req, mapped_segs,
++				usbif->domid, indirect->gref,
++				indirect->nr_segments, in, 1)) {
++			debug_print(LOG_LVL_ERROR, "indirect map failed!\n");
++			return (-1);
++		}
++
++		mapped_segs += indirect->nr_segments;
++	}
++
++	BUG_ON(mapped_segs != segs);
++
++	return (0);
++}
++#endif
++
++static void dispatch_usb_io(usbif_t *usbif, usbif_request_t *req,
++				 pending_req_t *pending_req)
++{
++	struct urb *urb;
++	int ret = -EINVAL;
++	int type = usbif_request_type(req);
++	int indirect = usbif_request_indirect(req);
++	int err;
++
++	debug_print(LOG_LVL_INFO, "start %d id %llu %s type %d end %d"
++			" len %d off %d segs %d flags %x pr %p\n",
++			usbif->vusb.handle, req->id,
++			usbif_request_dir_in(req) ? "IN" : "OUT",
++			type, usbif_request_endpoint_num(req), req->length,
++			usbif_request_offset(req), req->nr_segments,
++			(int)req->flags, pending_req);
++
++	pending_req->usbif        = usbif;
++	pending_req->id           = req->id;
++	pending_req->type         = req->type;
++	pending_req->direction_in = usbif_request_dir_in(req);
++	pending_req->offset       = usbif_request_offset(req);
++	pending_req->nr_pages     = req->nr_segments;
++	pending_req->nr_packets   = req->nr_packets;
++	pending_req->urb          = NULL;
++
++	if (unlikely(req->length > USBBCK_MAX_URB_SZ)) {
++		debug_print(LOG_LVL_ERROR,
++			"Bad req size %d (%d)\n",
++			req->length, USBBCK_MAX_URB_SZ);
++		goto fail_response;
++	}
++
++	if (unlikely(pending_req->nr_packets > USBBCK_NRPACKS)) {
++		debug_print(LOG_LVL_ERROR,
++			"Bad number of packets in request (%d : %d)\n",
++			req->nr_packets, USBBCK_NRPACKS);
++		goto fail_response;
++	}
++
++	if (populate_req(pending_req) < 0) {
++		debug_print(LOG_LVL_ERROR, "Failed populate req\n");
++		goto fail_response;
++        }
++
++	urb = setup_urb(pending_req, req->length, &err);
++	if (unlikely(urb == NULL)) {
++		if (printk_ratelimit())
++			debug_print(LOG_LVL_ERROR, "Failed urb alloc, reason = %d\n", err);
++		goto fail_response;
++	}
++
++	if (req->length > 0) {
++		/* Check that number of segments is sane. */
++		int pages = buffer_pages(pending_req->offset + req->length);
++
++		/* ISO requests have one addition page for the desciptors */
++		if (type == USBIF_T_ISOC)
++			pages++;
++		if (unlikely(req->nr_segments == 0) ||
++			unlikely(req->nr_segments
++				> USBIF_MAX_SEGMENTS_PER_REQUEST) ||
++			(unlikely(pages != req->nr_segments) && !indirect)) {
++			debug_print(LOG_LVL_ERROR,
++				"Bad number of segments in request (%d : %d)\n",
++				req->nr_segments, pages);
++			goto fail_response;
++		}
++
++		if ((err = map_request(pending_req, 0, usbif->domid, req->u.gref,
++				       req->nr_segments,
++				       !usbif_request_dir_in(req) || indirect,
++				       0))) {
++			debug_print(LOG_LVL_ERROR,
++				    "map_request failed, err=%d\n",err);
++			goto fail_flush;
++		}
++
++		if (indirect) {
++#ifdef INDIRECT_SEGMENTS
++			if ((err = setup_indirect(usbif, pending_req, pages,
++						  !usbif_request_dir_in(req))) < 0) {
++				debug_print(LOG_LVL_ERROR,
++					    "setup_indirect failed, err=%d\n",err);
++				goto fail_flush;
++			}
++#else
++			debug_print(LOG_LVL_ERROR,
++				    "indirect specified but not compiled in\n");
++			goto fail_flush;
++#endif
++		}
++
++		ret = copy_out(pending_req);
++		if (unlikely(ret < 0)) {
++			debug_print(LOG_LVL_ERROR,
++				"copy iso failed urb %p, ret %d\n", urb, ret);
++			goto fail_flush;
++		}
++	}
++
++	ret = vusb_setup_urb(&usbif->vusb, req, urb);
++	if (unlikely(ret < 0)) {
++		debug_print(LOG_LVL_ERROR,
++			"setup failed for urb %p, ret %d\n", urb, ret);
++		goto fail_flush;
++	} else if (unlikely(ret > 0)) {
++		debug_print(LOG_LVL_INFO,
++			"control success for urb %p\n", urb);
++		ret = 0;
++		goto early_success;
++	}
++
++	usbif_get(usbif);
++
++#ifdef USBBK_TIMEOUT
++	if (usbif_request_timeout(req)) {
++		debug_print(LOG_LVL_DEBUG,
++			"Timeout set for urb for %llu\n", req->id);
++		set_timeout(pending_req);
++	}
++#endif
++
++	usb_anchor_urb(urb, &usbif->vusb.anchor);
++
++	ret = usb_submit_urb(urb, GFP_KERNEL);
++	if (unlikely(ret < 0)) {
++		debug_print(LOG_LVL_ERROR,
++			"submit failed for urb %p, ret %d\n", urb, ret);
++		usb_unanchor_urb(urb);
++#ifdef USBBK_TIMEOUT
++		cancel_timeout(pending_req);
++#endif
++		usbif_put(usbif);
++		goto fail_flush;
++	}
++
++	/* release our urb reference from the alloc, the core now owns it */
++	usb_free_urb(urb);
++
++	debug_print(LOG_LVL_INFO, "%s: Submitted urb for %llu\n",
++			__FUNCTION__, req->id);
++
++	return;
++
++ early_success:
++ fail_flush:
++	fast_flush_area(pending_req);
++ fail_response:
++	make_response(usbif, req->id, 0, 0, get_usb_status(ret), 0);
++	urb = pending_req->urb;
++	free_req(pending_req);
++	usb_free_urb(urb);
++}
++
++
++
++/******************************************************************
++ * MISCELLANEOUS SETUP / TEARDOWN / DEBUGGING
++ */
++
++
++static void make_response(usbif_t *usbif, u64 id, int actual_length,
++	int data, int status, int error_count)
++{
++	usbif_response_t  resp;
++	unsigned long     flags;
++	usbif_back_rings_t *usb_rings = &usbif->usb_rings;
++	int more_to_do = 0;
++	int notify;
++
++	debug_print(LOG_LVL_INFO,
++		"%s: id %llu len %d data %d status %d\n",
++		__FUNCTION__, id, actual_length, data, status);
++
++	if (status)
++		usbif->stats.st_error++;
++
++	resp.id            = id;
++	resp.actual_length = actual_length;
++	resp.data          = data;
++	resp.status        = status;
++	resp.error_count   = error_count;   /* used for ISOCH only */
++
++	spin_lock_irqsave(&usbif->usb_ring_lock, flags);
++	/* Place on the response ring for the relevant domain. */
++	switch (usbif->usb_protocol) {
++	case USBIF_PROTOCOL_NATIVE:
++		memcpy(RING_GET_RESPONSE(&usb_rings->native, usb_rings->native.rsp_prod_pvt),
++		       &resp, sizeof(resp));
++		break;
++	case USBIF_PROTOCOL_X86_32:
++		memcpy(RING_GET_RESPONSE(&usb_rings->x86_32, usb_rings->x86_32.rsp_prod_pvt),
++		       &resp, sizeof(resp));
++		break;
++	case USBIF_PROTOCOL_X86_64:
++		memcpy(RING_GET_RESPONSE(&usb_rings->x86_64, usb_rings->x86_64.rsp_prod_pvt),
++		       &resp, sizeof(resp));
++		break;
++	default:
++		BUG();
++	}
++	usb_rings->common.rsp_prod_pvt++;
++	RING_PUSH_RESPONSES_AND_CHECK_NOTIFY(&usb_rings->common, notify);
++	if (usb_rings->common.rsp_prod_pvt == usb_rings->common.req_cons) {
++		/*
++		 * Tail check for pending requests. Allows frontend to avoid
++		 * notifications if requests are already in flight (lower
++		 * overheads and promotes batching).
++		 */
++		RING_FINAL_CHECK_FOR_REQUESTS(&usb_rings->common, more_to_do);
++
++	} else if (RING_HAS_UNCONSUMED_REQUESTS(&usb_rings->common)) {
++		more_to_do = 1;
++	}
++
++	spin_unlock_irqrestore(&usbif->usb_ring_lock, flags);
++
++	if (more_to_do)
++		usbif_notify_work(usbif);
++
++	/*
++	 * OXT-311 it is unlikely the Xen ring code is broken since it is
++	 * the backbone of PV drivers. This needs investigation and fixing.
++	 */
++	/* always notify, there seems to be a bug in the Xen ring code */
++	/*if (notify)*/
++		notify_remote_via_irq(usbif->irq);
++}
++
++static int __init usbif_init(void)
++{
++	int i, mmap_pages;
++
++	if (vusb_init())
++		return -EINVAL;
++
++	mmap_pages = usbif_reqs * USBIF_MAX_SEGMENTS_PER_REQUEST;
++
++	pending_reqs          = kzalloc(sizeof(pending_reqs[0]) *
++					usbif_reqs, GFP_KERNEL);
++	pending_pages         = vzalloc(sizeof(pending_pages[0]) * mmap_pages);
++
++	pending_segments      = kzalloc(sizeof(pending_segments[0]) *
++					mmap_pages, GFP_KERNEL);
++
++	if (!pending_reqs || !pending_pages || !pending_segments)
++		goto out_of_memory;
++
++	if (gnttab_alloc_pages(mmap_pages, pending_pages))
++		goto out_of_memory;
++
++	INIT_LIST_HEAD(&pending_segments_free);
++
++	for (i = 0; i < mmap_pages; i++) {
++		pending_segments[i].grant_handle = USBBACK_INVALID_HANDLE;
++		pending_segments[i].page = pending_pages[i];
++		list_add_tail(&pending_segments[i].free_list, &pending_segments_free);
++	}
++	pending_segments_free_cnt = mmap_pages;
++
++	usbif_interface_init();
++
++	INIT_LIST_HEAD(&pending_free);
++
++	for (i = 0; i < usbif_reqs; i++) {
++		timer_setup(&pending_reqs[i].timer, NULL, 0);
++		list_add_tail(&pending_reqs[i].free_list, &pending_free);
++	}
++
++	INIT_LIST_HEAD(&pending_to_free);
++
++	if (usbif_xenbus_init()) {
++		pr_warning("Could not register xenbus backend for usbback.\n");
++		BUG();
++	}
++
++	printk("USB backend driver intialized!\n");
++
++	return 0;
++
++ out_of_memory:
++	kfree(pending_reqs);
++	kfree(pending_segments);
++	vfree(pending_pages);
++	printk("%s: out of memory\n", __FUNCTION__);
++	return -ENOMEM;
++}
++
++module_init(usbif_init);
++
++MODULE_LICENSE("Dual BSD/GPL");
+--- /dev/null
++++ b/drivers/usb/xen-usbback/vusb.c
+@@ -0,0 +1,938 @@
++/******************************************************************************
++ * usbback/vusb.c
++ *
++ * Routines for managing virtual usb devices.
++ *
++ * Copyright (c) Citrix Systems Inc.
++ *
++ * This program is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU General Public License version 2
++ * as published by the Free Software Foundation; or, when distributed
++ * separately from the Linux kernel or incorporated into other
++ * software packages, subject to the following license:
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining a copy
++ * of this source file (the "Software"), to deal in the Software without
++ * restriction, including without limitation the rights to use, copy, modify,
++ * merge, publish, distribute, sublicense, and/or sell copies of the Software,
++ * and to permit persons to whom the Software is furnished to do so, subject to
++ * the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included in
++ * all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
++ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
++ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
++ * IN THE SOFTWARE.
++ */
++
++#include <linux/usb.h>
++#include <linux/dusb.h>
++
++#include "common.h"
++
++struct vusb_map
++{
++	int         bus;
++	int         device;
++	struct vusb *vusb;
++};
++
++#define VUSB_MAX_DEVICES 512
++static struct vusb_map vusb_map[VUSB_MAX_DEVICES];
++static spinlock_t vusb_map_lock;
++
++
++/* Add or update bus,dev to map to new vusb
++   There can be only one of each {bus,device} pair */
++static int
++vusb_map_device(struct vusb *vusb, int bus, int device)
++{
++	unsigned long flags;
++	int index;
++	int ret = -1;
++
++	spin_lock_irqsave(&vusb_map_lock, flags);
++	for (index=0; index<VUSB_MAX_DEVICES; index++) {
++		struct vusb_map *map = &vusb_map[index];
++
++		if ((map->vusb == NULL) || ((map->bus == bus) && (map->device == device)) ){
++			if (map->vusb)
++				debug_print(LOG_LVL_ERROR, "%s: removing dup\n",__FUNCTION__);
++			map->vusb   = vusb;
++			map->bus    = bus;
++			map->device = device;
++			ret = 0;
++			break;
++		}
++	}
++    index++;
++	/* flush any remaining dulpicate pairs */
++	while (index<VUSB_MAX_DEVICES) {
++		struct vusb_map *map = &vusb_map[index];
++		if ((map->bus == bus) && (map->device == device)) {
++			debug_print(LOG_LVL_ERROR, "%s: removing dup\n",__FUNCTION__);
++			map->vusb = NULL;
++			map->bus    = 0;
++			map->device = 0;
++		}
++		index++;
++	}
++
++	spin_unlock_irqrestore(&vusb_map_lock, flags);
++
++	return ret;
++}
++
++static int
++vusb_unmap_device(struct vusb *vusb)
++{
++	unsigned long flags;
++	int index;
++	int ret = -1;
++
++	spin_lock_irqsave(&vusb_map_lock, flags);
++	for (index=0; index<VUSB_MAX_DEVICES; index++) {
++		struct vusb_map *map = &vusb_map[index];
++
++		if (map->vusb == vusb) {
++			map->vusb   = NULL;
++			map->bus    = 0;
++			map->device = 0;
++			ret = 0;
++			break;
++		}
++	}
++	spin_unlock_irqrestore(&vusb_map_lock, flags);
++
++	return ret;
++}
++
++static struct vusb *
++vusb_find_device(int bus, int device)
++{
++	unsigned long flags;
++	int index;
++	struct vusb *vusb = NULL;
++
++	spin_lock_irqsave(&vusb_map_lock, flags);
++	for (index=0; index<VUSB_MAX_DEVICES; index++) {
++		struct vusb_map *map = &vusb_map[index];
++
++		if (map->vusb && (map->bus == bus) && (map->device == device)) {
++			vusb = map->vusb;
++			break;
++		}
++	}
++	spin_unlock_irqrestore(&vusb_map_lock, flags);
++
++	return vusb;
++}
++
++static void vusb_delete(struct kref *kref)
++{
++	struct vusb *vusb = KREF_TO_VUSB(kref);
++
++	debug_print(LOG_LVL_ERROR, "%s: vusb %p\n", __FUNCTION__, vusb);
++	vusb->active = 0;
++
++	vusb_flush(vusb);
++}
++
++static int vusb_probe(struct usb_interface *intf,
++			 const struct usb_device_id *id)
++{
++	struct usb_device *udev = interface_to_usbdev(intf);
++	int bus = udev->bus->busnum;
++	int port = udev->portnum;
++	int device = udev->devnum;
++	struct vusb *vusb = vusb_find_device(bus, device);
++
++	debug_print(LOG_LVL_ERROR, "%s: intf %p vusb %p for %d:%d (port %d)\n",
++		__FUNCTION__, intf, vusb, bus, device, port);
++
++	if (vusb) {
++		if (!vusb->active) {
++			/*
++			 * The driver released all of its interfacesi, is now
++			 * reprobing. reference counting needs to be restarted
++			 * and the device marked active.
++			 */
++			kref_init(&vusb->kref);
++			vusb->active = 1;
++		} else {
++			kref_get(&vusb->kref);
++		}
++		usb_set_intfdata(intf, vusb);
++		return 0;
++	}
++
++	return -ENODEV;
++}
++
++static void vusb_disconnect(struct usb_interface *intf)
++{
++	struct vusb *vusb = usb_get_intfdata(intf);
++
++	debug_print(LOG_LVL_ERROR, "%s: intf %p vusb %p\n",
++		__FUNCTION__, intf, vusb);
++
++	if (!vusb)
++		return;
++
++	/* Mark the interface for later rebinding */
++	intf->needs_binding = 1;
++
++	usb_set_intfdata(intf, NULL);
++	kref_put(&vusb->kref, vusb_delete);
++}
++
++static int vusb_suspend(struct usb_interface *intf, pm_message_t message)
++{
++	struct vusb *vusb = usb_get_intfdata(intf);
++
++	debug_print(LOG_LVL_ERROR, "%s: intf %p vusb %p\n",
++		__FUNCTION__, intf, vusb);
++
++	if (!vusb || !vusb->initted)
++		return -1;
++
++	usbback_suspend(usbif_from_vusb(vusb), 1);
++	vusb_flush(vusb);
++	return 0;
++}
++
++static int vusb_resume(struct usb_interface *intf)
++{
++	struct vusb *vusb = usb_get_intfdata(intf);
++
++	debug_print(LOG_LVL_ERROR, "%s: intf %p vusb %p\n",
++		__FUNCTION__, intf, vusb);
++
++	if (!vusb || !vusb->initted)
++		return -1;
++
++	usbback_suspend(usbif_from_vusb(vusb), 0);
++	return 0;
++}
++
++static int vusb_reset_resume(struct usb_interface *intf)
++{
++	struct vusb *vusb = usb_get_intfdata(intf);
++
++	debug_print(LOG_LVL_ERROR, "%s: intf %p vusb %p\n",
++		__FUNCTION__, intf, vusb);
++
++	return vusb_resume(intf);
++}
++
++static int vusb_pre_reset(struct usb_interface *intf)
++{
++	struct vusb *vusb = usb_get_intfdata(intf);
++
++	debug_print(LOG_LVL_ERROR, "%s: intf %p vusb %p\n",
++		__FUNCTION__, intf, vusb);
++
++	if (!vusb)
++		return -ENODEV;
++
++	vusb->canceling_requests = 1;
++	return 0;
++}
++
++static int vusb_post_reset(struct usb_interface *intf)
++{
++	struct vusb *vusb = usb_get_intfdata(intf);
++
++	debug_print(LOG_LVL_ERROR, "%s: intf %p vusb %p\n",
++		__FUNCTION__, intf, vusb);
++
++	if (!vusb)
++		return -ENODEV;
++
++	vusb->canceling_requests = 0;
++	return 0;
++}
++
++struct usb_driver vusb_driver = {
++	.name                 = "vusb",
++	.probe                = vusb_probe,
++	.disconnect           = vusb_disconnect,
++	.suspend              = vusb_suspend,
++	.resume               = vusb_resume,
++	.reset_resume         = vusb_reset_resume,
++	.pre_reset            = vusb_pre_reset,
++	.post_reset           = vusb_post_reset,
++	.supports_autosuspend = 1,
++	.soft_unbind          = 0,
++};
++
++static int
++vusb_claim_interface(struct vusb *vusb, struct usb_interface *intf)
++{
++	struct device *dev = &intf->dev;
++	int ret;
++
++	debug_print(LOG_LVL_DEBUG,
++		"%s: claim interface if %p, vusb %p\n", __FUNCTION__, intf, vusb);
++
++	if (dev->driver) {
++		struct usb_driver *driver = to_usb_driver(dev->driver);
++
++		/* Even if this driver already owns it, its probably with
++		 * the wrong vusb, so we still need to release it, and
++		 * claim it properly
++		 */
++
++		if (driver == &vusb_driver) {
++			struct vusb *old_vusb = usb_get_intfdata(intf);
++			debug_print(LOG_LVL_ERROR,
++				"%s: release ourselves with vusb %p "
++				"from interface if %p\n", __FUNCTION__,
++				old_vusb,intf);
++		} else {
++			debug_print(LOG_LVL_ERROR,
++				"%s: release old driver from interface if %p\n",
++				__FUNCTION__, intf);
++		}
++		usb_driver_release_interface(driver, intf);
++	}
++
++	ret = usb_driver_claim_interface(&vusb_driver, intf, vusb);
++	if (ret)
++		debug_print(LOG_LVL_ERROR,
++			"%s: claim_interface failed for if %p ret %d\n",
++			__FUNCTION__, intf, ret);
++	else
++		usb_set_intfdata(intf, vusb);
++
++	return (ret);
++}
++
++static void
++vusb_claim_config(struct vusb *vusb, struct usb_host_config *config)
++{
++	unsigned int ifs = config->desc.bNumInterfaces;
++	unsigned int ifnum;
++
++	for (ifnum = 0; ifnum < ifs; ifnum++) {
++		struct usb_interface *intf = config->interface[ifnum];
++
++		/*
++		 * If there is an interface and we end up with ownership,
++		 * count it.
++		 */
++		if (intf && (vusb_claim_interface(vusb, intf) == 0))
++			kref_get(&vusb->kref);
++	}
++}
++
++/* precondition: usb_lock_device should be called */
++
++static void
++vusb_claim_dev(struct vusb *vusb, struct usb_device *udev)
++{
++	unsigned int confs = udev->descriptor.bNumConfigurations;
++	unsigned int confnum;
++
++	debug_print(LOG_LVL_ERROR,
++		"%s: claim device %p (%d.%d (port %d)), vusb %p\n", __FUNCTION__,
++		udev, udev->bus->busnum, udev->devnum, udev->portnum, vusb);
++
++	for (confnum = 0; confnum < confs; confnum++) {
++		struct usb_host_config *config = &udev->config[confnum];
++
++		if (config)
++			vusb_claim_config(vusb, config);
++	}
++	return;
++}
++
++static void
++vusb_release_config(struct vusb *vusb, struct usb_host_config *config)
++{
++	unsigned int ifnum;
++
++	debug_print(LOG_LVL_DEBUG, "%s[%d]: vusb %p config %p\n",
++		__FUNCTION__, __LINE__, vusb, config);
++
++	for (ifnum = 0; ifnum < config->desc.bNumInterfaces; ifnum++) {
++		struct usb_interface *intf = config->interface[ifnum];
++		struct device *dev = &intf->dev;
++		struct usb_driver *driver = to_usb_driver(dev->driver);
++
++		/*
++		 * Only release the interface if we own it. Releasing it will
++		 * result in our disconnect handler being called.
++		 */
++		if (driver == &vusb_driver) {
++			struct vusb *old_vusb = usb_get_intfdata(intf);
++			if (old_vusb == vusb) {
++				debug_print(LOG_LVL_ERROR, "%s[%d]: vusb %p intf %p\n",
++				    __FUNCTION__, __LINE__, vusb, intf);
++				usb_driver_release_interface(&vusb_driver, intf);
++			} else {
++				debug_print(LOG_LVL_ERROR, "%s[%d]: not releasing vusb %p config %p\n",
++				__FUNCTION__, __LINE__, old_vusb, config);
++			}
++		}
++	}
++}
++
++static void vusb_release_dev(struct vusb *vusb, struct usb_device *udev)
++{
++	debug_print(LOG_LVL_DEBUG, "%s[%d]: vusb %p dev %p (%d.%d (port %d))\n",
++		__FUNCTION__, __LINE__, vusb, udev,
++		udev->bus->busnum, udev->devnum, udev->portnum);
++
++	if (udev->actconfig)
++		vusb_release_config(vusb, udev->actconfig);
++
++	return;
++}
++
++int vusb_init(void)
++{
++	spin_lock_init(&vusb_map_lock);
++
++	return usb_register(&vusb_driver);
++}
++
++void vusb_cleanup(void)
++{
++	usb_deregister(&vusb_driver);
++}
++
++int vusb_create(usbif_t *usbif, usbif_vdev_t handle, unsigned bus,
++	       unsigned device)
++{
++	struct vusb *vusb;
++	struct usb_device *usbdev;
++
++	vusb = &usbif->vusb;
++	vusb->handle             = handle;
++	vusb->bus                = bus;
++	vusb->device             = device;
++	vusb->active             = 1;
++
++	kref_init(&vusb->kref);
++
++	init_usb_anchor(&vusb->anchor);
++
++	usbdev = dusb_open(bus, device);
++	if (NULL == usbdev) {
++		printk("VUSB: failed to open %d.%d\n", bus, device);
++		return -1;
++	}
++
++	usb_lock_device(usbdev);
++	vusb_map_device(vusb, bus, device);
++
++	/* validate */
++	if ((device != usbdev->devnum) || (bus != usbdev->bus->busnum))
++		debug_print(LOG_LVL_ERROR, "Device mismatch %d.%d vs %d.%d\n",
++			bus, device, usbdev->devnum, usbdev->bus->busnum);
++
++	vusb_claim_dev(vusb, usbdev);
++	vusb->usbdev = usbdev;
++	vusb->max_sgs = usbdev->bus->sg_tablesize;
++	vusb->hcd_speed = dusb_dev_controller_speed(usbdev);
++	/* EHCI fails unaligned transfers with BABBLE (EOVERFLOW) */
++	vusb->copy_unaligned = (vusb->hcd_speed != USB_SPEED_SUPER);
++
++	/* don't allow the device to suspend until the frontend says so */
++	usb_disable_autosuspend(usbdev);
++
++	vusb->initted = 1;
++
++	usb_unlock_device(usbdev);
++	kref_put(&vusb->kref, vusb_delete);
++
++	debug_print(LOG_LVL_ERROR,
++		"Created vusb %p (%d) device %d.%d (dom=%u) max sgs %u\n",
++		vusb, vusb->kref.refcount.refs.counter, bus, device, usbif->domid,
++		vusb->max_sgs);
++	debug_print(LOG_LVL_ERROR,
++		"VUSB: device %s - %s - %s speed %s on %s\n",
++		usbdev->product, usbdev->manufacturer, usbdev->serial,
++		(usbdev->speed == USB_SPEED_SUPER) ? "super" :
++		(usbdev->speed == USB_SPEED_HIGH) ? "high" : "low",
++		(vusb->hcd_speed == USB_SPEED_SUPER) ? "super" :
++		(vusb->hcd_speed == USB_SPEED_HIGH) ? "high" : "low");
++	return 0;
++}
++
++void vusb_free(struct vusb *vusb)
++{
++	struct usb_device *usbdev = vusb->usbdev;
++
++	if (usbdev) {
++		usb_lock_device(usbdev);
++
++		debug_print(LOG_LVL_ERROR, "VUSB: close device %s %s %s\n",
++			usbdev->product, usbdev->manufacturer, usbdev->serial);
++
++		vusb->usbdev = NULL;
++		vusb_unmap_device(vusb);
++
++		/* flush any remaining requests */
++		vusb_flush(vusb);
++
++		/*
++		 * If we haven't received cleanup callbacks from the USB side
++		 * yet, do the USB cleanup.
++		 */
++		if (vusb->active)
++			vusb_release_dev(vusb, usbdev);
++
++		usb_unlock_device(usbdev);
++		dusb_close(usbdev);
++	}
++}
++
++static char * setup_type(int type)
++{
++	switch((type & USB_TYPE_MASK)) {
++		case USB_TYPE_STANDARD:
++			return "standard";
++		case USB_TYPE_CLASS:
++			return "class";
++		case USB_TYPE_VENDOR:
++			return "reserved";
++		case USB_TYPE_RESERVED:
++		default:
++			return "reserved";
++	}
++}
++
++static char * setup_recip(int type)
++{
++	switch((type & USB_RECIP_MASK)) {
++		case USB_RECIP_DEVICE:
++			return "device";
++		case USB_RECIP_INTERFACE:
++			return "interface";
++		case USB_RECIP_ENDPOINT:
++			return "endpoint";
++		case USB_RECIP_OTHER:
++			return "other";
++		case USB_RECIP_PORT:
++			return "port";
++		case USB_RECIP_RPIPE:
++			return "rpipe";
++		default:
++			return "recip unknown";
++	}
++}
++
++static int maybe_set_configuration(struct usb_device *dev, int configuration)
++{
++	struct usb_host_config *cp = NULL;
++        int i;
++
++        for (i = 0; i < dev->descriptor.bNumConfigurations; i++) {
++                if (dev->config[i].desc.bConfigurationValue ==
++                    configuration) {
++                        cp = &dev->config[i];
++                        break;
++                }
++        }
++        if (cp && cp == dev->actconfig)
++                return 0;
++        return dusb_set_configuration(dev, configuration);
++}
++
++static int setup_control_urb(struct vusb *vusb, usbif_request_t *req,
++				struct urb *urb)
++{
++	struct usb_device *usbdev = vusb->usbdev;
++	usbif_stats_t *stats = &(usbif_from_vusb(vusb)->stats);
++	struct usb_ctrlrequest *setup =
++		(struct usb_ctrlrequest *)urb->setup_packet;
++	int value, index, length;
++	int ret = 0;
++
++	memcpy(urb->setup_packet, &req->setup, sizeof(struct usb_ctrlrequest));
++
++	value = __le16_to_cpup(&setup->wValue);
++	index = __le16_to_cpup(&setup->wIndex);
++	length = __le16_to_cpup(&setup->wLength);
++
++	debug_print(LOG_LVL_DEBUG,
++		"%s: setup: %s %s %s req %x val %x idx %x len %x\n",
++		__FUNCTION__,
++		(setup->bRequestType & USB_DIR_IN) ? "IN" : "OUT",
++		setup_type(setup->bRequestType),
++		setup_recip(setup->bRequestType),
++		(int)setup->bRequest,
++		value, index, length);
++
++	switch (setup->bRequestType & USB_RECIP_MASK) {
++	case USB_RECIP_DEVICE:
++		if (setup->bRequest == USB_REQ_CLEAR_FEATURE) {
++			debug_print(LOG_LVL_DEBUG, "clear feature\n");
++		} else if (setup->bRequest == USB_REQ_SET_CONFIGURATION) {
++			int confnum = value;
++
++			debug_print(LOG_LVL_DEBUG, "set config %d\n", confnum);
++
++			usb_lock_device(usbdev);
++			ret = maybe_set_configuration(usbdev, confnum);
++			usb_unlock_device(usbdev);
++			if (ret == 0)
++				return (1);
++		} else if (setup->bRequest == USB_REQ_GET_DESCRIPTOR) {
++			int type = value >> 8;
++			int id = value & 0xff;
++
++			if ((type == USB_DT_STRING) && (id > 0)) {
++				debug_print(LOG_LVL_DEBUG,
++					"get string descriptor index %d language %x\n",
++					id, index);
++			} else {
++				debug_print(LOG_LVL_DEBUG,
++					"get descriptor type %d index %d\n",
++					type, id);
++			}
++		}
++		break;
++
++	case USB_RECIP_INTERFACE:
++		if (setup->bRequest == USB_REQ_CLEAR_FEATURE) {
++			debug_print(LOG_LVL_DEBUG, "clear feature\n");
++		} else if (setup->bRequest == USB_REQ_SET_INTERFACE) {
++			int ifnum = index;
++			int alt = value;
++
++			debug_print(LOG_LVL_DEBUG, "set interface %d\n", ifnum);
++
++			ret = usb_set_interface(usbdev, ifnum, alt);
++			if (ret == 0)
++				return (1);
++		}
++		break;
++
++	case USB_RECIP_ENDPOINT:
++		if (setup->bRequest == USB_REQ_GET_STATUS) {
++			debug_print(LOG_LVL_DEBUG, "get status %d\n", index);
++		} else if ((setup->bRequest == USB_REQ_CLEAR_FEATURE) &&
++				(value == USB_ENDPOINT_HALT)) {
++			int ep = index;
++			int epnum = ep & 0x7f;
++			int pipe;
++
++			debug_print(LOG_LVL_DEBUG, "clear halt %d\n", epnum);
++			if (ep & USB_DIR_IN)
++				pipe = usb_rcvbulkpipe(usbdev, epnum);
++			else
++				pipe = usb_sndbulkpipe(usbdev, epnum);
++			ret = usb_clear_halt(usbdev, pipe);
++			if ((ret == 0) || (ret == -EPIPE))
++				return (1);
++		}
++		break;
++
++	default:
++		break;
++	}
++
++	urb->interval	       = 1;
++
++	if (usbif_request_dir_in(req)) {
++		urb->pipe = usb_rcvctrlpipe(usbdev,
++				usbif_request_endpoint_num(req));
++		stats->st_in_req++;
++	} else {
++		urb->pipe = usb_sndctrlpipe(usbdev,
++				usbif_request_endpoint_num(req));
++		stats->st_out_req++;
++	}
++	stats->st_cntrl_req++;
++
++	return (ret);
++}
++
++static void setup_isoc_urb(struct vusb *vusb, usbif_request_t *req,
++				struct urb *urb, struct usb_host_endpoint *ep)
++{
++	struct usb_device *usbdev = vusb->usbdev;
++	usbif_stats_t *stats = &(usbif_from_vusb(vusb)->stats);
++
++	urb->interval          = 1 << min(15, ep->desc.bInterval - 1);
++	urb->start_frame       = req->startframe;
++
++	if (usbif_request_asap(req))
++		urb->transfer_flags |= URB_ISO_ASAP;
++
++	debug_print(LOG_LVL_DEBUG, "%s: interval %x sf %d packets %d\n",
++		__FUNCTION__, urb->interval, urb->start_frame,
++		urb->number_of_packets);
++
++	if (usbif_request_dir_in(req)) {
++		urb->pipe = usb_rcvisocpipe(usbdev,
++				usbif_request_endpoint_num(req));
++		stats->st_in_req++;
++	} else {
++		urb->pipe = usb_sndisocpipe(usbdev,
++				usbif_request_endpoint_num(req));
++		stats->st_out_req++;
++	}
++	stats->st_isoc_req++;
++}
++
++static void setup_bulk_urb(struct vusb *vusb, usbif_request_t *req,
++				struct urb *urb)
++{
++	struct usb_device *usbdev = vusb->usbdev;
++	usbif_stats_t *stats = &(usbif_from_vusb(vusb)->stats);
++
++	debug_print(LOG_LVL_DEBUG, "%s\n", __FUNCTION__);
++
++	urb->interval	       = 1;
++
++	if (usbif_request_dir_in(req)) {
++		urb->pipe = usb_rcvbulkpipe(usbdev,
++				usbif_request_endpoint_num(req));
++		stats->st_in_req++;
++	} else {
++		urb->pipe = usb_sndbulkpipe(usbdev,
++				usbif_request_endpoint_num(req));
++		stats->st_out_req++;
++	}
++	stats->st_bulk_req++;
++}
++
++static void setup_int_urb(struct vusb *vusb, usbif_request_t *req,
++				struct urb *urb, struct usb_host_endpoint *ep)
++{
++	struct usb_device *usbdev = vusb->usbdev;
++	usbif_stats_t *stats = &(usbif_from_vusb(vusb)->stats);
++
++	switch (usbdev->speed) {
++		case USB_SPEED_HIGH:
++		case USB_SPEED_SUPER:
++			urb->interval = 1 << min(15, ep->desc.bInterval - 1);
++			break;
++		case USB_SPEED_FULL:
++		case USB_SPEED_LOW:
++			urb->interval = ep->desc.bInterval;
++			break;
++		default:
++			debug_print(LOG_LVL_ERROR, "%s: bad speed %x\n",
++				__FUNCTION__, usbdev->speed);
++			break;
++	}
++
++	debug_print(LOG_LVL_DEBUG, "%s: interval %x\n", __FUNCTION__,
++		urb->interval);
++
++	if (usbif_request_dir_in(req)) {
++		urb->pipe = usb_rcvintpipe(usbdev,
++				usbif_request_endpoint_num(req));
++		stats->st_in_req++;
++	} else {
++		urb->pipe = usb_sndintpipe(usbdev,
++				usbif_request_endpoint_num(req));
++		stats->st_out_req++;
++	}
++	stats->st_int_req++;
++}
++
++static struct usb_device *vusb_device(struct vusb *vusb)
++{
++	return ((vusb->active && vusb->usbdev &&
++		dusb_dev_running(vusb->usbdev)) ? vusb->usbdev : NULL);
++}
++
++int vusb_setup_urb(struct vusb *vusb, usbif_request_t *req, struct urb *urb)
++{
++	struct usb_device *usbdev = vusb_device(vusb);
++	struct usb_host_endpoint *ep;
++	int endpointnum = usbif_request_endpoint_num(req);
++	int ret = 0;
++
++	if ((usbdev == NULL) || ((usbdev->state != USB_STATE_ADDRESS) &&
++		(usbdev->state != USB_STATE_CONFIGURED))) {
++		return -ENODEV;
++	}
++
++	if (usbif_request_dir_in(req))
++		ep = usbdev->ep_in[endpointnum];
++	else
++		ep = usbdev->ep_out[endpointnum];
++	if (!ep) {
++		debug_print(LOG_LVL_ERROR, "endpoint not found (%d)\n", endpointnum);
++		return -ENOENT;
++	}
++
++	urb->dev = usbdev;
++	if (!usbif_request_shortok(req) && usbif_request_dir_in(req))
++		urb->transfer_flags |= URB_SHORT_NOT_OK;
++
++	switch((ep->desc.bmAttributes & USB_ENDPOINT_XFERTYPE_MASK)) {
++		case USB_ENDPOINT_XFER_CONTROL:
++			ret = setup_control_urb(vusb, req, urb);
++			break;
++
++		case USB_ENDPOINT_XFER_ISOC:
++			setup_isoc_urb(vusb, req, urb, ep);
++			break;
++
++		case USB_ENDPOINT_XFER_BULK:
++			setup_bulk_urb(vusb, req, urb);
++			break;
++
++		default:
++		case USB_ENDPOINT_XFER_INT:
++			setup_int_urb(vusb, req, urb, ep);
++			break;
++	}
++
++	return (ret);
++}
++
++int vusb_reset_device(struct vusb *vusb)
++{
++	struct usb_device *usbdev = vusb_device(vusb);
++	usbif_stats_t *stats = &(usbif_from_vusb(vusb)->stats);
++	int ret;
++
++	if (!usbdev)
++		return (-1);
++
++	debug_print(LOG_LVL_ERROR, "%s vusb %p, usbdev %p (%d.%d (port %d)) Start\n",
++		    __FUNCTION__, vusb, usbdev,
++		    usbdev->bus->busnum, usbdev->devnum, usbdev->portnum);
++
++	/* pre and post reset handlers set and clear canceling_requests */
++	usb_lock_device(usbdev);
++	ret = usb_reset_device(usbdev);
++	usb_unlock_device(usbdev);
++
++	stats->st_reset++;
++
++	debug_print(LOG_LVL_ERROR, "%s vusb %p, usbdev %p (%d.%d (port %d)) Done\n",
++		    __FUNCTION__, vusb, usbdev,
++		    usbdev->bus->busnum, usbdev->devnum, usbdev->portnum);
++
++	return ret;
++}
++
++void vusb_flush(struct vusb *vusb)
++{
++	debug_print(LOG_LVL_INFO, "%s\n", __FUNCTION__);
++
++	vusb->canceling_requests = 1;
++
++	usb_kill_anchored_urbs(&vusb->anchor);
++
++	vusb->canceling_requests = 0;
++}
++
++int vusb_flush_endpoint(struct vusb *vusb, usbif_request_t *req)
++{
++	int endpointnum = usbif_request_endpoint_num(req);
++	struct usb_device *usbdev = vusb_device(vusb);
++	struct usb_host_endpoint *ep;
++
++	debug_print(LOG_LVL_DEBUG, "%s udev %p\n", __FUNCTION__, usbdev);
++
++	if (usbdev) {
++		if (usbif_request_dir_in(req))
++			ep = usbdev->ep_in[endpointnum];
++		else
++			ep = usbdev->ep_out[endpointnum];
++		if (!ep) {
++			debug_print(LOG_LVL_ERROR, "endpoint not found (%d)\n", endpointnum);
++			return -ENOENT;
++		}
++
++		vusb->canceling_requests = 1;
++
++		dusb_flush_endpoint(usbdev, ep);
++
++		vusb->canceling_requests = 0;
++	} else {
++		vusb_flush(vusb);
++	}
++
++	debug_print(LOG_LVL_DEBUG, "%s - udev %p end\n", __FUNCTION__, usbdev);
++
++	return (0);
++}
++
++int vusb_get_speed(struct vusb *vusb)
++{
++	struct usb_device *usbdev = vusb_device(vusb);
++
++	return (usbdev ? usbdev->speed : -1);
++}
++
++void vusb_free_coherent(struct vusb *vusb, struct urb *urb)
++{
++	struct usb_device *usbdev = urb->dev ? urb->dev : vusb->usbdev;
++
++	if (usbdev)
++		usb_free_coherent(usbdev, urb->transfer_buffer_length,
++		        urb->transfer_buffer, urb->transfer_dma);
++	else
++		debug_print(LOG_LVL_ERROR, "%s: leaking buffer! no dev!",
++			__FUNCTION__);
++	urb->transfer_buffer = NULL;
++}
++
++void *vusb_alloc_coherent(struct vusb *vusb, size_t size, dma_addr_t *dma)
++{
++	struct usb_device *usbdev = vusb_device(vusb);
++
++	void *ret = (usbdev ? usb_alloc_coherent(usbdev, size, GFP_KERNEL, dma) : NULL);
++
++	if (!ret) {
++		debug_print((usbdev != NULL) ? LOG_LVL_DEBUG : LOG_LVL_ERROR,
++			"%s: Failed: vusb:%p, udbdev:%p, "
++			"active:%d, running:%s\n",
++			__FUNCTION__,
++			vusb, vusb->usbdev, vusb->active,
++			usbdev && dusb_dev_running(usbdev) ? "yes" : "no");
++	}
++
++	return (ret);
++}
++
++void vusb_cycle_port(struct vusb *vusb)
++{
++	struct usb_device *usbdev = vusb_device(vusb);
++
++	if (usbdev) {
++		debug_print(LOG_LVL_ERROR, "%s vusb %p, usbdev %p (%d.%d (port %d)) Start\n",
++			__FUNCTION__, vusb, usbdev,
++			usbdev->bus->busnum, usbdev->devnum, usbdev->portnum);
++		usb_device_reenumerate(usbdev);
++		debug_print(LOG_LVL_ERROR, "%s vusb %p, usbdev %p (%d.%d (port %d)) Done\n",
++			__FUNCTION__, vusb, usbdev,
++			usbdev->bus->busnum, usbdev->devnum, usbdev->portnum);
++	}
++}
++
++
++/* power management methods */
++void vusb_pm_autosuspend_control(struct vusb *vusb, int enable)
++{
++	struct usb_device *usbdev = vusb_device(vusb);
++
++	if (usbdev && (vusb->autosuspend != enable)) {
++		debug_print(LOG_LVL_INFO, "%s vusb %p, udev %p enable %d\n",
++			__FUNCTION__, vusb, usbdev, enable);
++
++		vusb->autosuspend = enable;
++		if (enable)
++			usb_enable_autosuspend(usbdev);
++		else
++			usb_disable_autosuspend(usbdev);
++	}
++}
++
+--- /dev/null
++++ b/drivers/usb/xen-usbback/xenbus.c
+@@ -0,0 +1,583 @@
++/*  Xenbus code for usbif backend
++    Copyright (C) 2005 Rusty Russell <rusty@rustcorp.com.au>
++    Copyright (C) 2005 XenSource Ltd
++    Copyright (C) 2008-2012 Virtual Computer Inc.
++
++    This program is free software; you can redistribute it and/or modify
++    it under the terms of the GNU General Public License as published by
++    the Free Software Foundation; either version 2 of the License, or
++    (at your option) any later version.
++
++    This program is distributed in the hope that it will be useful,
++    but WITHOUT ANY WARRANTY; without even the implied warranty of
++    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++    GNU General Public License for more details.
++
++    You should have received a copy of the GNU General Public License
++    along with this program; if not, write to the Free Software
++    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
++*/
++
++#include <stdarg.h>
++#include <linux/module.h>
++#include <linux/kthread.h>
++#include "common.h"
++
++#undef DPRINTK
++#define DPRINTK(fmt, args...)				\
++	pr_debug("usbback/xenbus (%s:%d) " fmt ".\n",	\
++		 __FUNCTION__, __LINE__, ##args)
++
++static void connect(struct backend_info *);
++static int connect_ring(struct backend_info *);
++
++static void update_usbif_status(usbif_t *usbif)
++{
++	int err;
++	char name[TASK_COMM_LEN];
++
++	/* Not ready to connect? */
++	if (!usbif->irq)
++		return;
++
++	/* Already connected? */
++	if (usbif->be->dev->state == XenbusStateConnected)
++		return;
++
++	/* Attempt to connect: exit if we fail to. */
++	connect(usbif->be);
++	if (usbif->be->dev->state != XenbusStateConnected)
++		return;
++
++	snprintf(name, TASK_COMM_LEN, "usbback.%d.%d.%d",
++		usbif->domid, usbif->be->bus, usbif->be->device);
++
++	usbif->xenusbd = kthread_run(usbif_schedule, usbif, name);
++	if (IS_ERR(usbif->xenusbd)) {
++		err = PTR_ERR(usbif->xenusbd);
++		usbif->xenusbd = NULL;
++		xenbus_dev_error(usbif->be->dev, err, "start xenusbd");
++	}
++	else
++		debug_print(LOG_LVL_DEBUG, "Started xenusbd\n");
++}
++
++/****************************************************************
++ *  sysfs interface for VUSB I/O requests
++ */
++#define USB_SHOW(name, format, args...)                                 \
++        static ssize_t show_##name(struct device *_dev,                 \
++                                   struct device_attribute *attr,       \
++                                   char *buf)                           \
++        {                                                               \
++                ssize_t ret = -ENODEV;                                  \
++                struct xenbus_device *dev;                              \
++                struct backend_info *be;                                \
++                                                                        \
++                if (!get_device(_dev))                                  \
++                        return ret;                                     \
++                dev = to_xenbus_device(_dev);                           \
++                if ((be = dev_get_drvdata(&dev->dev)) != NULL)          \
++                        ret = sprintf(buf, format, ##args);             \
++                put_device(_dev);                                       \
++                return ret;                                             \
++        }                                                               \
++        static DEVICE_ATTR(name, S_IRUGO, show_##name, NULL)
++
++
++USB_SHOW(oo_req,  "%d\n", be->usbif->stats.st_oo_req);
++USB_SHOW(in_req,  "%d\n", be->usbif->stats.st_in_req);
++USB_SHOW(out_req,  "%d\n", be->usbif->stats.st_out_req);
++
++USB_SHOW(error,  "%d\n", be->usbif->stats.st_error);
++USB_SHOW(reset,  "%d\n", be->usbif->stats.st_reset);
++
++USB_SHOW(in_bandwidth,  "%d\n", be->usbif->stats.st_in_bandwidth);
++USB_SHOW(out_bandwidth,  "%d\n", be->usbif->stats.st_out_bandwidth);
++
++USB_SHOW(cntrl_req,  "%d\n", be->usbif->stats.st_cntrl_req);
++USB_SHOW(isoc_req, "%d\n", be->usbif->stats.st_isoc_req);
++USB_SHOW(bulk_req, "%d\n", be->usbif->stats.st_bulk_req);
++USB_SHOW(int_req, "%d\n", be->usbif->stats.st_int_req);
++
++static struct attribute *usbstat_attrs[] = {
++	&dev_attr_oo_req.attr,
++	&dev_attr_in_req.attr,
++	&dev_attr_out_req.attr,
++	&dev_attr_error.attr,
++	&dev_attr_reset.attr,
++	&dev_attr_in_bandwidth.attr,
++	&dev_attr_out_bandwidth.attr,
++	&dev_attr_cntrl_req.attr,
++	&dev_attr_isoc_req.attr,
++	&dev_attr_bulk_req.attr,
++	&dev_attr_int_req.attr,
++	NULL
++};
++
++static struct attribute_group usbstat_group = {
++	.name = "statistics",
++	.attrs = usbstat_attrs,
++};
++
++USB_SHOW(physical_device, "%x.%x\n", be->bus, be->device);
++
++int xenusb_sysfs_addif(struct xenbus_device *dev)
++{
++	int error;
++
++	error = device_create_file(&dev->dev, &dev_attr_physical_device);
++        if (error)
++		goto fail1;
++
++	error = sysfs_create_group(&dev->dev.kobj, &usbstat_group);
++	if (error)
++		goto fail2;
++
++	return 0;
++
++fail2:	sysfs_remove_group(&dev->dev.kobj, &usbstat_group);
++fail1:	device_remove_file(&dev->dev, &dev_attr_physical_device);
++	return error;
++}
++
++void xenusb_sysfs_delif(struct xenbus_device *dev)
++{
++	sysfs_remove_group(&dev->dev.kobj, &usbstat_group);
++	device_remove_file(&dev->dev, &dev_attr_physical_device);
++}
++
++static int usbback_remove(struct xenbus_device *dev)
++{
++	struct backend_info *be = dev_get_drvdata(&dev->dev);
++
++	debug_print(LOG_LVL_ERROR, "usbback_remove\n");
++
++	if (be->bus || be->device)
++		xenusb_sysfs_delif(dev);
++
++	if (be->backend_watch.node) {
++		unregister_xenbus_watch(&be->backend_watch);
++		kfree(be->backend_watch.node);
++		be->backend_watch.node = NULL;
++	}
++
++	if (be->autosuspend_watch.node) {
++		unregister_xenbus_watch(&be->autosuspend_watch);
++		kfree(be->autosuspend_watch.node);
++		be->autosuspend_watch.node = NULL;
++	}
++
++	if (be->usbif) {
++		usbif_t *usbif = be->usbif;
++
++		/*
++		 * Disconnect the be and usbif since the call to vusb_free can
++		 * cause callbacks like usbback_suspend which dereference
++		 * usbif to be and make calls on the be.
++		 */
++		be->usbif = NULL;
++		usbif->be = NULL;
++		/*
++		 * Kill the per device kthread so we don't process any more
++		 * frontend requests.
++		 */
++		debug_print(LOG_LVL_ERROR, "Disconnecting vusb %p\n", &usbif->vusb);
++		usbif_disconnect(usbif, be->dev);
++		/* Shutdown the Linux USB class driver */
++		debug_print(LOG_LVL_ERROR, "Freeing vusb %p\n", &usbif->vusb);
++		vusb_free(&usbif->vusb);
++		usbif_free(usbif);
++	}
++
++	kfree(be);
++	dev_set_drvdata(&dev->dev, NULL);
++	return 0;
++}
++
++int usbback_barrier(struct xenbus_transaction xbt,
++		    struct backend_info *be, int state)
++{
++	struct xenbus_device *dev = be->dev;
++	int err;
++
++	err = xenbus_printf(xbt, dev->nodename, "feature-barrier",
++			    "%d", state);
++	if (err)
++		xenbus_dev_fatal(dev, err, "writing feature-barrier");
++
++	return err;
++}
++
++/* tell the frontend that the device's suspend state has changed */
++int usbback_suspend(usbif_t *usbif, int suspended)
++{
++	struct xenbus_device *dev = usbif->be ? usbif->be->dev : NULL;
++	int err;
++
++	debug_print(LOG_LVL_ERROR, "%s: usbif %p dev %p node %s\n",
++		__FUNCTION__, usbif, dev, dev ? dev->nodename : "");
++
++	if (dev)
++		err = 0;
++	else
++		err = -ENODEV;
++
++	return err;
++}
++
++/**
++ * Callback received when the hotplug scripts have placed the physical-device
++ * node.  Read it and create a vusb.  If the frontend is ready, connect.
++ */
++static void backend_changed(struct xenbus_watch *watch,
++			    const char *path, const char *token)
++{
++	int err;
++	unsigned bus;
++	unsigned device;
++	struct backend_info *be
++		= container_of(watch, struct backend_info, backend_watch);
++	struct xenbus_device *dev = be->dev;
++
++	err = xenbus_scanf(XBT_NIL, dev->nodename, "physical-device", "%d.%d",
++			   &bus, &device);
++	if (XENBUS_EXIST_ERR(err)) {
++		/* Since this watch will fire once immediately after it is
++		   registered, we expect this.  Ignore it, and wait for the
++		   hotplug scripts. */
++		return;
++	}
++	if (err != 2) {
++		xenbus_dev_fatal(dev, err, "reading physical-device");
++		return;
++	}
++
++	if ((be->bus || be->device) && (bus || device) &&
++	    ((be->bus != bus) || (be->device != device))) {
++		debug_print(LOG_LVL_ERROR,
++		       "usbback: changing physical device (from %x.%x to "
++		       "%x.%x) not supported.\n", be->bus, be->device,
++		       bus, device);
++		return;
++	}
++
++	if (be->bus == 0 && be->device == 0) {
++		/* Front end dir is a number, which is used as the handle. */
++
++		char *p = strrchr(dev->otherend, '/') + 1;
++		long handle = simple_strtoul(p, NULL, 0);
++
++		be->bus = bus;
++		be->device = device;
++
++		err = vusb_create(be->usbif, handle, bus, device);
++		if (err) {
++			be->bus = be->device = 0;
++			xenbus_dev_fatal(dev, err, "creating vusb structure");
++			return;
++		}
++
++		err = xenusb_sysfs_addif(dev);
++		if (err) {
++			vusb_free(&be->usbif->vusb);
++			be->bus = be->device = 0;
++			xenbus_dev_fatal(dev, err, "creating sysfs entries");
++			return;
++		}
++
++		/* We're potentially connected now */
++		update_usbif_status(be->usbif);
++	} else if (bus == 0 && device == 0) {
++		/* Device is being unassigned -- simulate hot unplug */
++		vusb_cycle_port(&be->usbif->vusb);
++	}
++}
++
++/**
++ * Callback received when the frontend changes the atosuspend element.
++ */
++static void autosuspend_changed(struct xenbus_watch *watch,
++			    const char *path, const char* token)
++{
++	struct backend_info *be
++		= container_of(watch, struct backend_info, autosuspend_watch);
++	struct xenbus_device *dev = be->dev;
++	unsigned autosuspend;
++	int err;
++
++	err = xenbus_scanf(XBT_NIL, dev->otherend, "autosuspend", "%d",
++			   &autosuspend);
++	if (XENBUS_EXIST_ERR(err)) {
++		/* Since this watch will fire once immediately after it is
++		   registered, we expect this.  Ignore it, and wait for the
++		   hotplug scripts. */
++		return;
++	}
++	if (err != 1) {
++		xenbus_dev_error(dev, err, "reading autosuspend");
++		return;
++	}
++
++	err = xenbus_scanf(XBT_NIL, dev->otherend, "autosuspend", "%d",
++			   &autosuspend);
++	vusb_pm_autosuspend_control(&be->usbif->vusb, autosuspend);
++
++	debug_print(LOG_LVL_INFO, "Autosuspend changed %d\n", autosuspend);
++}
++
++
++/**
++ * Entry point to this code when a new device is created.  Allocate the basic
++ * structures, and watch the store waiting for the hotplug scripts to tell us
++ * the device's physical major and minor numbers.  Switch to InitWait.
++ */
++#define VERSION_SZ 4
++static int usbback_probe(struct xenbus_device *dev,
++			 const struct xenbus_device_id *id)
++{
++	int err;
++	char version[VERSION_SZ];
++	struct backend_info *be = kzalloc(sizeof(struct backend_info),
++					  GFP_KERNEL);
++	if (!be) {
++		xenbus_dev_fatal(dev, -ENOMEM,
++				 "allocating backend structure");
++		return -ENOMEM;
++	}
++	be->dev = dev;
++	dev_set_drvdata(&dev->dev, be);
++
++	be->usbif = usbif_alloc(dev->otherend_id);
++	if (IS_ERR(be->usbif)) {
++		err = PTR_ERR(be->usbif);
++		be->usbif = NULL;
++		xenbus_dev_fatal(dev, err, "creating block interface");
++		goto fail;
++	}
++
++	/* setup back pointer */
++	be->usbif->be = be;
++
++	err = xenbus_watch_pathfmt(dev, &be->backend_watch, NULL, backend_changed,
++				   "%s/%s", dev->nodename, "physical-device");
++	if (err)
++		goto fail;
++
++	err = xenbus_watch_pathfmt(dev, &be->autosuspend_watch, NULL,
++				   autosuspend_changed, "%s/%s", dev->otherend,
++				   "autosuspend");
++	if (err)
++		goto fail;
++
++	debug_print(LOG_LVL_ERROR, "Setup watch for %s/%s\n", dev->otherend, "autosuspend");
++
++        err = snprintf(version, VERSION_SZ, "%d", USBBCK_VERSION);
++        if (err < 0)
++                goto fail;
++
++	err = xenbus_write(XBT_NIL, dev->nodename, "version", version);
++	if (err)
++                goto fail;
++
++	err = xenbus_switch_state(dev, XenbusStateInitWait);
++	if (err)
++		goto fail;
++
++	return 0;
++
++fail:
++	debug_print(LOG_LVL_ERROR, "Probe failed\n");
++	usbback_remove(dev);
++	return err;
++}
++
++/**
++ * Callback received when the frontend's state changes.
++ */
++static void frontend_changed(struct xenbus_device *dev,
++			     enum xenbus_state frontend_state)
++{
++	struct backend_info *be = dev_get_drvdata(&dev->dev);
++	int err;
++
++	debug_print(LOG_LVL_INFO, "Frontend state: %s Backend state: %s\n",
++		xenbus_strstate(frontend_state), xenbus_strstate(dev->state));
++
++	switch (frontend_state) {
++	case XenbusStateInitialising:
++		if (dev->state == XenbusStateClosed) {
++			printk(KERN_INFO "%s: %s: prepare for reconnect\n",
++			       __FUNCTION__, dev->nodename);
++			xenbus_switch_state(dev, XenbusStateInitWait);
++		}
++		break;
++
++	case XenbusStateInitialised:
++	case XenbusStateConnected:
++		/* Ensure we connect even when two watches fire in
++		   close successsion and we miss the intermediate value
++		   of frontend_state. */
++		if (dev->state == XenbusStateConnected)
++			break;
++
++		err = connect_ring(be);
++		if (err)
++			break;
++		update_usbif_status(be->usbif);
++		break;
++
++	case XenbusStateClosing:
++		usbif_disconnect(be->usbif, be->dev);
++		xenbus_switch_state(dev, XenbusStateClosing);
++		break;
++
++	case XenbusStateClosed:
++		xenbus_switch_state(dev, XenbusStateClosed);
++		if (xenbus_dev_is_online(dev))
++			break;
++		/* fall through if not online */
++		fallthrough;
++	case XenbusStateUnknown:
++		device_unregister(&dev->dev);
++		break;
++
++	default:
++		xenbus_dev_fatal(dev, -EINVAL, "saw state %d at frontend",
++				 frontend_state);
++		break;
++	}
++}
++
++
++/* ** Connection ** */
++
++
++/**
++ * Write the physical details regarding the usb device to the store, and
++ * switch to Connected state.
++ */
++static void connect(struct backend_info *be)
++{
++	struct xenbus_transaction xbt;
++	int err;
++	struct xenbus_device *dev = be->dev;
++
++	debug_print(LOG_LVL_INFO, "Connect: %s\n", dev->otherend);
++
++	/* Supply the information about the device the frontend needs */
++again:
++	err = xenbus_transaction_start(&xbt);
++	if (err) {
++		xenbus_dev_fatal(dev, err, "starting transaction");
++		return;
++	}
++
++	err = usbback_barrier(xbt, be, 1);
++	if (err)
++		goto abort;
++
++	err = xenbus_transaction_end(xbt, 0);
++	if (err == -EAGAIN)
++		goto again;
++	if (err)
++		xenbus_dev_fatal(dev, err, "ending transaction");
++
++	err = xenbus_switch_state(dev, XenbusStateConnected);
++	if (err)
++		xenbus_dev_fatal(dev, err, "switching to Connected state");
++
++	return;
++ abort:
++	xenbus_transaction_end(xbt, 1);
++}
++
++static int connect_ring(struct backend_info *be)
++{
++	struct xenbus_device *dev = be->dev;
++	grant_ref_t ring_ref;
++	unsigned int evtchn;
++	unsigned int version;
++	char protocol[64] = "";
++	int err;
++
++	debug_print(LOG_LVL_INFO, "Connect ring: %s\n", dev->otherend);
++
++        err = xenbus_scanf(XBT_NIL, dev->otherend, "version", "%d",
++                           &version);
++        if (XENBUS_EXIST_ERR(err)) {
++                debug_print(LOG_LVL_ERROR, "frontend version doesn't exist, must be old\n");
++                return -1;
++        }
++        if (err != 1) {
++                xenbus_dev_fatal(dev, err, "reading version");
++                return -1;
++        }
++        debug_print(LOG_LVL_INFO, "frontend version %d\n", version);
++        if (version < USBBCK_VERSION) {
++                xenbus_dev_fatal(dev, EINVAL, "frontend doesn't match backend (%d)", version);
++		return -1;
++	}
++
++	err = xenbus_gather(XBT_NIL, dev->otherend, "ring-ref", "%lu", &ring_ref,
++			    "event-channel", "%u", &evtchn, NULL);
++	if (err) {
++		xenbus_dev_fatal(dev, err,
++				 "reading %s/ring-ref and event-channel",
++				 dev->otherend);
++		return err;
++	}
++
++	be->usbif->usb_protocol = USBIF_PROTOCOL_NATIVE;
++	err = xenbus_gather(XBT_NIL, dev->otherend, "protocol",
++			    "%63s", protocol, NULL);
++	if (err) {
++		strcpy(protocol, "unspecified");
++//		be->usbif->usb_protocol = xen_guest_usbif_protocol(be->usbif->domid);
++	}
++	else if (0 == strcmp(protocol, XEN_IO_PROTO_ABI_NATIVE))
++		be->usbif->usb_protocol = USBIF_PROTOCOL_NATIVE;
++	else if (0 == strcmp(protocol, XEN_IO_PROTO_ABI_X86_32))
++		be->usbif->usb_protocol = USBIF_PROTOCOL_X86_32;
++	else if (0 == strcmp(protocol, XEN_IO_PROTO_ABI_X86_64))
++		be->usbif->usb_protocol = USBIF_PROTOCOL_X86_64;
++	else {
++		xenbus_dev_fatal(dev, err, "unknown fe protocol %s", protocol);
++		return -1;
++	}
++	debug_print(LOG_LVL_INFO,
++		"usbback: ring-ref %d, event-channel %d, protocol %d (%s)\n",
++		ring_ref, evtchn, be->usbif->usb_protocol, protocol);
++
++	/* Map the shared frame, irq etc. */
++	err = usbif_map(be->usbif, ring_ref, evtchn);
++	if (err) {
++		xenbus_dev_fatal(dev, err, "mapping ring-ref %d port %u",
++				 ring_ref, evtchn);
++		return err;
++	}
++
++	return 0;
++}
++
++
++/*
++ * Driver Registration
++ */
++static const struct xenbus_device_id usbback_ids[] = {
++	{ "vusb" },
++	{ "" }
++};
++
++static struct xenbus_driver usbback_driver = {
++	.name			= "usbback",
++	.ids			= usbback_ids,
++	.probe			= usbback_probe,
++	.remove			= usbback_remove,
++	.otherend_changed	= frontend_changed
++};
++
++int usbif_xenbus_init(void)
++{
++	return xenbus_register_backend(&usbback_driver);
++}
+--- /dev/null
++++ b/include/linux/dusb.h
+@@ -0,0 +1,44 @@
++/*****************************************************************************/
++
++/*
++ *      dusb.c  --  Direct communication with USB devices.
++ *
++ *      Copyright (C) 1999-2000  Thomas Sailer (sailer@ife.ee.ethz.ch)
++ *      Copyright (C) 2008-2012  Virtual Computer Inc
++ *
++ *      This program is free software; you can redistribute it and/or modify
++ *      it under the terms of the GNU General Public License as published by
++ *      the Free Software Foundation; either version 2 of the License, or
++ *      (at your option) any later version.
++ *
++ *      This program is distributed in the hope that it will be useful,
++ *      but WITHOUT ANY WARRANTY; without even the implied warranty of
++ *      MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ *      GNU General Public License for more details.
++ *
++ *      You should have received a copy of the GNU General Public License
++ *      along with this program; if not, write to the Free Software
++ *      Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
++ *
++ *
++ *  Derived from usb/core/devio.c
++ *
++ */
++
++/*****************************************************************************/
++
++#ifndef __LINUX_DUSB_H
++#define __LINUX_DUSB_H
++
++extern struct usb_device *dusb_open(unsigned bus, unsigned device);
++extern void dusb_close(struct usb_device *dev);
++extern int dusb_set_configuration(struct usb_device *dev, int configuration);
++extern void dusb_flush_endpoint(struct usb_device *udev, struct usb_host_endpoint *ep);
++
++extern int dusb_dev_running(struct usb_device *udev);
++extern int dusb_dev_controller_speed(struct usb_device *udev);
++
++/* hub.c */
++extern void usb_device_reenumerate(struct usb_device *udev);
++
++#endif
+--- /dev/null
++++ b/include/xen/interface/io/usbif.h
+@@ -0,0 +1,196 @@
++/******************************************************************************
++ * usbif.h
++ *
++ * Unified usb-device I/O interface for Xen guest OSes.
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining a copy
++ * of this software and associated documentation files (the "Software"), to
++ * deal in the Software without restriction, including without limitation the
++ * rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
++ * sell copies of the Software, and to permit persons to whom the Software is
++ * furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included in
++ * all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
++ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
++ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
++ * DEALINGS IN THE SOFTWARE.
++ *
++ * Derived from blkif.h
++ *
++ * Copyright (c) 2003-2004, Keir Fraser
++ * Copyright (c) 2008, Virtual Computer Inc.
++ */
++
++#ifndef __XEN_PUBLIC_IO_USBIF_H__
++#define __XEN_PUBLIC_IO_USBIF_H__
++
++#include "ring.h"
++#include "../grant_table.h"
++
++/*
++ * Front->back notifications: When enqueuing a new request, sending a
++ * notification can be made conditional on req_event (i.e., the generic
++ * hold-off mechanism provided by the ring macros). Backends must set
++ * req_event appropriately (e.g., using RING_FINAL_CHECK_FOR_REQUESTS()).
++ *
++ * Back->front notifications: When enqueuing a new response, sending a
++ * notification can be made conditional on rsp_event (i.e., the generic
++ * hold-off mechanism provided by the ring macros). Frontends must set
++ * rsp_event appropriately (e.g., using RING_FINAL_CHECK_FOR_RESPONSES()).
++ */
++
++#ifndef usbif_vdev_t
++#define usbif_vdev_t   uint16_t
++#endif
++
++/* URB operations */
++#define USBIF_T_CNTRL           0
++#define USBIF_T_ISOC            1
++#define USBIF_T_BULK            2
++#define USBIF_T_INT             3
++
++/* non URB operations */
++#define USBIF_T_RESET		4
++#define USBIF_T_ABORT_PIPE	5
++#define USBIF_T_GET_FRAME	6
++#define USBIF_T_GET_SPEED	7
++#define USBIF_T_CANCEL		8
++
++#define USBIF_T_MAX		(USBIF_T_CANCEL)
++
++#define USBIF_F_SHORTOK		0x01
++#define USBIF_F_RESET		0x02
++#define USBIF_F_ASAP		0x04 /* start ISO request on next available frame */
++#define USBIF_F_INDIRECT	0x08 /* this request contains indirect segments */
++#define USBIF_F_CYCLE_PORT	0x10 /* force re-enumeration of this device */
++#define USBIF_F_DIRECT_DATA	0x20 /* request contains data directly inline */
++
++/*
++ * Maximum scatter/gather segments per request.
++ * This is carefully chosen so that sizeof(usbif_ring_t) <= PAGE_SIZE.
++ * NB.
++ */
++#define USBIF_MAX_SEGMENTS_PER_REQUEST 17
++#define USBIF_MAX_ISO_SEGMENTS         (USBIF_MAX_SEGMENTS_PER_REQUEST - 1)
++
++typedef uint32_t usbif_request_len_t;
++
++struct usbif_request {
++    uint64_t            id;           /* private guest value, echoed in resp */
++    uint64_t            setup;
++    uint8_t             type;         /* USBIF_T_??? */
++    uint8_t             endpoint;
++    uint16_t            offset;
++    usbif_request_len_t length;
++    uint8_t             nr_segments;  /* number of segments */
++    uint8_t             flags;
++    uint16_t            nr_packets;   /* number of ISO packets */
++    uint32_t            startframe;
++    union {
++        grant_ref_t     gref[USBIF_MAX_SEGMENTS_PER_REQUEST];
++        uint8_t         data[sizeof(grant_ref_t)*USBIF_MAX_SEGMENTS_PER_REQUEST];
++    } u;
++    uint32_t            pad;
++};
++typedef struct usbif_request usbif_request_t;
++
++#define INDIRECT_SEGMENTS
++
++#ifdef INDIRECT_SEGMENTS
++#define USBIF_MAX_SEGMENTS_PER_IREQUEST 1023
++struct usbif_indirect_request {
++    uint32_t		nr_segments;
++    grant_ref_t         gref[USBIF_MAX_SEGMENTS_PER_IREQUEST];
++};
++typedef struct usbif_indirect_request usbif_indirect_request_t;
++#endif
++
++struct usbif_iso_packet_info {
++    usbif_request_len_t offset;
++    uint16_t            length;
++    uint16_t            status;
++};
++typedef struct usbif_iso_packet_info usbif_iso_packet_info_t;
++
++struct usbif_response {
++    uint64_t            id;              /* copied from request */
++    usbif_request_len_t actual_length;
++    uint32_t            data;
++    int16_t             status;          /* USBIF_RSP_???       */
++    uint32_t            error_count;     /* total ISOCH error count */
++};
++typedef struct usbif_response usbif_response_t;
++
++/*
++ * STATUS RETURN CODES.
++ */
++ /* USB errors */
++#define USBIF_RSP_USB_ERROR	-10
++
++#define USBIF_USB_CANCELED	-1
++#define USBIF_RSP_USB_CANCELED	(USBIF_RSP_USB_ERROR + USBIF_USB_CANCELED)
++#define USBIF_USB_PENDING	-2
++#define USBIF_RSP_USB_PENDING	(USBIF_RSP_USB_ERROR + USBIF_USB_PENDING)
++#define USBIF_USB_PROTO		-3
++#define USBIF_RSP_USB_PROTO	(USBIF_RSP_USB_ERROR + USBIF_USB_PROTO)
++#define USBIF_USB_CRC		-4
++#define USBIF_RSP_USB_CRC	(USBIF_RSP_USB_ERROR + USBIF_USB_CRC)
++#define USBIF_USB_TIMEOUT	-5
++#define USBIF_RSP_USB_TIMEOUT	(USBIF_RSP_USB_ERROR + USBIF_USB_TIMEOUT)
++#define USBIF_USB_STALLED	-6
++#define USBIF_RSP_USB_STALLED	(USBIF_RSP_USB_ERROR + USBIF_USB_STALLED)
++#define USBIF_USB_INBUFF	-7
++#define USBIF_RSP_USB_INBUFF	(USBIF_RSP_USB_ERROR + USBIF_USB_INBUFF)
++#define USBIF_USB_OUTBUFF	-8
++#define USBIF_RSP_USB_OUTBUFF	(USBIF_RSP_USB_ERROR + USBIF_USB_OUTBUFF)
++#define USBIF_USB_OVERFLOW	-9
++#define USBIF_RSP_USB_OVERFLOW	(USBIF_RSP_USB_ERROR + USBIF_USB_OVERFLOW)
++#define USBIF_USB_SHORTPKT	-10
++#define USBIF_RSP_USB_SHORTPKT	(USBIF_RSP_USB_ERROR + USBIF_USB_SHORTPKT)
++#define USBIF_USB_DEVRMVD	-11
++#define USBIF_RSP_USB_DEVRMVD	(USBIF_RSP_USB_ERROR + USBIF_USB_DEVRMVD)
++#define USBIF_USB_PARTIAL	-12
++#define USBIF_RSP_USB_PARTIAL	(USBIF_RSP_USB_ERROR + USBIF_USB_PARTIAL)
++#define USBIF_USB_INVALID	-13
++#define USBIF_RSP_USB_INVALID	(USBIF_RSP_USB_ERROR + USBIF_USB_INVALID)
++#define USBIF_USB_RESET		-14
++#define USBIF_RSP_USB_RESET	(USBIF_RSP_USB_ERROR + USBIF_USB_RESET)
++#define USBIF_USB_SHUTDOWN	-15
++#define USBIF_RSP_USB_SHUTDOWN	(USBIF_RSP_USB_ERROR + USBIF_USB_SHUTDOWN)
++#define USBIF_USB_UNKNOWN	-16
++#define USBIF_RSP_USB_UNKNOWN	(USBIF_RSP_USB_ERROR + USBIF_USB_UNKNOWN)
++
++ /* Operation not supported. */
++#define USBIF_RSP_EOPNOTSUPP  -2
++ /* Operation failed for some unspecified reason (-EIO). */
++#define USBIF_RSP_ERROR       -1
++ /* Operation completed successfully. */
++#define USBIF_RSP_OKAY         0
++
++#define USBIF_S_LOW		1
++#define USBIF_S_FULL		2
++#define USBIF_S_HIGH		3
++
++/*
++ * Generate usbif ring structures and types.
++ */
++
++DEFINE_RING_TYPES(usbif, struct usbif_request, struct usbif_response);
++
++#endif /* __XEN_PUBLIC_IO_USBIF_H__ */
++
++/*
++ * Local variables:
++ * mode: C
++ * c-set-style: "BSD"
++ * c-basic-offset: 4
++ * tab-width: 4
++ * indent-tabs-mode: nil
++ * End:
++ */
+--- /dev/null
++++ b/include/xen/vusb.h
+@@ -0,0 +1,56 @@
++#ifndef __XEN_VUSB_H__
++#define __XEN_VUSB_H__
++
++#include <xen/interface/io/ring.h>
++#include <xen/interface/io/usbif.h>
++#include <xen/interface/io/protocols.h>
++
++/* Not a real protocol.  Used to generate ring structs which contain
++ * the elements common to all protocols only.  This way we get a
++ * compiler-checkable way to use common struct elements, so we can
++ * avoid using switch(protocol) in a number of places.  */
++struct usbif_common_request {
++	char dummy;
++};
++struct usbif_common_response {
++	char dummy;
++};
++
++/* i386 protocol version */
++typedef struct usbif_request usbif_x86_32_request_t;
++typedef struct usbif_response usbif_x86_32_response_t;
++
++
++/* x86_64 protocol version */
++typedef struct usbif_request usbif_x86_64_request_t;
++typedef struct usbif_response usbif_x86_64_response_t;
++
++DEFINE_RING_TYPES(usbif_common, struct usbif_common_request, struct usbif_common_response);
++DEFINE_RING_TYPES(usbif_x86_32, struct usbif_request, struct usbif_response);
++DEFINE_RING_TYPES(usbif_x86_64, struct usbif_request, struct usbif_response);
++
++union usbif_back_rings {
++	struct usbif_back_ring        native;
++	struct usbif_common_back_ring common;
++	struct usbif_x86_32_back_ring x86_32;
++	struct usbif_x86_64_back_ring x86_64;
++};
++typedef union usbif_back_rings usbif_back_rings_t;
++
++enum usbif_protocol {
++	USBIF_PROTOCOL_NATIVE = 1,
++	USBIF_PROTOCOL_X86_32 = 2,
++	USBIF_PROTOCOL_X86_64 = 3,
++};
++
++static void inline usbif_get_x86_32_req(usbif_request_t *dst, usbif_x86_32_request_t *src)
++{
++	memcpy(dst, src, sizeof(usbif_request_t));
++}
++
++static void inline usbif_get_x86_64_req(usbif_request_t *dst, usbif_x86_64_request_t *src)
++{
++	memcpy(dst, src, sizeof(usbif_request_t));
++}
++
++#endif /* __XEN_VUSB_H__ */

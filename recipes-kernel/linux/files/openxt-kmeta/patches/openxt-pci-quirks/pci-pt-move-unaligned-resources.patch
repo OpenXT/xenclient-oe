@@ -1,0 +1,78 @@
+################################################################################
+SHORT DESCRIPTION: 
+################################################################################
+Align start address of PCI resources passed through.
+
+################################################################################
+LONG DESCRIPTION: 
+################################################################################
+In some cases, the resource's start address is not page-aligned at this point.
+Pass-through to the guest will then fail. This patch makes sure this odd
+behaviour does not happen.
+
+################################################################################
+CHANGELOG 
+################################################################################
+Original author: Tomasz Wroblewski <tomasz.wroblewski@citrix.com>
+Port to 3.18: Eric Chanudet <chanudete@ainfosec.com>
+Port to 4.14: Richard Turner <turnerr@ainfosec.com>
+Port to 4.19: Richard Turner <turnerr@ainfosec.com>
+
+################################################################################
+REMOVAL 
+################################################################################
+This is a work-around for a corner case, more testing should be done to figure
+out if it still happens and why.
+
+################################################################################
+UPSTREAM PLAN
+################################################################################
+None, this is an OpenXT work-around.
+
+################################################################################
+INTERNAL DEPENDENCIES 
+################################################################################
+PCI pass-through, depending on the device.
+
+################################################################################
+PATCHES 
+################################################################################
+--- a/drivers/pci/pci.c
++++ b/drivers/pci/pci.c
+@@ -6111,6 +6111,27 @@ void __weak pci_resource_to_user(const s
+ static char *resource_alignment_param;
+ static DEFINE_SPINLOCK(resource_alignment_lock);
+ 
++static
++resource_size_t pci_auto_resource_alignment(struct pci_dev *dev)
++{
++	int i;
++	struct resource *r;
++	if (dev->hdr_type == PCI_HEADER_TYPE_BRIDGE ||
++	    (dev->hdr_type == PCI_HEADER_TYPE_NORMAL &&
++	     (dev->class >> 8) == PCI_CLASS_BRIDGE_HOST))
++		return 0;
++
++	/* move resources only if they are not page aligned */
++	for (i = 0; i < PCI_BRIDGE_RESOURCES; ++i) {
++		r = &dev->resource[i];
++		if (!(r->flags & IORESOURCE_MEM))
++			continue;
++		if (r->start & (PAGE_SIZE-1))
++			return PAGE_SIZE;
++	}
++	return 0;
++}
++
+ /**
+  * pci_specified_resource_alignment - get resource alignment specified by user.
+  * @dev: the PCI device to get
+@@ -6168,6 +6189,8 @@ static resource_size_t pci_specified_res
+ 		}
+ 		p++;
+ 	}
++	if (align < PAGE_SIZE)
++		align = pci_auto_resource_alignment(dev);
+ out:
+ 	spin_unlock(&resource_alignment_lock);
+ 	return align;

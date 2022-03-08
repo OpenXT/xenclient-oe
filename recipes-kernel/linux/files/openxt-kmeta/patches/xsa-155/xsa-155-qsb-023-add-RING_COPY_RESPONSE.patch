@@ -1,0 +1,52 @@
+################################################################################
+SHORT DESCRIPTION: 
+################################################################################
+QSB-023 (https://github.com/QubesOS/qubes-secpack/blob/master/QSBs/qsb-023-2015)
+XSA-155 additional patches for the Xen network and block frontends from Qubes
+OS Project.
+
+################################################################################
+LONG DESCRIPTION: 
+################################################################################
+Source: https://github.com/QubesOS/qubes-linux-kernel/tree/stable-3.18/patches.xen
+Patch: xsa155-linux-0008-xen-Add-RING_COPY_RESPONSE.patch
+
+Using RING_GET_RESPONSE() on a shared ring is easy to use incorrectly
+(i.e., by not considering that the other end may alter the data in the
+shared ring while it is being inspected).  Safe usage of a response
+generally requires taking a local copy.
+
+Provide a RING_COPY_RESPONSE() macro to use instead of
+RING_GET_RESPONSE() and an open-coded memcpy().  This takes care of
+ensuring that the copy is done correctly regardless of any possible
+compiler optimizations.
+
+Use a volatile source to prevent the compiler from reordering or
+omitting the copy.
+
+################################################################################
+PATCHES 
+################################################################################
+--- a/include/xen/interface/io/ring.h
++++ b/include/xen/interface/io/ring.h
+@@ -201,6 +201,20 @@ struct __name##_back_ring {						\
+ #define RING_GET_RESPONSE(_r, _idx)					\
+     (&((_r)->sring->ring[((_idx) & (RING_SIZE(_r) - 1))].rsp))
+ 
++/*
++ * Get a local copy of a response.
++ *
++ * Use this in preference to RING_GET_RESPONSE() so all processing is
++ * done on a local copy that cannot be modified by the other end.
++ *
++ * Note that https://gcc.gnu.org/bugzilla/show_bug.cgi?id=58145 may cause this
++ * to be ineffective where _rsp is a struct which consists of only bitfields.
++ */
++#define RING_COPY_RESPONSE(_r, _idx, _rsp) do {				\
++	/* Use volatile to force the copy into _rsp. */			\
++	*(_rsp) = *(volatile typeof(_rsp))RING_GET_RESPONSE(_r, _idx);	\
++} while (0)
++
+ /* Loop termination condition: Would the specified index overflow the ring? */
+ #define RING_REQUEST_CONS_OVERFLOW(_r, _cons)				\
+     (((_cons) - (_r)->rsp_prod_pvt) >= RING_SIZE(_r))
