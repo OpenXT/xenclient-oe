@@ -57,47 +57,6 @@ PATCHES
  int libxl_domain_reboot(libxl_ctx *ctx, uint32_t domid,
                          const libxl_asyncop_how *ao_how)
  {
-@@ -1130,6 +1137,8 @@ void libxl__domain_destroy(libxl__egc *e
-         dds->stubdom.domid = stubdomid;
-         dds->stubdom.callback = stubdom_destroy_callback;
-         dds->stubdom.soft_reset = false;
-+        libxl__qmp_stop(gc, dds->domid);
-+        libxl__qmp_quit(gc, dds->domid);
-         libxl__destroy_domid(egc, &dds->stubdom);
-     } else {
-         dds->stubdom_finished = 1;
---- a/tools/libs/light/libxl_internal.h
-+++ b/tools/libs/light/libxl_internal.h
-@@ -2112,6 +2112,10 @@ typedef struct libxl__qmp_handler libxl_
-  */
- _hidden libxl__qmp_handler *libxl__qmp_initialize(libxl__gc *gc,
-                                                   uint32_t domid);
-+/* Exit QEMU */
-+_hidden int libxl__qmp_quit(libxl__gc *gc, int domid);
-+/* Suspend QEMU. */
-+_hidden int libxl__qmp_stop(libxl__gc *gc, int domid);
- /* Resume QEMU. */
- _hidden int libxl__qmp_resume(libxl__gc *gc, int domid);
- /* Load current QEMU state from file. */
---- a/tools/libs/light/libxl_qmp.c
-+++ b/tools/libs/light/libxl_qmp.c
-@@ -764,6 +764,16 @@ int libxl__qmp_restore(libxl__gc *gc, in
-                            NULL, NULL);
- }
- 
-+int libxl__qmp_quit(libxl__gc *gc, int domid)
-+{
-+    return qmp_run_command(gc, domid, "quit", NULL, NULL, NULL);
-+}
-+
-+int libxl__qmp_stop(libxl__gc *gc, int domid)
-+{
-+    return qmp_run_command(gc, domid, "stop", NULL, NULL, NULL);
-+}
-+
- int libxl__qmp_resume(libxl__gc *gc, int domid)
- {
-     return qmp_run_command(gc, domid, "cont", NULL, NULL, NULL);
 --- a/tools/xl/xl_vmcontrol.c
 +++ b/tools/xl/xl_vmcontrol.c
 @@ -109,7 +109,7 @@ int main_destroy(int argc, char **argv)
