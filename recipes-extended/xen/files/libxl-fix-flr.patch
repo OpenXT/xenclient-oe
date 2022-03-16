@@ -7,24 +7,18 @@ Fix device reset for pci devices in libxl
 LONG DESCRIPTION:
 ################################################################################
 This patch fixes the logic and the control flow path for pci device reset in
-libxl.  Additionally, it addresses an issue with Xenbus state synchronization
-during domain teardown.  More detailed information about the patch follows:
+libxl.
 
-The changes to Xenbus state are to prevent hitting a timeout when domains are 
-shutdown or destroyed. Xl is waiting for "XenbusStateConnected" (state 4), while 
-the state machine has already moved the device to Closing (state 5) and Closed 
-(state 6) by the time we reach this point tearing down the domain.
-
-The reset logic introduced in this patch is delayed until the domain has fully 
-been destroyed. The reason for this has to do with the 
-thorough-reset-interface-to-pciback-s-sysfs.patch in the linux patchqueue. 
-__pcistub_raw_device_reset tries multiple approaches for resetting the device, 
-flr, slot-level, and bus-level. If we encounter a device that, for example, 
-doesn't support flr but does support a slot-level reset, we want to make sure 
-all the functions on that device (GPUS are a good example, they often have 2 
-functions, video and HDMI audio, and are the only device in the slot) are 
-released from the domain before attempting the reset or it will fail. This 
-approach seems to be taken in an attempt to support a wide variety of PCI 
+The reset logic introduced in this patch is delayed until the domain has fully
+been destroyed. The reason for this has to do with the
+thorough-reset-interface-to-pciback-s-sysfs.patch in the linux patchqueue.
+__pcistub_raw_device_reset tries multiple approaches for resetting the device,
+flr, slot-level, and bus-level. If we encounter a device that, for example,
+doesn't support flr but does support a slot-level reset, we want to make sure
+all the functions on that device (GPUS are a good example, they often have 2
+functions, video and HDMI audio, and are the only device in the slot) are
+released from the domain before attempting the reset or it will fail. This
+approach seems to be taken in an attempt to support a wide variety of PCI
 devices.
 
 ################################################################################
@@ -111,30 +105,6 @@ PATCHES
  };
 --- a/tools/libs/light/libxl_pci.c
 +++ b/tools/libs/light/libxl_pci.c
-@@ -243,7 +243,7 @@ static int libxl__device_pci_remove_xens
-         return ERROR_FAIL;
- 
-     if (domtype == LIBXL_DOMAIN_TYPE_PV) {
--        if (libxl__wait_for_backend(gc, be_path, GCSPRINTF("%d", XenbusStateConnected)) < 0) {
-+        if (libxl__wait_for_backend(gc, be_path, GCSPRINTF("%d", XenbusStateClosed)) < 0) {
-             LOGD(DEBUG, domid, "pci backend at %s is not ready", be_path);
-             return ERROR_FAIL;
-         }
-@@ -266,13 +266,12 @@ static int libxl__device_pci_remove_xens
- retry_transaction:
-     t = xs_transaction_start(ctx->xsh);
-     xs_write(ctx->xsh, t, GCSPRINTF("%s/state-%d", be_path, i), GCSPRINTF("%d", XenbusStateClosing), 1);
--    xs_write(ctx->xsh, t, GCSPRINTF("%s/state", be_path), GCSPRINTF("%d", XenbusStateReconfiguring), 1);
-     if (!xs_transaction_end(ctx->xsh, t, 0))
-         if (errno == EAGAIN)
-             goto retry_transaction;
- 
-     if (domtype == LIBXL_DOMAIN_TYPE_PV) {
--        if (libxl__wait_for_backend(gc, be_path, GCSPRINTF("%d", XenbusStateConnected)) < 0) {
-+        if (libxl__wait_for_backend(gc, be_path, GCSPRINTF("%d", XenbusStateClosed)) < 0) {
-             LOGD(DEBUG, domid, "pci backend at %s is not ready", be_path);
-             return ERROR_FAIL;
-         }
 @@ -1510,13 +1509,13 @@ out:
      pas->callback(egc, pas, rc);
  }
