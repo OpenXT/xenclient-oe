@@ -164,6 +164,42 @@ txt_failure()
 
 unseal_failure()
 {
+    # /tmp isn't available yet
+    mkdir /dev/pcrs
+    # forward_pcr.lst format:
+    # (foward|current|skipped) $p:$hash
+    # We only care about forward and current - not skipped - grab $p:$hash
+    awk '/forward |current /{ print $2 }' \
+        /boot/system/tpm/forward_pcr.lst > /dev/pcrs/expected
+    # Get used pcrs
+    pcrs=$( cut -d: -f1 < /dev/pcrs/expected )
+
+    i=0
+    do_diff=1
+
+    for p in $pcrs ; do
+        i=$(( i + 1 ))
+        if [ "$i" -ge 24 ]; then
+            do_diff=0
+            pcr_diff="Diff skipped - too many lines in forward_pcr.lst"
+            break
+        fi
+        # Only accept valid PCRs
+        if [ "$p" -ge 0 ] && [ "$p" -le 23 ] ; then
+            echo "$p:$( tpm_get_pcr "$p" )" >> /dev/pcrs/current
+        else
+            do_diff=0
+            pcr_diff="Diff skipped - unexpected data in forward_pcr.lst"
+            break
+        fi
+    done
+
+    if [ "$do_diff" = "1" ] ; then
+        pcr_diff="$( diff -u /dev/pcrs/expected /dev/pcrs/current )"
+    fi
+
+    rm -rf /dev/pcrs
+
     dialog --colors --backtitle "${BACK_TITLE}" --defaultno \
         --yes-label "Continue" --no-label "Shutdown" --yesno "
           \ZbSECURITY WARNING: Measured Launch Unseal FAILED\ZB
@@ -171,6 +207,10 @@ unseal_failure()
     The failure is due to a mismatch between sealed and current
     PCR values. Primarily this is the result of either an upgrade
     or the tampering of the system.
+
+    You can't trust me - I may be compromised - but here is a diff
+    of the PCRs:
+$pcr_diff
 
     If a system change is expected, then you may enter the
     recovery passphrase to continue launching the system." 0 0
