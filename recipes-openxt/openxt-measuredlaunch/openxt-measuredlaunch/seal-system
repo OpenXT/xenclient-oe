@@ -78,6 +78,7 @@ tpm_ver="$(get_tpm_version)"
 operation="seal"
 config_key="/config/keys/config.key"
 sealed_key="/boot/system/tpm/config.tss"
+forward_seal_list=/boot/system/tpm/forward_pcr.lst
 config_pcrs="/config/config.pcrs"
 good_pcrs="/config/good.pcrs"
 bad_pcrs="/boot/system/tpm/bad.pcrs"
@@ -231,11 +232,17 @@ forward)
         pcr_forward[19]=":${pcr19}"
     fi
 
-    rm -f /boot/system/tpm/forward_pcr.lst
-    for p in ${pcr_selection}; do
-        pcr_params="${pcr_params} -p ${p}${pcr_forward[${p}]}"
-        if [ -n "${pcr_forward[${p}]}" ]; then
-            echo "${p}${pcr_forward[${p}]}" >> /boot/system/tpm/forward_pcr.lst
+    rm -f $forward_seal_list
+    for p in $( seq 0 23 ) ; do
+        if pcr_in_selection "$p" ; then
+            pcr_params="${pcr_params} -p ${p}${pcr_forward[${p}]}"
+            if [ -n "${pcr_forward[${p}]}" ]; then
+                echo "forward ${p}${pcr_forward[${p}]}" >> $forward_seal_list
+            else
+                echo "current $p:$( tpm_get_pcr "$p")" >> $forward_seal_list
+            fi
+        else
+            echo "skipped $p:$( tpm_get_pcr "$p")" >> $forward_seal_list
         fi
     done
 
