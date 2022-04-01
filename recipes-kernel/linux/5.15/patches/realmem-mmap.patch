@@ -1,20 +1,19 @@
 ################################################################################
 SHORT DESCRIPTION: 
 ################################################################################
-Remove PNP_DISABLE capability for serial port on 0x3f8 as Xen uses it and will
-disable it when going to S3.
+Give additional flags to /dev/mem mmap()'ed pages.
 
 ################################################################################
 LONG DESCRIPTION: 
 ################################################################################
-Disables the functionality to evaluate ACPI _DIS method on serial 0x3f8 which
-is used by Xen logging. Fixes S3 for machines with PNP serial port. Xen is
-supposed to disable the serial port as it uses it.
+Force VM_SPECIAL (special vmas that are non-mergable, non-mlock()able) and
+VM_DONTDUMP (Do not include in the core dump) flags on pages mapped using
+/dev/mem char device.
 
 ################################################################################
 CHANGELOG 
 ################################################################################
-Original Author: unknown
+Original author: unknown
 Port to 3.18: Eric Chanudet <chanudete@ainfosec.com>
 Port to 4.14: Richard Turner <turnerr@ainfosec.com>
 Port to 4.19: Richard Turner <turnerr@ainfosec.com>
@@ -22,8 +21,7 @@ Port to 4.19: Richard Turner <turnerr@ainfosec.com>
 ################################################################################
 REMOVAL 
 ################################################################################
-Without this work-around, S3 is known to fail on machines with PNP serial ports.
-(Optiplex 980 for example).
+?
 
 ################################################################################
 UPSTREAM PLAN
@@ -33,21 +31,27 @@ None.
 ################################################################################
 INTERNAL DEPENDENCIES 
 ################################################################################
-None.
+?
 
 ################################################################################
 PATCHES 
 ################################################################################
---- a/drivers/tty/serial/8250/8250_pnp.c
-+++ b/drivers/tty/serial/8250/8250_pnp.c
-@@ -454,6 +454,10 @@ serial_pnp_probe(struct pnp_dev *dev, co
- 	} else if (pnp_port_valid(dev, 0)) {
- 		uart.port.iobase = pnp_port_start(dev, 0);
- 		uart.port.iotype = UPIO_PORT;
-+               /* Xen uses port 3f8 for logging, turn off ability to disable it as it breaks suspend */
-+               if (uart.port.iobase == 0x3f8) {
-+                       dev->capabilities &= ~PNP_DISABLE;
-+               }
- 	} else if (pnp_mem_valid(dev, 0)) {
- 		uart.port.mapbase = pnp_mem_start(dev, 0);
- 		uart.port.iotype = UPIO_MEM;
+--- a/drivers/char/mem.c
++++ b/drivers/char/mem.c
+@@ -385,9 +385,13 @@ static int mmap_mem(struct file *file, s
+ 						&vma->vm_page_prot))
+ 		return -EINVAL;
+ 
+-	vma->vm_page_prot = phys_mem_access_prot(file, vma->vm_pgoff,
+-						 size,
+-						 vma->vm_page_prot);
++	vma->vm_flags |= VM_DONTDUMP | VM_SPECIAL;
++	vma->vm_page_prot =  __pgprot(
++			pgprot_val(vm_get_page_prot(vma->vm_flags)) |
++			pgprot_val(phys_mem_access_prot(file,
++				vma->vm_pgoff,
++				size,
++				vma->vm_page_prot)));
+ 
+ 	vma->vm_ops = &mmap_mem_ops;
+ 

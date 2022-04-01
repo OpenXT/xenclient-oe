@@ -33,16 +33,10 @@ SRC_URI += "${KERNELORG_MIRROR}/linux/kernel/v${PV_MAJOR}.x/linux-${PV}.tar.xz;n
     file://netback-vwif-support.patch \
     file://xen-txt-add-xen-txt-eventlog-module.patch \
     file://xenpv-no-tty0-as-default-console.patch \
-    file://xsa-155-qsb-023-add-RING_COPY_RESPONSE.patch \
-    file://xsa-155-qsb-023-xen-blkfront-make-local-copy-of-response-before-usin.patch \
-    file://xsa-155-qsb-023-xen-blkfront-prepare-request-locally-only-then-put-i.patch \
-    file://xsa-155-qsb-023-xen-netfront-add-range-check-for-Tx-response-id.patch \
-    file://xsa-155-qsb-023-xen-netfront-copy-response-out-of-shared-buffer-befo.patch \
-    file://xsa-155-qsb-023-xen-netfront-do-not-use-data-already-exposed-to-back.patch \
     file://tpm_tis-work-around-status-register-bug-in-STMicroelectronics-TPM.patch \
     file://defconfig \
     "
 
 LIC_FILES_CHKSUM = "file://COPYING;md5=6bc538ed5bd9a7fc9398086aedcd7e46"
-SRC_URI[kernel.md5sum] = "7431b0b5fecd1dd01665de90c2d98064"
-SRC_URI[kernel.sha256sum] = "b0d16de7e79c272b01996ad8ff8bdf3a6a011bc0c94049baccf69f05dde3025e"
+SRC_URI[kernel.md5sum] = "fc75d0d1ad8a36f39cdb439e81371945"
+SRC_URI[kernel.sha256sum] = "5905e684602c47ae95746d4003cb834335e5451aca4ac7c3013f15dd49ed876e"
