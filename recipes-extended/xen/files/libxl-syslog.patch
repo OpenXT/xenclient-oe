@@ -221,7 +221,15 @@ PATCHES
  void libxl__logv(libxl_ctx *ctx, xentoollog_level msglevel, int errnoval,
               const char *file, int line, const char *func,
               uint32_t domid, const char *fmt, va_list ap)
-@@ -238,10 +266,15 @@ void libxl__logv(libxl_ctx *ctx, xentool
+@@ -251,6 +251,7 @@ void libxl__logv(libxl_ctx *ctx, xentoollo
+     int rc, esave;
+     char fileline[256];
+     char domain[256];
++    char errbuf[96], *errp = NULL;
+ 
+     esave = errno;
+ 
+@@ -238,10 +266,20 @@ void libxl__logv(libxl_ctx *ctx, xentool
      if (libxl_domid_valid_guest(domid))
          snprintf(domain, sizeof(domain), "Domain %"PRIu32":", domid);
   x:
@@ -234,9 +242,14 @@ PATCHES
 +    /*         fileline, func&&file?":":"", func?func:"", func||file?": ":"", */
 +    /*         domain, base); */
 +    /* OpenXT: we use syslog */
-+    syslog(LOG_USER | xtl_level_to_syslog_level(msglevel), "[%d] %s%s%s%s%s%s",
++    if (errnoval >= 0) {
++        /* Using GNU variant which may return a static string and not
++         * update errbuf. */
++        errp = strerror_r(errnoval, errbuf, sizeof(errbuf));
++    }
++    syslog(LOG_USER | xtl_level_to_syslog_level(msglevel), "[%d] %s%s%s%s%s%s%s%s",
 +           getpid(), fileline, func&&file?":":"", func?func:"",
-+           func||file?":":"", domain, base);
++           func||file?":":"", domain, base, errp?":":"", errp?errp:"");
 +
      if (base != enomem) free(base);
      errno = esave;
