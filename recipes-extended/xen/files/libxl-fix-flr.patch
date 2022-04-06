@@ -46,22 +46,41 @@ PATCHES
 ################################################################################
 --- a/tools/libs/light/libxl_domain.c
 +++ b/tools/libs/light/libxl_domain.c
-@@ -1186,6 +1186,14 @@ static void domain_destroy_callback(libx
-         dds->rc = rc;
-     }
- 
-+    if(dis->pciw) {
-+        for (int i = 0; i < dis->pciw->num_devs; i++) {
-+            libxl_device_pci *pci = &dis->pciw->pcis[i];
-+            libxl__device_pci_reset(gc, pci->domain, pci->bus, pci->dev, pci->func);
-+        }
-+        libxl_device_pci_list_free(dis->pciw->pcis, dis->pciw->num_devs);
-+    }
-+
-     dds->domain_finished = 1;
+@@ -1190,12 +1190,33 @@ static void domain_destroy_callback(libx
      destroy_finish_check(egc, dds);
  }
-@@ -1259,7 +1267,7 @@ void libxl__destroy_domid(libxl__egc *eg
+ 
++static void reset_pci_devices(libxl__destroy_domid_state *dis)
++{
++    STATE_AO_GC(dis->ao);
++
++    if (dis->pciw == NULL)
++        return;
++
++    for (int i = 0; i < dis->pciw->num_devs; i++) {
++        libxl_device_pci *pci = &dis->pciw->pcis[i];
++        libxl__device_pci_reset(gc, pci->domain, pci->bus, pci->dev,
++                                pci->func);
++    }
++
++    libxl_device_pci_list_free(dis->pciw->pcis, dis->pciw->num_devs);
++}
++
+ static void destroy_finish_check(libxl__egc *egc,
+                                  libxl__domain_destroy_state *dds)
+ {
+     if (!(dds->domain_finished && dds->stubdom_finished))
+         return;
+ 
++    if (dds->domain.pciw)
++        reset_pci_devices(&dds->domain);
++    if (dds->stubdom.pciw)
++        reset_pci_devices(&dds->stubdom);
++
+     dds->callback(egc, dds, dds->rc);
+ }
+ 
+@@ -1259,7 +1280,7 @@ void libxl__destroy_domid(libxl__egc *eg
  
      libxl__multidev_begin(ao, &dis->multidev);
      dis->multidev.callback = destroy_domid_pci_done;
@@ -132,7 +151,7 @@ PATCHES
      if (!isstubdom) {
          rc = xc_deassign_device(CTX->xch, domid, pci_encode_bdf(pci));
          if (rc < 0 && (prs->hvm || errno != ENOSYS))
-@@ -2501,7 +2496,8 @@ static int libxl__device_pci_get_path(li
+@@ -2501,15 +2496,18 @@ static int libxl__device_pci_get_path(li
  }
  
  void libxl__device_pci_destroy_all(libxl__egc *egc, uint32_t domid,
@@ -142,7 +161,18 @@ PATCHES
  {
      STATE_AO_GC(multidev->ao);
      libxl_device_pci *pcis;
-@@ -2521,7 +2517,12 @@ void libxl__device_pci_destroy_all(libxl
+     int num, i;
+ 
+     pcis = libxl_device_pci_list(CTX, domid, &num);
+-    if ( pcis == NULL )
++    if ( pcis == NULL ) {
++        *pciw = NULL;
+         return;
++    }
+ 
+     for (i = 0; i < num; i++) {
+         /* Force remove on shutdown since, on HVM, qemu will not always
+@@ -2521,7 +2519,12 @@ void libxl__device_pci_destroy_all(libxl
                                          aodev);
      }
  
