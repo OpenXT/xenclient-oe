@@ -46,7 +46,7 @@ PATCHES
 ################################################################################
 --- a/tools/libs/light/libxl_domain.c
 +++ b/tools/libs/light/libxl_domain.c
-@@ -1188,6 +1188,15 @@ static void domain_destroy_callback(libx
+@@ -1186,6 +1186,14 @@ static void domain_destroy_callback(libx
          dds->rc = rc;
      }
  
@@ -55,14 +55,13 @@ PATCHES
 +            libxl_device_pci *pci = &dis->pciw->pcis[i];
 +            libxl__device_pci_reset(gc, pci->domain, pci->bus, pci->dev, pci->func);
 +        }
-+        free(dis->pciw->pcis);
-+        free(dis->pciw);
++        libxl_device_pci_list_free(dis->pciw->pcis, dis->pciw->num_devs);
 +    }
 +
      dds->domain_finished = 1;
      destroy_finish_check(egc, dds);
  }
-@@ -1270,7 +1279,7 @@ void libxl__destroy_domid(libxl__egc *eg
+@@ -1259,7 +1267,7 @@ void libxl__destroy_domid(libxl__egc *eg
  
      libxl__multidev_begin(ao, &dis->multidev);
      dis->multidev.callback = destroy_domid_pci_done;
@@ -73,7 +72,7 @@ PATCHES
  
 --- a/tools/libs/light/libxl_internal.h
 +++ b/tools/libs/light/libxl_internal.h
-@@ -1726,12 +1726,20 @@ _hidden int libxl__pci_topology_init(lib
+@@ -1724,12 +1724,20 @@ _hidden int libxl__pci_topology_init(lib
                                       int num_devs);
  
  /* from libxl_pci */
@@ -95,7 +94,7 @@ PATCHES
  _hidden int libxl__device_pci_setdefault(libxl__gc *gc, uint32_t domid,
                                           libxl_device_pci *pci, bool hotplug);
  _hidden bool libxl__is_igd_vga_passthru(libxl__gc *gc,
-@@ -4092,6 +4100,7 @@ struct libxl__destroy_domid_state {
+@@ -4086,6 +4094,7 @@ struct libxl__destroy_domid_state {
      libxl__devices_remove_state drs;
      libxl__destroy_devicemodel_state ddms;
      libxl__ev_child destroyer;
@@ -105,7 +104,7 @@ PATCHES
  };
 --- a/tools/libs/light/libxl_pci.c
 +++ b/tools/libs/light/libxl_pci.c
-@@ -1510,13 +1509,13 @@ out:
+@@ -1542,13 +1542,13 @@ out:
      pas->callback(egc, pas, rc);
  }
  
@@ -121,7 +120,7 @@ PATCHES
      fd = open(reset, O_WRONLY);
      if (fd >= 0) {
          char *buf = GCSPRINTF(PCI_BDF, domain, bus, dev, func);
-@@ -2214,11 +2213,6 @@ static void pci_remove_detached(libxl__e
+@@ -2246,11 +2246,6 @@ static void pci_remove_detached(libxl__e
  
      isstubdom = libxl_is_stubdom(CTX, domid, &domainid);
  
@@ -133,7 +132,7 @@ PATCHES
      if (!isstubdom) {
          rc = xc_deassign_device(CTX->xch, domid, pci_encode_bdf(pci));
          if (rc < 0 && (prs->hvm || errno != ENOSYS))
-@@ -2469,7 +2463,8 @@ static int libxl__device_pci_get_path(li
+@@ -2501,7 +2496,8 @@ static int libxl__device_pci_get_path(li
  }
  
  void libxl__device_pci_destroy_all(libxl__egc *egc, uint32_t domid,
@@ -143,12 +142,13 @@ PATCHES
  {
      STATE_AO_GC(multidev->ao);
      libxl_device_pci *pcis;
-@@ -2489,7 +2484,11 @@ void libxl__device_pci_destroy_all(libxl
+@@ -2521,7 +2517,12 @@ void libxl__device_pci_destroy_all(libxl
                                          aodev);
      }
  
 -    libxl_device_pci_list_free(pcis, num);
-+    *pciw = malloc(sizeof(libxl_pci_dev_wrap));
++    /* pcis is freed in domain_destroy_callback. */
++    *pciw = libxl__malloc(gc, sizeof(libxl_pci_dev_wrap));
 +    if (*pciw) {
 +        (*pciw)->pcis = pcis;
 +        (*pciw)->num_devs = num;
