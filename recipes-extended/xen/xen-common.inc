@@ -11,7 +11,6 @@ SRC_URI_append = " \
     file://kconfig-grant-table-v2-interface.patch \
     file://kconfig-grant-table-exotic.patch \
     file://hvm-pm-hibernate-s-state.patch;patch=1 \
-    file://prune-vga-acpi-dev.patch;patch=1 \
     file://smbios.patch;patch=1 \
     file://evtchn-do-not-set-pending-if-s3.patch;patch=1 \
     file://hvm-rtc.patch;patch=1 \
