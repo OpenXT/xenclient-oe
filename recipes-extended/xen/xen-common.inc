@@ -67,6 +67,7 @@ SRC_URI_append = " \
     file://libxl-disable-dom0-qemu.patch \
     file://libxl-xen-disable-dom0-qemu.patch \
     file://0001-libxl-Enable-stubdom-cdrom-changing.patch \
+    file://0001-libxl-Don-t-leak-self-pipes.patch \
     file://libxl-add-xen-acpi-pm.patch \
 "
 
