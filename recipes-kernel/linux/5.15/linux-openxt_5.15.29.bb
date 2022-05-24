@@ -15,7 +15,6 @@ SRC_URI += "${KERNELORG_MIRROR}/linux/kernel/v${PV_MAJOR}.x/linux-${PV}.tar.xz;n
     file://extra-mt-input-devices.patch \
     file://tpm-log-didvid.patch \
     file://blktap2.patch \
-    file://intel-amt-support.patch \
     file://disable-csum-xennet.patch \
     file://pci-pt-move-unaligned-resources.patch \
     file://pci-pt-flr.patch \
