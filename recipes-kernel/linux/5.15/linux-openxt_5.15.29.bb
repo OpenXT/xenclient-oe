@@ -19,7 +19,6 @@ SRC_URI += "${KERNELORG_MIRROR}/linux/kernel/v${PV_MAJOR}.x/linux-${PV}.tar.xz;n
     file://disable-csum-xennet.patch \
     file://pci-pt-move-unaligned-resources.patch \
     file://pci-pt-flr.patch \
-    file://realmem-mmap.patch \
     file://usbback-base.patch \
     file://hvc-kgdb-fix.patch \
     file://pciback-restrictive-attr.patch \
