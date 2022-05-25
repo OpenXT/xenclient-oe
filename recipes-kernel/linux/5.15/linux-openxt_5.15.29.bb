@@ -10,7 +10,6 @@ PV_MAJOR = "${@"${PV}".split('.', 3)[0]}"
 FILESEXTRAPATHS_prepend := "${THISDIR}/patches:${THISDIR}/defconfigs:"
 SRC_URI += "${KERNELORG_MIRROR}/linux/kernel/v${PV_MAJOR}.x/linux-${PV}.tar.xz;name=kernel \
     file://bridge-carrier-follow-prio0.patch \
-    file://skb-forward-copy-bridge-param.patch \
     file://dont-suspend-xen-serial-port.patch \
     file://extra-mt-input-devices.patch \
     file://blktap2.patch \
