@@ -21,7 +21,6 @@ SRC_URI += "${KERNELORG_MIRROR}/linux/kernel/v${PV_MAJOR}.x/linux-${PV}.tar.xz;n
     file://hvc-kgdb-fix.patch \
     file://pciback-restrictive-attr.patch \
     file://thorough-reset-interface-to-pciback-s-sysfs.patch \
-    file://tpm-tis-force-ioremap.patch \
     file://netback-vwif-support.patch \
     file://xen-txt-add-xen-txt-eventlog-module.patch \
     file://xenpv-no-tty0-as-default-console.patch \
