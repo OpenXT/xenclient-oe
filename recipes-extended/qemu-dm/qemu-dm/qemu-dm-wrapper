@@ -41,4 +41,17 @@ export QEMU_ALSA_VOL_CTRL=vm-${ALSA_VMID}
 
 ARGS="$*"
 
-exec /usr/bin/qemu-system-i386 $ARGS 2>&1 | logger -t qemu-$DOMID
+# libxl tracks $$ as the pid to HUP or KILL when terminating a qemu process.
+# We want to run `exec qemu | logger` with qemu replacing the current process
+# at the current PID, that exec actually runs in a subshell, so the PID isn't
+# re-used.  Instead we have the current process stay and just forward any HUP
+# signals to the real QEMU process
+
+/usr/bin/qemu-system-i386 $ARGS 2>&1 | logger -t qemu-$DOMID &
+
+sighup() {
+	kill -HUP %/usr/bin/qemu-system-i386
+}
+
+trap sighup SIGHUP
+wait
