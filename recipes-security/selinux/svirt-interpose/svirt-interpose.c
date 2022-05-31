@@ -32,7 +32,7 @@
 
 #define BUF_SIZE      256
 #define LOCAL_DOMAINS "/local/domain"
-/* #define QEMU          "/opt/xensource/libexec/qemu-dm-wrapper-old" */
+#define QEMU_CONTEXT  "system_u:system_r:qemu_t:s0"
 #define QEMU          "/usr/bin/qemu-dm-wrapper"
 #define RAND_DEV      "/dev/random"
 
@@ -46,13 +46,11 @@ static char*    do_read                    (xs_handle_t*, char*);
 static bool     do_write                   (xs_handle_t*, char*, char*);
 static void     exec_cmd                   (char**);
 static int      file_con_fixup             (data_t*);
-static int      get_default_contexts       (data_t*);
 static int      get_domid_by_mcs           (xs_handle_t*, uint16_t);
 static char**   get_vbd_nums               (xs_handle_t*, int, int*);
 static char*    get_vbd_backend            (xs_handle_t*, char*);
 static char*    get_vbd_file               (xs_handle_t*, char*);
 static char**   get_writable_files         (xs_handle_t*, int);
-static int      read_single_context        (char*, const char*, size_t);
 static bool     set_domid_category         (xs_handle_t*, int, uint16_t);
 static bool     set_exec_context           (data_t*);
 static bool     vbd_is_writable            (xs_handle_t*, char*);
@@ -68,7 +66,7 @@ struct data {
 int
 main (int argc, char **argv)
 {
-        data_t data = { 0, };
+        data_t data = { .domain_context = QEMU_CONTEXT, };
         int retval = EXIT_SUCCESS, i = 0, cat_result = 0;
 
         openlog (argv[0], LOG_NOWAIT | LOG_PID, LOG_DAEMON);
@@ -114,13 +112,7 @@ main (int argc, char **argv)
                 retval = EXIT_FAILURE;
                 goto exit_files;
         }
-        /*  SELinux stuff  */
-        /*  get SELinux default contexts  */
-        if (get_default_contexts (&data) != 0) {
-                syslog (LOG_CRIT, "ERROR getting default contexts. Halting");
-                retval = EXIT_FAILURE;
-                goto exit_files;
-        }
+
         /*  label files  */
         if (file_con_fixup (&data) != 0) {
                 syslog (LOG_CRIT,
@@ -245,23 +237,7 @@ file_con_fixup (data_t *data)
         freecon (sec_con);
         return ret;
 }
-/*  Gets the default context for virtualization processes and populates
- *  the data_t structure accordingly.
- */
-static int
-get_default_contexts (data_t *data)
-{
-        int ret = 0;
 
-        ret = read_single_context (data->domain_context,
-                                   selinux_virtual_domain_context_path (),
-                                   sizeof (data->domain_context));
-        if (ret != 0) {
-                syslog (LOG_CRIT, "read single failed. ret: %d", ret);
-                return ret;
-        }
-        return 0;
-}
 static bool
 set_domid_category (xs_handle_t *xsh, int domid, uint16_t mcs)
 {
@@ -549,36 +525,7 @@ exit_free:
 exit:
         return vbd_paths;
 }
-/*  Wrapper around fopen/getline calls to read a single line from a file.  This
- *  is necessary in order to read default contexts from virtualization specific
- *  files in /etc/selinux/policy/contexts/
- */
-static int
-read_single_context (char* buf, const char* file_path, size_t size)
-{
-        FILE* fstream = { 0, };
-	char* tmp;
 
-        fstream = fopen(file_path, "r");
-        if (fstream == NULL) {
-                syslog (LOG_CRIT, "error opening file %s: %s", file_path, strerror (errno));
-                return -1;
-        }
-        if (getline(&buf, &size, fstream) == -1) {
-                syslog (LOG_CRIT, "error getting line from %s: %s", file_path, strerror (errno));
-                fclose (fstream);
-                return -1;
-        }
-        fclose (fstream);
-        /*  Contents of file may have trailing new line after context.
-         *  The context_* functions require that this be removed.
-         */
-	tmp = strchrnul (buf, '\n');
-        *tmp = '\0';
-        return 0;
-}
-/*  wrapper around xs_write
- */
 static bool
 do_write (xs_handle_t *xsh, char *path, char *data)
 {
