@@ -44,7 +44,7 @@ static char*    create_context             (char*, char*);
 static char**   do_directory               (xs_handle_t*, char*, unsigned*);
 static char*    do_read                    (xs_handle_t*, char*);
 static bool     do_write                   (xs_handle_t*, char*, char*);
-static void     exec_cmd                   (char**);
+static void     exec_cmd                   (char**, char *[]);
 static int      file_con_fixup             (data_t*);
 static int      get_domid_by_mcs           (xs_handle_t*, uint16_t);
 static char**   get_vbd_nums               (xs_handle_t*, int, int*);
@@ -64,7 +64,7 @@ struct data {
 };
 
 int
-main (int argc, char **argv)
+main (int argc, char **argv, char *envp[])
 {
         data_t data = { .domain_context = QEMU_CONTEXT, };
         int retval = EXIT_SUCCESS, i = 0, cat_result = 0;
@@ -143,7 +143,7 @@ exit:
         closelog ();
         /*  execute the real qemu if no previous errors prevent it  */
         if (retval != EXIT_FAILURE)
-                exec_cmd (argv);
+                exec_cmd (argv, envp);
         exit (retval);
 }
 /*  Build a context from the domain_context and category fields of the data_t
@@ -576,10 +576,10 @@ do_directory (xs_handle_t *xsh, char* path, unsigned *len)
 /*  Final function called to execute QEMU.  Does some basic cleanup as well.
  */
 static void
-exec_cmd (char** argv)
+exec_cmd (char** argv, char *envp[])
 {
         argv [0] = QEMU;
-        execve (QEMU, argv, NULL);
+        execve (QEMU, argv, envp);
         perror ("exec");
 }
 /*  Basic function to build string representation of context from
