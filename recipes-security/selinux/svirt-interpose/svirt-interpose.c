@@ -27,6 +27,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <syslog.h>
+#include <sys/random.h>
 #include <unistd.h>
 #include <xenstore.h>
 
@@ -34,7 +35,6 @@
 #define LOCAL_DOMAINS "/local/domain"
 #define QEMU_CONTEXT  "system_u:system_r:qemu_t:s0"
 #define QEMU          "/usr/bin/qemu-dm-wrapper"
-#define RAND_DEV      "/dev/random"
 
 typedef struct data data_t;
 typedef struct xs_handle xs_handle_t;
@@ -271,26 +271,17 @@ set_domid_category (xs_handle_t *xsh, int domid, uint16_t mcs)
 static int
 create_category (xs_handle_t *xsh)
 {
-        int fd = 0, ret = 0, domid = 0;
-        char *val = NULL;
+        int ret = 0, domid = 0;
         /*  current SELinux MCS uses 1024 categories: 0 - 1023  */
         uint16_t random = 0;
 
         /*  generate random category number  */
-        fd = open (RAND_DEV, O_RDONLY);
-        if (fd == -1) {
-                syslog (LOG_CRIT, "error opening %s: %s", RAND_DEV, strerror (errno));
-                return -1;
-        }
         do {
-                if (val)
-                        free (val);
-                ret = read (fd, &random, sizeof (random));
+                ret = getrandom (&random, sizeof (random), 0);
                 if (ret != sizeof (random)) {
                         if (ret == -1) {
                                 syslog (LOG_CRIT,
-                                        "error reading from %s: %s",
-                                        RAND_DEV,
+                                        "error calling getrandom: %s",
                                         strerror (errno));
                                 return -1;
                         } else
@@ -309,7 +300,6 @@ create_category (xs_handle_t *xsh)
                         return -1;
                 }
         } while (ret != -1);
-        close (fd);
         /*  return integer value  */
         return random;
 }
