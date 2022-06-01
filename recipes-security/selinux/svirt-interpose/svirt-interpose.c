@@ -124,7 +124,7 @@ main (int argc, char **argv, char *envp[])
         if (set_exec_context (&data) != true) {
                 syslog (LOG_CRIT,
                         "ERROR setting context to %s for qemu execution: %s. Halting",
-                        strerror (errno));
+                        data.domain_context, strerror (errno));
                 retval = EXIT_FAILURE;
                 goto exit_files;
         }
