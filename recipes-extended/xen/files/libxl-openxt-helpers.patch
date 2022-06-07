@@ -60,10 +60,26 @@ PATCHES
          }
          if (!libxl__acpi_defbool_val(b_info)) {
              flexarray_append(dm_args, "-no-acpi");
-@@ -2258,6 +2262,25 @@ char *libxl__stub_dm_name(libxl__gc *gc,
+@@ -2258,6 +2262,42 @@ char *libxl__stub_dm_name(libxl__gc *gc,
      return GCSPRINTF("%s-dm", guest_name);
  }
  
++static void reset_fds(libxl__gc *gc)
++{
++        int nullfd;
++
++        nullfd = open("/dev/null", O_RDONLY);
++        dup2(nullfd, 0);
++        close(nullfd);
++
++        nullfd = open("/dev/null", O_WRONLY);
++        dup2(nullfd, 1);
++        dup2(nullfd, 2);
++        close(nullfd);
++
++        xs_daemon_destroy_postfork(CTX->xsh);
++}
++
 +static void fork_helper(libxl__gc *gc, const char *helper_path,
 +                        const char *xs_pid_key, int guest_domid, int dm_domid)
 +{
@@ -72,10 +88,11 @@ PATCHES
 +    pid = fork();
 +    if (pid == -1)
 +        LOG(ERROR, "Failed to fork");
-+    else if (pid == 0)
++    else if (pid == 0) {
++        reset_fds(gc);
 +        execl(helper_path, helper_path, GCSPRINTF("%d", guest_domid),
 +              GCSPRINTF("%d", dm_domid), NULL);
-+    else
++    } else
 +        libxl__xs_printf(gc, XBT_NULL,
 +                         GCSPRINTF("%s/%s",
 +                                   libxl__xs_get_dompath(gc, dm_domid),
@@ -86,7 +103,7 @@ PATCHES
  void libxl__spawn_stub_dm(libxl__egc *egc, libxl__stub_dm_spawn_state *sdss)
  {
      STATE_AO_GC(sdss->dm.spawn.ao);
-@@ -2382,6 +2405,17 @@ void libxl__spawn_stub_dm(libxl__egc *eg
+@@ -2382,6 +2422,17 @@ void libxl__spawn_stub_dm(libxl__egc *eg
          goto out;
      }
  
