@@ -1,7 +1,6 @@
 FILESEXTRAPATHS_prepend := "${THISDIR}/patches:"
 
 SRC_URI += " \
-    file://0001-Make-the-default-DBus-reply-timeout-configurable.patch \
     file://add-domid-authentication.patch \
     file://fix-segfault-bus_connection_disconnected.patch \
 "
