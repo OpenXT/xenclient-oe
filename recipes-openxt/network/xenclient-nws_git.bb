@@ -2,7 +2,6 @@ DESCRIPTION = "XenClient Network Slave"
 LICENSE = "GPLv2"
 LIC_FILES_CHKSUM="file://../COPYING;md5=4641e94ec96f98fabc56ff9cc48be14b"
 DEPENDS = " \
-    carrier-detect \
     libxchutils \
     hkg-hsyslog \
     libxch-rpc \
@@ -15,8 +14,12 @@ DEPENDS = " \
     hkg-network \
 "
 RDEPENDS_${PN} += " \
+    bridge-utils \
+    carrier-detect \
     glibc-gconv-utf-32 \
     iproute2 \
+    iptables \
+    networkmanager \
 "
 
 require network.inc

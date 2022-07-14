@@ -51,11 +51,8 @@ IMAGE_INSTALL = " \
     libargo-bin \
     dbus \
     xenclient-dbusbouncer \
-    networkmanager \
     linux-firmware-iwlwifi \
     linux-firmware-bnx2 \
-    bridge-utils \
-    iptables \
     xenclient-ndvm-tweaks \
     rsyslog \
     argo-module \
@@ -63,7 +60,6 @@ IMAGE_INSTALL = " \
     xen-tools-xenstore \
     wget \
     ethtool \
-    carrier-detect \
     xenclient-nws \
     modemmanager \
     ppp \
