@@ -75,7 +75,7 @@ PATCHES
 +blktap-objs := control.o ring.o device.o request.o sysfs.o
 --- /dev/null
 +++ b/drivers/block/blktap/blktap.h
-@@ -0,0 +1,185 @@
+@@ -0,0 +1,184 @@
 +#ifndef _BLKTAP_H_
 +#define _BLKTAP_H_
 +
@@ -120,7 +120,6 @@ PATCHES
 +struct blktap_device {
 +	struct mutex                   lock;
 +	struct gendisk                *gd;
-+	struct request_queue          *rq;
 +	struct blk_mq_tag_set          tag_set;
 +};
 +
@@ -626,7 +625,7 @@ PATCHES
 +MODULE_LICENSE("Dual BSD/GPL");
 --- /dev/null
 +++ b/drivers/block/blktap/device.c
-@@ -0,0 +1,684 @@
+@@ -0,0 +1,683 @@
 +#include <linux/fs.h>
 +#include <linux/blkdev.h>
 +#include <linux/blk-mq.h>
@@ -1058,7 +1057,7 @@ PATCHES
 +		goto out;
 +	}
 +
-+	blk_mq_stop_hw_queues(tapdev->rq);
++	blk_mq_stop_hw_queues(gd->queue);
 +
 +	del_gendisk(gd);
 +	gd->private_data = NULL;
@@ -1089,12 +1088,12 @@ PATCHES
 +blktap_device_fail_queue(struct blktap *tap)
 +{
 +	struct blktap_device *tapdev = &tap->device;
-+	struct request_queue *q = tapdev->gd->queue;
 +
 +	mutex_lock(&tapdev->lock);
-+	// Moved inside lock like it was in 4.14
-+	blk_queue_flag_clear(QUEUE_FLAG_STOPPED, q);
-+	blk_mq_free_tag_set(&tapdev->tag_set);
++
++	blk_mq_stop_hw_queues(tapdev->gd->queue);
++	blk_mark_disk_dead(tapdev->gd);
++	set_capacity(tapdev->gd, 0);
 +
 +	mutex_unlock(&tapdev->lock);
 +}
@@ -1234,7 +1233,6 @@ PATCHES
 +	gd->private_data = tapdev;
 +
 +	gd->queue->queuedata = tap;
-+	tapdev->rq = gd->queue;
 +	tapdev->gd = gd;
 +
 +	blktap_device_configure(tap, info);
@@ -1743,7 +1741,7 @@ PATCHES
 +}
 --- /dev/null
 +++ b/drivers/block/blktap/ring.c
-@@ -0,0 +1,825 @@
+@@ -0,0 +1,823 @@
 +
 +#include <linux/device.h>
 +#include <linux/signal.h>
@@ -1753,8 +1751,6 @@ PATCHES
 +#include <linux/export.h>
 +
 +#include "blktap.h"
-+
-+#define BLKTAP_DESTROY_RETRY_PERIOD (HZ/10) /*100 msec*/
 +
 +int blktap_ring_major;
 +static struct cdev blktap_ring_cdev;
@@ -2099,7 +2095,7 @@ PATCHES
 +		mutex_lock(&tapdev->lock);
 +		if (test_bit(BLKTAP_DEVICE, &tap->dev_inuse)) {
 +			schedule_delayed_work(&tap->destroy_work,
-+					      BLKTAP_DESTROY_RETRY_PERIOD);
++					      msecs_to_jiffies(5000));
 +		}
 +		mutex_unlock(&tapdev->lock);
 +	}
