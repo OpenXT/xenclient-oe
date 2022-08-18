@@ -20,7 +20,9 @@ PR = "r3"
 SRC_URI = "http://osdn.dl.sourceforge.jp/anthy/29142/anthy-9100e.tar.gz \
            file://not_build_elc.patch;patch=1 \
            file://2ch_t.patch;patch=1 \
-           file://native-helpers.patch;patch=1"
+           file://native-helpers.patch;patch=1 \
+           file://format-security-fixes.patch \
+"
 
 inherit autotools pkgconfig
 

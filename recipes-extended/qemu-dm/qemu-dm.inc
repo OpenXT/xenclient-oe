@@ -127,7 +127,7 @@ EXTRA_OECONF += " \
     --enable-trace-backends=nop \
     --enable-werror \
     --enable-xen \
-    --extra-cflags=-DXC_WANT_COMPAT_DEVICEMODEL_API \
+    --extra-cflags="${CFLAGS}" \
 "
 
 do_configure(){
@@ -135,8 +135,6 @@ do_configure(){
 }
 
 EXTRA_OEMAKE += "AUTOCONF_HOST='--host=`arch`' DESTDIR=${D} STRIP=''"
-
-CFLAGS_append = " -Wno-unused-parameter -Wno-unused-local-typedefs --param ssp-buffer-size=4 -ftrapv -D_FORTIFY_SOURCE=2"
 
 INC_PR = "r17"
 
