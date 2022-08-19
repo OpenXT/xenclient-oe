@@ -118,3 +118,9 @@ rw_config_partition() {
 }
 ROOTFS_POSTPROCESS_COMMAND += "rw_config_partition; "
 ROOTFS_POSTPROCESS_COMMAND += "start_tty_on_hvc0;"
+
+# Toggle flag to show PCRs during measured launch failure
+debug_pcrs() {
+	sed -i '/^DEBUG_DUMP_PCRS=/s/0/1/' "${IMAGE_ROOTFS}/sbin/init.root-ro"
+}
+ROOTFS_POSTPROCESS_COMMAND += '${@bb.utils.contains("IMAGE_FEATURES", "debug-tweaks", "debug_pcrs; ", "",d)}'
