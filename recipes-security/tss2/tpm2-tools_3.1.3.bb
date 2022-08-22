@@ -12,6 +12,7 @@ SRC_URI = "git://github.com/01org/tpm2-tools.git;protocol=https;branch=3.X \
     file://tpm2-sealing-support.patch \
     file://tpm2-unsealing-support.patch \
     file://tpm2-extendpcr-support.patch \
+    file://tpm2-nvlist-drop-ntoh.patch \
 "
 
 S = "${WORKDIR}/git"
