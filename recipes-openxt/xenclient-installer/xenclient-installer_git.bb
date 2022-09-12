@@ -37,6 +37,7 @@ do_deploy() {
     install -m 0644 ${D}/*.ans ${DEPLOYDIR}/netboot/
 
     tar --exclude=./install \
+        --owner=root --group=root \
         -C ${D} -cjf ${DEPLOYDIR}/control.tar.bz2 .
 }
 addtask do_deploy after do_install before do_build
