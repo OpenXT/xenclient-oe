@@ -69,6 +69,8 @@ SRC_URI_append = " \
     file://0001-libxl-Enable-stubdom-cdrom-changing.patch \
     file://0001-libxl-Don-t-leak-self-pipes.patch \
     file://libxl-add-xen-acpi-pm.patch \
+    file://0001-vchan-socket-proxy-add-reconnect-marker-support.patch \
+    file://0002-tools-libxl-enable-in-band-reconnect-marker-for-stub.patch \
 "
 
 # Unset variables inherited from meta-virt dunfell to avoid multilib

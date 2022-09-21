@@ -207,7 +207,7 @@ mdev -s
 device_model="device-model/$target"
 
 echo "Starting vchan-socket-proxy"
-vchan-socket-proxy -m server 0 $device_model/qmp-vchan /tmp/qemu.qmp &
+vchan-socket-proxy -m server --reconnect-marker=1 0 $device_model/qmp-vchan /tmp/qemu.qmp &
 
 while true; do
     printf '==== Press enter for shell ====\n'
