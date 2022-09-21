@@ -23,6 +23,7 @@ SRC_URI += "${KERNELORG_MIRROR}/linux/kernel/v${PV_MAJOR}.x/linux-${PV}.tar.xz;n
     file://xen-txt-add-xen-txt-eventlog-module.patch \
     file://xenpv-no-tty0-as-default-console.patch \
     file://tpm_tis-work-around-status-register-bug-in-STMicroelectronics-TPM.patch \
+    file://v2-0001-xen-pcifront-Handle-missed-Connected-state.patch \
     file://defconfig \
     "
 
