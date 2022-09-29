@@ -1,0 +1,45 @@
+From c5bca074ca9ecf5da470fae00ca7fae509260fd5 Mon Sep 17 00:00:00 2001
+From: William Roberts <william.c.roberts@intel.com>
+Date: Thu, 14 Jul 2022 09:32:06 -0500
+Subject: [PATCH] nvreadpublic: drop ntoh on attributes
+
+The attributes get marshalled to correct endianess by libmu and don't
+need to be changed again.
+
+For example:
+tpm2_define
+tpm2_nvreadpublic
+<snip>
+  attributes:
+    friendly: ownerwrite|authwrite|ownerread|authread
+    value: 0x6000600
+</snip>
+tpm2_nvdefine 0x6000600 <-- fails
+
+Drop NTOH
+tpm2_nvreadpublic
+<snip>
+  attributes:
+    friendly: ownerwrite|authwrite|ownerread|authread
+    value: 0x60006
+</snip>
+
+tpm2_nvdefine -a 0x60006 <-- works
+
+Fixes: #3053
+
+Signed-off-by: William Roberts <william.c.roberts@intel.com>
+---
+Made to apply to 3.x where tpm2_nvreadpublic.c is tpm2_nvlist.c
+
+--- a/tools/tpm2_nvlist.c
++++ b/tools/tpm2_nvlist.c
+@@ -63,7 +63,7 @@ static void print_nv_public(TPM2B_NV_PUB
+     tpm2_tool_output("  attributes:\n");
+     tpm2_tool_output("    friendly: %s\n", attrs);
+     tpm2_tool_output("    value: 0x%X\n",
+-            tpm2_util_ntoh_32(nv_public->nvPublic.attributes));
++            nv_public->nvPublic.attributes);
+ 
+     tpm2_tool_output("  size: %d\n",
+                nv_public->nvPublic.dataSize);
