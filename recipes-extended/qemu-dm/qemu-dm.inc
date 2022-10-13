@@ -41,6 +41,7 @@ SRC_URI += "file://compile-time-stubdom-flag.patch \
             file://block-remove-unused-block-format-support.patch \
             file://net-Remove-unused-network-options.patch \
             file://round-pci-region-sizes.patch \
+            file://ac97-compatibility.patch \
             file://0001-vnc-stubs-Allow-vnc-none.patch \
             "
 
