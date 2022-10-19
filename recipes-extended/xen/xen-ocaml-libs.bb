@@ -1,6 +1,6 @@
 DESCRIPTION = "Xen hypervisor ocaml libs and xenstore components"
 
-XEN_REL = "4.12"
+XEN_REL = "4.16"
 XEN_BRANCH ?= "stable-${XEN_REL}"
 SRCREV ?= "${AUTOREV}"
 
@@ -10,7 +10,7 @@ SRC_URI = " \
     file://oxenstored.conf \
     "
 
-LIC_FILES_CHKSUM ?= "file://COPYING;md5=bbb4b1bdc2c3b6743da3c39d03249095"
+LIC_FILES_CHKSUM ?= "file://COPYING;md5=419739e325a50f3d7b4501338e44a4e5"
 
 PV = "${XEN_REL}+git${SRCPV}"
 
@@ -50,8 +50,6 @@ RPROVIDES_${PN}-xenstored = "virtual/xenstored"
 
 EXTRA_OECONF_remove = "--disable-ocamltools"
 
-CFLAGS_prepend += " -I${STAGING_INCDIR}/blktap "
-
 # OCAMLDESTDIR is set to $DESTDIR/$(ocamlfind printconf destdir), yet DESTDIR
 # is required for other binaries installation, so override OCAMLDESTDIR.
 EXTRA_OEMAKE += " \
@@ -61,8 +59,6 @@ EXTRA_OEMAKE += " \
     DESTDIR=${D} \
     OCAMLDESTDIR=${D}${sitelibdir} \
     "
-
-EXTRA_OECONF += " --enable-blktap2 "
 
 TARGET_CC_ARCH += "${LDFLAGS}"
 CC_FOR_OCAML="${TARGET_PREFIX}gcc"
@@ -82,39 +78,25 @@ pkg_prerm_${PN}-xenstored () {
 }
 
 do_configure() {
-    if [ ${@bb.utils.contains('DISTRO_FEATURES', 'blktap2', 'blktap2', 'blktap3', d)} \
-            = "blktap3" ]
-    then
-        # The xen-tools recipe includes the xen-tools-blktap3.inc which will
-        # cause ${S}/tools/blktap3 to be populated for that recipe; this recipe
-        # needs an alternative.
-        # We just need a Makefile there sufficient to pass this configure step.
-        mkdir -p ${S}/tools/blktap3
-        cat >${S}/tools/blktap3/Makefile <<EOF
-clean:
-EOF
-    fi
-
     do_configure_common
 }
 
 do_compile() {
-    export EXTRA_CFLAGS_XEN_TOOLS="-I${STAGING_INCDIR}/blktap ${EXTRA_CFLAGS_XEN_TOOLS}"
-
     oe_runmake -C tools/libs subdir-all-toolcore
+    oe_runmake -C tools/libs subdir-all-toollog
+    oe_runmake -C tools/libs subdir-all-call
+    oe_runmake -C tools/libs subdir-all-hypfs
     oe_runmake -C tools subdir-all-include
     oe_runmake LDLIBS_libxenctrl='-lxenctrl' \
 		       LDLIBS_libxenstore='-lxenstore' \
-		       LDLIBS_libblktapctl='-lblktapctl' \
 		       LDLIBS_libxenguest='-lxenguest' \
 		       LDLIBS_libxentoollog='-lxentoollog' \
 		       LDLIBS_libxenevtchn='-lxenevtchn' \
-		       -C tools subdir-all-libxl
+		       -C tools/libs subdir-all-light
 
     oe_runmake V=1 \
        LDLIBS_libxenctrl='-lxenctrl' \
        LDLIBS_libxenstore='-lxenstore' \
-       LDLIBS_libblktapctl='-lblktapctl' \
        LDLIBS_libxenguest='-lxenguest' \
        LDLIBS_libxentoollog='-lxentoollog' \
        LDLIBS_libxenevtchn='-lxenevtchn' \

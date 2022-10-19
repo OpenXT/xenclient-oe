@@ -1,0 +1,71 @@
+From 096597b43ce7457107c6ddc5e35574d994250ae1 Mon Sep 17 00:00:00 2001
+From: Jason Andryuk <jandryuk@gmail.com>
+Date: Thu, 2 Jun 2022 14:21:05 -0400
+Subject: [PATCH] xen/pcifront: Handle missed Connected state
+
+An HVM guest with linux stubdomain and 2 PCI devices failed to start as
+libxl timed out waiting for the PCI devices to be added.  It happens
+intermittently but with some regularity.  libxl wrote the two xenstore
+entries for the devices, but then timed out waiting for backend state 4
+(Connected) - the state stayed at 7 (Reconfiguring).  (PCI passthrough
+to an HVM with stubdomain is PV passthrough to the stubdomain and then
+HVM passthrough with the QEMU inside the stubdomain.)
+
+The stubdom kernel never printed "pcifront pci-0: Installing PCI
+frontend", so it seems to have missed state 4 which would have called
+pcifront_try_connect() -> pcifront_connect_and_init_dma().
+
+Have pcifront_detach_devices() special-case state Initialised and call
+pcifront_connect_and_init_dma().  Don't use pcifront_try_connect()
+because that sets the xenbus state which may throw off the backend.
+After connecting, skip the remainder of detach_devices() since none have
+been initialized yet.  When the backend switches to Reconfigured,
+pcifront_attach_devices() will pick them up again.
+
+Signed-off-by: Jason Andryuk <jandryuk@gmail.com>
+---
+v2:
+Commit message changes - Bjorn
+
+ drivers/pci/xen-pcifront.c | 17 +++++++++++++++--
+ 1 file changed, 15 insertions(+), 2 deletions(-)
+
+--- a/drivers/pci/xen-pcifront.c
++++ b/drivers/pci/xen-pcifront.c
+@@ -1012,13 +1012,26 @@ static int pcifront_detach_devices(struc
+ {
+ 	int err = 0;
+ 	int i, num_devs;
++	enum xenbus_state state;
+ 	unsigned int domain, bus, slot, func;
+ 	struct pci_dev *pci_dev;
+ 	char str[64];
+ 
+-	if (xenbus_read_driver_state(pdev->xdev->nodename) !=
+-	    XenbusStateConnected)
++	state = xenbus_read_driver_state(pdev->xdev->nodename);
++	if (state == XenbusStateInitialised) {
++		dev_dbg(&pdev->xdev->dev, "Handle skipped connect.\n");
++		/* We missed Connected and need to initialize. */
++		err = pcifront_connect_and_init_dma(pdev);
++		if (err && err != -EEXIST) {
++			xenbus_dev_fatal(pdev->xdev, err,
++					 "Error setting up PCI Frontend");
++			goto out;
++		}
++
++		goto out_switch_state;
++	} else if (state != XenbusStateConnected) {
+ 		goto out;
++	}
+ 
+ 	err = xenbus_scanf(XBT_NIL, pdev->xdev->otherend, "num_devs", "%d",
+ 			   &num_devs);
+@@ -1079,6 +1092,7 @@ static int pcifront_detach_devices(struc
+ 			domain, bus, slot, func);
+ 	}
+ 
++ out_switch_state:
+ 	err = xenbus_switch_state(pdev->xdev, XenbusStateReconfiguring);
+ 
+ out:

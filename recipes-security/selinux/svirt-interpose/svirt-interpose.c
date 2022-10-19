@@ -27,14 +27,14 @@
 #include <stdlib.h>
 #include <string.h>
 #include <syslog.h>
+#include <sys/random.h>
 #include <unistd.h>
 #include <xenstore.h>
 
 #define BUF_SIZE      256
 #define LOCAL_DOMAINS "/local/domain"
-/* #define QEMU          "/opt/xensource/libexec/qemu-dm-wrapper-old" */
+#define QEMU_CONTEXT  "system_u:system_r:qemu_t:s0"
 #define QEMU          "/usr/bin/qemu-dm-wrapper"
-#define RAND_DEV      "/dev/random"
 
 typedef struct data data_t;
 typedef struct xs_handle xs_handle_t;
@@ -44,15 +44,13 @@ static char*    create_context             (char*, char*);
 static char**   do_directory               (xs_handle_t*, char*, unsigned*);
 static char*    do_read                    (xs_handle_t*, char*);
 static bool     do_write                   (xs_handle_t*, char*, char*);
-static void     exec_cmd                   (char**);
+static void     exec_cmd                   (char**, char *[]);
 static int      file_con_fixup             (data_t*);
-static int      get_default_contexts       (data_t*);
 static int      get_domid_by_mcs           (xs_handle_t*, uint16_t);
 static char**   get_vbd_nums               (xs_handle_t*, int, int*);
 static char*    get_vbd_backend            (xs_handle_t*, char*);
 static char*    get_vbd_file               (xs_handle_t*, char*);
 static char**   get_writable_files         (xs_handle_t*, int);
-static int      read_single_context        (char*, const char*, size_t);
 static bool     set_domid_category         (xs_handle_t*, int, uint16_t);
 static bool     set_exec_context           (data_t*);
 static bool     vbd_is_writable            (xs_handle_t*, char*);
@@ -66,9 +64,9 @@ struct data {
 };
 
 int
-main (int argc, char **argv)
+main (int argc, char **argv, char *envp[])
 {
-        data_t data = { 0, };
+        data_t data = { .domain_context = QEMU_CONTEXT, };
         int retval = EXIT_SUCCESS, i = 0, cat_result = 0;
 
         openlog (argv[0], LOG_NOWAIT | LOG_PID, LOG_DAEMON);
@@ -114,13 +112,7 @@ main (int argc, char **argv)
                 retval = EXIT_FAILURE;
                 goto exit_files;
         }
-        /*  SELinux stuff  */
-        /*  get SELinux default contexts  */
-        if (get_default_contexts (&data) != 0) {
-                syslog (LOG_CRIT, "ERROR getting default contexts. Halting");
-                retval = EXIT_FAILURE;
-                goto exit_files;
-        }
+
         /*  label files  */
         if (file_con_fixup (&data) != 0) {
                 syslog (LOG_CRIT,
@@ -132,7 +124,7 @@ main (int argc, char **argv)
         if (set_exec_context (&data) != true) {
                 syslog (LOG_CRIT,
                         "ERROR setting context to %s for qemu execution: %s. Halting",
-                        strerror (errno));
+                        data.domain_context, strerror (errno));
                 retval = EXIT_FAILURE;
                 goto exit_files;
         }
@@ -151,7 +143,7 @@ exit:
         closelog ();
         /*  execute the real qemu if no previous errors prevent it  */
         if (retval != EXIT_FAILURE)
-                exec_cmd (argv);
+                exec_cmd (argv, envp);
         exit (retval);
 }
 /*  Build a context from the domain_context and category fields of the data_t
@@ -201,10 +193,16 @@ file_con_fixup (data_t *data)
                 return -1;
         }
         for (i = 0; data->files [i] != NULL; ++i) {
-                if (getfilecon (data->files [i], &sec_con) == -1) {
+                const char *prefix = "vhd:";
+                char *file = data->files[i];
+
+                if (strncmp(file, prefix, strlen(prefix)) == 0) {
+                        file += strlen(prefix);
+                }
+                if (getfilecon (file, &sec_con) == -1) {
                         syslog (LOG_CRIT,
                                 "error getting context from file: %s, error %s",
-                                data->files [i], strerror (errno));
+                                file, strerror (errno));
                         continue;
                 }
                 con = context_new (sec_con);
@@ -223,8 +221,8 @@ file_con_fixup (data_t *data)
                         goto err_confree;
                 }
                 syslog (LOG_INFO, "Setting context for file %s to %s",
-                        data->files [i], context_str (con));
-                ret = setfilecon (data->files [i], context_str (con));
+                        file, context_str (con));
+                ret = setfilecon (file, context_str (con));
                 if (ret != 0)
                         syslog (LOG_CRIT, "setfilecon error:%s",
                                 strerror (errno));
@@ -239,23 +237,7 @@ file_con_fixup (data_t *data)
         freecon (sec_con);
         return ret;
 }
-/*  Gets the default context for virtualization processes and populates
- *  the data_t structure accordingly.
- */
-static int
-get_default_contexts (data_t *data)
-{
-        int ret = 0;
 
-        ret = read_single_context (data->domain_context,
-                                   selinux_virtual_domain_context_path (),
-                                   sizeof (data->domain_context));
-        if (ret != 0) {
-                syslog (LOG_CRIT, "read single failed. ret: %d", ret);
-                return ret;
-        }
-        return 0;
-}
 static bool
 set_domid_category (xs_handle_t *xsh, int domid, uint16_t mcs)
 {
@@ -289,26 +271,17 @@ set_domid_category (xs_handle_t *xsh, int domid, uint16_t mcs)
 static int
 create_category (xs_handle_t *xsh)
 {
-        int fd = 0, ret = 0, domid = 0;
-        char *val = NULL;
+        int ret = 0, domid = 0;
         /*  current SELinux MCS uses 1024 categories: 0 - 1023  */
         uint16_t random = 0;
 
         /*  generate random category number  */
-        fd = open (RAND_DEV, O_RDONLY);
-        if (fd == -1) {
-                syslog (LOG_CRIT, "error opening %s: %s", RAND_DEV, strerror (errno));
-                return -1;
-        }
         do {
-                if (val)
-                        free (val);
-                ret = read (fd, &random, sizeof (random));
+                ret = getrandom (&random, sizeof (random), 0);
                 if (ret != sizeof (random)) {
                         if (ret == -1) {
                                 syslog (LOG_CRIT,
-                                        "error reading from %s: %s",
-                                        RAND_DEV,
+                                        "error calling getrandom: %s",
                                         strerror (errno));
                                 return -1;
                         } else
@@ -327,7 +300,6 @@ create_category (xs_handle_t *xsh)
                         return -1;
                 }
         } while (ret != -1);
-        close (fd);
         /*  return integer value  */
         return random;
 }
@@ -543,45 +515,13 @@ exit_free:
 exit:
         return vbd_paths;
 }
-/*  Wrapper around fopen/getline calls to read a single line from a file.  This
- *  is necessary in order to read default contexts from virtualization specific
- *  files in /etc/selinux/policy/contexts/
- */
-static int
-read_single_context (char* buf, const char* file_path, size_t size)
-{
-        FILE* fstream = { 0, };
-	char* tmp;
 
-        fstream = fopen(file_path, "r");
-        if (fstream == NULL) {
-                syslog (LOG_CRIT, "error opening file %s: %s", file_path, strerror (errno));
-                return -1;
-        }
-        if (getline(&buf, &size, fstream) == -1) {
-                syslog (LOG_CRIT, "error getting line from %s: %s", file_path, strerror (errno));
-                fclose (fstream);
-                return -1;
-        }
-        fclose (fstream);
-        /*  Contents of file may have trailing new line after context.
-         *  The context_* functions require that this be removed.
-         */
-	tmp = strchrnul (buf, '\n');
-        *tmp = '\0';
-        return 0;
-}
-/*  wrapper around xs_write
- */
 static bool
 do_write (xs_handle_t *xsh, char *path, char *data)
 {
-        static struct expanding_buffer ebuf = { 0, };
-        unsigned len;
+        unsigned len = strlen(data);
 
-        expanding_buffer_ensure (&ebuf, strlen (data) + 1);
-        unsanitise_value (ebuf.buf, &len, data);
-        if (!xs_write (xsh, 0, path, ebuf.buf, len)) {
+        if (!xs_write (xsh, 0, path, data, len)) {
                 syslog (LOG_WARNING,
                         "could not write %s to path %s",
                         data,
@@ -595,8 +535,7 @@ do_write (xs_handle_t *xsh, char *path, char *data)
 static char*
 do_read (xs_handle_t *xsh, char* path)
 {
-        char *val = NULL, *san_val = NULL, *tmp = NULL;
-        static struct expanding_buffer ebuf = { 0, };
+        char *val;
         unsigned len = 0;
 
         val = xs_read (xsh, 0, path, &len);
@@ -606,16 +545,8 @@ do_read (xs_handle_t *xsh, char* path)
                         path);
                 return NULL;
         }
-        san_val = sanitise_value (&ebuf, val, len);
-        if (san_val == NULL) {
-                syslog (LOG_CRIT, "sanitise_value returned NULL");
-                free (val);
-                return NULL;
-        }
-        tmp = strdup (san_val);
-        /*  don't free san_val  */
-        free (val);
-        return tmp;
+
+        return val;
 }
 /*  wrapper around directory listing  
  *  not sure if these values need to be sanitized
@@ -635,10 +566,10 @@ do_directory (xs_handle_t *xsh, char* path, unsigned *len)
 /*  Final function called to execute QEMU.  Does some basic cleanup as well.
  */
 static void
-exec_cmd (char** argv)
+exec_cmd (char** argv, char *envp[])
 {
         argv [0] = QEMU;
-        execve (QEMU, argv, NULL);
+        execve (QEMU, argv, envp);
         perror ("exec");
 }
 /*  Basic function to build string representation of context from

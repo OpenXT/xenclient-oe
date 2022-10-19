@@ -23,6 +23,7 @@ S = "${WORKDIR}/git"
 SRC_URI = " \
     git://github.com/xapi-project/varstored.git;protocol=https;branch=master \
     file://0001-add-oxtdb-varstore.patch \
+    file://0001-Cleanup-pidfile-when-exiting.patch \
 "
 
 # download the public Microsoft certs for verifying MS-signed binaries

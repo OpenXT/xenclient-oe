@@ -1,0 +1,537 @@
+From aaa9491259c279e6bfa20e8d87d29a6470474549 Mon Sep 17 00:00:00 2001
+From: Jason Andryuk <jandryuk@gmail.com>
+Date: Fri, 3 Dec 2021 13:10:52 -0500
+Subject: [PATCH] libxl: Enable stubdom cdrom changing
+
+To enable stubdom cdrom changing, we have to eject the cdrom, remove the
+stubdom disk, attached the new disk, insert the cdrom.
+
+The remove and attach are implemented here.
+
+Signed-off-by: Jason Andryuk <jandryuk@gmail.com>
+---
+ tools/libs/light/libxl_disk.c | 166 +++++++++++++++++++++++++++++++---
+ 1 file changed, 152 insertions(+), 14 deletions(-)
+
+--- a/tools/libs/light/libxl_disk.c
++++ b/tools/libs/light/libxl_disk.c
+@@ -634,25 +634,46 @@ int libxl_device_disk_getinfo(libxl_ctx
+ 
+ typedef struct {
+     libxl__ao *ao;
++    libxl__ao_device aodev;
++    libxl__ao_device aodev_del;
+     libxl_domid domid;
++    libxl_domid disk_domid;
+     libxl_device_disk *disk;
+     libxl_device_disk disk_saved;
+     libxl__ev_slowlock qmp_lock;
+     int dm_ver;
+     libxl__ev_time time;
++    libxl__ev_time timeout_retry;
+     libxl__ev_qmp qmp;
++    int retries;
++    int stubdom_fdset;
+ } libxl__cdrom_insert_state;
+ 
+ static void cdrom_insert_lock_acquired(libxl__egc *, libxl__ev_slowlock *,
+                                        int rc);
+ static void cdrom_insert_qmp_connected(libxl__egc *, libxl__ev_qmp *,
+                                        const libxl__json_object *, int rc);
++static void cdrom_insert_stubdom_removefd(libxl__egc *egc, libxl__ev_qmp *qmp,
++                                          const libxl__json_object *response,
++                                          int rc);
++static void cdrom_insert_stubdom_ejected(libxl__egc *egc, libxl__ev_qmp *,
++                                         const libxl__json_object *, int rc);
++static void cdrom_insert_stubdom_disk_ejected_aocomplete(libxl__egc *egc,
++                                                         libxl__ao_device *aodev);
++static void cdrom_insert_stubdom_disk_ejected(libxl__egc *egc, libxl__ev_qmp *,
++                                              const libxl__json_object *,
++                                              int rc);
++static void cdrom_insert_ejected_aodevcb(libxl__egc *egc,
++                                         libxl__ao_device *aodev);
+ static void cdrom_insert_ejected(libxl__egc *egc, libxl__ev_qmp *,
+                                  const libxl__json_object *, int rc);
+ static void cdrom_insert_addfd_cb(libxl__egc *egc, libxl__ev_qmp *,
+                                   const libxl__json_object *, int rc);
+ static void cdrom_insert_inserted(libxl__egc *egc, libxl__ev_qmp *,
+                                   const libxl__json_object *, int rc);
++static void cdrom_insert_addfd_retry(libxl__egc *egc, libxl__ev_time *ev,
++                                     const struct timeval *requested_abs,
++                                     int rc);
+ static void cdrom_insert_timout(libxl__egc *egc, libxl__ev_time *ev,
+                                 const struct timeval *requested_abs,
+                                 int rc);
+@@ -668,6 +689,7 @@ int libxl_cdrom_insert(libxl_ctx *ctx, u
+     libxl_device_disk *disks = NULL;
+     int rc;
+     libxl__cdrom_insert_state *cis;
++    libxl_domid stubdomid;
+ 
+     GCNEW(cis);
+     cis->ao = ao;
+@@ -679,6 +701,8 @@ int libxl_cdrom_insert(libxl_ctx *ctx, u
+     cis->qmp_lock.ao = ao;
+     cis->qmp_lock.domid = domid;
+     libxl__ev_time_init(&cis->time);
++    libxl__ev_time_init(&cis->timeout_retry);
++    cis->retries = 0;
+     libxl__ev_qmp_init(&cis->qmp);
+     cis->qmp.ao = ao;
+     cis->qmp.domid = domid;
+@@ -695,12 +719,6 @@ int libxl_cdrom_insert(libxl_ctx *ctx, u
+         goto out;
+     }
+ 
+-    if (libxl_get_stubdom_id(ctx, domid) != 0) {
+-        LOGD(ERROR, domid, "cdrom-insert doesn't work for stub domains");
+-        rc = ERROR_INVAL;
+-        goto out;
+-    }
+-
+     cis->dm_ver = libxl__device_model_version_running(gc, domid);
+     if (cis->dm_ver == -1) {
+         LOGD(ERROR, domid, "Cannot determine device model version");
+@@ -708,7 +726,14 @@ int libxl_cdrom_insert(libxl_ctx *ctx, u
+         goto out;
+     }
+ 
+-    disks = libxl__device_list(gc, &libxl__disk_devtype, domid, &num);
++    stubdomid = libxl_get_stubdom_id(CTX, cis->domid);
++    if (stubdomid == 0) {
++        cis->disk_domid = domid;
++    } else {
++        cis->disk_domid = stubdomid;
++    }
++
++    disks = libxl__device_list(gc, &libxl__disk_devtype, cis->disk_domid, &num);
+     for (i = 0; i < num; i++) {
+         if (disks[i].is_cdrom && !strcmp(disk->vdev, disks[i].vdev))
+         {
+@@ -723,7 +748,7 @@ int libxl_cdrom_insert(libxl_ctx *ctx, u
+         goto out;
+     }
+ 
+-    rc = libxl__device_disk_setdefault(gc, domid, disk, false);
++    rc = libxl__device_disk_setdefault(gc, cis->disk_domid, disk, false);
+     if (rc) goto out;
+ 
+     if (!disk->pdev_path) {
+@@ -731,6 +756,18 @@ int libxl_cdrom_insert(libxl_ctx *ctx, u
+         disk->format = LIBXL_DISK_FORMAT_EMPTY;
+     }
+ 
++#define STUBDOM_FDSET_CD 8000
++    if (strncmp(disk->vdev, "hd", 2) == 0) {
++	    cis->stubdom_fdset = STUBDOM_FDSET_CD + disk->vdev[2] - 'a';
++    } else if (strncmp(disk->vdev, "xvd", 3) == 0) {
++	    cis->stubdom_fdset = STUBDOM_FDSET_CD + disk->vdev[3] - 'a';
++    } else {
++        LOGD(ERROR, cis->domid, "disk->vdev \"%s\" isn't hdX or xvdY",
++             disk->vdev);
++        rc = ERROR_FAIL;
++        goto out;
++    }
++
+ out:
+     libxl__device_list_free(&libxl__disk_devtype, disks, num);
+     if (rc) {
+@@ -749,6 +786,7 @@ static void cdrom_insert_lock_acquired(l
+     libxl__cdrom_insert_state *cis = CONTAINER_OF(lock, *cis, qmp_lock);
+     STATE_AO_GC(cis->ao);
+ 
++    LOGD(DEBUG, cis->domid, "rc=%d", rc);
+     if (rc) goto out;
+ 
+     rc = libxl__ev_time_register_rel(ao, &cis->time,
+@@ -797,7 +835,12 @@ static void cdrom_insert_qmp_connected(l
+         QMP_PARAMETERS_SPRINTF(&args, "id", "ide-%i", devid);
+     else
+         QMP_PARAMETERS_SPRINTF(&args, "device", "ide-%i", devid);
+-    qmp->callback = cdrom_insert_ejected;
++
++    if (libxl_get_stubdom_id(CTX, cis->domid))
++        qmp->callback = cdrom_insert_stubdom_removefd;
++    else
++        qmp->callback = cdrom_insert_ejected;
++
+     rc = libxl__ev_qmp_send(egc, qmp, "eject", args);
+     if (rc) goto out;
+     return;
+@@ -805,6 +848,147 @@ out:
+     cdrom_insert_done(egc, cis, rc); /* must be last */
+ }
+ 
++static void cdrom_insert_stubdom_removefd(libxl__egc *egc, libxl__ev_qmp *qmp,
++                                          const libxl__json_object *response,
++                                          int rc)
++{
++    libxl__cdrom_insert_state *cis = CONTAINER_OF(qmp, *cis, qmp);
++    STATE_AO_GC(cis->ao);
++
++    if (rc) goto out;
++
++    /* Only called for qemu-xen/linux stubdom. */
++    assert(cis->dm_ver == LIBXL_DEVICE_MODEL_VERSION_QEMU_XEN);
++    libxl__json_object *args = NULL;
++
++    libxl__qmp_param_add_integer(gc, &args, "fdset-id", cis->stubdom_fdset);
++
++    cis->qmp.callback = cdrom_insert_stubdom_ejected;
++
++    rc = libxl__ev_qmp_send(egc, &cis->qmp, "remove-fd", args);
++    if (rc) goto out;
++
++    return;
++
++out:
++    cdrom_insert_done(egc, cis, rc); /* must be last */
++}
++
++static void cdrom_insert_stubdom_ejected(libxl__egc *egc, libxl__ev_qmp *qmp,
++                                         const libxl__json_object *response,
++                                         int rc)
++{
++    libxl__cdrom_insert_state *cis = CONTAINER_OF(qmp, *cis, qmp);
++    libxl__device *device;
++    STATE_AO_GC(cis->ao);
++    domid_t stubdomid = libxl_get_stubdom_id(CTX, cis->domid);
++
++    LOGD(DEBUG, cis->domid, "rc=%d", rc);
++    /* cis->stubdom_fdset is initially empty, so remove-fd fails the first
++     * call with:
++     * {"error": {"class": "GenericError",
++     *            "desc": "File descriptor named 'fdset-id:8675' not found"}}
++     * Carry on in that case. */
++    if (rc && rc != ERROR_QMP_GENERIC_ERROR) goto out;
++
++    GCNEW(device);
++    rc = libxl__device_from_disk(gc, stubdomid, cis->disk, device);
++    if (rc != 0) goto out;
++
++    /* block dev eject */
++    /* Below is basically an open coding of:
++     * libxl_device_disk__remove(CTX, cis->domid, cis->disk, 0);
++     * ...since we can't call it from within libxl.
++     */
++    libxl__prepare_ao_device(ao, &cis->aodev_del);
++    cis->aodev_del.action = LIBXL__DEVICE_ACTION_REMOVE;
++    cis->aodev_del.dev = device;
++    cis->aodev_del.callback = cdrom_insert_stubdom_disk_ejected_aocomplete;
++    cis->aodev_del.force.flag = LIBXL__FORCE_OFF;
++    libxl__initiate_device_generic_remove(egc, &cis->aodev_del);
++    return;
++
++ out:
++    cdrom_insert_done(egc, cis, rc); /* must be last */
++}
++
++static void cdrom_insert_stubdom_disk_ejected_aocomplete(libxl__egc *egc,
++                                                         libxl__ao_device *aodev)
++{
++    STATE_AO_GC(aodev->ao);
++    libxl__cdrom_insert_state *cis = CONTAINER_OF(aodev, *cis, aodev_del);
++
++    LOGD(DEBUG, cis->domid, "rc=%d", aodev->rc);
++    if (aodev->rc) {
++        if (aodev->dev) {
++            LOGD(ERROR, aodev->dev->domid, "Unable to %s %s with id %u",
++                        libxl__device_action_to_string(aodev->action),
++                        libxl__device_kind_to_string(aodev->dev->kind),
++                        aodev->dev->devid);
++        } else {
++            LOG(ERROR, "unable to %s device",
++                       libxl__device_action_to_string(aodev->action));
++        }
++        goto out;
++    }
++
++    cdrom_insert_stubdom_disk_ejected(egc, &cis->qmp, NULL, aodev->rc);
++    return;
++
++ out:
++    cdrom_insert_done(egc, cis, aodev->rc);
++}
++
++static void cdrom_insert_stubdom_disk_ejected(libxl__egc *egc,
++                                              libxl__ev_qmp *qmp,
++                                              const libxl__json_object *response,
++                                              int rc)
++{
++    libxl__cdrom_insert_state *cis = CONTAINER_OF(qmp, *cis, qmp);
++    STATE_AO_GC(cis->ao);
++    domid_t stubdomid = libxl_get_stubdom_id(CTX, cis->domid);
++
++    LOGD(DEBUG, cis->domid, "rc=%d", rc);
++    if (rc) goto out;
++
++    /* block dev insert */
++    libxl__prepare_ao_device(ao, &cis->aodev);
++    /* set an ao callback to end up in cdrom_insert_ejected */
++    cis->aodev.callback = cdrom_insert_ejected_aodevcb;
++    libxl__device_disk_add(egc, stubdomid, cis->disk, &cis->aodev);
++    return;
++
++ out:
++    cdrom_insert_done(egc, cis, rc); /* must be last */
++}
++
++static void cdrom_insert_ejected_aodevcb(libxl__egc *egc,
++                                         libxl__ao_device *aodev)
++{
++    STATE_AO_GC(aodev->ao);
++    libxl__cdrom_insert_state *cis = CONTAINER_OF(aodev, *cis, aodev);
++
++    LOGD(DEBUG, cis->domid, "rc=%d", aodev->rc);
++    if (aodev->rc) {
++        if (aodev->dev) {
++            LOGD(ERROR, aodev->dev->domid, "Unable to %s %s with id %u",
++                        libxl__device_action_to_string(aodev->action),
++                        libxl__device_kind_to_string(aodev->dev->kind),
++                        aodev->dev->devid);
++        } else {
++            LOG(ERROR, "unable to %s device",
++                       libxl__device_action_to_string(aodev->action));
++        }
++        goto out;
++    }
++
++    cdrom_insert_ejected(egc, &cis->qmp, NULL, aodev->rc);
++    return;
++
++ out:
++    cdrom_insert_done(egc, cis, aodev->rc);
++}
++
+ static void cdrom_insert_ejected(libxl__egc *egc,
+                                  libxl__ev_qmp *qmp,
+                                  const libxl__json_object *response,
+@@ -827,9 +1011,10 @@ static void cdrom_insert_ejected(libxl__
+ 
+     libxl_domain_config_init(&d_config);
+ 
++    LOGD(DEBUG, cis->domid, "rc=%d", rc);
+     if (rc) goto out;
+ 
+-    rc = libxl__device_from_disk(gc, domid, disk, &device);
++    rc = libxl__device_from_disk(gc, cis->disk_domid, disk, &device);
+     if (rc) goto out;
+     be_path = libxl__device_backend_path(gc, &device);
+     libxl_path = libxl__device_libxl_path(gc, &device);
+@@ -876,7 +1061,7 @@ static void cdrom_insert_ejected(libxl__
+      */
+ 
+     rc = libxl__get_domain_configuration(gc, domid, &d_config);
+-    if (rc) goto out;
++    if (rc && rc != ERROR_JSON_CONFIG_EMPTY) goto out;
+ 
+     device_add_domain_config(gc, &d_config, &libxl__disk_devtype,
+                              &cis->disk_saved);
+@@ -884,10 +1069,15 @@ static void cdrom_insert_ejected(libxl__
+     rc = libxl__dm_check_start(gc, &d_config, domid);
+     if (rc) goto out;
+ 
++    LOGD(DEBUG, cis->domid, "stubdom_id=%d",
++                libxl_get_stubdom_id(CTX, cis->domid));
++    /* A linux stubdom will perform add-fd with calculated stubdom_fdset. */
+     if (cis->dm_ver == LIBXL_DEVICE_MODEL_VERSION_QEMU_XEN &&
++        libxl_get_stubdom_id(CTX, cis->domid) == 0 &&
+         disk->format != LIBXL_DISK_FORMAT_EMPTY) {
+         libxl__json_object *args = NULL;
+ 
++        LOGD(DEBUG, cis->domid, "Doing qmp add-fd path");
+         assert(qmp->payload_fd == -1);
+         qmp->payload_fd = open(disk->pdev_path, O_RDONLY);
+         if (qmp->payload_fd < 0) {
+@@ -906,20 +1096,28 @@ static void cdrom_insert_ejected(libxl__
+         if (rc) goto out;
+         has_callback = true;
+     } else {
++        LOGD(DEBUG, cis->domid, "Skipping qmp add-fd path");
+         has_callback = false;
+     }
+ 
+     rc = 0;
+ 
+ out:
++    LOGD(DEBUG, cis->domid, "out label rc=%d", rc);
+     libxl__xs_transaction_abort(gc, &t);
+     libxl_domain_config_dispose(&d_config);
+     if (data_lock) libxl__unlock_file(data_lock);
+     if (rc) {
+         cdrom_insert_done(egc, cis, rc); /* must be last */
+     } else if (!has_callback) {
+-        /* Only called if no asynchronous callback are set. */
+-        cdrom_insert_inserted(egc, qmp, NULL, 0); /* must be last */
++        LOGD(DEBUG, cis->domid, "no callback; stubdom_id=%d",
++                libxl_get_stubdom_id(CTX, cis->domid));
++        if (libxl_get_stubdom_id(CTX, cis->domid) == 0) {
++            /* Only called if no asynchronous callback are set. */
++            cdrom_insert_inserted(egc, qmp, NULL, 0); /* must be last */
++        } else {
++            cdrom_insert_addfd_cb(egc, qmp, NULL, 0);
++        }
+     }
+ }
+ 
+@@ -938,17 +1136,24 @@ static void cdrom_insert_addfd_cb(libxl_
+     /* convenience aliases */
+     libxl_device_disk *disk = cis->disk;
+ 
+-    close(qmp->payload_fd);
+-    qmp->payload_fd = -1;
++    LOGD(DEBUG, cis->domid, "rc=%d", rc);
+ 
+     if (rc) goto out;
+ 
+-    o = libxl__json_map_get("fdset-id", response, JSON_INTEGER);
+-    if (!o) {
+-        rc = ERROR_FAIL;
+-        goto out;
++    /* response non-NULL only for non-stubdom */
++    if (response) {
++        close(qmp->payload_fd);
++        qmp->payload_fd = -1;
++
++        o = libxl__json_map_get("fdset-id", response, JSON_INTEGER);
++        if (!o) {
++            rc = ERROR_FAIL;
++            goto out;
++        }
++        fdset = libxl__json_object_get_integer(o);
++    } else {
++        fdset = cis->stubdom_fdset;
+     }
+-    fdset = libxl__json_object_get_integer(o);
+ 
+     devid = libxl__device_disk_dev_number(disk->vdev, NULL, NULL);
+     qmp->callback = cdrom_insert_inserted;
+@@ -961,8 +1166,13 @@ static void cdrom_insert_addfd_cb(libxl_
+     if (libxl__qmp_ev_qemu_compare_version(qmp, 2, 8, 0) >= 0) {
+         QMP_PARAMETERS_SPRINTF(&args, "id", "ide-%i", devid);
+         QMP_PARAMETERS_SPRINTF(&args, "filename", "/dev/fdset/%d", fdset);
+-        libxl__qmp_param_add_string(gc, &args, "format",
+-            libxl__qemu_disk_format_string(disk->format));
++        if (response) {
++            libxl__qmp_param_add_string(gc, &args, "format",
++                libxl__qemu_disk_format_string(disk->format));
++        } else {
++            /* Stubdom is using blockdev /dev/xvd* */
++            libxl__qmp_param_add_string(gc, &args, "format", "host_device");
++        }
+         rc = libxl__ev_qmp_send(egc, qmp, "blockdev-change-medium", args);
+     } else {
+         QMP_PARAMETERS_SPRINTF(&args, "device", "ide-%i", devid);
+@@ -976,13 +1186,22 @@ out:
+         cdrom_insert_done(egc, cis, rc); /* must be last */
+ }
+ 
++static void cdrom_insert_addfd_retry(libxl__egc *egc, libxl__ev_time *ev,
++                                     const struct timeval *requested_abs,
++                                     int rc)
++{
++    libxl__cdrom_insert_state *cis = CONTAINER_OF(ev, *cis, timeout_retry);
++
++    cdrom_insert_addfd_cb(egc, &cis->qmp, NULL, 0);
++}
++
+ static void cdrom_insert_inserted(libxl__egc *egc,
+                                   libxl__ev_qmp *qmp,
+                                   const libxl__json_object *response,
+                                   int rc)
+ {
+-    EGC_GC;
+     libxl__cdrom_insert_state *cis = CONTAINER_OF(qmp, *cis, qmp);
++    STATE_AO_GC(cis->ao);
+     libxl__flock *data_lock = NULL;
+     libxl_domain_config d_config;
+     flexarray_t *insert = NULL;
+@@ -997,9 +1216,22 @@ static void cdrom_insert_inserted(libxl_
+ 
+     libxl_domain_config_init(&d_config);
+ 
+-    if (rc) goto out;
++    LOGD(DEBUG, cis->domid, "rc=%d", rc);
++
++    if (rc) {
++        if (cis->retries++ < 10 ) {
++            LOGD(DEBUG, qmp->domid, "Retrying QMP cdrom change\n");
++            rc = libxl__ev_time_register_rel(ao, &cis->timeout_retry,
++                                             cdrom_insert_addfd_retry, 100);
++            if (rc) goto out;
++
++            return;
++        } else {
++            goto out;
++        }
++    }
+ 
+-    rc = libxl__device_from_disk(gc, domid, disk, &device);
++    rc = libxl__device_from_disk(gc, cis->disk_domid, disk, &device);
+     if (rc) goto out;
+     be_path = libxl__device_backend_path(gc, &device);
+     libxl_path = libxl__device_libxl_path(gc, &device);
+@@ -1011,7 +1243,7 @@ static void cdrom_insert_inserted(libxl_
+     }
+ 
+     rc = libxl__get_domain_configuration(gc, domid, &d_config);
+-    if (rc) goto out;
++    if (rc && rc != ERROR_JSON_CONFIG_EMPTY) goto out;
+ 
+     device_add_domain_config(gc, &d_config, &libxl__disk_devtype,
+                              &cis->disk_saved);
+@@ -1020,10 +1252,14 @@ static void cdrom_insert_inserted(libxl_
+     flexarray_append_pair(insert, "type",
+                       libxl__device_disk_string_of_backend(disk->backend));
+     if (disk->format != LIBXL_DISK_FORMAT_EMPTY)
+-        flexarray_append_pair(insert, "params",
+-                    GCSPRINTF("%s:%s",
+-                        libxl__device_disk_string_of_format(disk->format),
+-                        disk->pdev_path));
++        if (disk->backend == LIBXL_DISK_BACKEND_QDISK) {
++            flexarray_append_pair(insert, "params",
++                        GCSPRINTF("%s:%s",
++                            libxl__device_disk_string_of_format(disk->format),
++                            disk->pdev_path));
++        } else {
++            flexarray_append_pair(insert, "params", disk->pdev_path);
++        }
+     else
+         flexarray_append_pair(insert, "params", "");
+ 
+@@ -1081,7 +1317,10 @@ static void cdrom_insert_done(libxl__egc
+ {
+     EGC_GC;
+ 
++    LOGD(DEBUG, cis->domid, "rc=%d", rc);
++
+     libxl__ev_time_deregister(gc, &cis->time);
++    libxl__ev_time_deregister(gc, &cis->timeout_retry);
+     libxl__ev_qmp_dispose(gc, &cis->qmp);
+     if (cis->qmp.payload_fd >= 0) close(cis->qmp.payload_fd);
+     libxl__ev_slowlock_unlock(gc, &cis->qmp_lock);
+--- a/docs/misc/stubdom.txt
++++ b/docs/misc/stubdom.txt
+@@ -127,6 +127,22 @@ Limitations:
+  - at most 26 emulated disks are supported (more are still available as PV disks)
+  - graphics output (VNC/SDL/Spice) not supported
+ 
++CD-ROM changing:
++
++To change the CD-ROM medium, libxl will:
++ - QMP eject the medium from QEMU
++ - block-detach the old PV disk
++ - block-attach the new PV disk
++ - QMP change the medium to the new PV disk by fdset-id
++
++The QMP change insert uses fdset-id STUBDOM_FDSET_CD + $disk - 'a'.
++That is, hda -> 'a', so
++STUBDOM_FDSET_CD + 'a' - 'a' = STUBDOM_FDSET_CD.
++For hdc:
++STUBDOM_FDSET_CD + 'c' - 'a' = STUBDOM_FDSET_CD + 2.
++
++The stubdom must internally handle adding /dev/xvdc to the appropriate
++fdset.
+ 
+                                    PV-GRUB
+                                    =======

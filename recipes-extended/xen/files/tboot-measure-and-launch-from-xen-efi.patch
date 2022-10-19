@@ -26,20 +26,9 @@ structures that bypassed tboot are located in RAM.
 Signed-off-by: Daniel De Graaf <dgdegra@tycho.nsa.gov>
 Signed-off-by: Tamas K Lengyel <lengyelt@ainfosec.com>
 ---
- docs/misc/efi.pandoc              |  14 +
- xen/arch/arm/efi/efi-boot.h       |  13 +-
- xen/arch/x86/efi/efi-boot.h       | 568 +++++++++++++++++++++++++++++-
- xen/arch/x86/efi/stub.c           |   5 +
- xen/arch/x86/tboot.c              | 105 +++++-
- xen/common/efi/boot.c             |  13 +-
- xen/common/libelf/libelf-loader.c |  60 ++++
- xen/include/xen/efi.h             |   1 +
- xen/include/xen/libelf.h          |   1 +
- 9 files changed, 753 insertions(+), 27 deletions(-)
-
 --- a/docs/misc/efi.pandoc
 +++ b/docs/misc/efi.pandoc
-@@ -112,6 +112,20 @@ Specifies an alternate configuration fil
+@@ -114,6 +114,20 @@ Specifies an alternate configuration fil
  specified) configuration file. This is only meaningful in the [global] section
  and really not meant to be used together with the `-cfg=` command line option.
  
@@ -62,17 +51,17 @@ Signed-off-by: Tamas K Lengyel <lengyelt@ainfosec.com>
  Extra options to be passed to Xen can also be specified on the command line,
 --- a/xen/arch/arm/efi/efi-boot.h
 +++ b/xen/arch/arm/efi/efi-boot.h
-@@ -395,7 +395,8 @@ static void __init efi_arch_cfg_file_ear
-         blexit(L"Unable to create new FDT");
- }
+@@ -456,7 +456,8 @@ static void __init efi_arch_cfg_file_ear
  
--static void __init efi_arch_cfg_file_late(EFI_FILE_HANDLE dir_handle, char *section)
-+static void __init efi_arch_cfg_file_late(EFI_FILE_HANDLE dir_handle, char *section,
+ static void __init efi_arch_cfg_file_late(const EFI_LOADED_IMAGE *image,
+                                           EFI_FILE_HANDLE dir_handle,
+-                                          const char *section)
++                                          const char *section,
 +                                          EFI_SHIM_LOCK_PROTOCOL *shim_lock)
  {
  }
  
-@@ -418,6 +419,16 @@ static void __init efi_arch_memory_setup
+@@ -479,6 +480,16 @@ static void __init efi_arch_memory_setup
  {
  }
  
@@ -88,12 +77,12 @@ Signed-off-by: Tamas K Lengyel <lengyelt@ainfosec.com>
 +
  static void __init efi_arch_handle_cmdline(CHAR16 *image_name,
                                             CHAR16 *cmdline_options,
-                                            char *cfgfile_options)
+                                            const char *cfgfile_options)
 --- a/xen/arch/x86/efi/efi-boot.h
 +++ b/xen/arch/x86/efi/efi-boot.h
 @@ -9,16 +9,43 @@
+ #include <asm/microcode.h>
  #include <asm/msr.h>
- #include <asm/processor.h>
  #include <asm/setup.h>
 +#include <xen/libelf.h>
 +#include <xen/multiboot2.h>
@@ -136,7 +125,7 @@ Signed-off-by: Tamas K Lengyel <lengyelt@ainfosec.com>
  
  static void __init edd_put_string(u8 *dst, size_t n, const char *src)
  {
-@@ -213,6 +240,231 @@ static void __init efi_arch_process_memo
+@@ -215,6 +242,231 @@ static void __init efi_arch_process_memo
  
  }
  
@@ -368,7 +357,7 @@ Signed-off-by: Tamas K Lengyel <lengyelt@ainfosec.com>
  static void *__init efi_arch_allocate_mmap_buffer(UINTN map_size)
  {
      return ebmalloc(map_size);
-@@ -228,12 +480,56 @@ static void __init efi_arch_pre_exit_boo
+@@ -230,12 +482,81 @@ static void __init efi_arch_pre_exit_boo
      }
  }
  
@@ -383,13 +372,25 @@ Signed-off-by: Tamas K Lengyel <lengyelt@ainfosec.com>
 +    asm volatile(
 +        "cli\n"
 +
-+        // We need to use Xen's GDT to switch back to 32-bit mode
-+        "lgdt   gdt_descr(%%rip)\n"
++        /* Load compat GDT. */
++        "leaq    compat_mode_gdt(%%rip), %%rax\n"
++        "movq    %%rax, (compat_mode_gdt_desc + 2)(%%rip)\n"
++        "lgdt    compat_mode_gdt_desc(%%rip)\n"
 +
 +        // this push and call are consumed by lretq, producing a mov-to-cs
-+        "pushq  %[cs]\n"
-+        "call   1f\n"
++        "lea  do_do_sinit(%%rip), %%rax\n"
++        "pushq  $0x10\n"
++        "pushq  %%rax\n"
++        "lretq\n"
++
 +        ".code32\n"
++        "do_do_sinit:\n"
++        "movl   $0x0008, %%eax\n"
++        "movl   %%eax, %%ds\n"
++        "movl   %%eax, %%es\n"
++        "movl   %%eax, %%fs\n"
++        "movl   %%eax, %%gs\n"
++        "movl   %%eax, %%ss\n"
 +
 +        // Disable paging; we are identity mapped
 +        "mov    %[cr0], %%eax\n"
@@ -407,11 +408,24 @@ Signed-off-by: Tamas K Lengyel <lengyelt@ainfosec.com>
 +        // Jump to tboot's entry point; it will return control to the copy of
 +        // xen.efi passed via its first multiboot argument
 +        "jmp *%%esi\n"
++        "ud2\n"
 +
++        ".align 4\n"
++        "compat_mode_gdt_desc:\n"
++        "        .word .Lcompat_mode_gdt_end - compat_mode_gdt -1\n"
++        "        .quad 0x0000000000000000     /* set in call_32_bit above */\n"
++        "        .align 8\n"
++
++        "compat_mode_gdt:\n"
++        "        .quad 0x0000000000000000     /* null                              */\n"
++        "        .quad 0x00cf93000000ffff     /* 0x0008 ring 0 data                */\n"
++        "        .quad 0x00cf9b000000ffff     /* 0x0010 ring 0 code, compatibility */\n"
++        ".Lcompat_mode_gdt_end:\n"
++
++        // Reset back to 64bit for the rest of the file.
 +        ".code64\n"
-+        "1: lretq\n"
++
 +        ::
-+         [cs] "i" (__HYPERVISOR_CS32),
 +         [cr0] "i" (X86_CR0_PE | X86_CR0_MP | X86_CR0_ET | X86_CR0_NE),
 +         [efer] "i" (MSR_EFER),
 +         [lme_mask] "i" (~EFER_LME),
@@ -429,19 +443,18 @@ Signed-off-by: Tamas K Lengyel <lengyelt@ainfosec.com>
  
      /* Set system registers and transfer control. */
      asm volatile("pushq $0\n\tpopfq");
-@@ -263,22 +559,35 @@ static void __init noreturn efi_arch_pos
-                    "lretq  %[stkoff]-16"
+@@ -266,14 +587,25 @@ static void __init noreturn efi_arch_pos
+                    "lretq"
                     : [rip] "=&r" (efer/* any dead 64-bit variable */),
                       [cr4] "+&r" (cr4)
 -                   : [cr3] "r" (idle_pg_table),
 +                   : [cr3] "r" (cr3),
-                      [cs] "ir" (__HYPERVISOR_CS),
+                      [cs] "i" (__HYPERVISOR_CS),
                       [ds] "r" (__HYPERVISOR_DS),
-                      [stkoff] "i" (STACK_SIZE - sizeof(struct cpu_info)),
 -                     "D" (&mbi)
 +                     "D" (mbi_p)
                     : "memory" );
-     for( ; ; ); /* not reached */
+     unreachable();
  }
  
 +static void __init noreturn efi_arch_post_exit_boot(void)
@@ -455,20 +468,23 @@ Signed-off-by: Tamas K Lengyel <lengyelt@ainfosec.com>
 +    enter_xen_context((unsigned long)&mbi, (unsigned long)idle_pg_table);
 +}
 +
- static void __init efi_arch_cfg_file_early(EFI_FILE_HANDLE dir_handle, char *section)
- {
- }
+ static void __init efi_arch_cfg_file_early(const EFI_LOADED_IMAGE *image,
+                                            EFI_FILE_HANDLE dir_handle,
+                                            const char *section)
+@@ -282,9 +614,11 @@ static void __init efi_arch_cfg_file_ear
  
--static void __init efi_arch_cfg_file_late(EFI_FILE_HANDLE dir_handle, char *section)
-+static void __init efi_arch_cfg_file_late(EFI_FILE_HANDLE dir_handle, char *section,
+ static void __init efi_arch_cfg_file_late(const EFI_LOADED_IMAGE *image,
+                                           EFI_FILE_HANDLE dir_handle,
+-                                          const char *section)
++                                          const char *section,
 +                                          EFI_SHIM_LOCK_PROTOCOL *shim_lock)
  {
      union string name;
 +    EFI_STATUS status;
  
-     name.s = get_value(&cfg, section, "ucode");
-     if ( !name.s )
-@@ -290,6 +599,112 @@ static void __init efi_arch_cfg_file_lat
+     if ( read_section(image, L"ucode", &ucode, NULL) )
+         return;
+@@ -299,6 +633,112 @@ static void __init efi_arch_cfg_file_lat
          read_file(dir_handle, s2w(&name), &ucode, NULL);
          efi_bs->FreePool(name.w);
      }
@@ -581,7 +597,7 @@ Signed-off-by: Tamas K Lengyel <lengyelt@ainfosec.com>
  }
  
  static void __init efi_arch_handle_cmdline(CHAR16 *image_name,
-@@ -564,6 +979,10 @@ static void __init efi_arch_memory_setup
+@@ -573,6 +1013,10 @@ static void __init efi_arch_memory_setup
      unsigned int i;
      EFI_STATUS status;
  
@@ -592,14 +608,14 @@ Signed-off-by: Tamas K Lengyel <lengyelt@ainfosec.com>
      /* Allocate space for trampoline (in first Mb). */
      cfg.addr = 0x100000;
  
-@@ -714,6 +1133,146 @@ void __init efi_multiboot2(EFI_HANDLE Im
+@@ -761,6 +1205,146 @@ void __init efi_multiboot2(EFI_HANDLE Im
      efi_exit_boot(ImageHandle, SystemTable);
  }
  
 +static void __init relocate_pagetables_only(void)
 +{
 +    u64 *ptr;
-+    unsigned int i;
++    unsigned int i, slots;
 +
 +    /* Instead of walking the PE relocation tables, rely on the fact that page
 +     * tables have a well-known structure and relocate all present entries.
@@ -612,22 +628,22 @@ Signed-off-by: Tamas K Lengyel <lengyelt@ainfosec.com>
 +        *ptr += xen_phys_start;
 +    }
 +
-+    /* The above loop also adjusted l2_identmap, but that mostly contains a 1:1
-+     * mapping that should not have been relocated.  The first entry of that
-+     * table is already correct; re-generate the rest now.
-+     */
-+    for ( i = 1; i < 8; i++ )
-+    {
-+        paddr_t addr = i << L2_PAGETABLE_SHIFT;
-+        l2_identmap[i] = l2e_from_paddr(addr, PAGE_HYPERVISOR|_PAGE_PSE);
-+    }
++    /* l2_xenmap must be dynamically created.  This is the virtual address
++     * space Xen will run in after calling __start_xen. */
++    for ( i =  l2_table_offset((UINTN)_start  );
++          i <= l2_table_offset((UINTN)_end - 1); ++i )
++        l2_xenmap[i] =
++            l2e_from_paddr(xen_phys_start + (i << L2_PAGETABLE_SHIFT),
++                           PAGE_HYPERVISOR_RWX | _PAGE_PSE);
 +
-+    /* Map 16MB starting at xen_phys_start, as expected by __start_xen */
-+    for ( i = 0; i < 8; i++ )
++    /* Map Xen binary at xen_phys_start, as expected by __start_xen */
++    slots = l2_table_offset((UINTN)_end - 1) - l2_table_offset((UINTN)_start);
++    slots++;
++    for ( i = 0; i <= slots; i++ )
 +    {
 +        paddr_t addr = (i << L2_PAGETABLE_SHIFT) + xen_phys_start;
 +        unsigned int slot = addr >> L2_PAGETABLE_SHIFT;
-+        l2_identmap[slot] = l2e_from_paddr(addr, PAGE_HYPERVISOR|_PAGE_PSE);
++        l2_directmap[slot] = l2e_from_paddr(addr, PAGE_HYPERVISOR|_PAGE_PSE);
 +    }
 +}
 +
@@ -741,21 +757,20 @@ Signed-off-by: Tamas K Lengyel <lengyelt@ainfosec.com>
   * mode: C
 --- a/xen/arch/x86/efi/stub.c
 +++ b/xen/arch/x86/efi/stub.c
-@@ -50,6 +50,11 @@ bool efi_enabled(unsigned int feature)
- 
- void __init efi_init_memory(void) { }
- 
+@@ -59,6 +59,10 @@ bool efi_boot_mem_unused(unsigned long *
+         *start = *end = (unsigned long)_end;
+     return false;
+ }
 +void __init efi_tboot_verify_memory(bool (*not_ram)(const void*, size_t, void*),
 +                                    void* data)
 +{
 +}
-+
+ 
  void efi_update_l4_pgtable(unsigned int l4idx, l4_pgentry_t l4e) { }
  
- bool efi_rs_using_pgtables(void)
 --- a/xen/arch/x86/tboot.c
 +++ b/xen/arch/x86/tboot.c
-@@ -7,6 +7,7 @@
+@@ -9,6 +9,7 @@
  #include <xen/iommu.h>
  #include <xen/acpi.h>
  #include <xen/pfn.h>
@@ -861,7 +876,7 @@ Signed-off-by: Tamas K Lengyel <lengyelt@ainfosec.com>
  void __init tboot_probe(void)
  {
      tboot_shared_t *tboot_shared;
-@@ -144,6 +229,9 @@ void __init tboot_probe(void)
+@@ -143,6 +228,9 @@ void __init tboot_probe(void)
                        TXT_PUB_CONFIG_REGS_BASE + TXTCR_SINIT_BASE);
      tboot_copy_memory((unsigned char *)&sinit_size, sizeof(sinit_size),
                        TXT_PUB_CONFIG_REGS_BASE + TXTCR_SINIT_SIZE);
@@ -871,7 +886,7 @@ Signed-off-by: Tamas K Lengyel <lengyelt@ainfosec.com>
      clear_fixmap(FIX_TBOOT_MAP_ADDRESS);
  }
  
-@@ -454,7 +542,6 @@ int __init tboot_protect_mem_regions(voi
+@@ -461,7 +549,6 @@ int __init tboot_protect_mem_regions(voi
  int __init tboot_parse_dmar_table(acpi_table_handler dmar_handler)
  {
      int rc;
@@ -879,7 +894,7 @@ Signed-off-by: Tamas K Lengyel <lengyelt@ainfosec.com>
      uint32_t dmar_table_length;
      unsigned long pa;
      sinit_mle_data_t sinit_mle_data;
-@@ -469,21 +556,8 @@ int __init tboot_parse_dmar_table(acpi_t
+@@ -476,21 +563,8 @@ int __init tboot_parse_dmar_table(acpi_t
      if ( txt_heap_base == 0 )
          return 1;
  
@@ -905,7 +920,7 @@ Signed-off-by: Tamas K Lengyel <lengyelt@ainfosec.com>
      tboot_copy_memory((unsigned char *)&dmar_table_length,
 --- a/xen/common/efi/boot.c
 +++ b/xen/common/efi/boot.c
-@@ -630,7 +630,7 @@ static bool __init read_file(EFI_FILE_HA
+@@ -614,7 +614,7 @@ static bool __init read_file(EFI_FILE_HA
          what = what ?: L"Seek";
      else
      {
@@ -914,7 +929,7 @@ Signed-off-by: Tamas K Lengyel <lengyelt@ainfosec.com>
                           HYPERVISOR_VIRT_END - DIRECTMAP_VIRT_START);
          ret = efi_bs->AllocatePages(AllocateMaxAddress, EfiLoaderData,
                                      PFN_UP(size), &file->addr);
-@@ -742,6 +742,7 @@ static char *__init get_value(const stru
+@@ -732,6 +732,7 @@ static char *__init get_value(const stru
  
  static void __init efi_init(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
  {
@@ -922,7 +937,7 @@ Signed-off-by: Tamas K Lengyel <lengyelt@ainfosec.com>
      efi_ih = ImageHandle;
      efi_bs = SystemTable->BootServices;
      efi_bs_revision = efi_bs->Hdr.Revision;
-@@ -1148,6 +1149,8 @@ efi_start(EFI_HANDLE ImageHandle, EFI_SY
+@@ -1164,6 +1165,8 @@ efi_start(EFI_HANDLE ImageHandle, EFI_SY
      __set_bit(EFI_RS, &efi_flags);
  #endif
  
@@ -931,7 +946,7 @@ Signed-off-by: Tamas K Lengyel <lengyelt@ainfosec.com>
      efi_init(ImageHandle, SystemTable);
  
      use_cfg_file = efi_arch_use_config_file(SystemTable);
-@@ -1238,6 +1241,13 @@ efi_start(EFI_HANDLE ImageHandle, EFI_SY
+@@ -1254,6 +1257,13 @@ efi_start(EFI_HANDLE ImageHandle, EFI_SY
          /* Get the file system interface. */
          dir_handle = get_parent_handle(loaded_image, &file_name);
  
@@ -943,17 +958,27 @@ Signed-off-by: Tamas K Lengyel <lengyelt@ainfosec.com>
 +            efi_arch_handle_xen_filename(dir_handle, file_name);
 +
          /* Read and parse the config file. */
-         if ( !cfg_file_name )
-         {
-@@ -1382,7 +1392,7 @@ efi_start(EFI_HANDLE ImageHandle, EFI_SY
+         if ( read_section(loaded_image, L"config", &cfg, NULL) )
+             PrintStr(L"Using builtin config file\r\n");
+@@ -1410,7 +1420,7 @@ efi_start(EFI_HANDLE ImageHandle, EFI_SY
              }
          }
  
--        efi_arch_cfg_file_late(dir_handle, section.s);
-+        efi_arch_cfg_file_late(dir_handle, section.s, shim_lock);
+-        efi_arch_cfg_file_late(loaded_image, dir_handle, section.s);
++        efi_arch_cfg_file_late(loaded_image, dir_handle, section.s, shim_lock);
  
          efi_bs->FreePages(cfg.addr, PFN_UP(cfg.size));
          cfg.addr = 0;
+--- a/xen/common/efi/runtime.c
++++ b/xen/common/efi/runtime.c
+@@ -68,6 +68,7 @@ struct efi __read_mostly efi = {
+ 	.mps    = EFI_INVALID_TABLE_ADDR,
+ 	.smbios = EFI_INVALID_TABLE_ADDR,
+ 	.smbios3 = EFI_INVALID_TABLE_ADDR,
++	.system_table = EFI_INVALID_TABLE_ADDR,
+ };
+ 
+ const struct efi_pci_rom *__read_mostly efi_pci_roms;
 --- a/xen/common/libelf/libelf-loader.c
 +++ b/xen/common/libelf/libelf-loader.c
 @@ -184,6 +184,13 @@ static elf_errorstatus elf_load_image(st
@@ -1040,7 +1065,7 @@ Signed-off-by: Tamas K Lengyel <lengyelt@ainfosec.com>
  };
  
  extern struct efi efi;
-@@ -44,6 +45,7 @@ int efi_runtime_call(struct xenpf_efi_ru
+@@ -45,6 +46,7 @@ int efi_runtime_call(struct xenpf_efi_ru
  int efi_compat_get_info(uint32_t idx, union compat_pf_efi_info *);
  int efi_compat_runtime_call(struct compat_pf_efi_runtime_call *);
  bool efi_secureboot_enabled(void);
@@ -1058,13 +1083,3 @@ Signed-off-by: Tamas K Lengyel <lengyelt@ainfosec.com>
  
  elf_ptrval elf_get_ptr(struct elf_binary *elf, unsigned long addr);
  uint64_t elf_lookup_addr(struct elf_binary *elf, const char *symbol);
---- a/xen/common/efi/runtime.c
-+++ b/xen/common/efi/runtime.c
-@@ -68,6 +68,7 @@ struct efi __read_mostly efi = {
- 	.mps    = EFI_INVALID_TABLE_ADDR,
- 	.smbios = EFI_INVALID_TABLE_ADDR,
- 	.smbios3 = EFI_INVALID_TABLE_ADDR,
-+	.system_table = EFI_INVALID_TABLE_ADDR,
- };
- 
- const struct efi_pci_rom *__read_mostly efi_pci_roms;

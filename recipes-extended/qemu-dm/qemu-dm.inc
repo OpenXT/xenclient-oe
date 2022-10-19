@@ -32,7 +32,6 @@ SRC_URI += "file://compile-time-stubdom-flag.patch \
             file://msix-cap-disable.patch \
             file://openxtaudio.patch \
             file://nic-link-state-propagation.patch \
-            file://stubdom-read-gsi-from-device-config-space.patch \
             file://acpi-pm-feature.patch \
             file://maintain-time-offset.patch \
             file://openxt-misc-fixes.patch \
@@ -42,6 +41,8 @@ SRC_URI += "file://compile-time-stubdom-flag.patch \
             file://block-remove-unused-block-format-support.patch \
             file://net-Remove-unused-network-options.patch \
             file://round-pci-region-sizes.patch \
+            file://ac97-compatibility.patch \
+            file://0001-vnc-stubs-Allow-vnc-none.patch \
             "
 
 SRC_URI[md5sum] = "5862fc984bb955c4c24427d3bceddca5"

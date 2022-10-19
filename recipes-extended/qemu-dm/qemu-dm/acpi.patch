@@ -55,48 +55,15 @@ PATCHES
  
  struct acpi_table_header {
      uint16_t _length;         /* our length, not actual part of the hdr */
-@@ -54,6 +60,17 @@ struct acpi_table_header {
- #define ACPI_TABLE_HDR_SIZE sizeof(struct acpi_table_header)
- #define ACPI_TABLE_PFX_SIZE sizeof(uint16_t)  /* size of the extra prefix */
- 
-+/* OpenXT: ACPI
-+ * Sleep state type codes as defined by the \_Sx objects in the DSDT.
-+ * These must be kept in sync with the DSDT (hvmloader/acpi/dsdt.asl)
-+ */
-+#define SLP_TYP_S4_V0     (6)
-+#define SLP_TYP_S3_V0     (5)
-+#define SLP_TYP_S5_V0     (7)
-+#define SLP_TYP_S4_V1     (0)
-+#define SLP_TYP_S3_V1     (1)
-+#define SLP_TYP_S5_V1     (0)
-+
- static const char unsigned dfl_hdr[ACPI_TABLE_HDR_SIZE - ACPI_TABLE_PFX_SIZE] =
-     "QEMU\0\0\0\0\1\0"       /* sig (4), len(4), revno (1), csum (1) */
-     "QEMUQEQEMUQEMU\1\0\0\0" /* OEM id (6), table (8), revno (4) */
-@@ -560,16 +577,29 @@ static void acpi_pm1_cnt_write(ACPIREGS
-         /* change suspend type */
-         uint16_t sus_typ = (val >> 10) & 7;
+@@ -562,14 +568,17 @@ static void acpi_pm1_cnt_write(ACPIREGS
          switch(sus_typ) {
--        case 0: /* soft power off */
-+        case SLP_TYP_S3_V0: /* S3: Suspend to RAM: Sleep */
-+            /* Same code for V0 and V1 */
-+        case SLP_TYP_S3_V1:
-+            qemu_system_suspend_request();
-+            xenstore_update_power(XENSTORE_PM_TYPE_SLEEP);
-+            break;
-+        case SLP_TYP_S4_V0: /* S4: Suspend to disk: Hibernation */
-+            /* PRIOR: monitor_protocol_event(QEVENT_SUSPEND_DISK, NULL); */
-+            qapi_event_send_suspend_disk();
+         case 0: /* soft power off */
              qemu_system_shutdown_request(SHUTDOWN_CAUSE_GUEST_SHUTDOWN);
-+            xenstore_update_power(XENSTORE_PM_TYPE_HIBERNATE);
-             break;
--        case 1:
--            qemu_system_suspend_request();
-+        case SLP_TYP_S5_V0: /* S5: Shutdown */
-+            /* Same code for V0 and V1 */
-+        case SLP_TYP_S5_V1:
-+            qemu_system_shutdown_request(SHUTDOWN_CAUSE_GUEST_SHUTDOWN);
 +            xenstore_update_power(XENSTORE_PM_TYPE_SHUTDOWN);
+             break;
+         case 1:
+             qemu_system_suspend_request();
++            xenstore_update_power(XENSTORE_PM_TYPE_SLEEP);
              break;
          default:
              if (sus_typ == ar->pm1.cnt.s4_val) { /* S4 request */
@@ -125,19 +92,9 @@ PATCHES
      acpi_pcihp_reset(&s->acpi_pci_hotplug);
  }
  
-@@ -505,6 +513,9 @@ static void piix4_pm_realize(PCIDevice *
-     /* APM */
-     apm_init(dev, &s->apm, apm_ctrl_changed, s);
- 
-+    /* OpenXT: Enable ACPI, QEMU doesn't enable it by default */
-+    apm_ctrl_changed(ACPI_ENABLE, s);
-+
-     if (!s->smm_enabled) {
-         /* Mark SMM as already inited to prevent SMM from running.  KVM does not
-          * support SMM mode. */
 --- a/hw/i386/xen/xen-hvm.c
 +++ b/hw/i386/xen/xen-hvm.c
-@@ -1528,6 +1528,15 @@ err:
+@@ -1521,6 +1521,15 @@ err:
      exit(1);
  }
  
@@ -153,7 +110,7 @@ PATCHES
  void destroy_hvm_domain(bool reboot)
  {
      xc_interface *xc_handle;
-@@ -1539,6 +1548,7 @@ void destroy_hvm_domain(bool reboot)
+@@ -1532,6 +1541,7 @@ void destroy_hvm_domain(bool reboot)
      if (xen_dmod) {
          rc = xendevicemodel_shutdown(xen_dmod, xen_domid, reason);
          if (!rc) {
@@ -161,7 +118,7 @@ PATCHES
              return;
          }
          if (errno != ENOTTY /* old Xen */) {
-@@ -1557,8 +1567,7 @@ void destroy_hvm_domain(bool reboot)
+@@ -1550,8 +1560,7 @@ void destroy_hvm_domain(bool reboot)
                      "sts %d, %s\n", reboot ? "reboot" : "poweroff",
                      sts, strerror(errno));
          } else {
@@ -173,7 +130,7 @@ PATCHES
      }
 --- a/hw/xen/xen-legacy-backend.c
 +++ b/hw/xen/xen-legacy-backend.c
-@@ -953,3 +956,17 @@ int xenstore_generic_init(void)
+@@ -953,3 +953,17 @@ int xenstore_generic_init(void)
  
      return 0;
  }

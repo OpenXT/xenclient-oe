@@ -44,7 +44,7 @@ PATCHES
 
 --- a/xen/arch/x86/acpi/power.c
 +++ b/xen/arch/x86/acpi/power.c
-@@ -133,6 +133,8 @@ static void thaw_domains(void)
+@@ -161,6 +161,8 @@ static void thaw_domains(void)
      for_each_domain ( d )
      {
          restore_vcpu_affinity(d);
@@ -53,35 +53,6 @@ PATCHES
          domain_unpause(d);
      }
      rcu_read_unlock(&domlist_read_lock);
---- a/xen/arch/x86/hvm/rtc.c
-+++ b/xen/arch/x86/hvm/rtc.c
-@@ -574,7 +574,7 @@ static void rtc_set_time(RTCState *s)
- {
-     struct tm *tm = &s->current_tm;
-     struct domain *d = vrtc_domain(s);
--    unsigned long before, after; /* XXX s_time_t */
-+    unsigned long before, after, adjustment; /* XXX s_time_t */
-       
-     ASSERT(spin_is_locked(&s->lock));
- 
-@@ -594,10 +594,14 @@ static void rtc_set_time(RTCState *s)
- 
-     /* We use the guest's setting of the RTC to define the local-time 
-      * offset for this domain. */
--    d->time_offset_seconds += (after - before);
-+    adjustment = after - before;
-+
-+    if (adjustment) {
-+        d->time_offset_seconds += adjustment;
-+        /* Also tell qemu-dm about it so it will be remembered for next boot. */
-+        send_timeoffset_req(d->time_offset_seconds);
-+    }
-     update_domain_wallclock_time(d);
--    /* Also tell qemu-dm about it so it will be remembered for next boot. */
--    send_timeoffset_req(after - before);
- }
- 
- static void rtc_copy_date(RTCState *s)
 --- a/xen/arch/x86/hvm/io.c
 +++ b/xen/arch/x86/hvm/io.c
 @@ -57,9 +57,6 @@ void send_timeoffset_req(unsigned long t
@@ -91,6 +62,35 @@ PATCHES
 -    if ( timeoff == 0 )
 -        return;
 -
-     if ( hvm_broadcast_ioreq(&p, true) != 0 )
+     if ( ioreq_broadcast(&p, true) != 0 )
          gprintk(XENLOG_ERR, "Unsuccessful timeoffset update\n");
  }
+--- a/xen/arch/x86/hvm/rtc.c
++++ b/xen/arch/x86/hvm/rtc.c
+@@ -575,7 +575,7 @@ static void rtc_set_time(RTCState *s)
+ {
+     struct tm *tm = &s->current_tm;
+     struct domain *d = vrtc_domain(s);
+-    unsigned long before, after; /* XXX s_time_t */
++    unsigned long before, after, adjustment; /* XXX s_time_t */
+       
+     ASSERT(spin_is_locked(&s->lock));
+ 
+@@ -595,10 +595,14 @@ static void rtc_set_time(RTCState *s)
+ 
+     /* We use the guest's setting of the RTC to define the local-time 
+      * offset for this domain. */
+-    d->time_offset.seconds += (after - before);
++    adjustment = after - before;
++
++    if (adjustment) {
++        d->time_offset.seconds += adjustment;
++        /* Also tell qemu-dm about it so it will be remembered for next boot. */
++        send_timeoffset_req(d->time_offset.seconds);
++    }
+     update_domain_wallclock_time(d);
+-    /* Also tell qemu-dm about it so it will be remembered for next boot. */
+-    send_timeoffset_req(after - before);
+ }
+ 
+ static void rtc_copy_date(RTCState *s)

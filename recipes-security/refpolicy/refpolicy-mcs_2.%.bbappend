@@ -91,7 +91,6 @@ SRC_URI += " \
 "
 # Patches.
 SRC_URI += " \
-    file://patches/virtual_domain_context.diff \
     file://patches/fc-subs-busybox-aliases.patch \
     file://patches/fc-subs-config-aliases.patch \
     file://patches/policy.modules.admin.alsa.diff \

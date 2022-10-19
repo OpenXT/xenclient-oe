@@ -34,47 +34,84 @@ INTERNAL DEPENDENCIES
 ################################################################################
 PATCHES
 ################################################################################
---- a/tools/libxl/libxl.h
-+++ b/tools/libxl/libxl.h
-@@ -1551,6 +1551,8 @@ int libxl_domain_remus_start(libxl_ctx *
+--- a/tools/include/libxl.h
++++ b/tools/include/libxl.h
+@@ -1804,6 +1804,12 @@ static inline int libxl_domain_reboot_0x
+ #define libxl_domain_reboot libxl_domain_reboot_0x041200
+ #endif
  
- int libxl_domain_shutdown(libxl_ctx *ctx, uint32_t domid);
- int libxl_domain_reboot(libxl_ctx *ctx, uint32_t domid);
-+int libxl_domain_sleep(libxl_ctx *ctx, uint32_t domid);
-+int libxl_domain_hibernate(libxl_ctx *ctx, uint32_t domid);
++int libxl_domain_sleep(libxl_ctx *ctx, uint32_t domid,
++                        const libxl_asyncop_how *ao_how)
++                        LIBXL_EXTERNAL_CALLERS_ONLY;
++int libxl_domain_hibernate(libxl_ctx *ctx, uint32_t domid,
++                        const libxl_asyncop_how *ao_how)
++                        LIBXL_EXTERNAL_CALLERS_ONLY;
  int libxl_domain_destroy(libxl_ctx *ctx, uint32_t domid,
                           const libxl_asyncop_how *ao_how)
                           LIBXL_EXTERNAL_CALLERS_ONLY;
---- a/tools/libxl/libxl_domain.c
-+++ b/tools/libxl/libxl_domain.c
-@@ -721,6 +721,24 @@ int libxl_domain_reboot(libxl_ctx *ctx,
-     return ret;
+--- a/tools/include/libxl_utils.h
++++ b/tools/include/libxl_utils.h
+@@ -26,6 +26,9 @@ char *libxl_basename(const char *name);
+ unsigned long libxl_get_required_shadow_memory(unsigned long maxmem_kb, unsigned int smp_cpus);
+   /* deprecated; see LIBXL_HAVE_DOMAIN_NEED_MEMORY_CONFIG in libxl.h */
+ int libxl_name_to_domid(libxl_ctx *ctx, const char *name, uint32_t *domid);
++int libxl_uuid_to_domid(libxl_ctx *ctx, const char *uuid, int32_t *domid);
++int libxl_domid_to_uuid(libxl_ctx *ctx, libxl_uuid *uuid, uint32_t domid);
++int libxl_get_acpi_state(libxl_ctx *ctx, int32_t domid, uint32_t * acpi_state);
+ int libxl_domain_qualifier_to_domid(libxl_ctx *ctx, const char *name, uint32_t *domid);
+ char *libxl_domid_to_name(libxl_ctx *ctx, uint32_t domid);
+ int libxl_cpupool_qualifier_to_cpupoolid(libxl_ctx *ctx, const char *p,
+@@ -185,6 +188,8 @@ void libxl_string_copy(libxl_ctx *ctx, c
+ 
+ #define LIBXL_FILLZERO(object) (memset(&(object), 0, sizeof((object))))
+ 
++#define INVALID_ACPI_STATE ~0
++
+ #endif
+ 
+ /*
+--- a/tools/libs/light/libxl_domain.c
++++ b/tools/libs/light/libxl_domain.c
+@@ -867,6 +867,36 @@ static void pvcontrol_cb(libxl__egc *egc
+     libxl__ao_complete(egc, ao, rc);
  }
  
-+int libxl_domain_sleep(libxl_ctx *ctx, uint32_t domid)
++int libxl_domain_sleep(libxl_ctx *ctx, uint32_t domid,
++                        const libxl_asyncop_how *ao_how)
 +{
-+    GC_INIT(ctx);
-+    int ret;
-+    ret = libxl__domain_pvcontrol(gc, domid, "s3");
-+    GC_FREE;
-+    return ret;
++    AO_CREATE(ctx, domid, ao_how);
++    libxl__xswait_state *pvcontrol;
++    int rc;
++
++    GCNEW(pvcontrol);
++    pvcontrol->ao = ao;
++    pvcontrol->callback = pvcontrol_cb;
++    rc = libxl__domain_pvcontrol(egc, pvcontrol, domid, "s3");
++
++    return rc ? AO_CREATE_FAIL(rc) : AO_INPROGRESS;
 +}
 +
-+int libxl_domain_hibernate(libxl_ctx *ctx, uint32_t domid)
++int libxl_domain_hibernate(libxl_ctx *ctx, uint32_t domid,
++                        const libxl_asyncop_how *ao_how)
 +{
-+    GC_INIT(ctx);
-+    int ret;
-+    ret = libxl__domain_pvcontrol(gc, domid, "hibernate");
-+    GC_FREE;
-+    return ret;
++    AO_CREATE(ctx, domid, ao_how);
++    libxl__xswait_state *pvcontrol;
++    int rc;
++
++    GCNEW(pvcontrol);
++    pvcontrol->ao = ao;
++    pvcontrol->callback = pvcontrol_cb;
++    rc = libxl__domain_pvcontrol(egc, pvcontrol, domid, "hibernate");
++
++    return rc ? AO_CREATE_FAIL(rc) : AO_INPROGRESS;
 +}
 +
  static void domain_death_occurred(libxl__egc *egc,
                                    libxl_evgen_domain_death **evg_upd,
                                    const char *why) {
---- a/tools/libxl/libxl_types.idl
-+++ b/tools/libxl/libxl_types.idl
-@@ -169,6 +169,7 @@ libxl_trigger = Enumeration("trigger", [
+--- a/tools/libs/light/libxl_types.idl
++++ b/tools/libs/light/libxl_types.idl
+@@ -160,6 +160,7 @@ libxl_trigger = Enumeration("trigger", [
      (4, "INIT"),
      (5, "RESET"),
      (6, "S3RESUME"),
@@ -82,7 +119,7 @@ PATCHES
      ])
  
  libxl_tsc_mode = Enumeration("tsc_mode", [
-@@ -342,6 +343,7 @@ libxl_dominfo = Struct("dominfo",[
+@@ -347,6 +348,7 @@ libxl_dominfo = Struct("dominfo",[
      #
      # Otherwise set to a value guaranteed not to clash with any valid
      # LIBXL_SHUTDOWN_REASON_* constant.
@@ -90,8 +127,8 @@ PATCHES
      ("shutdown_reason", libxl_shutdown_reason),
      ("outstanding_memkb",  MemKB),
      ("current_memkb",   MemKB),
---- a/tools/libxl/libxl_utils.c
-+++ b/tools/libxl/libxl_utils.c
+--- a/tools/libs/light/libxl_utils.c
++++ b/tools/libs/light/libxl_utils.c
 @@ -94,6 +94,65 @@ int libxl_name_to_domid(libxl_ctx *ctx,
      return ret;
  }
@@ -158,30 +195,9 @@ PATCHES
  int libxl_domain_qualifier_to_domid(libxl_ctx *ctx, const char *name,
                                      uint32_t *domid)
  {
---- a/tools/libxl/libxl_utils.h
-+++ b/tools/libxl/libxl_utils.h
-@@ -25,6 +25,9 @@ char *libxl_basename(const char *name);
- 
- unsigned long libxl_get_required_shadow_memory(unsigned long maxmem_kb, unsigned int smp_cpus);
- int libxl_name_to_domid(libxl_ctx *ctx, const char *name, uint32_t *domid);
-+int libxl_uuid_to_domid(libxl_ctx *ctx, const char *uuid, int32_t *domid);
-+int libxl_domid_to_uuid(libxl_ctx *ctx, libxl_uuid *uuid, uint32_t domid);
-+int libxl_get_acpi_state(libxl_ctx *ctx, int32_t domid, uint32_t * acpi_state);
- int libxl_domain_qualifier_to_domid(libxl_ctx *ctx, const char *name, uint32_t *domid);
- char *libxl_domid_to_name(libxl_ctx *ctx, uint32_t domid);
- int libxl_cpupool_qualifier_to_cpupoolid(libxl_ctx *ctx, const char *p,
-@@ -184,6 +187,8 @@ void libxl_string_copy(libxl_ctx *ctx, c
- 
- #define LIBXL_FILLZERO(object) (memset(&(object), 0, sizeof((object))))
- 
-+#define INVALID_ACPI_STATE ~0
-+
- #endif
- 
- /*
 --- a/tools/xl/xl.h
 +++ b/tools/xl/xl.h
-@@ -137,6 +137,9 @@ int main_unpause(int argc, char **argv);
+@@ -138,6 +138,9 @@ int main_unpause(int argc, char **argv);
  int main_destroy(int argc, char **argv);
  int main_shutdown(int argc, char **argv);
  int main_reboot(int argc, char **argv);
@@ -193,7 +209,7 @@ PATCHES
  int main_create(int argc, char **argv);
 --- a/tools/xl/xl_cmdtable.c
 +++ b/tools/xl/xl_cmdtable.c
-@@ -77,6 +77,13 @@ struct cmd_spec cmd_table[] = {
+@@ -78,6 +78,13 @@ const struct cmd_spec cmd_table[] = {
        "                        no PV drivers.\n"
        "-w, --wait              Wait for guest(s) to shutdown.\n"
      },
@@ -207,7 +223,7 @@ PATCHES
      { "reboot",
        &main_reboot, 0, 1,
        "Issue a reboot signal to a domain",
-@@ -295,6 +302,16 @@ struct cmd_spec cmd_table[] = {
+@@ -302,6 +309,16 @@ const struct cmd_spec cmd_table[] = {
        "Convert a domain id to domain name",
        "<DomainId>",
      },
@@ -282,15 +298,15 @@ PATCHES
          }
      }
  
--    libxl_send_trigger(ctx, domid, trigger, vcpuid);
+-    libxl_send_trigger(ctx, domid, trigger, vcpuid, NULL);
 +    if (trigger == LIBXL_TRIGGER_SLEEP){
 +        int rc;
-+        rc = libxl_domain_sleep(ctx, domid);
++        rc = libxl_domain_sleep(ctx, domid, NULL);
 +        if(rc){
 +            return -1;
 +        }
 +    } else {
-+        libxl_send_trigger(ctx, domid, trigger, vcpuid);
++        libxl_send_trigger(ctx, domid, trigger, vcpuid, NULL);
 +    }
  
      return EXIT_SUCCESS;
@@ -308,12 +324,12 @@ PATCHES
 +{
 +   int rc;
 +   libxl_update_state(ctx, domid, "shutdowning");
-+   rc=libxl_domain_hibernate(ctx, domid);
++   rc=libxl_domain_hibernate(ctx, domid, NULL);
 +   if (rc == ERROR_NOPARAVIRT) {
 +       if (fallback_trigger) {
 +           fprintf(stderr, "PV control interface not available:"
 +                   " sending ACPI power button event.\n");
-+           rc = libxl_send_trigger(ctx, domid, LIBXL_TRIGGER_HIBERNATE, 0);
++           rc = libxl_send_trigger(ctx, domid, LIBXL_TRIGGER_HIBERNATE, 0, NULL);
 +       } else {
 +           fprintf(stderr, "PV control interface not available:"
 +                   " external graceful hibernate not possible.\n");
@@ -337,7 +353,7 @@ PATCHES
  static void shutdown_domain(uint32_t domid,
                              libxl_evgen_domain_death **deathw,
                              libxl_ev_user for_user,
-@@ -207,6 +240,43 @@ static void wait_for_domain_deaths(libxl
+@@ -212,6 +245,43 @@ static void wait_for_domain_deaths(libxl
      }
  }
  
@@ -372,7 +388,7 @@ PATCHES
 +   fn(domid, wait_for_it ? &deathw : NULL, 0, 0);
 +
 +   if (wait_for_it)
-+       wait_for_domain_deaths(&deathw, 1);
++       wait_for_domain_deaths(&deathw, 1, 0);
 +
 +   return 0;
 +

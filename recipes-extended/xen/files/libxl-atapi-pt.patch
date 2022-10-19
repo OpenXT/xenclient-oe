@@ -33,8 +33,8 @@ INTERNAL DEPENDENCIES
 ################################################################################
 PATCHES
 ################################################################################
---- a/tools/libxl/libxl_device.c
-+++ b/tools/libxl/libxl_device.c
+--- a/tools/libs/light/libxl_device.c
++++ b/tools/libs/light/libxl_device.c
 @@ -307,6 +307,11 @@ static int disk_try_backend(disk_try_bac
              return backend;
          }
@@ -47,7 +47,7 @@ PATCHES
          if (a->disk->script) {
              LOG(DEBUG, "Disk vdev=%s, uses script=... assuming phy backend",
                  a->disk->vdev);
-@@ -408,6 +413,7 @@ int libxl__device_disk_set_backend(libxl
+@@ -394,6 +399,7 @@ int libxl__device_disk_set_backend(libxl
      } else if ((disk->backend == LIBXL_DISK_BACKEND_UNKNOWN ||
                  disk->backend == LIBXL_DISK_BACKEND_PHY) &&
                 disk->backend_domid == LIBXL_TOOLSTACK_DOMID &&
@@ -55,7 +55,7 @@ PATCHES
                 !disk->script) {
          if (stat(disk->pdev_path, &a.stab)) {
              LOGE(ERROR, "Disk vdev=%s failed to stat: %s",
-@@ -542,6 +548,14 @@ int libxl__device_disk_dev_number(const
+@@ -525,6 +531,14 @@ int libxl__device_disk_dev_number(const
      char *ep;
      unsigned long ul;
      int chrused;
@@ -70,38 +70,52 @@ PATCHES
  
      chrused = -1;
      if ((sscanf(virtpath, "d%ip%i%n", &disk, &partition, &chrused)  >= 2
---- a/tools/libxl/libxl_dm.c
-+++ b/tools/libxl/libxl_dm.c
-@@ -1835,13 +1835,21 @@ static int libxl__build_device_model_arg
-             }
+--- a/tools/libs/light/libxl_dm.c
++++ b/tools/libs/light/libxl_dm.c
+@@ -1927,21 +1927,28 @@ static int libxl__build_device_model_arg
+                     continue;
+                 }
  
-             if (disks[i].is_cdrom) {
--                drive = libxl__sprintf(gc,
--                         "if=ide,index=%d,readonly=on,media=cdrom,id=ide-%i",
--                         disk, dev_number);
--
--                if (target_path)
--                    drive = libxl__sprintf(gc, "%s,file=%s,format=%s",
--                                           drive, target_path, format);
+-                drive_id = GCSPRINTF("ide-%i", dev_number);
+-                drive = GCSPRINTF("if=none,readonly=on,id=%s", drive_id);
 +                if (!strncmp(disks[i].vdev, "atapi-pt", 9)) {
 +                    need_atapi_helper = true;
 +                    drive = libxl__sprintf(gc,
 +                        "file=%s,if=atapi-pt,media=cdrom,format=atapi-pt-fmt%s",
 +                         disks[i].pdev_path, disks[i].readwrite ? "" : ",readonly");
-+                }
-+                else {
-+                    drive = libxl__sprintf(gc,
-+                             "if=ide,index=%d,readonly=on,media=cdrom,id=ide-%i",
-+                             disk, dev_number);
++                } else {
++                    drive_id = GCSPRINTF("ide-%i", dev_number);
++                    drive = GCSPRINTF("if=none,readonly=on,id=%s", drive_id);
 +
 +                    if (target_path)
 +                        drive = libxl__sprintf(gc, "%s,file=%s,format=%s",
 +                                               drive, target_path, format);
+ 
+-                if (target_path)
+-                    drive = libxl__sprintf(gc, "%s,file=%s,format=%s",
+-                                           drive, target_path, format);
+-
+-                flexarray_vappend(dm_args,
+-                    "-drive", drive,
+-                    "-device",
+-                    GCSPRINTF("ide-cd,id=%s,drive=%s,bus=ide.%u,unit=%u",
+-                              drive_id, drive_id,
+-                              disk / 2, disk % 2),
+-                    NULL);
+-                continue;
++                    flexarray_vappend(dm_args,
++                        "-drive", drive,
++                        "-device",
++                        GCSPRINTF("ide-cd,id=%s,drive=%s,bus=ide.%u,unit=%u",
++                                  drive_id, drive_id,
++                                  disk / 2, disk % 2),
++                        NULL);
++                    continue;
 +                }
              } else {
                  /*
                   * Explicit sd disks are passed through as is.
-@@ -1987,6 +1995,34 @@ static int libxl__build_device_model_arg
+@@ -2083,6 +2090,34 @@ static int libxl__build_device_model_arg
      }
  }
  
@@ -136,9 +150,9 @@ PATCHES
  static void libxl__dm_vifs_from_hvm_guest_config(libxl__gc *gc,
                                      libxl_domain_config * const guest_config,
                                      libxl_domain_config *dm_config)
-@@ -2227,9 +2263,7 @@ void libxl__spawn_stub_dm(libxl__egc *eg
-     dm_config->b_info.stubdom_cmdline =
-         libxl__strdup(gc, guest_config->b_info.stubdom_cmdline);
+@@ -2371,9 +2406,7 @@ void libxl__spawn_stub_dm(libxl__egc *eg
+     dm_config->b_info.extra_pv = guest_config->b_info.extra_pv;
+     dm_config->b_info.extra_hvm = guest_config->b_info.extra_hvm;
  
 -    dm_config->disks = guest_config->disks;
 -    dm_config->num_disks = guest_config->num_disks;
@@ -147,9 +161,9 @@ PATCHES
      libxl__dm_vifs_from_hvm_guest_config(gc, guest_config, dm_config);
  
      dm_config->c_info.run_hotplug_scripts =
---- a/tools/libxl/libxlu_disk.c
-+++ b/tools/libxl/libxlu_disk.c
-@@ -75,7 +75,9 @@ int xlu_disk_parse(XLU_Config *cfg,
+--- a/tools/libs/util/libxlu_disk.c
++++ b/tools/libs/util/libxlu_disk.c
+@@ -74,7 +74,9 @@ int xlu_disk_parse(XLU_Config *cfg,
      }
      if (disk->is_cdrom) {
          disk->removable = 1;

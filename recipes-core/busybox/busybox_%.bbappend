@@ -12,10 +12,12 @@ SRC_URI += " \
     file://netutils.cfg \
     file://poweroff.cfg \
     file://process.cfg \
+    file://setsid.cfg \
     file://shells.cfg \
     file://syslog.cfg \
     file://sysutils.cfg \
     file://tftp.cfg \
+    file://mdev.cfg \
 "
 
 # We should use sh wrappers instead of links so the commands could get correct

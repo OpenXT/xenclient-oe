@@ -31,10 +31,10 @@ INTERNAL DEPENDENCIES
 ################################################################################
 PATCHES
 ################################################################################
---- a/tools/libxl/libxl_dm.c
-+++ b/tools/libxl/libxl_dm.c
-@@ -2109,6 +2109,9 @@ static int libxl__store_libxl_entry(libx
-     return libxl__xs_printf(gc, XBT_NULL, path, "%s", value);
+--- a/tools/libs/light/libxl_dm.c
++++ b/tools/libs/light/libxl_dm.c
+@@ -2238,6 +2238,9 @@ static void dmss_dispose(libxl__gc *gc,
+     libxl__ev_time_deregister(gc, &dmss->timeout);
  }
  
 +static void argo_xswait_cb(libxl__egc *egc, libxl__xswait_state *xswait,
@@ -43,13 +43,12 @@ PATCHES
  static void spawn_stubdom_pvqemu_cb(libxl__egc *egc,
                                  libxl__dm_spawn_state *stubdom_dmss,
                                  int rc);
-@@ -2353,11 +2356,22 @@ retry_transaction:
+@@ -2482,10 +2485,22 @@ retry_transaction:
      libxl__xs_printf(gc, XBT_NULL,
                       DEVICE_MODEL_XS_PATH(gc, dm_domid, guest_domid, "/xen_extended_power_mgmt"), "2");
  
 -    libxl__multidev_begin(ao, &sdss->multidev);
 -    sdss->multidev.callback = spawn_stub_launch_dm;
--    /* OpenXT: Again, no disk for the stubdom itself */
 -    libxl__add_disks(egc, ao, dm_domid, dm_config, &sdss->multidev);
 -    libxl__multidev_prepared(egc, &sdss->multidev, 0);
 +    /* OpenXT: We wait on xenmgr writing argo-firewall-ready.
@@ -71,7 +70,7 @@ PATCHES
  
      return;
  
-@@ -2366,6 +2380,35 @@ out:
+@@ -2494,6 +2509,51 @@ out:
      spawn_stubdom_pvqemu_cb(egc, &sdss->pvqemu, ret);
  }
  
@@ -86,29 +85,45 @@ PATCHES
 +
 +    if (rc) {
 +        if (rc == ERROR_TIMEDOUT)
-+            LOGD(ERROR, guest_domid,
-+                 "%s: xenstore wait timed out", xswait->what);
++            LOGD(ERROR, guest_domid, "%s: xswait timed out", xswait->what);
++        else
++            LOGD(ERROR, guest_domid, "%s: xswait error (rc=%d)", xswait->what,
++                 rc);
 +        goto out;
 +    }
 +
-+    if (!p)
-+        LOGD(ERROR, guest_domid, "argo-firewall-ready was unable to be read");
-+    else if (!strcmp(p, "1"))
-+        LOGD(ERROR, guest_domid, "unexpected argo-firewall-ready value");
++    if (!p) {
++        LOGD(DEBUG, guest_domid,
++             "Unable to read argo-firewall-ready - keep waiting");
++        return;
++    }
 +
-+ out:
++    if (strcmp(p, "1")) {
++        LOGD(WARN, guest_domid,
++             "Unexpected argo-firewall-ready value \"%s\" - keep waiting", p);
++        return;
++    }
++
++    LOGD(DEBUG, guest_domid, "argo firewall is ready");
++
 +    libxl__xswait_stop(gc, xswait);
 +    libxl__multidev_begin(ao, &sdss->multidev);
 +    sdss->multidev.callback = spawn_stub_launch_dm;
 +    libxl__add_disks(egc, ao, dm_domid, dm_config, &sdss->multidev);
-+    libxl__multidev_prepared(egc, &sdss->multidev, 0);
++    libxl__multidev_prepared(egc, &sdss->multidev, rc);
++
++    return;
++
++ out:
++    libxl__xswait_stop(gc, xswait);
++    qmp_proxy_spawn_outcome(egc, sdss, rc);
 +}
 +
  static void spawn_stub_launch_dm(libxl__egc *egc,
                                   libxl__multidev *multidev, int ret)
  {
---- a/tools/libxl/libxl_internal.h
-+++ b/tools/libxl/libxl_internal.h
+--- a/tools/libs/light/libxl_internal.h
++++ b/tools/libs/light/libxl_internal.h
 @@ -98,6 +98,7 @@
  #define LIBXL_INIT_TIMEOUT 10
  #define LIBXL_DESTROY_TIMEOUT 10

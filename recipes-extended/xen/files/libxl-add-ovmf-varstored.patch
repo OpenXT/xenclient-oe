@@ -1,14 +1,14 @@
---- a/tools/libxl/libxl_dm.c
-+++ b/tools/libxl/libxl_dm.c
-@@ -21,6 +21,7 @@
+--- a/tools/libs/light/libxl_dm.c
++++ b/tools/libs/light/libxl_dm.c
+@@ -20,6 +20,7 @@
+ #include "libxl_internal.h"
  
- #include <xc_dom.h>
  #include <xen/hvm/e820.h>
 +#include <sys/stat.h>
  #include <sys/types.h>
  #include <pwd.h>
  #include <grp.h>
-@@ -2185,6 +2186,45 @@ static void fork_helper(libxl__gc *gc, c
+@@ -2353,6 +2354,41 @@ static void fork_helper(libxl__gc *gc, c
                           "%d", pid);
  }
  
@@ -18,15 +18,11 @@
 +    pid_t pid;
 +    libxl_ctx *ctx = libxl__gc_owner(gc);
 +
-+    struct stat st = {0};
-+    if (stat(GCSPRINTF("/var/run/varstored-root-%d", guest_domid), &st) == -1) {
-+        mkdir(GCSPRINTF("/var/run/varstored-root-%d", guest_domid), 0700);
-+    }
-+
 +    pid = fork();
 +    if (pid == -1) {
 +        LOG(ERROR, "Failed to fork");
 +    } else if (pid == 0) {
++        reset_fds(gc);
 +        execl(helper_path, GCSPRINTF("varstored-watch-%d", guest_domid),
 +                       "--domid",
 +                        GCSPRINTF("%d", guest_domid),
@@ -54,7 +50,7 @@
  void libxl__spawn_stub_dm(libxl__egc *egc, libxl__stub_dm_spawn_state *sdss)
  {
      STATE_AO_GC(sdss->dm.spawn.ao);
-@@ -2342,6 +2382,21 @@ void libxl__spawn_stub_dm(libxl__egc *eg
+@@ -2486,6 +2522,21 @@ void libxl__spawn_stub_dm(libxl__egc *eg
          fork_helper(gc, AUDIO_HELPER_PATH, XS_AUDIO_PID, guest_domid, dm_domid);
      }
  
@@ -75,10 +71,10 @@
 +
      libxl__store_libxl_entry(gc, guest_domid, "dm-version",
          libxl_device_model_version_to_string(dm_config->b_info.device_model_version));
-     libxl__store_libxl_entry(gc, dm_domid, "stubdom-version",
---- a/tools/libxl/libxl_domain.c
-+++ b/tools/libxl/libxl_domain.c
-@@ -1065,7 +1065,7 @@ static void domain_destroy_domid_cb(libx
+ 
+--- a/tools/libs/light/libxl_domain.c
++++ b/tools/libs/light/libxl_domain.c
+@@ -1236,7 +1236,7 @@ static void domain_destroy_domid_cb(libx
                                      libxl__ev_child *destroyer,
                                      pid_t pid, int status);
  
@@ -87,7 +83,7 @@
  {
      char *pid;
      int rc;
-@@ -1096,6 +1096,23 @@ static void kill_openxt_helpers(libxl__g
+@@ -1258,6 +1258,23 @@ static void kill_openxt_helpers(libxl__g
          if (rc < 0)
              LOG(ERROR, "Failed to kill audio_helper for domain %d", dm_domid);
      }
@@ -111,7 +107,7 @@
  }
  
  void libxl__destroy_domid(libxl__egc *egc, libxl__destroy_domid_state *dis)
-@@ -1164,7 +1181,7 @@ void libxl__destroy_domid(libxl__egc *eg
+@@ -1343,7 +1360,7 @@ static void destroy_domid_pci_done(libxl
      } else {
          /* OpenXT: if the domain has a stubdom, we kill the stubdom helpers here */
          if (stubdom_id)
@@ -120,24 +116,23 @@
          dm_destroy_cb(egc, &dis->ddms, 0);
          return;
      }
---- a/tools/libxl/libxl_internal.h
-+++ b/tools/libxl/libxl_internal.h
-@@ -138,9 +138,12 @@
- #define QMP_HELPER_PATH "/usr/lib/xen/bin/qmp_helper"
+--- a/tools/libs/light/libxl_internal.h
++++ b/tools/libs/light/libxl_internal.h
+@@ -137,8 +137,11 @@
+ 
  #define ATAPI_PT_HELPER_PATH "/usr/lib/xen/bin/atapi_pt_helper"
  #define AUDIO_HELPER_PATH "/usr/lib/xen/bin/audio_helper_start"
 +#define VARSTORED_HELPER_PATH "/usr/sbin/varstored-watch"
- #define XS_QMP_PID "qmp-helper-pid"
  #define XS_ATAPI_PT_PID "atapi-pt-helper-pid"
  #define XS_AUDIO_PID "audio-helper-pid"
 +#define XS_VARSTORED_PID "varstored-pid"
 +#define XS_VARSTORED_WATCH_PID "varstored-watch-pid"
  
- #define ROUNDUP(_val, _order)                                           \
-     (((unsigned long)(_val)+(1UL<<(_order))-1) & ~((1UL<<(_order))-1))
---- a/tools/libxl/libxl_dom.c
-+++ b/tools/libxl/libxl_dom.c
-@@ -972,6 +972,20 @@ static int hvm_build_set_xs_values(libxl
+ #define DIV_ROUNDUP(n, d) (((n) + (d) - 1) / (d))
+ 
+--- a/tools/libs/light/libxl_dom.c
++++ b/tools/libs/light/libxl_dom.c
+@@ -803,6 +803,20 @@ static int hvm_build_set_xs_values(libxl
              goto err;
      }
  
@@ -158,9 +153,9 @@
      return 0;
  
  err:
---- a/tools/libxl/libxl_types.idl
-+++ b/tools/libxl/libxl_types.idl
-@@ -570,6 +570,8 @@ libxl_domain_build_info = Struct("domain
+--- a/tools/libs/light/libxl_types.idl
++++ b/tools/libs/light/libxl_types.idl
+@@ -582,6 +582,8 @@ libxl_domain_build_info = Struct("domain
                                         ("acpi_s3",          libxl_defbool),
                                         ("acpi_s4",          libxl_defbool),
                                         ("acpi_laptop_slate",libxl_defbool),
@@ -171,7 +166,7 @@
                                         ("viridian_enable",  libxl_bitmap),
 --- a/tools/xl/xl_parse.c
 +++ b/tools/xl/xl_parse.c
-@@ -1626,6 +1626,8 @@ void parse_config_data(const char *confi
+@@ -1724,6 +1724,8 @@ void parse_config_data(const char *confi
          xlu_cfg_get_defbool(config, "acpi_s3", &b_info->u.hvm.acpi_s3, 0);
          xlu_cfg_get_defbool(config, "acpi_s4", &b_info->u.hvm.acpi_s4, 0);
          xlu_cfg_get_defbool(config, "acpi_laptop_slate", &b_info->u.hvm.acpi_laptop_slate, 0);
@@ -193,9 +188,9 @@
          fprintf(fh, "\t\t\t(nx %s)\n", libxl_defbool_to_string(b_info->u.hvm.nx));
          fprintf(fh, "\t\t\t(viridian %s)\n",
                 libxl_defbool_to_string(b_info->u.hvm.viridian));
---- a/tools/libxl/libxl_create.c
-+++ b/tools/libxl/libxl_create.c
-@@ -327,6 +327,8 @@ int libxl__domain_build_info_setdefault(
+--- a/tools/libs/light/libxl_create.c
++++ b/tools/libs/light/libxl_create.c
+@@ -356,6 +356,8 @@ int libxl__domain_build_info_setdefault(
          libxl_defbool_setdefault(&b_info->u.hvm.acpi_s3,            true);
          libxl_defbool_setdefault(&b_info->u.hvm.acpi_s4,            true);
          libxl_defbool_setdefault(&b_info->u.hvm.acpi_laptop_slate,  false);

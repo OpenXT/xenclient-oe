@@ -40,6 +40,7 @@ do_configure() {
     echo "CONFIG_TXT_OP=y" >> "${B}/xen/.config"
 
     # Enable argo
+    echo "CONFIG_EXPERT=y" >> "${B}/xen/.config"
     echo "CONFIG_ARGO=y" >> "${B}/xen/.config"
 
     unset CFLAGS

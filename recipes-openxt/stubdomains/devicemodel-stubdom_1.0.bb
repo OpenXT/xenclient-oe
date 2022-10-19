@@ -15,7 +15,7 @@ SRC_URI = " \
 do_install() {
         install -d ${D}${libdir}/xen/boot
         install -m 0644 ${WORKDIR}/${STUBDOMAIN_NAME}-${STUBDOMAIN_MACHINE}.cpio.gz \
-            ${D}${libdir}/xen/boot/stubdomain-initramfs
+            ${D}${libdir}/xen/boot/qemu-stubdom-linux-rootfs
 }
 
 do_checkimage() {
@@ -25,7 +25,7 @@ do_checkimage() {
 }
 addtask checkimage before do_fetch
 
-FILES_${PN} = "${libdir}/xen/boot/stubdomain-initramfs"
+FILES_${PN} = "${libdir}/xen/boot/qemu-stubdom-linux-rootfs"
 
 RDEPENDS_${PN} = "${STUBDOMAIN_MACHINE}-kernel"
 

@@ -39,7 +39,7 @@ IMAGE_INSTALL = "\
     wget \
     sync-client \
     xenclient-syncvm-tweaks \
-    ${@bb.utils.contains('DISTRO_FEATURES', 'blktap2', 'xen-tools-blktap', 'xen-tools-blktap3', d)} \
+    blktap3 \
 "
 
 require xenclient-version.inc

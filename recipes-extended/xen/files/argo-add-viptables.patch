@@ -13,6 +13,11 @@ CHANGELOG
 Original: Christopher Clark, christopher.w.clark@gmail.com
 Ported: Nicholas Tsirakis, tsirakisn@ainfosec.com
 
+Switch to typdefs to avoid errors with compat header generation.
+In file included from argo.c:34:
+xen/include/compat/argo.h:81:12: error: stray ‘@’ in program
+   81 |     struct @KeeP@xen_argo_addr src;
+
 ################################################################################
 REMOVAL 
 ################################################################################
@@ -64,7 +69,7 @@ PATCHES
  /*
   * This hash function is used to distribute rings within the per-domain
   * hash tables (d->argo->ring_hash and d->argo_send_hash). The hash table
-@@ -1957,6 +1970,221 @@ notify(struct domain *currd,
+@@ -1954,6 +1967,221 @@ notify(struct domain *currd,
      return ret;
  }
  
@@ -286,7 +291,7 @@ PATCHES
  static long
  sendv(struct domain *src_d, xen_argo_addr_t *src_addr,
        const xen_argo_addr_t *dst_addr, xen_argo_iov_t *iovs, unsigned int niov,
-@@ -2002,6 +2230,17 @@ sendv(struct domain *src_d, xen_argo_add
+@@ -1999,6 +2227,17 @@ sendv(struct domain *src_d, xen_argo_add
          return ret;
      }
  
@@ -296,7 +301,7 @@ PATCHES
 +                src_addr->domain_id, src_addr->aport,
 +                dst_addr->domain_id, dst_addr->aport);
 +
-+        put_domain(dst_d);
++        rcu_unlock_domain(dst_d);
 +
 +        return -EPERM;
 +    }
@@ -304,7 +309,7 @@ PATCHES
      read_lock(&L1_global_argo_rwlock);
  
      if ( !src_d->argo )
-@@ -2199,6 +2438,52 @@ do_argo_op(unsigned int cmd, XEN_GUEST_H
+@@ -2196,6 +2435,52 @@ do_argo_op(unsigned int cmd, XEN_GUEST_H
          break;
      }
  
@@ -369,14 +374,14 @@ PATCHES
  /* gfn type: 64-bit fixed-width on all architectures */
  typedef uint64_t xen_argo_gfn_t;
  
-@@ -155,6 +158,21 @@ struct xen_argo_ring_message_header
- #endif
+@@ -143,6 +146,21 @@ struct xen_argo_ring_message_header
+     uint8_t data[XEN_FLEX_ARRAY_DIM];
  };
  
 +typedef struct xen_argo_viptables_rule
 +{
-+    struct xen_argo_addr src;
-+    struct xen_argo_addr dst;
++    xen_argo_addr_t src;
++    xen_argo_addr_t dst;
 +    uint32_t accept;
 +} xen_argo_viptables_rule_t;
 +
@@ -384,14 +389,14 @@ PATCHES
 +
 +typedef struct xen_argo_viptables_list
 +{
-+    struct xen_argo_viptables_rule rules[XEN_ARGO_VIPTABLES_LIST_SIZE];
++    xen_argo_viptables_rule_t rules[XEN_ARGO_VIPTABLES_LIST_SIZE];
 +    uint32_t nrules;
 +} xen_argo_viptables_list_t;
 +
  /*
   * Hypercall operations
   */
-@@ -264,4 +282,19 @@ struct xen_argo_ring_message_header
+@@ -252,4 +270,19 @@ struct xen_argo_ring_message_header
   */
  #define XEN_ARGO_OP_notify              4
  

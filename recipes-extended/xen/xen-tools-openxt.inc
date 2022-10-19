@@ -10,18 +10,15 @@ SRC_URI_append = "\
 "
 
 RDEPENDS_${PN}-xl += " ${PN}-scripts-block"
-RDEPENDS_${PN}-scripts-common += " ${PN}-cmp-fd-file-inode"
 RDEPENDS_${PN}-scripts-block += " udev"
 RDEPENDS_${PN}-libxenlight += " varstored-watch"
 
 PACKAGES += " \
-    ${PN}-cmp-fd-file-inode \
-    ${PN}-toolstack-headers \
+    ${PN}-libxenhypfs \
+    ${PN}-libxenhypfs-dev \
     "
 
 PROVIDES =+ "virtual/xenstored"
-
-FILES_${PN}-cmp-fd-file-inode = "${libdir}/xen/bin/cmp-fd-file-inode"
 
 # OpenXT uses init scripts rather than systemd
 FILES_${PN}-console += "${INIT_D_DIR}/xenconsoled"
@@ -31,19 +28,61 @@ FILES_${PN}-scripts-block += " \
     ${sysconfdir}/xen/scripts/block-vbd3 \
 "
 
-# Export local headers for external toolstack
-FILES_${PN}-toolstack-headers = "\
-    ${includedir}/xc_dom.h \
-    ${includedir}/xen/libelf/libelf.h \
-    ${includedir}/xen/libelf/elfstructs.h \
-    "
-
 FILES_${PN}-xenstored = " \
     ${sbindir}/xenstored.${PN}-xenstored \
     ${localstatedir}/lib/xenstored \
     ${INIT_D_DIR}/xenstored.${PN}-xenstored \
     ${sysconfdir}/xen/xenstored.conf \
     "
+
+FILES_${PN}-libxenhypfs = " \
+    ${libdir}/libxenhypfs.so.* \
+"
+RDPENDS_${PN} += "${PN}-libxenhypfs"
+
+FILES_${PN}-libxenhypfs-dev = " \
+    ${libdir}/libxenhypfs.so \
+    ${libdir}/pkgconfig/xenhypfs.pc \
+    ${datadir}/pkgconfig/xenhypfs.pc \
+"
+FILES_${PN}-xenhypfs = " \
+    ${sbindir}/xenhypfs \
+"
+PACKAGES += "${PN}-xenhypfs"
+
+FILES_${PN}-xen-ucode = " \
+    ${sbindir}/xen-ucode \
+"
+PACKAGES += "${PN}-xen-ucode"
+
+FILES_${PN}-tests = " \
+    ${libdir}/xen/bin/test-* \
+"
+PACKAGES += "${PN}-tests"
+
+FILES_${PN}-misc += " \
+    ${sbindir}/xen-access \
+    ${sbindir}/xen-mceinj \
+    ${sbindir}/xen-memshare \
+    ${sbindir}/xen-vmtrace \
+"
+
+# Python programs we don't want inby default, but they are
+# actually libxl runtime dependencies.
+FILES_${PN}-migration-helpers = " \
+    ${libdir}/xen/bin/convert-legacy-stream \
+    ${libdir}/xen/bin/verify-stream-v2 \
+"
+PACKAGES =+ "${PN}-migration-helpers"
+
+FILES_${PN}-bash-complete = " \
+    ${sysconfdir}/bash_completion.d \
+"
+PACKAGES += "${PN}-bash-complete"
+
+FILES_${PN}-xl-examples += " \
+    ${sysconfdir}/xen/xlexample.pvhlinux \
+"
 
 # This init script is added by OpenXT and runs the xen-init-dom0 script
 # that meta-virtualization has packaged in the ${PN}-xl package.
@@ -86,14 +125,6 @@ do_install_append() {
     install -d ${D}${sysconfdir}/xen
     install -m 0644 ${WORKDIR}/xl.conf \
                     ${D}${sysconfdir}/xen/xl.conf
-
-    install -d ${D}${includedir}/xen/libelf
-    install -m 0755 ${S}/tools/libxc/include/xc_dom.h \
-                    ${D}${includedir}/xc_dom.h
-    install -m 0755 ${S}/tools/include/xen/libelf/libelf.h \
-                    ${D}${includedir}/xen/libelf/libelf.h
-    install -m 0755 ${S}/tools/include/xen/libelf/elfstructs.h \
-                    ${D}${includedir}/xen/libelf/elfstructs.h
 
     mv ${D}${sbindir}/xenstored ${D}${sbindir}/xenstored.${PN}-xenstored
     install -m 0755 ${WORKDIR}/xenstored.initscript \

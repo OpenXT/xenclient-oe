@@ -55,9 +55,9 @@ Some toolstack code to write vlan nodes and custom frontend drivers like xenwnet
 ################################################################################
 PATCHES
 ################################################################################
---- a/tools/libxl/libxl_device.c
-+++ b/tools/libxl/libxl_device.c
-@@ -789,7 +789,8 @@ int libxl__device_destroy(libxl__gc *gc,
+--- a/tools/libs/light/libxl_device.c
++++ b/tools/libs/light/libxl_device.c
+@@ -771,7 +771,8 @@ int libxl__device_destroy(libxl__gc *gc,
              libxl__xs_path_cleanup(gc, t, be_path);
          }
  
@@ -67,7 +67,7 @@ PATCHES
              libxl__xs_path_cleanup(gc, t, be_path);
          }
  
-@@ -1337,7 +1338,9 @@ static void device_destroy_be_watch_cb(l
+@@ -1316,7 +1317,9 @@ static void device_destroy_be_watch_cb(l
       * in xenstore. NDVM doesn't do that, so let's not wait forever
       * here. libxl will take care of the xenstore nodes later
       */
@@ -78,7 +78,7 @@ PATCHES
          /* backend path still exists, wait a little longer... */
          return;
      }
-@@ -1470,6 +1473,15 @@ int libxl__device_nextid(libxl__gc *gc,
+@@ -1450,6 +1453,15 @@ int libxl__device_nextid(libxl__gc *gc,
      else
          nextid = strtoul(l[nb - 1], NULL, 10) + 1;
  
@@ -94,55 +94,27 @@ PATCHES
      return nextid;
  }
  
-@@ -1608,9 +1620,11 @@ static int add_device(libxl__egc *egc, l
- 
-     switch(dev->backend_kind) {
-     case LIBXL__DEVICE_KIND_VBD:
-+    case LIBXL__DEVICE_KIND_VWIF:
-     case LIBXL__DEVICE_KIND_VIF:
--        if (dev->backend_kind == LIBXL__DEVICE_KIND_VBD) dguest->num_vbds++;
--        if (dev->backend_kind == LIBXL__DEVICE_KIND_VIF) dguest->num_vifs++;
-+        if (dev->backend_kind == LIBXL__DEVICE_KIND_VBD)  dguest->num_vbds++;
-+        if (dev->backend_kind == LIBXL__DEVICE_KIND_VWIF) dguest->num_vifs++;
-+        if (dev->backend_kind == LIBXL__DEVICE_KIND_VIF)  dguest->num_vifs++;
- 
-         GCNEW(aodev);
-         libxl__prepare_ao_device(ao, aodev);
-@@ -1656,9 +1670,11 @@ static int remove_device(libxl__egc *egc
- 
-     switch(ddev->dev->backend_kind) {
-     case LIBXL__DEVICE_KIND_VBD:
-+    case LIBXL__DEVICE_KIND_VWIF:
-     case LIBXL__DEVICE_KIND_VIF:
--        if (dev->backend_kind == LIBXL__DEVICE_KIND_VBD) dguest->num_vbds--;
--        if (dev->backend_kind == LIBXL__DEVICE_KIND_VIF) dguest->num_vifs--;
-+        if (dev->backend_kind == LIBXL__DEVICE_KIND_VBD)  dguest->num_vbds--;
-+        if (dev->backend_kind == LIBXL__DEVICE_KIND_VWIF) dguest->num_vifs--;
-+        if (dev->backend_kind == LIBXL__DEVICE_KIND_VIF)  dguest->num_vifs--;
- 
-         GCNEW(aodev);
-         libxl__prepare_ao_device(ao, aodev);
---- a/tools/libxl/libxl_dm.c
-+++ b/tools/libxl/libxl_dm.c
-@@ -1491,9 +1491,12 @@ static int libxl__build_device_model_arg
+--- a/tools/libs/light/libxl_dm.c
++++ b/tools/libs/light/libxl_dm.c
+@@ -1563,9 +1563,12 @@ static int libxl__build_device_model_arg
                                                  LIBXL_NIC_TYPE_VIF_IOEMU);
                  flexarray_append(dm_args, "-device");
                  flexarray_append(dm_args,
--                   GCSPRINTF("%s,id=vif%d,netdev=net%d,mac=%s",
+-                   GCSPRINTF("%s,id=nic%d,netdev=net%d,mac=%s",
 -                             nics[i].model, nics[i].devid,
 -                             nics[i].devid, smac));
 +                   GCSPRINTF("%s,id=%s%d,netdev=net%d,mac=%s",
 +                             nics[i].model,
-+                             (libxl_defbool_val(nics[i].wireless)) ? "vwif" : "vif",
++                             (libxl_defbool_val(nics[i].wireless)) ? "vwif" : "nic",
 +                             nics[i].devid,
 +                             nics[i].devid,
 +                             smac));
                  flexarray_append(dm_args, "-netdev");
                  flexarray_append(dm_args,
                                   GCSPRINTF("type=tap,id=net%d,ifname=%s,"
-@@ -1997,6 +2000,9 @@ static void libxl__dm_vifs_from_hvm_gues
-         libxl_device_nic_init(&dm_config->nics[i]);
-         libxl_device_nic_copy(ctx, &dm_config->nics[i], &guest_config->nics[i]);
+@@ -2091,6 +2094,9 @@ static void libxl__dm_vifs_from_hvm_gues
+     for (i=0; i<nr; i++) {
+         dm_config->nics[i] = guest_config->nics[i];
          dm_config->nics[i].nictype = LIBXL_NIC_TYPE_VIF;
 +        /* Stubdoms use Linux netfront, which doesn't handle VWIFs */
 +        libxl_defbool_set(&dm_config->nics[i].wireless, false);
@@ -150,8 +122,8 @@ PATCHES
          if (dm_config->nics[i].ifname)
              dm_config->nics[i].ifname = GCSPRINTF("%s" TAP_DEVICE_SUFFIX,
                                                    dm_config->nics[i].ifname);
---- a/tools/libxl/libxl_linux.c
-+++ b/tools/libxl/libxl_linux.c
+--- a/tools/libs/light/libxl_linux.c
++++ b/tools/libs/light/libxl_linux.c
 @@ -60,7 +60,8 @@ static char **get_hotplug_env(libxl__gc
      env[nr++] = GCSPRINTF("backend/%s/%u/%d", type, dev->domid, dev->devid);
      env[nr++] = "XENBUS_BASE_PATH";
@@ -170,17 +142,17 @@ PATCHES
          /*
           * If domain has a stubdom we don't have to execute hotplug scripts
           * for emulated interfaces
---- a/tools/libxl/libxl_nic.c
-+++ b/tools/libxl/libxl_nic.c
-@@ -58,6 +58,7 @@ static int libxl__device_nic_setdefault(
+--- a/tools/libs/light/libxl_nic.c
++++ b/tools/libs/light/libxl_nic.c
+@@ -60,6 +60,7 @@ static int libxl__device_nic_setdefault(
  {
      int rc;
  
 +    libxl_defbool_setdefault(&nic->wireless, false);
      if (!nic->mtu)
-         nic->mtu = 1492;
+         nic->mtu = LIBXL_DEVICE_NIC_MTU_DEFAULT;
      if (!nic->model) {
-@@ -259,6 +260,7 @@ static int libxl__nic_from_xenstore(libx
+@@ -277,6 +278,7 @@ static int libxl__nic_from_xenstore(libx
      int rc;
  
      libxl_device_nic_init(nic);
@@ -188,7 +160,7 @@ PATCHES
  
      rc = libxl__xs_read_checked(gc, XBT_NULL,
                                  GCSPRINTF("%s/handle", libxl_path), &tmp);
-@@ -277,6 +279,10 @@ static int libxl__nic_from_xenstore(libx
+@@ -295,6 +297,10 @@ static int libxl__nic_from_xenstore(libx
          rc = ERROR_FAIL;
          goto out;
      }
@@ -199,7 +171,7 @@ PATCHES
      rc = libxl__backendpath_parse_domid(gc, tmp, &nic->backend_domid);
      if (rc) goto out;
  
-@@ -413,10 +419,17 @@ int libxl_device_nic_getinfo(libxl_ctx *
+@@ -445,10 +451,17 @@ int libxl_device_nic_getinfo(libxl_ctx *
  
      nicinfo->devid = nic->devid;
  
@@ -221,7 +193,7 @@ PATCHES
      nicinfo->backend = xs_read(ctx->xsh, XBT_NULL,
                                  GCSPRINTF("%s/backend", libxl_path), NULL);
      if (!nicinfo->backend) {
-@@ -502,9 +515,73 @@ out:
+@@ -534,9 +547,73 @@ out:
  }
  
  static LIBXL_DEFINE_UPDATE_DEVID(nic)
@@ -297,9 +269,9 @@ PATCHES
  LIBXL_DEFINE_DEVICE_ADD(nic)
  LIBXL_DEFINE_DEVICES_ADD(nic)
  LIBXL_DEFINE_DEVICE_REMOVE(nic)
---- a/tools/libxl/libxl_types.idl
-+++ b/tools/libxl/libxl_types.idl
-@@ -720,6 +720,7 @@ libxl_device_nic = Struct("device_nic",
+--- a/tools/libs/light/libxl_types.idl
++++ b/tools/libs/light/libxl_types.idl
+@@ -739,6 +739,7 @@ libxl_device_nic = Struct("device_nic",
      ("rate_bytes_per_interval", uint64),
      ("rate_interval_usecs", uint32),
      ("gatewaydev", string),
@@ -307,13 +279,13 @@ PATCHES
      # Note that the COLO configuration settings should be considered unstable.
      # They may change incompatibly in future versions of Xen.
      ("coloft_forwarddev", string),
---- a/tools/libxl/libxl_types_internal.idl
-+++ b/tools/libxl/libxl_types_internal.idl
-@@ -30,6 +30,7 @@ libxl__device_kind = Enumeration("device
-     (13, "VUART"),
+--- a/tools/libs/light/libxl_types_internal.idl
++++ b/tools/libs/light/libxl_types_internal.idl
+@@ -32,6 +32,7 @@ libxl__device_kind = Enumeration("device
      (14, "PVCALLS"),
      (15, "VSND"),
-+    (16, "VWIF"),
+     (16, "VINPUT"),
++    (17, "VWIF"),
      ])
  
  libxl__console_backend = Enumeration("console_backend", [
@@ -327,4 +299,4 @@ PATCHES
 +        libxl_defbool_set(&nic->wireless, (oparg && *oparg == '1'));
      } else if (MATCH_OPTION("devid", token, oparg)) {
          nic->devid = parse_ulong(oparg);
-     } else {
+     } else if (MATCH_OPTION("mtu", token, oparg)) {
