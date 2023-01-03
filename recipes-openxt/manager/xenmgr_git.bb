@@ -16,11 +16,8 @@ DEPENDS = " \
     hkg-network \
     hkg-attoparsec \
     hkg-zlib \
-    hkg-parsec \
-    hkg-deepseq \
-    hkg-text \
-    hkg-mtl \
     hkg-split \
+    hkg-old-locale \
 "
 
 require manager.inc

@@ -5,12 +5,13 @@ DEPENDS = " \
     udbus \
     udbus-intro \
     hkg-hsyslog \
-    hkg-parsec \
-    hkg-text \
     compleat \
     libxchargo \
+    libxchutils \
 "
-RDEPENDS_${PN} += "glibc-gconv-utf-32"
+RDEPENDS_${PN} += "\
+    glibc-gconv-utf-32 \
+"
 
 require manager.inc
 
