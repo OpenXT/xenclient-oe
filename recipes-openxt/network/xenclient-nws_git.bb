@@ -8,9 +8,6 @@ DEPENDS = " \
     libxchxenstore \
     networkmanager \
     hkg-regex-posix \
-    hkg-deepseq \
-    hkg-text \
-    hkg-mtl \
     hkg-network \
 "
 RDEPENDS_${PN} += " \
