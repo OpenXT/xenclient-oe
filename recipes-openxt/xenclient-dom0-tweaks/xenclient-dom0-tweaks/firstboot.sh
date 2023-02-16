@@ -157,17 +157,17 @@ if [ -r ${INSTALL_CONF}/uivm-gconf,aes-xts-plain,256.key ] ; then
     mv ${INSTALL_CONF}/uivm-gconf,aes-xts-plain,256.key ${KEY_FOLDER}
     restore -r ${KEY_FOLDER}
     # Setup the filesystem
-    UIVM_GCONF_DEV=`TAPDISK2_CRYPTO_KEYDIR=/config/platform-crypto-keys TAPDISK3_CRYPTO_KEYDIR=/config/platform-crypto-keys tap-ctl create -a "vhd:/storage/uivm/uivm-gconf.vhd"`
+    UIVM_GCONF_DEV=`TAPDISK2_CRYPTO_KEYDIR=/config/platform-crypto-keys TAPDISK3_CRYPTO_KEYDIR=/config/platform-crypto-keys tap-ctl create -W -a "vhd:/storage/uivm/uivm-gconf.vhd"`
     mkfs.ext3 -q "${UIVM_GCONF_DEV}"
     tune2fs -i 0 -c -1 -m 0 "${UIVM_GCONF_DEV}"
     tap-ctl destroy -d "${UIVM_GCONF_DEV}"
 fi
 
-NDVM_SWAP_DEV=`tap-ctl create -a "vhd:/storage/ndvm/ndvm-swap.vhd"`
+NDVM_SWAP_DEV=`tap-ctl create -W -a "vhd:/storage/ndvm/ndvm-swap.vhd"`
 mkswap "${NDVM_SWAP_DEV}"
 tap-ctl destroy -d "${NDVM_SWAP_DEV}"
 
-UIVM_SWAP_DEV=`tap-ctl create -a "vhd:/storage/uivm/uivm-swap.vhd"`
+UIVM_SWAP_DEV=`tap-ctl create -W -a "vhd:/storage/uivm/uivm-swap.vhd"`
 mkswap "${UIVM_SWAP_DEV}"
 tap-ctl destroy -d "${UIVM_SWAP_DEV}"
 
