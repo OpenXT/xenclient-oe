@@ -32,6 +32,12 @@ S = "${WORKDIR}/git/xenmgr"
 
 inherit haskell update-rc.d xc-rpcgen
 
+# make sure xenmgr can find its templates. the new default datadir
+# for haskell packages is /usr/share/x86_64-linux-ghc-x.x.x/, where
+# datasubdir is the ghc directory. we don't want the extra ghc dir,
+# so replace it with the standard pkgid of xenmgr-1.0.
+EXTRA_CABAL_CONF += "--datasubdir=xenmgr-1.0"
+
 do_configure_append() {
     # generate rpc stubs
     mkdir -p Rpc/Autogen
