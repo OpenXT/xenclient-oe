@@ -73,6 +73,8 @@ RDEPENDS_${PN} += " \
     heimdallr \
     bash \
     openssl-bin \
+    grub-xen-pv64 \
+    grub-xen-pvh \
 "
 
 INITSCRIPT_NAME = "xenmgr"
