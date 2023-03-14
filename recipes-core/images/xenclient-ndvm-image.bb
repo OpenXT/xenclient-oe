@@ -66,6 +66,7 @@ IMAGE_INSTALL = " \
     iputils-ping \
     dbd-tools-vm \
     xen-vif-scripts-ndvm \
+    grub-xen-conf \
 "
 
 require xenclient-version.inc

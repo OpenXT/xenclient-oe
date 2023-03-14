@@ -40,6 +40,7 @@ IMAGE_INSTALL = "\
     sync-client \
     xenclient-syncvm-tweaks \
     blktap3 \
+    grub-xen-conf \
 "
 
 require xenclient-version.inc
