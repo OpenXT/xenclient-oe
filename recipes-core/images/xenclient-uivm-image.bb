@@ -97,6 +97,7 @@ IMAGE_INSTALL += "\
     matchbox-keyboard \
     matchbox-keyboard-im \
     kernel-module-openxtfb \
+    grub-xen-conf \
 "
 
 require xenclient-version.inc
