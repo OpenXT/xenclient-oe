@@ -19,19 +19,19 @@ LIC_FILES_CHKSUM = " \
 "
 
 SRC_URI = " \
-    ${OPENXT_MIRROR}/openxt/GM45_GS45_PM45-SINIT_51.zip;name=gm45 \
-    ${OPENXT_MIRROR}/openxt/Q45_Q43-SINIT_51.zip;name=q45 \
-    ${OPENXT_MIRROR}/openxt/Q35-SINIT_51.zip;name=q35 \
-    ${OPENXT_MIRROR}/openxt/i5_i7_DUAL-SINIT_51.zip;name=i5 \
-    ${OPENXT_MIRROR}/openxt/i7_QUAD-SINIT_51.zip;name=i7 \
-    ${OPENXT_MIRROR}/openxt/Xeon-5600-3500-SINIT-v1.1.zip;name=xeon_5600 \
-    ${OPENXT_MIRROR}/openxt/Xeon-E7-8800-4800-2800-SINIT-v1.1.zip;name=xeon_e7 \
-    ${OPENXT_MIRROR}/openxt/3rd-gen-i5-i7-sinit-67.zip;name=ivb_snb \
-    ${OPENXT_MIRROR}/openxt/4th-gen-i5-i7-sinit-75.zip;name=hsw \
-    ${OPENXT_MIRROR}/openxt/5th_gen_i5_i7-SINIT_79.zip;name=bdw \
-    ${OPENXT_MIRROR}/openxt/6th_gen_i5_i7-SINIT_71.zip;name=skl \
-    ${OPENXT_MIRROR}/openxt/7th_gen_i5_i7-SINIT_74.zip;name=kbl \
-    ${OPENXT_MIRROR}/openxt/8th_gen_i5_i7-SINIT_76.zip;name=cfl \
+    ${OPENXT_MIRROR}/GM45_GS45_PM45-SINIT_51.zip;name=gm45 \
+    ${OPENXT_MIRROR}/Q45_Q43-SINIT_51.zip;name=q45 \
+    ${OPENXT_MIRROR}/Q35-SINIT_51.zip;name=q35 \
+    ${OPENXT_MIRROR}/i5_i7_DUAL-SINIT_51.zip;name=i5 \
+    ${OPENXT_MIRROR}/i7_QUAD-SINIT_51.zip;name=i7 \
+    ${OPENXT_MIRROR}/Xeon-5600-3500-SINIT-v1.1.zip;name=xeon_5600 \
+    ${OPENXT_MIRROR}/Xeon-E7-8800-4800-2800-SINIT-v1.1.zip;name=xeon_e7 \
+    ${OPENXT_MIRROR}/3rd-gen-i5-i7-sinit-67.zip;name=ivb_snb \
+    ${OPENXT_MIRROR}/4th-gen-i5-i7-sinit-75.zip;name=hsw \
+    ${OPENXT_MIRROR}/5th_gen_i5_i7-SINIT_79.zip;name=bdw \
+    ${OPENXT_MIRROR}/6th_gen_i5_i7-SINIT_71.zip;name=skl \
+    ${OPENXT_MIRROR}/7th_gen_i5_i7-SINIT_74.zip;name=kbl \
+    ${OPENXT_MIRROR}/8th_gen_i5_i7-SINIT_76.zip;name=cfl \
 "
 
 SRC_URI[gm45.md5sum] = "330c774e71fe390d7ab649d5e2b1d504"
