@@ -39,7 +39,6 @@ RDEPENDS_${PN} = " \
     seabios \
     ovmf-firmware \
     xcpmd \
-    xen-vif-scripts-dom0 \
     xenclient-dom0-tweaks \
     xenclient-splash-images \
     xenclient-config-access \
