@@ -23,10 +23,10 @@ SRC_URI += "${KERNELORG_MIRROR}/linux/kernel/v${PV_MAJOR}.x/linux-${PV}.tar.xz;n
     file://xen-txt-add-xen-txt-eventlog-module.patch \
     file://xenpv-no-tty0-as-default-console.patch \
     file://tpm_tis-work-around-status-register-bug-in-STMicroelectronics-TPM.patch \
-    file://v2-0001-xen-pcifront-Handle-missed-Connected-state.patch \
+    file://revert-mtrr.patch \
     file://defconfig \
     "
 
 LIC_FILES_CHKSUM = "file://COPYING;md5=6bc538ed5bd9a7fc9398086aedcd7e46"
-SRC_URI[kernel.md5sum] = "fb1777e62d8123d95e4e588b9dbfd659"
-SRC_URI[kernel.sha256sum] = "e32839ca761e5251f25708f7939b37b101d28fc29515a97bfc0c838a21efdf34"
+SRC_URI[kernel.md5sum] = "1bc7e01e75c0b63b890282838703665a"
+SRC_URI[kernel.sha256sum] = "aae6a7e38e33589011f5a5c0d7e087c8a26e3daf8d434432ee975ead90546504"
