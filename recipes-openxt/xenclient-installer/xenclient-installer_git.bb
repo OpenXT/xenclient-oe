@@ -4,7 +4,7 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=4641e94ec96f98fabc56ff9cc48be14b"
 
 PV = "0+git${SRCPV}"
 
-SRCREV = "${AUTOREV}"
+SRCREV = "e20749637d9a8016af6721d4bc3968cd5978c60a"
 SRC_URI = " \
     git://github.com/OpenXT/installer.git;protocol=https \
     file://network.ans \

@@ -3,7 +3,7 @@ LICENSE = "MIT"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=c93f84859222e5549645b5fee3d87947"
 
 SRC_URI = "git://github.com/OpenXT/bats-suite.git;protocol=https"
-SRCREV = "${AUTOREV}"
+SRCREV = "4615057adc2670bc558d9322fa7941363eda3b9c"
 
 S = "${WORKDIR}/git"
 

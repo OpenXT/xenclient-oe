@@ -13,7 +13,7 @@ DEPENDS += " \
 PV = "0+git${SRCPV}"
 
 SRC_URI = "git://github.com/OpenXT/toolstack.git;protocol=https"
-SRCREV = "${AUTOREV}"
+SRCREV = "8e1f91f340a38203c9d0d95e672e3a94c2137aaf"
 
 S = "${WORKDIR}/git"
 

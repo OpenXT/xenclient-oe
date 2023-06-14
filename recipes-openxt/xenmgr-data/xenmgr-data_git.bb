@@ -19,7 +19,7 @@ DEPENDS = "dojosdk-native"
 
 PV = "0+git${SRCPV}"
 
-SRCREV = "${AUTOREV}"
+SRCREV = "591c934bdffa0590504f37bc4f96159b016aff8f"
 SRC_URI = "git://github.com/OpenXT/toolstack-data.git;protocol=https"
 
 S = "${WORKDIR}/git"
