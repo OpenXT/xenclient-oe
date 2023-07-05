@@ -22,6 +22,7 @@ Port to 4.19: Richard Turner <turnerr@ainfosec.com>
 Port to 5.4 blk-mq: Jason Andryuk <jandryuk@gmail.com>
 Restore 4.14 spinlock order
 Port to 5.15: Chris Rogers <rogersc@ainfosec.com>
+Port to 6.1: Chris Rogers <rogersc@ainfosec.com>
 
 ###############################################################################i
 REMOVAL 
@@ -43,7 +44,7 @@ PATCHES
 ################################################################################
 --- a/drivers/block/Kconfig
 +++ b/drivers/block/Kconfig
-@@ -427,4 +427,13 @@ config BLK_DEV_RSXX
+@@ -416,4 +416,13 @@ config BLK_DEV_UBLK
  
  source "drivers/block/rnbd/Kconfig"
  
@@ -59,14 +60,14 @@ PATCHES
  endif # BLK_DEV
 --- a/drivers/block/Makefile
 +++ b/drivers/block/Makefile
-@@ -26,6 +26,7 @@ obj-$(CONFIG_SUNVDC)		+= sunvdc.o
+@@ -25,6 +25,7 @@ obj-$(CONFIG_SUNVDC)		+= sunvdc.o
+ 
  obj-$(CONFIG_BLK_DEV_NBD)	+= nbd.o
- obj-$(CONFIG_BLK_DEV_CRYPTOLOOP) += cryptoloop.o
  obj-$(CONFIG_VIRTIO_BLK)	+= virtio_blk.o
 +obj-$(CONFIG_BLK_DEV_TAP)	+= blktap/
  
- obj-$(CONFIG_BLK_DEV_SX8)	+= sx8.o
- 
+ obj-$(CONFIG_XEN_BLKDEV_FRONTEND)	+= xen-blkfront.o
+ obj-$(CONFIG_XEN_BLKDEV_BACKEND)	+= xen-blkback/
 --- /dev/null
 +++ b/drivers/block/blktap/Makefile
 @@ -0,0 +1,3 @@
@@ -625,7 +626,7 @@ PATCHES
 +MODULE_LICENSE("Dual BSD/GPL");
 --- /dev/null
 +++ b/drivers/block/blktap/device.c
-@@ -0,0 +1,683 @@
+@@ -0,0 +1,682 @@
 +#include <linux/fs.h>
 +#include <linux/blkdev.h>
 +#include <linux/blk-mq.h>
@@ -692,7 +693,7 @@ PATCHES
 +
 +	iput(bdev->bd_inode);
 +
-+	if (!bdev->bd_openers) {
++	if (!atomic_read(&bdev->bd_openers)) {
 +		set_bit(BLKTAP_DEVICE_CLOSED, &tap->dev_inuse);
 +		blktap_ring_kick_user(tap);
 +	}
@@ -928,8 +929,6 @@ PATCHES
 +
 +		limits->discard_granularity = info->trim_block_size;
 +		limits->discard_alignment   = info->trim_block_offset;
-+
-+		blk_queue_flag_set(QUEUE_FLAG_DISCARD, rq);
 +	}
 +}
 +
@@ -1052,7 +1051,7 @@ PATCHES
 +	}
 +
 +	mutex_lock(&tapdev->lock);
-+	if (bdev->bd_openers) {
++	if (atomic_read(&bdev->bd_openers)) {
 +		err = -EBUSY;
 +		goto out;
 +	}
@@ -1062,7 +1061,7 @@ PATCHES
 +	del_gendisk(gd);
 +	gd->private_data = NULL;
 +
-+	blk_cleanup_disk(gd);
++	put_disk(gd);
 +
 +	blk_mq_free_tag_set(&tapdev->tag_set);
 +
@@ -1231,6 +1230,7 @@ PATCHES
 +	gd->first_minor = minor;
 +	gd->fops = &blktap_device_file_operations;
 +	gd->private_data = tapdev;
++	gd->flags |= GENHD_FL_NO_PART;
 +
 +	gd->queue->queuedata = tap;
 +	tapdev->gd = gd;
@@ -1277,7 +1277,7 @@ PATCHES
 +	if (bdev) {
 +		s += snprintf(s, end - s,
 +			      "bdev openers:%d closed:%d\n",
-+			      bdev->bd_openers,
++			      atomic_read(&bdev->bd_openers),
 +			      test_bit(BLKTAP_DEVICE_CLOSED, &tap->dev_inuse));
 +		iput(bdev->bd_inode);
 +	}
@@ -1311,7 +1311,7 @@ PATCHES
 +}
 --- /dev/null
 +++ b/drivers/block/blktap/request.c
-@@ -0,0 +1,427 @@
+@@ -0,0 +1,437 @@
 +#include <linux/mempool.h>
 +#include <linux/spinlock.h>
 +#include <linux/mutex.h>
@@ -1561,6 +1561,15 @@ PATCHES
 +	NULL,
 +};
 +
++static const struct attribute_group blktap_page_pool_default_group = {
++  .attrs = blktap_page_pool_attrs,
++};
++
++static const struct attribute_group *blktap_page_pool_attr_groups[] = {
++  &blktap_page_pool_default_group,
++  NULL,
++};
++
 +static inline struct kobject*
 +__blktap_kset_find_obj(struct kset *kset, const char *name)
 +{
@@ -1617,10 +1626,11 @@ PATCHES
 +	kfree(pool);
 +}
 +
++ATTRIBUTE_GROUPS(blktap_page_pool);
 +struct kobj_type blktap_page_pool_ktype = {
 +	.release       = blktap_page_pool_release,
 +	.sysfs_ops     = &blktap_page_pool_sysfs_ops,
-+	.default_attrs = blktap_page_pool_attrs,
++	.default_groups = blktap_page_pool_groups,
 +};
 +
 +static void*
@@ -2567,12 +2577,11 @@ PATCHES
 +}
 --- /dev/null
 +++ b/drivers/block/blktap/sysfs.c
-@@ -0,0 +1,359 @@
+@@ -0,0 +1,358 @@
 +#include <linux/types.h>
 +#include <linux/device.h>
 +#include <linux/module.h>
 +#include <linux/sched.h>
-+#include <linux/genhd.h>
 +#include <linux/blkdev.h>
 +
 +#include "blktap.h"
