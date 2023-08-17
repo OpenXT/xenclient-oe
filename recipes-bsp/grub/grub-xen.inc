@@ -9,6 +9,11 @@ require conf/image-uefi.conf
 # Need to be disabled otherwise there are wint_t type not defined errors
 SECURITY_CFLAGS = ""
 
+# Prevent generation of .text.unlikely which would be placed ahead of the
+# expected _start at the beginning of the .text section.  .text.unlikely
+# would then get executed and fault.
+CFLAGS_append = "-fno-reorder-functions"
+
 DEPENDS_append_class-target = " grub-efi-native"
 RDEPENDS_${PN}_class-target = "grub-common virtual/grub-bootconf"
 
