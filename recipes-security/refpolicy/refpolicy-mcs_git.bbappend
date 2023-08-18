@@ -1,4 +1,4 @@
-FILESEXTRAPATHS_prepend := "${THISDIR}/${BPN}-${PV}:"
+FILESEXTRAPATHS_prepend := "${THISDIR}/${BPN}:"
 
 # Configuration.
 SRC_URI += " \
@@ -91,17 +91,14 @@ SRC_URI += " \
 "
 # Patches.
 SRC_URI += " \
-    file://patches/fc-subs-busybox-aliases.patch \
     file://patches/fc-subs-config-aliases.patch \
     file://patches/policy.modules.admin.alsa.diff \
-    file://patches/policy.modules.services.acpi.diff \
     file://patches/policy.modules.admin.brctl.diff \
     file://patches/policy.modules.admin.dmidecode.diff \
     file://patches/policy.modules.admin.dpkg.diff \
     file://patches/policy.modules.admin.firstboot.diff \
     file://patches/policy.modules.admin.logrotate.diff \
     file://patches/policy.modules.apps.qemu.diff \
-    file://patches/policy.modules.kernel.corenetwork.diff \
     file://patches/policy.modules.kernel.devices.diff \
     file://patches/policy.modules.kernel.domain.diff \
     file://patches/policy.modules.kernel.filesystem.diff \
@@ -110,6 +107,7 @@ SRC_URI += " \
     file://patches/policy.modules.kernel.storage.diff \
     file://patches/policy.modules.roles.staff.diff \
     file://patches/policy.modules.roles.sysadm.diff \
+    file://patches/policy.modules.services.acpi.diff \
     file://patches/policy.modules.services.cron.diff \
     file://patches/policy.modules.services.dbus.diff \
     file://patches/policy.modules.services.dnsmasq.diff \
