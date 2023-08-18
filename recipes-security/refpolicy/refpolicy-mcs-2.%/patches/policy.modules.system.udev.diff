@@ -12,9 +12,9 @@ ndex: refpolicy/policy/modules/system/udev.fc
  /etc/hotplug\.d/default/udev.* -- gen_context(system_u:object_r:udev_helper_exec_t,s0)
 --- a/policy/modules/system/udev.te
 +++ b/policy/modules/system/udev.te
-@@ -15,6 +15,12 @@ domain_interactive_fd(udev_t)
- init_daemon_domain(udev_t, udev_exec_t)
- init_named_socket_activation(udev_t, udev_var_run_t)
+@@ -22,6 +22,12 @@ init_system_domain(udevadm_t, udevadm_ex
+ application_domain(udevadm_t, udevadm_exec_t)
+ role udevadm_roles types udevadm_t;
  
 +type udevrc_t;
 +type udevrc_exec_t;
@@ -25,7 +25,7 @@ ndex: refpolicy/policy/modules/system/udev.fc
  type udev_etc_t alias etc_udev_t;
  files_config_file(udev_etc_t)
  
-@@ -59,6 +65,11 @@ allow udev_t self:rawip_socket create_so
+@@ -66,6 +72,11 @@ allow udev_t self:rawip_socket create_so
  # for systemd-udevd to rename interfaces
  allow udev_t self:netlink_route_socket nlmsg_write;
  
@@ -34,10 +34,10 @@ ndex: refpolicy/policy/modules/system/udev.fc
 +# http://git.kernel.org/cgit/linux/kernel/git/torvalds/linux.git/commit/?id=a5a6579db33af91f4f5134e14be758dc71c1b694
 +dontaudit udev_t self:capability ipc_lock;
 +
- allow udev_t udev_exec_t:file write;
  can_exec(udev_t, udev_exec_t)
  
-@@ -107,6 +118,8 @@ kernel_dontaudit_search_unlabeled(udev_t
+ allow udev_t udev_helper_exec_t:dir list_dir_perms;
+@@ -111,6 +122,8 @@ kernel_dontaudit_search_unlabeled(udev_t
  
  corecmd_exec_all_executables(udev_t)
  
@@ -46,7 +46,7 @@ ndex: refpolicy/policy/modules/system/udev.fc
  dev_rw_sysfs(udev_t)
  dev_manage_all_dev_nodes(udev_t)
  dev_rw_generic_files(udev_t)
-@@ -194,6 +207,8 @@ sysnet_etc_filetrans_config(udev_t)
+@@ -200,6 +213,8 @@ sysnet_etc_filetrans_config(udev_t)
  
  userdom_dontaudit_search_user_home_content(udev_t)
  
@@ -55,7 +55,7 @@ ndex: refpolicy/policy/modules/system/udev.fc
  ifdef(`distro_debian',`
  	# for https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=851933
  	files_read_default_files(udev_t)
-@@ -368,8 +383,40 @@ optional_policy(`
+@@ -381,12 +396,52 @@ optional_policy(`
  	xen_manage_log(udev_t)
  	xen_read_image_files(udev_t)
  	fs_manage_xenfs_files(udev_t)
@@ -65,15 +65,23 @@ ndex: refpolicy/policy/modules/system/udev.fc
  ')
  
  optional_policy(`
- 	xserver_read_xdm_pid(udev_t)
+ 	xserver_read_xdm_runtime_files(udev_t)
  ')
-+
+ 
 +fs_manage_tmpfs_chr_files(udev_t)
 +fs_manage_tmpfs_files(udev_t)
 +fs_manage_tmpfs_symlinks(udev_t)
 +virt_search_dirs(udev_t)
 +
 +vusbd_read_etc_files(udev_t)
++
++gen_require(`
++    type lib_t;
++')
++
++allow udev_t lib_t:dir { watch };
++allow udev_t udev_rules_t:dir { watch };
++allow udev_t udev_runtime_t:dir { watch };
 +
 +########################################
 +#
@@ -96,3 +104,7 @@ ndex: refpolicy/policy/modules/system/udev.fc
 +seutil_domtrans_setfiles(udevrc_t)
 +
 +allow udevrc_t self:fifo_file manage_fifo_file_perms;
++
+ ########################################
+ #
+ # udevadm Local policy
