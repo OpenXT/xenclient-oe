@@ -1,0 +1,67 @@
+--- a/policy/modules/services/cron.fc
++++ b/policy/modules/services/cron.fc
+@@ -62,6 +62,9 @@ ifdef(`distro_debian',`
+ /var/spool/cron/atjobs	-d	gen_context(system_u:object_r:cron_spool_t,s0)
+ /var/spool/cron/atjobs/[^/]*	--	<<none>>
+ /var/spool/cron/atspool	-d	gen_context(system_u:object_r:cron_spool_t,s0)
++/var/cron                      -d      gen_context(system_u:object_r:cron_spool_t,s0)
++/var/cron/tabs(/*.)?                   gen_context(system_u:object_r:cron_spool_t,s0)
++/var/cron/log                  --      gen_context(system_u:object_r:cron_log_t,s0)
+ ')
+ 
+ ifdef(`distro_gentoo',`
+--- a/policy/modules/services/cron.if
++++ b/policy/modules/services/cron.if
+@@ -982,3 +982,33 @@ interface(`cron_admin',`
+ 	files_search_spool($1)
+ 	admin_pattern($1, cron_spool_type)
+ ')
++
++########################################
++## <summary>
++##	Create logging file in cron spool directory
++##	with a private type.
++## </summary>
++## <param name="domain">
++##	<summary>
++##	Domain allowed access.
++##	</summary>
++## </param>
++## <param name="private type">
++##	<summary>
++##	The type of the object to be created.
++##	</summary>
++## </param>
++## <param name="object">
++##	<summary>
++##	The object class of the object being created.
++##	</summary>
++## </param>
++#
++interface(`cron_filetrans',`
++	gen_require(`
++		type cron_spool_t;
++	')
++
++	cron_search_spool($1)
++	filetrans_pattern($1, cron_spool_t, $2, $3)
++')
+--- a/policy/modules/services/cron.te
++++ b/policy/modules/services/cron.te
+@@ -51,7 +51,7 @@ type cron_var_lib_t;
+ files_type(cron_var_lib_t)
+ 
+ type cron_log_t;
+-logging_log_file(cron_log_t)
++files_type(cron_log_t)
+ 
+ type cronjob_t;
+ domain_type(cronjob_t)
+@@ -64,6 +64,7 @@ type crond_exec_t;
+ init_daemon_domain(crond_t, crond_exec_t)
+ domain_interactive_fd(crond_t)
+ domain_cron_exemption_source(crond_t)
++cron_filetrans(crond_t, cron_log_t, { file })
+ 
+ type crond_initrc_exec_t;
+ init_script_file(crond_initrc_exec_t)

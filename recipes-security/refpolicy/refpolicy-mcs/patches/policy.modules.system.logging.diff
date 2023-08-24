@@ -1,0 +1,112 @@
+--- a/policy/modules/system/logging.fc
++++ b/policy/modules/system/logging.fc
+@@ -65,6 +65,16 @@ ifdef(`distro_suse', `
+ /var/log/audit(/.*)?		gen_context(system_u:object_r:auditd_log_t,mls_systemhigh)
+ /var/log/syslog-ng(/.*)? 	gen_context(system_u:object_r:syslogd_runtime_t,mls_systemhigh)
+ 
++/var/volatile/log		-d	gen_context(system_u:object_r:var_log_t,s0-mls_systemhigh)
++/var/volatile/log/.*			gen_context(system_u:object_r:var_log_t,s0)
++/var/volatile/log/messages[^/]*		gen_context(system_u:object_r:var_log_t,mls_systemhigh)
++/var/volatile/log/secure[^/]*		gen_context(system_u:object_r:var_log_t,mls_systemhigh)
++/var/volatile/log/cron[^/]*		gen_context(system_u:object_r:var_log_t,mls_systemhigh)
++/var/volatile/log/maillog[^/]*		gen_context(system_u:object_r:var_log_t,mls_systemhigh)
++/var/volatile/log/spooler[^/]*		gen_context(system_u:object_r:var_log_t,mls_systemhigh)
++/var/volatile/log/audit(/.*)?		gen_context(system_u:object_r:auditd_log_t,mls_systemhigh)
++/var/volatile/log/syslog-ng(/.*)? 	gen_context(system_u:object_r:syslogd_runtime_t,s0)
++
+ ifdef(`distro_redhat',`
+ /var/named/chroot/var/log -d	gen_context(system_u:object_r:var_log_t,s0)
+ /var/named/chroot/dev/log -s	gen_context(system_u:object_r:devlog_t,s0)
+--- a/policy/modules/system/logging.if
++++ b/policy/modules/system/logging.if
+@@ -1245,6 +1245,24 @@ interface(`logging_write_generic_logs',`
+ 
+ ########################################
+ ## <summary>
++##	Dontaudit Write generic log dirs.
++## </summary>
++## <param name="domain">
++##	<summary>
++##	Domain allowed access.
++##	</summary>
++## </param>
++#
++interface(`logging_dontaudit_write_log_dirs',`
++	gen_require(`
++		type var_log_t;
++	')
++
++	dontaudit $1 var_log_t:dir write;
++')
++
++########################################
++## <summary>
+ ##	Dontaudit Write generic log files.
+ ## </summary>
+ ## <param name="domain">
+@@ -1462,3 +1480,44 @@ interface(`logging_mmap_journal',`
+ 
+ 	allow $1 syslogd_runtime_t:file map;
+ ')
++
++########################################
++## <summary>
++##	Allow process to read syslogd process state.
++## </summary>
++## <param name="domain">
++##	<summary>
++##	Domain allowed access.
++##	</summary>
++## </param>
++#
++interface(`logging_read_state_syslogd',`
++	gen_require(`
++		type syslogd_t;
++	')
++
++	kernel_search_proc($1)
++	allow $1 syslogd_t:dir search_dir_perms;
++	allow $1 syslogd_t:file read_file_perms;
++	allow $1 syslogd_t:lnk_file read_lnk_file_perms;
++')
++
++########################################
++## <summary>
++##      Execute the syslogd init script in
++##      the init script domain.
++## </summary>
++## <param name="domain">
++##      <summary>
++##      Domain allowed to transition.
++##      </summary>
++## </param>
++#
++#
++interface(`syslogd_initrc_domtrans',`
++        gen_require(`
++                type syslogd_initrc_exec_t;
++        ')
++
++        init_labeled_script_domtrans($1, syslogd_initrc_exec_t)
++')
+--- a/policy/modules/system/logging.te
++++ b/policy/modules/system/logging.te
+@@ -509,6 +509,7 @@ mls_trusted_object(syslogd_t) # Other pr
+ mls_fd_use_all_levels(syslogd_t)
+ 
+ term_write_console(syslogd_t)
++dev_dontaudit_rw_generic_chr_files(syslogd_t)
+ # Allow syslog to a terminal
+ term_write_unallocated_ttys(syslogd_t)
+ 
+@@ -571,6 +572,10 @@ ifdef(`init_systemd',`
+ 	udev_read_runtime_files(syslogd_t)
+ ')
+ 
++corecmd_exec_bin(syslogd_t)
++corecmd_exec_shell(syslogd_t)
++logrotate_domtrans(syslogd_t)
++
+ ifdef(`distro_gentoo',`
+ 	# default gentoo syslog-ng config appends kernel
+ 	# and high priority messages to /dev/tty12

@@ -1,0 +1,53 @@
+--- a/policy/modules/admin/dpkg.fc
++++ b/policy/modules/admin/dpkg.fc
+@@ -13,3 +13,6 @@
+ 
+ /usr/sbin/dpkg-preconfigure	--	gen_context(system_u:object_r:dpkg_exec_t,s0)
+ /usr/sbin/dpkg-reconfigure	--	gen_context(system_u:object_r:dpkg_exec_t,s0)
++
++/usr/bin/opkg	    --      gen_context(system_u:object_r:dpkg_exec_t,s0)
++/var/lib/opkg(/.*)?	gen_context(system_u:object_r:dpkg_var_lib_t,s0)
+--- a/policy/modules/admin/dpkg.if
++++ b/policy/modules/admin/dpkg.if
+@@ -356,3 +356,23 @@ interface(`dpkg_read_script_tmp_symlinks
+ 
+ 	allow $1 dpkg_script_tmp_t:lnk_file read_lnk_file_perms;
+ ')
++
++########################################
++## <summary>
++##	Do not audit attempts to lock the dpkg
++##	package database.
++## </summary>
++## <param name="domain">
++##	<summary>
++##	The type of the process performing this action.
++##	</summary>
++## </param>
++#
++interface(`dpkg_dontaudit_lock_db',`
++	gen_require(`
++		type dpkg_lock_t, dpkg_var_lib_t;
++	')
++
++	dontaudit $1 dpkg_var_lib_t:dir list_dir_perms;
++	dontaudit $1 dpkg_lock_t:file manage_file_perms;
++')
+--- a/policy/modules/admin/dpkg.te
++++ b/policy/modules/admin/dpkg.te
+@@ -87,6 +87,7 @@ fs_tmpfs_filetrans(dpkg_t, dpkg_tmpfs_t,
+ allow dpkg_t dpkg_var_lib_t:file mmap_exec_file_perms;
+ manage_files_pattern(dpkg_t, dpkg_var_lib_t, dpkg_var_lib_t)
+ files_var_lib_filetrans(dpkg_t, dpkg_var_lib_t, dir)
++files_usr_filetrans(dpkg_t, dpkg_var_lib_t, dir)
+ 
+ kernel_read_system_state(dpkg_t)
+ kernel_read_kernel_sysctls(dpkg_t)
+@@ -144,6 +145,7 @@ auth_dontaudit_read_shadow(dpkg_t)
+ 
+ init_all_labeled_script_domtrans(dpkg_t)
+ init_use_script_ptys(dpkg_t)
++init_dontaudit_use_fds(dpkg_t)
+ 
+ libs_exec_ld_so(dpkg_t)
+ libs_exec_lib_files(dpkg_t)

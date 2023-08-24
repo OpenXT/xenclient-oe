@@ -1,0 +1,49 @@
+Fix neverallow failures the right way.
+
+During the uprev to jethro, Adam encountered a set of neverallow failures
+between neverallow rules in the reference policy and allow rules added by
+OpenXT.  neverallow rules are build-time policy invariants that prevent
+building the policy if any allow rule would allow a permission prohibited
+by one of the neverallows. As a temporary workaround, Adam simply
+commented out the neverallow rules in the refpolicy that were being
+violated.
+
+The allow rules that cause the violations are all introduced via the
+*unconfined_readonly* interface calls added by OpenXT, where these
+interface calls appear to allow read-only access to all objects of a given
+class (e.g. all networks, devices, domains, files, etc).  This appears
+to be a slightly scoped down version of unconfined domains in refpolicy,
+just reduced from read-write to read-only access.  There are two domains
+defined in the OpenXT policy patches that uses these interfaces:
+unconfined_readonly_t and statusreport_t.
+
+Rather than commenting out the neverallow rules altogether, this change
+adds appropriate refpolicy interface calls to the definition of
+unconfined_readonly_domain_noaudit() to exempt domains using it from
+these neverallow rules.  This preserves the neverallow checking for all
+other domains and avoids modifying neverallow rules in the refpolicy.
+
+We should later investigate why these domains exist in OpenXT policy and
+whether they truly need these permissions at all.
+
+OXT-475
+
+Signed-off-by: Stephen Smalley <sds@tycho.nsa.gov>
+
+--- a/policy/modules/system/unconfined.if
++++ b/policy/modules/system/unconfined.if
+@@ -153,6 +153,14 @@ interface(`unconfined_readonly_domain_no
+ 	optional_policy(`
+ 		dbus_system_bus_unconfined($1)
+ 	')
++
++	# Required to satisfy neverallow rules.
++	auth_can_read_shadow_passwords($1)
++	dev_read_raw_memory($1)
++	kernel_read_messages($1)
++	kernel_read_core_if($1)
++	storage_raw_read_fixed_disk($1)
++	storage_read_scsi_generic($1)
+ ')
+ 
+ ########################################

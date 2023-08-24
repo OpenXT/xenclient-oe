@@ -1,0 +1,83 @@
+--- a/policy/modules/services/tcsd.fc
++++ b/policy/modules/services/tcsd.fc
+@@ -4,7 +4,10 @@
+ 
+ # Systemd unit file
+ /usr/lib/systemd/system/[^/]*tcsd.*	--	gen_context(system_u:object_r:tcsd_unit_t,s0)
++/etc/init\.d/trousers	--	gen_context(system_u:object_r:tcsd_initrc_exec_t,s0)
+ 
+ /usr/sbin/tcsd	--	gen_context(system_u:object_r:tcsd_exec_t,s0)
+ 
+ /var/lib/tpm(/.*)?	gen_context(system_u:object_r:tcsd_var_lib_t,s0)
++/etc/tcsd\.conf	--	gen_context(system_u:object_r:tcsd_etc_t,s0)
++/boot/system/tpm(/.*)?	gen_context(system_u:object_r:tcsd_var_lib_t,s0)
+--- a/policy/modules/services/tcsd.if
++++ b/policy/modules/services/tcsd.if
+@@ -36,6 +36,7 @@ interface(`tcsd_initrc_domtrans',`
+ 	')
+ 
+ 	init_labeled_script_domtrans($1, tcsd_initrc_exec_t)
++	domain_system_change_exemption($1)
+ ')
+ 
+ ########################################
+--- a/policy/modules/services/tcsd.te
++++ b/policy/modules/services/tcsd.te
+@@ -9,6 +9,10 @@ type tcsd_t;
+ type tcsd_exec_t;
+ init_daemon_domain(tcsd_t, tcsd_exec_t)
+ 
++ifdef(`enable_mcs',`
++	init_ranged_daemon_domain(tcsd_t, tcsd_exec_t, s0 - mcs_systemhigh)
++')
++
+ type tcsd_initrc_exec_t;
+ init_script_file(tcsd_initrc_exec_t)
+ 
+@@ -18,6 +22,9 @@ init_unit_file(tcsd_unit_t)
+ type tcsd_var_lib_t;
+ files_type(tcsd_var_lib_t)
+ 
++type tcsd_etc_t;
++files_type(tcsd_etc_t)
++
+ ########################################
+ #
+ # Local policy
+@@ -35,6 +42,7 @@ corenet_all_recvfrom_netlabel(tcsd_t)
+ corenet_tcp_sendrecv_generic_if(tcsd_t)
+ corenet_tcp_sendrecv_generic_node(tcsd_t)
+ corenet_tcp_bind_generic_node(tcsd_t)
++corenet_tcp_bind_generic_port(tcsd_t)
+ 
+ corenet_sendrecv_tcs_server_packets(tcsd_t)
+ corenet_tcp_bind_tcs_port(tcsd_t)
+@@ -42,7 +50,11 @@ corenet_tcp_bind_tcs_port(tcsd_t)
+ dev_read_urand(tcsd_t)
+ dev_rw_tpm(tcsd_t)
+ 
++files_var_lib_filetrans(tcsd_t, tcsd_var_lib_t, dir)
++files_dontaudit_search_tmp(tcsd_t)
++files_read_etc_files(tcsd_t)
+ files_read_usr_files(tcsd_t)
++files_manage_boot_files(tcsd_t)
+ 
+ auth_use_nsswitch(tcsd_t)
+ 
+@@ -50,4 +62,16 @@ init_read_utmp(tcsd_t)
+ 
+ logging_send_syslog_msg(tcsd_t)
+ 
++manage_dirs_pattern(tcsd_t, tcsd_var_lib_t, tcsd_var_lib_t)
++manage_files_pattern(tcsd_t, tcsd_var_lib_t, tcsd_var_lib_t)
+ miscfiles_read_localization(tcsd_t)
++
++sysnet_read_config(tcsd_t)
++
++allow tcsd_t self:tcp_socket connected_stream_socket_perms;
++allow tcsd_t self:udp_socket create_socket_perms;
++allow tcsd_t self:unix_dgram_socket connected_stream_socket_perms;
++
++allow tcsd_t tcsd_etc_t:file read_file_perms;
++allow tcsd_t tcsd_var_lib_t:file rw_file_perms;
++allow tcsd_t tcsd_var_lib_t:dir search_dir_perms;
