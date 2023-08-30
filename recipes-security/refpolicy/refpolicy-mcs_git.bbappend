@@ -91,6 +91,7 @@ SRC_URI += " \
 "
 # Patches.
 SRC_URI += " \
+    file://patches/0001-udev-allow-udev_t-to-watch-udev_rules_t-dir.patch \
     file://patches/fc-subs-config-aliases.patch \
     file://patches/policy.modules.admin.alsa.diff \
     file://patches/policy.modules.admin.brctl.diff \

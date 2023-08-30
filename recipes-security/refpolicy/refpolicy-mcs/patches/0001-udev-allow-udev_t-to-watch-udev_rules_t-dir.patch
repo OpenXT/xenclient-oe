@@ -1,0 +1,61 @@
+From 7ae40510fd1b7704ef4e08b0377a71f7522dcef2 Mon Sep 17 00:00:00 2001
+From: Yi Zhao <yi.zhao@windriver.com>
+Date: Sun, 10 Oct 2021 23:21:09 +0800
+Subject: [PATCH] udev: allow udev_t to watch udev_rules_t dir
+
+Fixes:
+avc: denied { watch } for pid=187 comm="udevd" path="/lib/udev/rules.d"
+dev="vda" ino=1060 scontext=system_u:system_r:udev_t
+tcontext=system_u:object_r:lib_t tclass=dir permissive=0
+
+avc: denied { watch } for pid=187 comm="udevd" path="/etc/udev/rules.d"
+dev="vda" ino=886 scontext=system_u:system_r:udev_t
+tcontext=system_u:object_r:udev_rules_t tclass=dir permissive=0
+
+avc: denied { watch } for pid=187 comm="udevd" path="/run/udev/rules.d"
+dev="tmpfs" ino=4 scontext=system_u:system_r:udev_t
+tcontext=system_u:object_r:udev_runtime_t tclass=dir permissive=0
+
+avc: denied { watch } for pid=196 comm="udevadm" path="/run/udev"
+dev="tmpfs" ino=2 scontext=system_u:system_r:udev_t
+tcontext=system_u:object_r:udev_runtime_t tclass=dir permissive=0
+
+Signed-off-by: Yi Zhao <yi.zhao@windriver.com>
+---
+ policy/modules/system/udev.fc | 2 ++
+ policy/modules/system/udev.te | 2 ++
+ 2 files changed, 4 insertions(+)
+
+--- a/policy/modules/system/udev.fc
++++ b/policy/modules/system/udev.fc
+@@ -36,10 +36,12 @@ ifdef(`distro_redhat',`
+ 
+ /usr/lib/systemd/systemd-udevd -- gen_context(system_u:object_r:udev_exec_t,s0)
+ /usr/lib/udev/udev-acl --	gen_context(system_u:object_r:udev_exec_t,s0)
++/usr/lib/udev/rules\.d(/.*)? gen_context(system_u:object_r:udev_rules_t,s0)
+ 
+ /usr/share/virtualbox/VBoxCreateUSBNode\.sh	--	gen_context(system_u:object_r:udev_helper_exec_t,s0)
+ 
+ /run/udev(/.*)?	gen_context(system_u:object_r:udev_runtime_t,s0)
++/run/udev/rules\.d(/.*)? gen_context(system_u:object_r:udev_rules_t,s0)
+ 
+ ifdef(`distro_debian',`
+ /run/xen-hotplug -d	gen_context(system_u:object_r:udev_runtime_t,s0)
+--- a/policy/modules/system/udev.te
++++ b/policy/modules/system/udev.te
+@@ -78,6 +78,7 @@ can_exec(udev_t, udev_helper_exec_t)
+ 
+ # read udev config
+ allow udev_t udev_etc_t:file read_file_perms;
++allow udev_t udev_runtime_t:dir watch;
+ 
+ allow udev_t udev_tbl_t:file manage_file_perms;
+ dev_filetrans(udev_t, udev_tbl_t, file)
+@@ -85,6 +86,7 @@ dev_filetrans(udev_t, udev_tbl_t, file)
+ list_dirs_pattern(udev_t, udev_rules_t, udev_rules_t)
+ manage_files_pattern(udev_t, udev_rules_t, udev_rules_t)
+ manage_lnk_files_pattern(udev_t, udev_rules_t, udev_rules_t)
++allow udev_t udev_rules_t:dir watch;
+ 
+ manage_dirs_pattern(udev_t, udev_runtime_t, udev_runtime_t)
+ manage_files_pattern(udev_t, udev_runtime_t, udev_runtime_t)
