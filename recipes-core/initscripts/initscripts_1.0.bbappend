@@ -11,6 +11,10 @@ SRC_URI += " \
     file://volatiles \
 "
 
+SRC_URI_append_openxt-installer += " \
+    file://mountefi.sh \
+"
+
 # Override to reduce the number of scripts installed
 do_install () {
 #
@@ -74,6 +78,11 @@ do_install () {
 	update-rc.d -r ${D} finish.sh start 99 S .
 	update-rc.d -r ${D} mountearly.sh start 01 S .
 	update-rc.d -r ${D} udev-volatiles.sh start 03 S .
+}
+
+do_install_append_openxt-installer() {
+	install -m 0755    ${WORKDIR}/mountefi.sh	${D}${sysconfdir}/init.d
+	update-rc.d -r ${D} mountefi.sh start 36 S .
 }
 
 pkg_postinst_${PN}_append() {
