@@ -30,8 +30,6 @@ PACKAGES =+ " \
     ${PN}-libxenhypfs-dev \
     "
 
-PROVIDES =+ "virtual/xenstored"
-
 # OpenXT uses init scripts rather than systemd
 FILES_${PN}-console += "${INIT_D_DIR}/xenconsoled"
 
@@ -42,7 +40,6 @@ FILES_${PN}-xenstored = " \
     ${sysconfdir}/xen/xenstored.conf \
 "
 RCONFLICTS_${PN}-xenstored = "${PN}-oxenstored"
-RPROVIDES_${PN}-xenstored = "virtual/xenstored"
 
 FILES_${PN}-oxenstored = " \
     ${sbindir}/oxenstored \
