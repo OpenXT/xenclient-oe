@@ -81,3 +81,11 @@ remove_nonessential_initscripts() {
     fi
 }
 ROOTFS_POSTPROCESS_COMMAND += "remove_nonessential_initscripts; "
+
+# Xenstore reboot
+ctrlaltdel_reboot() {
+    # PV driver synthesize ctrl+alt+del in response to a xenstore reboot
+    echo 'ca:12345:ctrlaltdel:/sbin/shutdown -t1 -a -r now' >> ${IMAGE_ROOTFS}/etc/inittab;
+}
+ROOTFS_POSTPROCESS_COMMAND += '${@bb.utils.contains("IMAGE_FEATURES", "ctrlaltdel-reboot", "ctrlaltdel_reboot; ", "",d)}'
+IMAGE_FEATURES[validitems] += "ctrlaltdel-reboot"

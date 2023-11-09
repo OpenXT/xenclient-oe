@@ -13,6 +13,7 @@ IMAGE_FEATURES += " \
     read-only-rootfs \
     empty-root-password \
     root-bash-shell \
+    ctrlaltdel-reboot \
 "
 IMAGE_FSTYPES = "ext3.vhd.gz"
 export IMAGE_BASENAME = "xenclient-uivm-image"
@@ -106,9 +107,6 @@ inherit xenclient-licences
 post_rootfs_shell_commands() {
     # Start WM right away.
     echo 'x:5:respawn:/bin/su - root -c /usr/bin/startxfce4' >> ${IMAGE_ROOTFS}/etc/inittab
-
-    # enable ctrlaltdel reboot because PV driver uses ctrl+alt+del to interpret reboot issued via xenstore
-    echo 'ca:12345:ctrlaltdel:/sbin/shutdown -t1 -a -r now' >> ${IMAGE_ROOTFS}/etc/inittab
 
     # Trick to resolve dom0 name with argo.
     echo '1.0.0.0 dom0' >> ${IMAGE_ROOTFS}/etc/hosts

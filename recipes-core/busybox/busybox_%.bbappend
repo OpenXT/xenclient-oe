@@ -1,5 +1,7 @@
 FILESEXTRAPATHS_prepend := "${THISDIR}/files:"
 
+DEPENDS += "libselinux"
+
 SRC_URI += " \
     file://archive.cfg \
     file://console.cfg \

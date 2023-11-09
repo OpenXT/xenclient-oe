@@ -22,8 +22,14 @@ inherit autotools update-rc.d pkgconfig xc-rpcgen-c
 INITSCRIPT_NAME = "xenclient-vusb-daemon"
 INITSCRIPT_PARAMS = "defaults 60 19"
 
+FILES_${PN}-stub += "${sysconfdir}/default/vusb-mode"
+RDEPENDS_${PN}-stub += "${PN}"
+PACKAGE_BEFORE_PN += "${PN}-stub"
+
 do_install_append (){
         install -d ${D}/etc/init.d
 	install -m 0755 ${WORKDIR}/xenclient-vusb.initscript \
 		${D}/etc/init.d/xenclient-vusb-daemon
+	install -d ${D}${sysconfdir}/default
+	echo 'VUSB_MODE="stub-mode"' >> ${D}${sysconfdir}/default/vusb-mode
 }
