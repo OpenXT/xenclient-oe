@@ -1,0 +1,37 @@
+Monit openxt fixes
+
+/var/lib/monit is a volatiles symlink to /var/volatile/monit, so label it and
+allow the symlink to be read.
+
+monit will start/stop vglass, disman and ivcdaemon, so allow monit to start
+init scripts.
+
+--- a/policy/modules/services/monit.fc
++++ b/policy/modules/services/monit.fc
+@@ -10,5 +10,6 @@
+ /usr/lib/systemd/system/monit.*	--	gen_context(system_u:object_r:monit_unit_t,s0)
+ 
+ /var/lib/monit(/.*)?			gen_context(system_u:object_r:monit_var_lib_t,s0)
++/var/volatile/monit(/.*)?			gen_context(system_u:object_r:monit_var_lib_t,s0)
+ 
+ /var/log/monit\.log.*		--	gen_context(system_u:object_r:monit_log_t,s0)
+--- a/policy/modules/services/monit.te
++++ b/policy/modules/services/monit.te
+@@ -104,6 +104,7 @@ files_pid_filetrans(monit_t, monit_runti
+ 
+ allow monit_t monit_var_lib_t:dir manage_dir_perms;
+ allow monit_t monit_var_lib_t:file manage_file_perms;
++allow monit_t monit_var_lib_t:lnk_file read_lnk_file_perms;
+ 
+ # entropy
+ kernel_read_kernel_sysctls(monit_t)
+@@ -141,6 +142,9 @@ tunable_policy(`monit_startstop_services
+ 	init_stop_all_units(monit_t)
+ ')
+ 
++# Need to support classic sysvinit scripts
++init_domtrans_script(monit_t)
++
+ optional_policy(`
+ 	dbus_system_bus_client(monit_t)
+ ')
