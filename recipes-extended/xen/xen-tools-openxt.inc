@@ -4,13 +4,10 @@ SRC_URI_append = "\
     file://xenconsoled.initscript \
     file://xenstored.initscript \
     file://xen-init-dom0.initscript \
-    file://xen-vbd3-backend.rules \
-    file://block-vbd3 \
     file://xl.conf \
 "
 
 RDEPENDS_${PN}-xl += " ${PN}-scripts-block"
-RDEPENDS_${PN}-scripts-block += " udev"
 RDEPENDS_${PN}-libxenlight += " varstored-watch"
 
 PACKAGES += " \
@@ -22,11 +19,6 @@ PROVIDES =+ "virtual/xenstored"
 
 # OpenXT uses init scripts rather than systemd
 FILES_${PN}-console += "${INIT_D_DIR}/xenconsoled"
-
-FILES_${PN}-scripts-block += " \
-    ${sysconfdir}/udev/rules.d/xen-vbd3-backend.rules \
-    ${sysconfdir}/xen/scripts/block-vbd3 \
-"
 
 FILES_${PN}-xenstored = " \
     ${sbindir}/xenstored.${PN}-xenstored \
@@ -137,11 +129,6 @@ do_install_append() {
     # Since we don't have a xenstore stubdomain, remove the
     # xenstore stubdomain init program (libdir == /usr/lib)
     rm -f ${D}/${libdir}/xen/bin/init-xenstore-domain
-
-    # install vbd3 work-around block script and udev rule.
-    install -d ${D}${sysconfdir}/udev/rules.d
-    install -m 0755 ${WORKDIR}/xen-vbd3-backend.rules ${D}${sysconfdir}/udev/rules.d/xen-vbd3-backend.rules
-    install -m 0755 ${WORKDIR}/block-vbd3 ${D}${sysconfdir}/xen/scripts/block-vbd3
 
     rm -rf ${D}/${INIT_D_DIR}/xencommons
     rm -rf ${D}/${INIT_D_DIR}/xendriverdomain
