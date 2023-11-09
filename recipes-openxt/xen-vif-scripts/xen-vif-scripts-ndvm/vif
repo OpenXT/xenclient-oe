@@ -17,95 +17,16 @@
 # Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 #
 
-TYPE=`echo ${XENBUS_PATH} | cut -f 2 -d '/'`
-DOMID=`echo ${XENBUS_PATH} | cut -f 3 -d '/'`
-DEVID=`echo ${XENBUS_PATH} | cut -f 4 -d '/'`
-
-XAPI=/xapi/${DOMID}/hotplug/${TYPE}/${DEVID}
-
 case "$1" in
     online)
         if [ "x${vif}" = "x" ]; then
             exit
         fi
-        xenstore-write "${XAPI}/vif" "${vif}"
-        xenstore-write "${XAPI}/hotplug" "online"
-        UUID=
-        for i in `xenstore-list /xenmgr/vms`; do
-            if [ "x`xenstore-read /xenmgr/vms/$i/domid`" = "x${DOMID}" ]; then
-                UUID=$i
-                break;
-            fi
-        done
-        FW_CONFIG=
-        if [ ! -z $UUID ]; then
-            FW_CONFIG="/vm/${UUID}/config/nic/${DEVID}/firewall-rules"
-        fi
-
-        iptables -N INPUT_${vif}
-        iptables -N FORWARD_${vif}
-        iptables -A INPUT_vifs -m physdev --physdev-in ${vif} -j INPUT_${vif}
-        iptables -A FORWARD_vifs -m physdev --physdev-in ${vif} -j FORWARD_${vif}
-
-        treat_rule()
-        {
-            OCMD=`db-read-dom0 $1/cmd`
-            OTYPE=`db-read-dom0 $1/type`
-            RTYPE=INPUT_${vif}
-            RCMD=`echo $OCMD | tr '[:lower:]' '[:upper:]'`
-            PORT=`db-read-dom0 $1/port`
-            IP=`db-read-dom0 $1/ip`
-            PROTOCOL=`db-read-dom0 $1/protocol`
-            EXTRA=''
-
-            if [ ! -z $PROTOCOL ]; then
-                PROTOCOL=`echo $PROTOCOL | tr '[:lower:]' '[:upper:]'`
-                EXTRA="--protocol $PROTOCOL"
-            fi
-
-            case `echo $OTYPE | tr '[:upper:]' '[:lower:]'` in
-                input)
-                    RTYPE=INPUT_${vif}
-                    if [ ! -z $PORT ]; then
-                        EXTRA="$EXTRA --source-port $PORT"
-                    fi
-                    if [ ! -z $IP ]; then
-                        EXTRA="$EXTRA --source $IP"
-                    fi
-                    ;;
-                output)
-                    RTYPE=FORWARD_${vif}
-                    if [ ! -z $PORT ]; then
-                        EXTRA="$EXTRA --destination-port $PORT"
-                    fi
-                    if [ ! -z $IP ]; then
-                        EXTRA="$EXTRA --destination $IP"
-                    fi
-                    ;;
-            esac
-
-            iptables -A $RTYPE $EXTRA -j $RCMD
-        }
-
-        if [ ! -z $FW_CONFIG ]; then
-            for i in `db-nodes-dom0 $FW_CONFIG`; do
-                treat_rule $FW_CONFIG/$i
-            done
-        fi
-        #end firewall
 
         xenstore-write "${XENBUS_PATH}/hotplug-status" "connected"
         ;;
 
     offline)
-        xenstore-rm "${XAPI}/hotplug"
-
-        iptables -D INPUT_vifs -m physdev --physdev-in ${vif} -j INPUT_${vif}
-        iptables -D FORWARD_vifs -m physdev --physdev-in ${vif} -j FORWARD_${vif}
-        iptables -F INPUT_${vif}
-        iptables -F FORWARD_${vif}
-        iptables -X INPUT_${vif}
-        iptables -X FORWARD_${vif}
         ;;
 esac
 
