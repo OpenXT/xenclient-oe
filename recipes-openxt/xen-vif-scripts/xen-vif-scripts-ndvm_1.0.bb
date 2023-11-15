@@ -19,5 +19,3 @@ do_install() {
     install -m 0755 -d ${D}${sysconfdir}/xen/scripts
     install -m 0755 ${S}/vif ${D}${sysconfdir}/xen/scripts/vif
 }
-
-RCONFLICTS_${PN} += "xen-vif-scripts-dom0"
