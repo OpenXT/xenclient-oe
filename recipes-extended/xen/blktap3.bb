@@ -1,16 +1,18 @@
 DESCRIPTION = "blktap3"
 LICENSE = "BSD-3-Clause"
-LIC_FILES_CHKSUM="file://LICENSE;md5=a9e8593dad23434929bc6218a17b5634"
+LIC_FILES_CHKSUM="file://LICENSE;md5=3da30208124386cb4aeab6d28a084ae9"
 DEPENDS = "xen-tools libicbinn"
 
 PV = "0+git${SRCPV}"
 
-SRCREV = "a7832564b4d7e540d2d5a85e2556f571b7f9d89b"
+SRCREV = "d1d4f2a9eb17b232a04ec5a4f583922860b5c78b"
 SRC_URI = "git://github.com/xapi-project/blktap.git;protocol=https \
     file://tapback.initscript \
-    file://fix-format-specifier-errors.patch \
     file://compiler-errors-fix.patch \
-    file://remove-inline-function-declarations.patch \
+    file://fix-strncpy.patch \
+    file://fix-cbt.patch \
+    file://drop-rd-defs.patch \
+    file://fix-format-specifier-errors.patch \
     file://OXT-specific-errors-fix.patch \
     file://fix-run-time-errors-and-memory-leaks.patch \
     file://fix-segfault-if-startup-fails.patch \
@@ -23,7 +25,6 @@ SRC_URI = "git://github.com/xapi-project/blktap.git;protocol=https \
     file://fix-encryption.patch \
     file://gcc9-compilation.patch \
     file://openssl-1.1.x.patch \
-    file://0001-Set-libvhdio-libtool-version-info.patch \
     file://0001-tap-ctl-Default-to-read-only-opening.patch \
 "
 

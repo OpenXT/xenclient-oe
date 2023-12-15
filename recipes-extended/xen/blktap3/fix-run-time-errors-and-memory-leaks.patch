@@ -61,8 +61,8 @@ PATCHES
  	fd = open(BLKTAP2_CONTROL_DEVICE, O_RDONLY);
  	if (fd == -1) {
  		EPRINTF("failed to open control device: %d\n", errno);
-@@ -57,5 +72,10 @@ tap_ctl_free(const int minor)
- 	err = ioctl(fd, BLKTAP2_IOCTL_FREE_TAP, minor);
+@@ -58,5 +73,10 @@ tap_ctl_free(const int minor)
+ 	err = (err == -1) ? -errno : 0;
  	close(fd);
  
 +	unlink(tapdev_name);
@@ -70,28 +70,19 @@ PATCHES
 +	free(tapdev_name);
 +	free(ring_name);
 +
- 	return err ? -errno : 0;
+ 	return err;
  }
 --- a/control/tap-ctl-ipc.c
 +++ b/control/tap-ctl-ipc.c
-@@ -64,7 +64,7 @@ tap_ctl_read_raw(int fd, void *buf, size
- 		if (ret == -1)
+@@ -72,7 +72,7 @@ tap_ctl_read_raw(int fd, void *buf, size
+ 			err = errno;
  			break;
- 		else if (FD_ISSET(fd, &readfds)) {
--			ret = read(fd, buf + offset, size - offset);
-+			ret = read(fd, (char*)buf + offset, size - offset);
- 			if (ret <= 0)
+ 		} else if (FD_ISSET(fd, &readfds)) {
+-			eintr_retry(ret, read(fd, buf + offset, size - offset))
++			eintr_retry(ret, read(fd, (char*)buf + offset, size - offset))
+ 			if (ret <= 0) {
+ 				err = errno;
  				break;
- 			offset += ret;
-@@ -120,7 +120,7 @@ tap_ctl_write_message(int fd, tapdisk_me
- 		if (ret == -1)
- 			break;
- 		else if (FD_ISSET(fd, &writefds)) {
--			ret = write(fd, message + offset, len - offset);
-+			ret = write(fd, (char*)message + offset, len - offset);
- 			if (ret <= 0)
- 				break;
- 			offset += ret;
 --- a/include/blktap.h
 +++ b/include/blktap.h
 @@ -32,7 +32,7 @@
@@ -116,7 +107,7 @@ PATCHES
  #define BLKTAP2_DIRECTORY              "/dev/xen/blktap-2"
 --- a/tapback/frontend.c
 +++ b/tapback/frontend.c
-@@ -478,7 +478,7 @@ tapback_backend_handle_otherend_watch(ba
+@@ -477,7 +477,7 @@ tapback_backend_handle_otherend_watch(ba
  {
      vbd_t *device = NULL;
      int err = 0, state = 0;
@@ -125,7 +116,7 @@ PATCHES
  
  	ASSERT(backend);
      ASSERT(path);
-@@ -509,30 +509,7 @@ tapback_backend_handle_otherend_watch(ba
+@@ -508,30 +508,7 @@ tapback_backend_handle_otherend_watch(ba
       */
  	s = tapback_xs_read(device->backend->xs, XBT_NULL, "%s",
  			device->frontend_state_path);
@@ -157,7 +148,7 @@ PATCHES
          state = strtol(s, &end, 0);
          if (*end != 0 || end == s) {
              WARN(device, "invalid XenBus state '%s'\n", s);
-@@ -541,9 +518,7 @@ tapback_backend_handle_otherend_watch(ba
+@@ -540,9 +517,7 @@ tapback_backend_handle_otherend_watch(ba
              err = frontend_changed(device, state);
      }
  
@@ -179,7 +170,7 @@ PATCHES
  	list_del(&backend->entry);
 --- a/vhd/lib/libvhd.c
 +++ b/vhd/lib/libvhd.c
-@@ -1333,7 +1333,7 @@ vhd_find_parent(vhd_context_t *ctx, cons
+@@ -1471,7 +1471,7 @@ vhd_find_parent(vhd_context_t *ctx, cons
  	location   = NULL;
  	*_location = NULL;
  
@@ -188,15 +179,6 @@ PATCHES
  		return -EINVAL;
  
  	if (parent[0] == '/') {
-@@ -1868,7 +1868,7 @@ vhd_footer_offset_at_eof(vhd_context_t *
- {
- 	int err;
- 	if ((err = vhd_seek(ctx, 0, SEEK_END)))
--		return errno;
-+		return err;
- 	*off = vhd_position(ctx) - sizeof(vhd_footer_t);
- 	return 0;
- }
 --- a/vhd/lib/vhd-util-read.c
 +++ b/vhd/lib/vhd-util-read.c
 @@ -216,6 +216,7 @@ vhd_print_parent(vhd_context_t *vhd, vhd
@@ -230,25 +212,3 @@ PATCHES
  	}
  
  	return 0;
---- a/vhd/lib/vhd-util-key.c
-+++ b/vhd/lib/vhd-util-key.c
-@@ -39,7 +39,7 @@
- 
- #include "libvhd.h"
- 
--#define LIBBLOCKCRYPTO_NAME "libblockcrypto.so"
-+#define LIBBLOCKCRYPTO_NAME "libblockcrypto.so.0"
- 
- #define MAX_KEY_SIZE 512
- int CRYPTO_SUPPORTED_KEYSIZE[] = { 512, 256, -1};
---- a/vhd/lib/vhd-util-copy.c
-+++ b/vhd/lib/vhd-util-copy.c
-@@ -46,7 +46,7 @@
- 
- #include "libvhd.h"
- 
--#define LIBBLOCKCRYPTO_NAME "libblockcrypto.so"
-+#define LIBBLOCKCRYPTO_NAME "libblockcrypto.so.0"
- 
- typedef int (*vhd_calculate_keyhash)(struct vhd_keyhash *keyhash,
- 					     const uint8_t *key, size_t key_byte);
