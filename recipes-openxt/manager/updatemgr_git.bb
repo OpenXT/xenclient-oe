@@ -12,10 +12,6 @@ DEPENDS = " \
     hkg-monadprompt \
     hkg-http \
     hkg-xenstore \
-    hkg-parsec \
-    hkg-deepseq \
-    hkg-text \
-    hkg-mtl \
     hkg-json \
     hkg-regex-posix \
     hkg-hinotify \

@@ -8,20 +8,16 @@ DEPENDS += " \
     libxchxenstore \
     libxch-rpc \
     libxchdb \
-    hkg-dbus-core \
+    hkg-dbus \
     hkg-json \
     hkg-hsyslog \
-    hkg-network-bytestring \
-    hkg-transformers \
-    hkg-parsec \
-    hkg-deepseq \
-    hkg-text \
-    hkg-mtl \
     hkg-network \
     hkg-monad-loops \
     hkg-lifted-base \
     hkg-monad-control \
+    hkg-vector \
     hkg-errors \
+    hkg-hashtables \
 "
 RDEPENDS_${PN} += "glibc-gconv-utf-32 bash"
 

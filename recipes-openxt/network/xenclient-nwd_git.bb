@@ -6,9 +6,6 @@ DEPENDS = " \
     hkg-hsyslog \
     libxch-rpc \
     hkg-regex-posix \
-    hkg-deepseq \
-    hkg-text \
-    hkg-mtl \
     hkg-network \
     libxchdb \
     libxchxenstore \
