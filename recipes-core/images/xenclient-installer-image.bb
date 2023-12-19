@@ -37,10 +37,9 @@ IMAGE_INSTALL = "\
     packagegroup-base \
     packagegroup-xenclient-common \
     packagegroup-xenclient-installer \
-    linux-firmware-iwlwifi \
     linux-firmware-bnx2 \
     linux-firmware-i915 \
-    linux-firmware-nvidia \
+    linux-firmware-nvidia-gpu \
     linux-firmware-radeon \
     libdrm-nouveau \
     libdrm-radeon \
