@@ -6,7 +6,6 @@ FILESEXTRAPATHS_prepend := "${THISDIR}/files:"
 
 SRC_URI_append = " \
     file://defconfig \
-    file://0001-libxl-retry-QMP-PCI-device_add.patch \
     file://0001-python-pygrub-pass-DISTUTILS-xen.4.12.patch \
     file://kconfig-grant-table-v2-interface.patch \
     file://kconfig-grant-table-exotic.patch \
@@ -63,11 +62,9 @@ SRC_URI_append = " \
     file://ocaml-makefiles-sysroot.patch \
     file://patch-xen-disable-efi-gettime.patch \
     file://libxl-add-ovmf-varstored.patch \
-    file://libxl-const-stubdom-is-linux.patch \
     file://libxl-disable-dom0-qemu.patch \
     file://libxl-xen-disable-dom0-qemu.patch \
     file://0001-libxl-Enable-stubdom-cdrom-changing.patch \
-    file://0001-libxl-Don-t-leak-self-pipes.patch \
     file://libxl-add-xen-acpi-pm.patch \
     file://0001-vchan-socket-proxy-add-reconnect-marker-support.patch \
     file://0002-tools-libxl-enable-in-band-reconnect-marker-for-stub.patch \

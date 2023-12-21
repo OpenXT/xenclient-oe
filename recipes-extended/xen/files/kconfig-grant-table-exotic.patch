@@ -65,7 +65,7 @@ Signed-off-by: Christopher Clark <christopher.clark6@baesystems.com>
 
 --- a/xen/common/Kconfig
 +++ b/xen/common/Kconfig
-@@ -40,6 +40,16 @@ config GRANT_TABLE_V2
+@@ -56,6 +56,16 @@ config GRANT_TABLE_V2
  	  If you do not require large memory support, say N.
  	  If you are paranoid, say N. If unsure, say Y.
  
@@ -84,7 +84,7 @@ Signed-off-by: Christopher Clark <christopher.clark6@baesystems.com>
  
 --- a/xen/common/compat/grant_table.c
 +++ b/xen/common/compat/grant_table.c
-@@ -193,6 +193,9 @@ int compat_grant_table_op(unsigned int c
+@@ -206,6 +206,9 @@ int compat_grant_table_op(
              break;
  
          case GNTTABOP_transfer:
@@ -93,8 +93,8 @@ Signed-off-by: Christopher Clark <christopher.clark6@baesystems.com>
 +#else
              for ( n = 0; n < COMPAT_ARG_XLAT_SIZE / sizeof(*nat.xfer) && i < count && rc == 0; ++i, ++n )
              {
-                 if ( unlikely(__copy_from_guest_offset(&cmp.xfer, cmp_uop, i, 1)) )
-@@ -224,6 +227,7 @@ int compat_grant_table_op(unsigned int c
+                 if ( unlikely(__copy_from_guest_offset(&cmp.xfer, uop, i, 1)) )
+@@ -237,6 +240,7 @@ int compat_grant_table_op(
                          rc = -EFAULT;
                  }
              }
@@ -104,7 +104,7 @@ Signed-off-by: Christopher Clark <christopher.clark6@baesystems.com>
          case GNTTABOP_copy:
 --- a/xen/common/grant_table.c
 +++ b/xen/common/grant_table.c
-@@ -1718,6 +1718,7 @@ fault:
+@@ -1757,6 +1757,7 @@ fault:
      return -EFAULT;
  }
  
@@ -112,7 +112,7 @@ Signed-off-by: Christopher Clark <christopher.clark6@baesystems.com>
  static void
  unmap_and_replace(
      struct gnttab_unmap_and_replace *op,
-@@ -1782,6 +1783,7 @@ fault:
+@@ -1821,6 +1822,7 @@ fault:
          unmap_common_complete(&common[i]);
      return -EFAULT;
  }
@@ -120,7 +120,7 @@ Signed-off-by: Christopher Clark <christopher.clark6@baesystems.com>
  
  static int
  gnttab_populate_status_frames(struct domain *d, struct grant_table *gt,
-@@ -2204,6 +2206,7 @@ gnttab_query_size(
+@@ -2237,6 +2239,7 @@ gnttab_query_size(
      return 0;
  }
  
@@ -128,7 +128,7 @@ Signed-off-by: Christopher Clark <christopher.clark6@baesystems.com>
  /*
   * Check that the given grant reference (rd,ref) allows 'ld' to transfer
   * ownership of a page frame. If so, lock down the grant entry.
-@@ -2491,6 +2494,7 @@ gnttab_transfer(
+@@ -2527,6 +2530,7 @@ gnttab_transfer(
  
      return 0;
  }
@@ -136,7 +136,7 @@ Signed-off-by: Christopher Clark <christopher.clark6@baesystems.com>
  
  /*
   * Undo acquire_grant_for_copy().  This has no effect on page type and
-@@ -3400,6 +3404,7 @@ gnttab_get_version(XEN_GUEST_HANDLE_PARA
+@@ -3469,6 +3473,7 @@ gnttab_get_version(XEN_GUEST_HANDLE_PARA
      return 0;
  }
  
@@ -144,15 +144,25 @@ Signed-off-by: Christopher Clark <christopher.clark6@baesystems.com>
  static s16
  swap_grant_ref(grant_ref_t ref_a, grant_ref_t ref_b)
  {
-@@ -3489,6 +3494,7 @@ gnttab_swap_grant_ref(XEN_GUEST_HANDLE_P
+@@ -3553,7 +3558,9 @@ out:
+ 
+     return rc;
+ }
++#endif
+ 
++#ifdef CONFIG_GRANT_TABLE_EXOTIC
+ static long
+ gnttab_swap_grant_ref(XEN_GUEST_HANDLE_PARAM(gnttab_swap_grant_ref_t) uop,
+                       unsigned int count)
+@@ -3574,6 +3581,7 @@ gnttab_swap_grant_ref(XEN_GUEST_HANDLE_P
      }
      return 0;
  }
 +#endif
  
- static int cache_flush(const gnttab_cache_flush_t *cflush, grant_ref_t *cur_ref)
+ static int _cache_flush(const gnttab_cache_flush_t *cflush, grant_ref_t *cur_ref)
  {
-@@ -3650,6 +3656,7 @@ do_grant_table_op(
+@@ -3739,6 +3747,7 @@ long do_grant_table_op(
          break;
      }
  
@@ -160,7 +170,7 @@ Signed-off-by: Christopher Clark <christopher.clark6@baesystems.com>
      case GNTTABOP_unmap_and_replace:
      {
          XEN_GUEST_HANDLE_PARAM(gnttab_unmap_and_replace_t) unmap =
-@@ -3665,6 +3672,7 @@ do_grant_table_op(
+@@ -3754,6 +3763,7 @@ long do_grant_table_op(
          }
          break;
      }
@@ -168,7 +178,7 @@ Signed-off-by: Christopher Clark <christopher.clark6@baesystems.com>
  
      case GNTTABOP_setup_table:
          rc = gnttab_setup_table(
-@@ -3672,6 +3680,7 @@ do_grant_table_op(
+@@ -3761,6 +3771,7 @@ long do_grant_table_op(
          ASSERT(rc <= 0);
          break;
  
@@ -176,7 +186,7 @@ Signed-off-by: Christopher Clark <christopher.clark6@baesystems.com>
      case GNTTABOP_transfer:
      {
          XEN_GUEST_HANDLE_PARAM(gnttab_transfer_t) transfer =
-@@ -3687,6 +3696,7 @@ do_grant_table_op(
+@@ -3776,6 +3787,7 @@ long do_grant_table_op(
          }
          break;
      }
@@ -184,7 +194,7 @@ Signed-off-by: Christopher Clark <christopher.clark6@baesystems.com>
  
      case GNTTABOP_copy:
      {
-@@ -3726,6 +3736,7 @@ do_grant_table_op(
+@@ -3814,6 +3826,7 @@ long do_grant_table_op(
          rc = gnttab_get_version(guest_handle_cast(uop, gnttab_get_version_t));
          break;
  
@@ -192,7 +202,7 @@ Signed-off-by: Christopher Clark <christopher.clark6@baesystems.com>
      case GNTTABOP_swap_grant_ref:
      {
          XEN_GUEST_HANDLE_PARAM(gnttab_swap_grant_ref_t) swap =
-@@ -3741,6 +3752,7 @@ do_grant_table_op(
+@@ -3829,6 +3842,7 @@ long do_grant_table_op(
          }
          break;
      }
