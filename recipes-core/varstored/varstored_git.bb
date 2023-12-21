@@ -1,6 +1,6 @@
 SUMMARY = "Package for managing guest EFI variables"
 LICENSE = "BSD"
-LIC_FILES_CHKSUM = "file://LICENSE;md5=8444b396c3cde7d8fe18ae36a3638a55"
+LIC_FILES_CHKSUM = "file://LICENSE;md5=4aa0fe4b47a2c3ecbddcbcf6a20f654b"
 
 inherit useradd xc-rpcgen-c
 
@@ -15,7 +15,7 @@ DEPENDS = " \
 "
 
 # lock to this SRCREV until we uprev Xen to >4.12
-SRCREV = "f8c2656be1cfca35bb9297b97d9af962f51f19f9"
+SRCREV = "${AUTOREV}"
 PV = "0+git${SRCPV}"
 
 S = "${WORKDIR}/git"
