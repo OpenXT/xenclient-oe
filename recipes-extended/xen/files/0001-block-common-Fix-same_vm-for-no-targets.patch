@@ -1,0 +1,56 @@
+From 1eb266d3ac6df915a0fa2fb6e86d8f8cd1328ec9 Mon Sep 17 00:00:00 2001
+From: Jason Andryuk <jandryuk@gmail.com>
+Date: Thu, 21 Dec 2023 15:42:57 -0500
+Subject: [PATCH 1/5] block-common: Fix same_vm for no targets
+
+same_vm is broken when the two main domains do not have targets.  otvm
+and targetvm are both missing, which means they get set to -1 and then
+converted to empty strings:
+
+++10697+ local targetvm=-1
+++10697+ local otvm=-1
+++10697+ otvm=
+++10697+ othervm=/vm/cc97bc2f-3a91-43f7-8fbc-4cb92f90b4e4
+++10697+ targetvm=
+++10697+ local frontend_uuid=/vm/844dea4e-44f8-4e3e-8145-325132a31ca5
+
+The final comparison returns true since the two empty strings match:
+
+++10697+ '[' /vm/844dea4e-44f8-4e3e-8145-325132a31ca5 = /vm/cc97bc2f-3a91-43f7-8fbc-4cb92f90b4e4 -o '' = /vm/cc97bc2f-3a91-43f7-8fbc-4cb92f90b4e4 -o /vm/844dea4e-44f8-4e3e-8145-325132a31ca5 = '' -o '' = '' ']'
+
+Replace -1 with distinct strings indicating the lack of a value and
+remove the collescing to empty stings.  The strings themselves will no
+longer match, and that is correct.
+
+++12364+ '[' /vm/844dea4e-44f8-4e3e-8145-325132a31ca5 = /vm/cc97bc2f-3a91-43f7-8fbc-4cb92f90b4e4 -o 'No target' = /vm/cc97bc2f-3a91-43f7-8fbc-4cb92f90b4e4 -o /vm/844dea4e-44f8-4e3e-8145-325132a31ca5 = 'No other target' -o 'No target' = 'No other target' ']'
+
+Signed-off-by: Jason Andryuk <jandryuk@gmail.com>
+---
+ tools/hotplug/Linux/block-common.sh | 8 +++-----
+ 1 file changed, 3 insertions(+), 5 deletions(-)
+
+diff --git a/tools/hotplug/Linux/block-common.sh b/tools/hotplug/Linux/block-common.sh
+index f86a88c4eb..5c80237d99 100644
+--- a/tools/hotplug/Linux/block-common.sh
++++ b/tools/hotplug/Linux/block-common.sh
+@@ -112,14 +112,12 @@ same_vm()
+                   "$FRONTEND_UUID")
+   local target=$(xenstore_read_default  "/local/domain/$FRONTEND_ID/target"   \
+                  "-1")
+-  local targetvm=$(xenstore_read_default "/local/domain/$target/vm" "-1")
++  local targetvm=$(xenstore_read_default "/local/domain/$target/vm" "No Target")
+   local otarget=$(xenstore_read_default  "/local/domain/$otherdom/target"   \
+                  "-1")
+   local otvm=$(xenstore_read_default  "/local/domain/$otarget/vm"   \
+-                 "-1")
+-  otvm=${otvm%-1}
+-  othervm=${othervm%-1}
+-  targetvm=${targetvm%-1}
++                 "No Other Target")
++
+   local frontend_uuid=${FRONTEND_UUID%-1}
+   
+   [ "$frontend_uuid" = "$othervm" -o "$targetvm" = "$othervm" -o \
+-- 
+2.43.0
+

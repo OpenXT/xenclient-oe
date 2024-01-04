@@ -1,0 +1,189 @@
+From ab11447309a175fbad3c38930e145a63001c8c9c Mon Sep 17 00:00:00 2001
+From: Jason Andryuk <jandryuk@gmail.com>
+Date: Fri, 21 Apr 2023 12:41:09 -0400
+Subject: [PATCH 2/5] libxl: Add support for blktap vbd3
+
+This patch re-introduces blktap support to libxl.  Unlike earlier
+versions, it does not link against any blktap library.  libxl changes
+are needed to write to the vbd3 backend XenStore nodes.
+
+blktap has three components.  tapdisk is a daemon implementing the disk
+IO, NBD (Network Block Device), and Xen PV interfaces.  tap-ctl is a
+tool to control tapdisks - creating, starting, stopping and freeing.
+tapback manages the XenStore operations and instructs tapdisk to
+connect.
+
+It is notable that tapdisk performs the grant and event channel ops, but
+doesn't interact with XenStore.  tapback performs XenStore operations
+and notifies tapdisks of values and changes.
+
+The flow is: libxl writes to the "vbd3" XenStore nodes and runs the
+block-tap script.  The block-tap script runs tap-ctl to create a tapdisk
+instance as the physical device.  tapback then sees the tapdisk and
+instructs the tapdisk to connect up the PV blkif interface.
+
+This is expected to work without the kernel blktap driver, so the
+block-tap script is modified accordingly to write the UNIX NBD path.
+
+backendtype=tap was not fully removed previously, but it would never
+succeed since it would hit the hardcoded error in disk_try_backend().
+It is reused now.
+
+An example command to attach a vhd:
+xl block-attach vm 'vdev=xvdf,backendtype=tap,format=vhd,target=/srv/target.vhd'
+
+Format raw also works to run an "aio:" tapdisk.
+
+Signed-off-by: Jason Andryuk <jandryuk@gmail.com>
+---
+VHD support is important for OpenXT since there are lots of existing
+VHDs which still need supporting.  tapdisk also supports encrypting VHDs
+which is not available in QEMU.
+---
+ docs/man/xl-disk-configuration.5.pod.in   |  4 +++-
+ tools/libs/light/libxl_device.c           | 14 ++++++++++----
+ tools/libs/light/libxl_disk.c             | 20 +++++++++++++++-----
+ tools/libs/light/libxl_linux.c            |  1 +
+ tools/libs/light/libxl_types_internal.idl |  1 +
+ tools/libs/light/libxl_utils.c            |  2 ++
+ 6 files changed, 32 insertions(+), 10 deletions(-)
+
+diff --git a/docs/man/xl-disk-configuration.5.pod.in b/docs/man/xl-disk-configuration.5.pod.in
+index bc945cc517..cb442bd5b4 100644
+--- a/docs/man/xl-disk-configuration.5.pod.in
++++ b/docs/man/xl-disk-configuration.5.pod.in
+@@ -232,7 +232,7 @@ Specifies the backend implementation to use
+ 
+ =item Supported values
+ 
+-phy, qdisk, standalone
++phy, qdisk, standalone, tap
+ 
+ =item Mandatory
+ 
+@@ -254,6 +254,8 @@ and "standalone" does not support specifications other than "virtio".
+ Normally this option should not be specified, in which case libxl will
+ automatically determine the most suitable backend.
+ 
++"tap" needs blktap's tapback to be running.
++
+ 
+ =item B<script>=I<SCRIPT>
+ 
+diff --git a/tools/libs/light/libxl_device.c b/tools/libs/light/libxl_device.c
+index 13da6e0573..ae2b71b0bf 100644
+--- a/tools/libs/light/libxl_device.c
++++ b/tools/libs/light/libxl_device.c
+@@ -328,9 +328,15 @@ static int disk_try_backend(disk_try_backend_args *a,
+         return 0;
+ 
+     case LIBXL_DISK_BACKEND_TAP:
+-        LOG(DEBUG, "Disk vdev=%s, backend tap unsuitable because blktap "
+-                   "not available", a->disk->vdev);
+-        return 0;
++        if (a->disk->format != LIBXL_DISK_FORMAT_RAW &&
++            a->disk->format != LIBXL_DISK_FORMAT_VHD)
++            goto bad_format;
++
++        if (libxl_defbool_val(a->disk->colo_enable))
++            goto bad_colo;
++
++        LOG(DEBUG, "Disk vdev=%s, returning blktap", a->disk->vdev);
++        return backend;
+ 
+     case LIBXL_DISK_BACKEND_QDISK:
+         if (a->disk->script) goto bad_script;
+@@ -478,7 +484,7 @@ char *libxl__device_disk_string_of_backend(libxl_disk_backend backend)
+ {
+     switch (backend) {
+         case LIBXL_DISK_BACKEND_QDISK: return "qdisk";
+-        case LIBXL_DISK_BACKEND_TAP: return "phy";
++        case LIBXL_DISK_BACKEND_TAP: return "vbd3";
+         case LIBXL_DISK_BACKEND_PHY: return "phy";
+         case LIBXL_DISK_BACKEND_STANDALONE: return "standalone";
+         default: return NULL;
+diff --git a/tools/libs/light/libxl_disk.c b/tools/libs/light/libxl_disk.c
+index ea3623dd6f..59ff996837 100644
+--- a/tools/libs/light/libxl_disk.c
++++ b/tools/libs/light/libxl_disk.c
+@@ -56,7 +56,9 @@ static void disk_eject_xswatch_callback(libxl__egc *egc, libxl__ev_xswatch *w,
+             "/local/domain/%d/backend/%" TOSTRING(BACKEND_STRING_SIZE)
+            "[a-z]/%*d/%*d",
+            &disk->backend_domid, backend_type);
+-    if (!strcmp(backend_type, "tap") || !strcmp(backend_type, "vbd")) {
++    if (!strcmp(backend_type, "tap") ||
++        !strcmp(backend_type, "vbd") ||
++        !strcmp(backend_type, "vbd3")) {
+         disk->backend = LIBXL_DISK_BACKEND_TAP;
+     } else if (!strcmp(backend_type, "qdisk")) {
+         disk->backend = LIBXL_DISK_BACKEND_QDISK;
+@@ -224,7 +226,7 @@ static int libxl__device_from_disk(libxl__gc *gc, uint32_t domid,
+             device->backend_kind = LIBXL__DEVICE_KIND_VBD;
+             break;
+         case LIBXL_DISK_BACKEND_TAP:
+-            device->backend_kind = LIBXL__DEVICE_KIND_VBD;
++            device->backend_kind = LIBXL__DEVICE_KIND_VBD3;
+             break;
+         case LIBXL_DISK_BACKEND_QDISK:
+             device->backend_kind = LIBXL__DEVICE_KIND_QDISK;
+@@ -368,9 +370,17 @@ static void device_disk_add(libxl__egc *egc, uint32_t domid,
+                 assert(device->backend_kind == LIBXL__DEVICE_KIND_VIRTIO_DISK);
+                 break;
+             case LIBXL_DISK_BACKEND_TAP:
+-                LOG(ERROR, "blktap is not supported");
+-                rc = ERROR_FAIL;
+-                goto out;
++                flexarray_append(back, "params");
++                flexarray_append(back, GCSPRINTF("%s:%s",
++                              libxl__device_disk_string_of_format(disk->format),
++                              disk->pdev_path ? : ""));
++
++                script = libxl__abs_path(gc, disk->script?: "block-tap",
++                                         libxl__xen_script_dir_path());
++                flexarray_append_pair(back, "script", script);
++
++                assert(device->backend_kind == LIBXL__DEVICE_KIND_VBD3);
++                break;
+             case LIBXL_DISK_BACKEND_QDISK:
+                 flexarray_append(back, "params");
+                 flexarray_append(back, GCSPRINTF("%s:%s",
+diff --git a/tools/libs/light/libxl_linux.c b/tools/libs/light/libxl_linux.c
+index f7c92ba562..0b4c8bd045 100644
+--- a/tools/libs/light/libxl_linux.c
++++ b/tools/libs/light/libxl_linux.c
+@@ -207,6 +207,7 @@ int libxl__get_hotplug_script_info(libxl__gc *gc, libxl__device *dev,
+ 
+     switch (dev->backend_kind) {
+     case LIBXL__DEVICE_KIND_VBD:
++    case LIBXL__DEVICE_KIND_VBD3:
+         if (num_exec != 0) {
+             LOGD(DEBUG, dev->domid,
+                  "num_exec %d, not running hotplug scripts", num_exec);
+diff --git a/tools/libs/light/libxl_types_internal.idl b/tools/libs/light/libxl_types_internal.idl
+index e24288f1a5..56dccac153 100644
+--- a/tools/libs/light/libxl_types_internal.idl
++++ b/tools/libs/light/libxl_types_internal.idl
+@@ -34,6 +34,7 @@ libxl__device_kind = Enumeration("device_kind", [
+     (16, "VINPUT"),
+     (17, "VIRTIO_DISK"),
+     (18, "VIRTIO"),
++    (19, "VBD3"),
+     ])
+ 
+ libxl__console_backend = Enumeration("console_backend", [
+diff --git a/tools/libs/light/libxl_utils.c b/tools/libs/light/libxl_utils.c
+index e403bd9bcf..10398a6c86 100644
+--- a/tools/libs/light/libxl_utils.c
++++ b/tools/libs/light/libxl_utils.c
+@@ -295,6 +295,8 @@ int libxl_string_to_backend(libxl_ctx *ctx, char *s, libxl_disk_backend *backend
+         *backend = LIBXL_DISK_BACKEND_PHY;
+     } else if (!strcmp(s, "file")) {
+         *backend = LIBXL_DISK_BACKEND_TAP;
++    } else if (!strcmp(s, "vbd3")) {
++        *backend = LIBXL_DISK_BACKEND_TAP;
+     } else if (!strcmp(s, "qdisk")) {
+         *backend = LIBXL_DISK_BACKEND_QDISK;
+     } else if (!strcmp(s, "standalone")) {
+-- 
+2.43.0
+
