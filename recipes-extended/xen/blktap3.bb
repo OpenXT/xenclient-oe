@@ -26,6 +26,9 @@ SRC_URI = "git://github.com/xapi-project/blktap.git;protocol=https \
     file://gcc9-compilation.patch \
     file://openssl-1.1.x.patch \
     file://0001-tap-ctl-Default-to-read-only-opening.patch \
+    file://0001-tapback-Add-l-libxl-compatibility-mode.patch \
+    file://0002-tapback-Move-backend-to-InitWait-earlier.patch \
+    file://0003-tapback-Don-t-remove-xenstore-backend-in-libxl-mode.patch \
 "
 
 S = "${WORKDIR}/git"
