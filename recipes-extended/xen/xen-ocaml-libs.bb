@@ -1,6 +1,6 @@
 DESCRIPTION = "Xen hypervisor ocaml libs and xenstore components"
 
-XEN_REL = "4.16"
+XEN_REL = "4.18"
 XEN_BRANCH ?= "stable-${XEN_REL}"
 SRCREV ?= "${AUTOREV}"
 
@@ -10,7 +10,7 @@ SRC_URI = " \
     file://oxenstored.conf \
     "
 
-LIC_FILES_CHKSUM ?= "file://COPYING;md5=419739e325a50f3d7b4501338e44a4e5"
+LIC_FILES_CHKSUM ?= "file://COPYING;md5=d1a1e216f80b6d8da95fec897d0dbec9"
 
 PV = "${XEN_REL}+git${SRCPV}"
 
@@ -87,12 +87,6 @@ do_compile() {
     oe_runmake -C tools/libs subdir-all-call
     oe_runmake -C tools/libs subdir-all-hypfs
     oe_runmake -C tools subdir-all-include
-    oe_runmake LDLIBS_libxenctrl='-lxenctrl' \
-		       LDLIBS_libxenstore='-lxenstore' \
-		       LDLIBS_libxenguest='-lxenguest' \
-		       LDLIBS_libxentoollog='-lxentoollog' \
-		       LDLIBS_libxenevtchn='-lxenevtchn' \
-		       -C tools/libs subdir-all-light
 
     oe_runmake V=1 \
        LDLIBS_libxenctrl='-lxenctrl' \

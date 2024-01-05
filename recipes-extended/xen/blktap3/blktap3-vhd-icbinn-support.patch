@@ -58,7 +58,7 @@ PATCHES
  
 --- a/include/libvhd.h
 +++ b/include/libvhd.h
-@@ -121,9 +121,20 @@ typedef struct vhd_bat             vhd_b
+@@ -127,9 +127,20 @@ typedef struct vhd_bat             vhd_b
  typedef struct vhd_batmap          vhd_batmap_t;
  typedef struct dd_batmap_hdr       vhd_batmap_header_t;
  typedef struct prt_loc             vhd_parent_locator_t;
@@ -79,16 +79,7 @@ PATCHES
  struct vhd_bat {
  	uint32_t                   spb;
  	uint32_t                   entries;
-@@ -143,6 +154,8 @@ struct vhd_context {
- 	int                        oflags;
- 	int                        is_block;
- 
-+	uint64_t 		   offset;
-+
- 	uint32_t                   spb;
- 	uint32_t                   bm_secs;
- 
-@@ -150,6 +163,7 @@ struct vhd_context {
+@@ -157,6 +168,7 @@ struct vhd_context {
  	vhd_footer_t               footer;
  	vhd_bat_t                  bat;
  	vhd_batmap_t               batmap;
@@ -96,18 +87,18 @@ PATCHES
  
  	struct crypto_blkcipher   *xts_tfm;
  	struct list_head           next;
-@@ -365,4 +379,8 @@ int vhd_io_write(vhd_context_t *, char *
- int vhd_io_read_bytes(vhd_context_t *, void *, size_t, uint64_t);
- int vhd_io_write_bytes(vhd_context_t *, void *, size_t, uint64_t);
+@@ -375,4 +387,8 @@ int vhd_io_write_bytes(vhd_context_t *,
  
-+char *vhd_canonpath(const char *path, char *resolved_path);
+ /** @} */ // End of LibVHD Doxygen group
+ 
++char *vhd_canonpath(const char *path, char *resolved_path, size_t size);
 +struct ICBINN_struct * vhd_icbinn_key(void);
 +struct ICBINN_struct * vhd_icbinn_vhd(void);
 +
  #endif
 --- a/vhd/Makefile.am
 +++ b/vhd/Makefile.am
-@@ -12,6 +12,6 @@ bin_PROGRAMS  = vhd-util
+@@ -12,7 +12,7 @@ bin_PROGRAMS  = vhd-util
  bin_PROGRAMS += vhd-index
  bin_PROGRAMS += vhd-update
  
@@ -115,6 +106,7 @@ PATCHES
 +LDADD = lib/libvhd.la -luuid -Llib -licbinn -ldl -lpthread
  
  vhd_index_LDADD = lib/libvhd.la -luuid
+ 
 --- a/vhd/lib/Makefile.am
 +++ b/vhd/lib/Makefile.am
 @@ -42,7 +42,7 @@ libvhd_la_SOURCES += xattr.h
@@ -124,8 +116,8 @@ PATCHES
 -libvhd_la_LIBADD = -luuid -ldl $(LIBICONV)  $(top_srcdir)/lvm/liblvmutil.la
 +libvhd_la_LIBADD = -luuid -lpthread -licbinn -ldl $(LIBICONV) $(top_srcdir)/lvm/liblvmutil.la
  
- libvhdio_la_SOURCES  = libvhdio.c
- libvhdio_la_SOURCES += ../../part/partition.c
+ if ENABLE_TESTS
+ MAYBE_test = test
 --- /dev/null
 +++ b/vhd/lib/icbinn.c
 @@ -0,0 +1,334 @@
@@ -347,17 +339,17 @@ PATCHES
 +   holds the same value as the value returned.  */
 +
 +char *
-+vhd_canonpath(const char *name, char *resolved)
++vhd_canonpath(const char *name, char *resolved, size_t size)
 +{
 +  char *rpath, *dest;
 +  const char *start, *end, *rpath_limit;
 +  long int path_max;
 +
 +  if (!vhd_icbinn_vhd ())
-+    return canonpath (name, resolved);
++    return canonpath (name, resolved, size);
 +
 +  if ((name == NULL) || (name[0] == '\0'))
-+    return canonpath (name, resolved);
++    return canonpath (name, resolved, size);
 +
 +#ifdef PATH_MAX
 +  path_max = PATH_MAX;
@@ -465,15 +457,15 @@ PATCHES
 +}
 --- a/vhd/lib/libvhd.c
 +++ b/vhd/lib/libvhd.c
-@@ -48,6 +48,7 @@
- #include <sys/mman.h>
+@@ -50,6 +50,7 @@
  #include <sys/stat.h>
+ #include <sys/sysmacros.h>
  #include <sys/types.h>
 +#include <stddef.h>
  
  #include "debug.h"
  #include "xattr.h"
-@@ -100,6 +101,9 @@ static int vhd_cache_enabled(vhd_context
+@@ -103,6 +104,9 @@ static int vhd_cache_enabled(vhd_context
  static int vhd_cache_load(vhd_context_t *);
  static int vhd_cache_unload(vhd_context_t *);
  static vhd_context_t * vhd_cache_get_parent(vhd_context_t *);
@@ -483,25 +475,25 @@ PATCHES
  
  static inline int
  old_test_bit(volatile char *addr, int nr)
-@@ -1346,7 +1350,7 @@ vhd_find_parent(vhd_context_t *ctx, cons
+@@ -1484,7 +1488,7 @@ vhd_find_parent(vhd_context_t *ctx, cons
  	}
  
  	/* check parent path relative to child's directory */
--	cpath = canonpath(ctx->file, __cpath);
-+	cpath = vhd_canonpath(ctx->file, __cpath);
+-	cpath = canonpath(ctx->file, __cpath, sizeof(__cpath));
++	cpath = vhd_canonpath(ctx->file, __cpath, sizeof(__cpath));
  	if (!cpath) {
  		err = -errno;
  		goto out;
-@@ -1360,7 +1364,7 @@ vhd_find_parent(vhd_context_t *ctx, cons
+@@ -1498,7 +1502,7 @@ vhd_find_parent(vhd_context_t *ctx, cons
  	}
  
  	if (!access(location, R_OK)) {
--		path = canonpath(location, __location);
-+		path = vhd_canonpath(location, __location);
+-		path = canonpath(location, __location, sizeof(__location));
++		path = vhd_canonpath(location, __location, sizeof(__location));
  		if (path) {
  			*_location = strdup(path);
  			if (*_location)
-@@ -1750,11 +1754,11 @@ vhd_parent_locator_write_at(vhd_context_
+@@ -1874,11 +1878,11 @@ vhd_parent_locator_write_at(vhd_context_
  			    const char *parent, off64_t off, uint32_t code,
  			    size_t max_bytes, vhd_parent_locator_t *loc)
  {
@@ -511,15 +503,15 @@ PATCHES
  	char __parent[PATH_MAX];
  	void *block;
 +	ICBINN *icb = vhd_icbinn_vhd();
+ 	int (*encode_location_fn)(char*, char**, int*);
  
  	memset(loc, 0, sizeof(vhd_parent_locator_t));
- 
-@@ -1777,22 +1781,36 @@ vhd_parent_locator_write_at(vhd_context_
+@@ -1905,22 +1909,36 @@ vhd_parent_locator_write_at(vhd_context_
  		return -EINVAL;
  	}
  
--	absolute_path = canonpath(parent, __parent);
-+	absolute_path = vhd_canonpath(parent, __parent);
+-	absolute_path = canonpath(parent, __parent, sizeof(__parent));
++	absolute_path = vhd_canonpath(parent, __parent, sizeof(__parent));
  	if (!absolute_path) {
  		err = -errno;
  		goto out;
@@ -561,7 +553,7 @@ PATCHES
  
  	relative_path = relative_path_to(ctx->file, absolute_path, &err);
  	if (!relative_path || err) {
-@@ -2424,8 +2442,8 @@ vhd_atomic_io(ssize_t (*f) (int, void *,
+@@ -2552,8 +2570,8 @@ vhd_atomic_io(ssize_t (*f) (int, void *,
  	return res;
  }
  
@@ -572,7 +564,7 @@ PATCHES
  {
  	off64_t off;
  
-@@ -2439,14 +2457,14 @@ vhd_seek(vhd_context_t *ctx, off64_t off
+@@ -2569,14 +2587,14 @@ vhd_seek(vhd_context_t *ctx, off64_t off
  	return 0;
  }
  
@@ -581,7 +573,7 @@ PATCHES
 +static off64_t
 +__vhd_position(vhd_context_t *ctx)
  {
- 	return lseek64(ctx->fd, 0, SEEK_CUR);
+ 	return ctx->offset;
  }
  
 -int
@@ -591,7 +583,7 @@ PATCHES
  {
  	size_t ret;
  
-@@ -2462,8 +2480,8 @@ vhd_read(vhd_context_t *ctx, void *buf,
+@@ -2592,8 +2610,8 @@ vhd_read(vhd_context_t *ctx, void *buf,
  	return (errno ? -errno : -EIO);
  }
  
@@ -602,7 +594,7 @@ PATCHES
  {
  	size_t ret;
  
-@@ -2480,7 +2498,7 @@ vhd_write(vhd_context_t *ctx, void *buf,
+@@ -2610,7 +2628,7 @@ vhd_write(vhd_context_t *ctx, void *buf,
  }
  
  static int
@@ -611,7 +603,7 @@ PATCHES
  {
  	ssize_t ret;
  
-@@ -2497,7 +2515,7 @@ vhd_pread(vhd_context_t *ctx, void *buf,
+@@ -2627,7 +2645,7 @@ vhd_pread(vhd_context_t *ctx, void *buf,
  }
  
  static int
@@ -620,7 +612,7 @@ PATCHES
  {
  	ssize_t ret;
  
-@@ -2514,6 +2532,54 @@ vhd_pwrite(vhd_context_t *ctx, void *buf
+@@ -2644,6 +2662,54 @@ vhd_pwrite(vhd_context_t *ctx, void *buf
  }
  
  int
@@ -675,7 +667,7 @@ PATCHES
  vhd_offset(vhd_context_t *ctx, uint32_t sector, uint32_t *offset)
  {
  	int err;
-@@ -2589,6 +2655,7 @@ int
+@@ -2719,6 +2785,7 @@ int
  vhd_open(vhd_context_t *ctx, const char *file, int flags)
  {
  	int i, err, oflags;
@@ -683,12 +675,30 @@ PATCHES
  
  	if (flags & VHD_OPEN_STRICT)
  		vhd_flag_clear(flags, VHD_OPEN_FAST);
-@@ -2599,28 +2666,43 @@ vhd_open(vhd_context_t *ctx, const char
+@@ -2729,47 +2796,62 @@ vhd_open(vhd_context_t *ctx, const char
  	ctx->fd     = -1;
  	ctx->oflags = flags;
  
+-	char bypass_file[PATH_MAX] = "";
+-	if (flags & VHD_OPEN_RDONLY) {
+-		struct stat stats;
+-		err = stat(file, &stats);
+-		if (err == -1)
+-			/* Coverity seems not understand that stat sets errno. */
+-			return errno ? -errno : -EINVAL;
+-
+-		/* If a DRBD path is used, we try to use the real physical device. */
+-		/* Why? Because the device can be locked by any program. */
+-		/* Note: We can't use the physical data if the DRBD is a diskless device... */
+-		/* Logic but annoying. Same idea: if the disk is not up to date we can't use it. */
+-		dev_t mapper_dev;
+-		if (drbd_is_up_to_date(&stats) && drbd_to_mapper(&stats, &mapper_dev) == 0) {
+-			if (snprintf(bypass_file, sizeof bypass_file, "/dev/block/%u:%u", major(mapper_dev), minor(mapper_dev)) == -1)
+-				return -EINVAL;
+-		}
+-	}
 +	icb = vhd_icbinn_vhd();
-+
+ 
  	err = namedup(&ctx->file, file);
  	if (err)
  		return err;
@@ -715,6 +725,25 @@ PATCHES
 +		ctx->devops = &vhd_icbinn_devops;
 +	}
 +	else{
++		char bypass_file[PATH_MAX] = "";
++		if (flags & VHD_OPEN_RDONLY) {
++			struct stat stats;
++			err = stat(file, &stats);
++			if (err == -1)
++				/* Coverity seems not understand that stat sets errno. */
++				return errno ? -errno : -EINVAL;
++
++			/* If a DRBD path is used, we try to use the real physical device. */
++			/* Why? Because the device can be locked by any program. */
++			/* Note: We can't use the physical data if the DRBD is a diskless device... */
++			/* Logic but annoying. Same idea: if the disk is not up to date we can't use it. */
++			dev_t mapper_dev;
++			if (drbd_is_up_to_date(&stats) && drbd_to_mapper(&stats, &mapper_dev) == 0) {
++				if (snprintf(bypass_file, sizeof bypass_file, "/dev/block/%u:%u", major(mapper_dev), minor(mapper_dev)) == -1)
++					return -EINVAL;
++			}
++		}
++
 +		oflags = O_LARGEFILE;
 +		if (!(flags & VHD_OPEN_CACHED)) {
 +			oflags |= O_DIRECT;
@@ -739,12 +768,12 @@ PATCHES
 -	if (flags & VHD_OPEN_RDWR)
 -		oflags |= O_RDWR;
  
--	ctx->fd = open_optional_odirect(ctx->file, oflags, 0644);
+-	ctx->fd = open_optional_odirect(*bypass_file ? bypass_file : ctx->file, oflags, 0644);
  	if (ctx->fd == -1) {
  		err = -errno;
  		VHDLOG("failed to open %s: %d\n", ctx->file, err);
-@@ -2645,11 +2727,17 @@ vhd_open(vhd_context_t *ctx, const char
- 		posix_fadvise(ctx->fd, 0, 0, POSIX_FADV_RANDOM);
+@@ -2793,11 +2875,17 @@ vhd_open(vhd_context_t *ctx, const char
+ 
  	}
  
 -	err = vhd_test_file_fixed(ctx->file, &ctx->is_block);
@@ -764,7 +793,7 @@ PATCHES
  		err = vhd_open_fast(ctx);
  		if (err)
  			goto fail;
-@@ -2691,19 +2779,23 @@ vhd_open(vhd_context_t *ctx, const char
+@@ -2839,19 +2927,23 @@ vhd_open(vhd_context_t *ctx, const char
  	return 0;
  
  fail:
@@ -793,7 +822,7 @@ PATCHES
  		fsync(ctx->fd);
  		close(ctx->fd);
  	}
-@@ -2715,6 +2807,14 @@ vhd_close(vhd_context_t *ctx)
+@@ -2863,6 +2955,14 @@ vhd_close(vhd_context_t *ctx)
  	memset(ctx, 0, sizeof(vhd_context_t));
  }
  
@@ -808,7 +837,7 @@ PATCHES
  static inline void
  vhd_initialize_footer(vhd_context_t *ctx, int type, uint64_t size)
  {
-@@ -2789,20 +2889,35 @@ get_file_size(const char *name)
+@@ -2940,20 +3040,35 @@ get_file_size(const char *name)
  {
  	int fd;
  	off64_t end;
@@ -852,7 +881,7 @@ PATCHES
  {
  	int err;
  	struct stat stats;
-@@ -2832,15 +2947,21 @@ vhd_initialize_header(vhd_context_t *ctx
+@@ -2983,15 +3098,21 @@ vhd_initialize_header(vhd_context_t *ctx
  	if (ctx->footer.type == HD_TYPE_DYNAMIC)
  		return 0;
  
@@ -877,7 +906,7 @@ PATCHES
  	}
  	else {
  		err = vhd_open(&parent, parent_path, VHD_OPEN_RDONLY);
-@@ -2853,16 +2974,10 @@ vhd_initialize_header(vhd_context_t *ctx
+@@ -3004,16 +3125,10 @@ vhd_initialize_header(vhd_context_t *ctx
  			vhd_close(&parent);
  			return -EINVAL;
  		}
@@ -895,16 +924,16 @@ PATCHES
  	ctx->footer.orig_size    = size;
  	ctx->footer.curr_size    = size;
  	ctx->footer.geometry     = vhd_chs(size);
-@@ -2927,7 +3042,7 @@ vhd_change_parent(vhd_context_t *child,
+@@ -3078,7 +3193,7 @@ vhd_change_parent(vhd_context_t *child,
  		return -EINVAL;
  	}
  
--	ppath = canonpath(parent_path, __parent_path);
-+	ppath = vhd_canonpath(parent_path, __parent_path);
+-	ppath = canonpath(parent_path, __parent_path, sizeof(__parent_path));
++	ppath = vhd_canonpath(parent_path, __parent_path, sizeof(__parent_path));
  	if (!ppath) {
  		VHDLOG("error resolving parent path %s for %s: %d\n",
  		       parent_path, child->file, errno);
-@@ -3165,6 +3280,7 @@ __vhd_create(const char *name, const cha
+@@ -3316,6 +3431,7 @@ __vhd_create(const char *name, const cha
  	off64_t off;
  	vhd_context_t ctx;
  	uint64_t size, psize, blks;
@@ -912,7 +941,7 @@ PATCHES
  
  	switch (type) {
  	case HD_TYPE_DIFF:
-@@ -3195,8 +3311,18 @@ __vhd_create(const char *name, const cha
+@@ -3346,8 +3462,18 @@ __vhd_create(const char *name, const cha
  		blks = (mbytes + VHD_BLOCK_SIZE - 1) >> VHD_BLOCK_SHIFT;
  	size = blks << VHD_BLOCK_SHIFT;
  
@@ -933,7 +962,7 @@ PATCHES
  	if (ctx.fd == -1) {
          fprintf(stderr, "%s: failed to create: %d\n", name, -errno);
          return -errno;
-@@ -3208,9 +3334,14 @@ __vhd_create(const char *name, const cha
+@@ -3359,9 +3485,14 @@ __vhd_create(const char *name, const cha
  		goto out;
  	}
  
@@ -951,7 +980,7 @@ PATCHES
  
  	vhd_initialize_footer(&ctx, type, size);
  
-@@ -3220,7 +3351,7 @@ __vhd_create(const char *name, const cha
+@@ -3371,7 +3502,7 @@ __vhd_create(const char *name, const cha
  			goto out;
  	} else {
  		int raw = vhd_flag_test(flags, VHD_FLAG_CREAT_PARENT_RAW);
@@ -960,7 +989,7 @@ PATCHES
  		if (err)
  			goto out;
  
-@@ -3286,8 +3417,12 @@ __vhd_create(const char *name, const cha
+@@ -3437,8 +3568,12 @@ __vhd_create(const char *name, const cha
  
  out:
  	vhd_close(&ctx);
@@ -981,7 +1010,7 @@ PATCHES
  #include <string.h>
  #include <limits.h>
  
-+char *vhd_canonpath(const char *path, char *resolved_path);
++char *vhd_canonpath(const char *path, char *resolved_path, size_t size);
 +
  #include "relative-path.h"
  #include "canonpath.h"
@@ -990,16 +1019,16 @@ PATCHES
  		return NULL;
  	}
  
--	to_absolute = canonpath(to, __to_absolute);
-+	to_absolute = vhd_canonpath(to, __to_absolute);
+-	to_absolute = canonpath(to, __to_absolute, sizeof(__to_absolute));
++	to_absolute = vhd_canonpath(to, __to_absolute, sizeof(__to_absolute));
  	if (!to_absolute) {
  		EPRINTF("failed to get absolute path of %s\n", to);
  		*err = -errno;
  		goto out;
  	}
  
--	from_absolute = canonpath(from, __from_absolute);
-+	from_absolute = vhd_canonpath(from, __from_absolute);
+-	from_absolute = canonpath(from, __from_absolute, sizeof(__from_absolute));
++	from_absolute = vhd_canonpath(from, __from_absolute, sizeof(__from_absolute));
  	if (!from_absolute) {
  		EPRINTF("failed to get absolute path of %s\n", from);
  		*err = -errno;
@@ -1012,8 +1041,8 @@ PATCHES
 +#include "icbinn.h"
  #include "libvhd.h"
  
- #define LIBBLOCKCRYPTO_NAME "libblockcrypto.so.0"
-@@ -176,18 +177,76 @@ out:
+ #define MAX_KEY_SIZE 512
+@@ -178,18 +179,76 @@ out:
  }
  
  static int
@@ -1093,23 +1122,23 @@ PATCHES
  		goto out;
 --- a/vhd/lib/vhd-util-scan.c
 +++ b/vhd/lib/vhd-util-scan.c
-@@ -786,7 +786,7 @@ vhd_util_scan_open(vhd_context_t *vhd, s
+@@ -787,7 +787,7 @@ vhd_util_scan_open(vhd_context_t *vhd, s
  	else {
  		char __image_name[PATH_MAX];
  
--		image->name = canonpath(target->name, __image_name);
-+		image->name = vhd_canonpath(target->name, __image_name);
+-		image->name = canonpath(target->name, __image_name, sizeof(__image_name));
++		image->name = vhd_canonpath(target->name, __image_name, sizeof(__image_name));
  		if (image->name)
  			image->name = strdup(__image_name);
  		if (!image->name) {
 --- a/vhd/lib/vhd-util-snapshot.c
 +++ b/vhd/lib/vhd-util-snapshot.c
-@@ -173,7 +173,7 @@ vhd_util_snapshot(int argc, char **argv)
+@@ -174,7 +174,7 @@ vhd_util_snapshot(int argc, char **argv)
  		goto usage;
  	}
  
--	ppath = canonpath(pname, __ppath);
-+	ppath = vhd_canonpath(pname, __ppath);
+-	ppath = canonpath(pname, __ppath, sizeof(__ppath));
++	ppath = vhd_canonpath(pname, __ppath, sizeof(__ppath));
  	if (!ppath)
  		return -errno;
  
