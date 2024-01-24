@@ -93,13 +93,6 @@ remove_initscripts() {
 }
 ROOTFS_POSTPROCESS_COMMAND += "remove_initscripts; "
 
-# After ensuring that the correct number of xenstored daemon(s) are installed,
-# enforce that the init script is active:
-activate_xenstored_initscript() {
-    update-rc.d -r ${IMAGE_ROOTFS} xenstored defaults 05
-}
-ROOTFS_POSTPROCESS_COMMAND += "activate_xenstored_initscript; "
-
 # Handle required configuration of the rootfs to store persistent files on
 # encripted /config partition.
 rw_config_partition() {

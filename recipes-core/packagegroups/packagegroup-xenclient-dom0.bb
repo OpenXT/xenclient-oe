@@ -20,7 +20,7 @@ RDEPENDS_${PN} = " \
     xen-tools-libxenstat \
     xen-tools-libxlutil \
     xen-tools-xenstat \
-    virtual/xenstored \
+    xen-tools-xenstored \
     xen-tools-xl \
     xen-xsm-policy \
     grub \
