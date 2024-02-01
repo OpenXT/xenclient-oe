@@ -1,0 +1,52 @@
+From adaffa0a7dab4984570e72c49366a08474bc6f2e Mon Sep 17 00:00:00 2001
+From: Jason Andryuk <jandryuk@gmail.com>
+Date: Thu, 25 Jan 2024 08:31:57 -0500
+Subject: [PATCH 3/3] tapback: Don't remove xenstore backend in libxl mode
+
+libxl doesn't clean up tapdisks because it doesn't call the hotplug
+cleanup scripts:
+libxl: debug: libxl_event.c:1043:devstate_callback: backend /local/domain/0/backend/vbd3/5/2048/state wanted state 6 but it was removed
+libxl: debug: libxl_event.c:849:libxl__ev_xswatch_deregister: watch w=0xf82ba0 wpath=/local/domain/0/backend/vbd3/5/2048/state token=1/2: deregister slotnum=1
+libxl: debug: libxl_device.c:1156:device_backend_callback: Domain 5:calling device_backend_cleanup
+libxl: debug: libxl_event.c:863:libxl__ev_xswatch_deregister: watch w=0xf82ba0: deregister unregistered
+libxl: error: libxl_device.c:1169:device_backend_callback: Domain 5:unable to remove device with path /local/domain/0/backend/vbd3/5/2048 - rc -6
+
+The backend state cannot be found because tapback deleted the entire
+backend subtree.
+
+In libxl mode, tapback shouldn't remove the backend nodes when the
+frontend is removed, because the nodes contain the information on how to
+clean up.  Leave the nodes and allowed them to be removed by the
+toolstack.
+
+Signed-off-by: Jason Andryuk <jandryuk@gmail.com>
+---
+ tapback/frontend.c | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/tapback/frontend.c b/tapback/frontend.c
+index 1b68d88..d5db62b 100644
+--- a/tapback/frontend.c
++++ b/tapback/frontend.c
+@@ -508,7 +508,7 @@ tapback_backend_handle_otherend_watch(backend_t *backend,
+      */
+ 	s = tapback_xs_read(device->backend->xs, XBT_NULL, "%s",
+ 			device->frontend_state_path);
+-    if (!s) {
++    if (!s && !libxl_mode()) {
+         err = errno;
+ 		/*
+          * If the front-end XenBus node is missing, the XenBus device has been
+@@ -531,6 +531,9 @@ tapback_backend_handle_otherend_watch(backend_t *backend,
+                 }
+             }
+ 		}
++    } else if (!s && libxl_mode()) {
++        WARN(device, "frontend disappeared!");
++        err = ENOENT;
+     } else {
+         state = strtol(s, &end, 0);
+         if (*end != 0 || end == s) {
+-- 
+2.43.0
+

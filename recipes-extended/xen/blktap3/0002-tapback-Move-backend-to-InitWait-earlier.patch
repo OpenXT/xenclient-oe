@@ -1,0 +1,86 @@
+From 726cdd1e45ed155af48b9b433492a0e427256b65 Mon Sep 17 00:00:00 2001
+From: Jason Andryuk <jandryuk@gmail.com>
+Date: Fri, 8 Dec 2023 13:17:20 -0500
+Subject: [PATCH 2/3] tapback: Move backend to InitWait earlier
+
+This is needed for libxl integration.
+
+tapdisk waits to transition to InitWait until after "hotplug-status" is
+connected.  However libxl doesn't run its hotplug scripts, which write
+"hotplug-status", until the backend transitions to InitWait.  With both
+sides waiting, progress is not made and connecting the blktap device
+times out and fails.
+
+Make tapback transition to InitWait earlier to resolve this issue under
+libxl.  Place the transition to InitWait in
+tapback_backend_create_device() after the xenstore feature nodes have
+been written.  InitWait is a signal to the frontend that such nodes have
+been written.  This matches blkback's behaviour.  It should also be fine
+since tapback still won't advance to Connected without the other setup
+like physical-device-path and hotplug-status.
+
+VBDs can be reconnected.  When pv-grub is used, it connects the VBD,
+loads the kernel, disconnects the VBD.  It then re-sets the frontend
+state to XenbusStateInitialising so that the new kernel will find and
+connect the VBD.
+
+tapback and blkback handle this case differently.  When blkback observes
+the frontend transition to XenbusStateInitialising, and the backend is
+XenbusStateClosed, the backend transitions to XenbusStateInitWait.
+
+When tapback observes the frontend transition to
+XenbusStateInitialising, the backend checks for hotplug_status_connected
+to be true before switching XenbusStateInitWait.  For tapback, this
+serves a second purpose for setting XenbusStateInitWait initially as
+well.
+
+Use libxl_mode() to determine whether to transition to InitWait sooner.
+Leave the hotplug_status_connected check since that should work fine for
+either even through it may be an extra watch firing for libxl.
+
+Signed-off-by: Jason Andryuk <jandryuk@gmail.com>
+---
+ tapback/backend.c  | 11 +++++++++++
+ tapback/frontend.c |  4 ++--
+ 2 files changed, 13 insertions(+), 2 deletions(-)
+
+diff --git a/tapback/backend.c b/tapback/backend.c
+index cb607b1..0494f15 100644
+--- a/tapback/backend.c
++++ b/tapback/backend.c
+@@ -259,6 +259,17 @@ tapback_backend_create_device(backend_t *backend,
+         goto out;
+     }
+ 
++    if (libxl_mode()) {
++        /* In libxl_mode, after tapback has written it's capabilities to
++         * XenStore, switch to InitWait. */
++        err = xenbus_switch_state(device, XenbusStateInitWait);
++        if (unlikely(err)) {
++            WARN(device, "failed to switch to XenbusStateInitWait: %s\n",
++                 strerror(-err));
++            goto out;
++        }
++    }
++
+ out:
+     if (err) {
+         WARN(NULL, "%s: error creating device: %s\n", name, strerror(-err));
+diff --git a/tapback/frontend.c b/tapback/frontend.c
+index e086813..1b68d88 100644
+--- a/tapback/frontend.c
++++ b/tapback/frontend.c
+@@ -439,8 +439,8 @@ frontend_changed(vbd_t * const device, const XenbusState state)
+ 
+     switch (state) {
+         case XenbusStateInitialising:
+-			if (device->hotplug_status_connected)
+-				err = xenbus_switch_state(device, XenbusStateInitWait);
++            if (device->hotplug_status_connected)
++                err = xenbus_switch_state(device, XenbusStateInitWait);
+             break;
+         case XenbusStateInitialised:
+     	case XenbusStateConnected:
+-- 
+2.43.0
+

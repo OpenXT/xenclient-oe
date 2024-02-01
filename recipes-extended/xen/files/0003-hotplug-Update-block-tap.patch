@@ -1,0 +1,224 @@
+From 8bb2ec9d9f0dcabde7084b4a505ab68e6ff19bd3 Mon Sep 17 00:00:00 2001
+From: Jason Andryuk <jandryuk@gmail.com>
+Date: Fri, 5 Jan 2024 14:39:04 -0500
+Subject: [PATCH 3/5] hotplug: Update block-tap
+
+Implement a sharing check like the regular block script.
+
+Checking tapback inside block-tap is too late since it needs to be
+running to transition the backend to InitWait before block-tap is run.
+
+tap-ctl check will be removed when the requirement for the blktap kernel
+driver is removed.  Remove it now as it is of limited use.
+
+find_device() needs to be non-fatal allow a sharing check.
+
+Only write physical-device-path because that is all that tapback needs.
+Also write_dev doesn't handled files and would incorrectly store
+physical-device as 0:0 which would confuse the minor inside tapback
+---
+ tools/hotplug/Linux/block-tap | 162 ++++++++++++++++++++++++++++++++--
+ 1 file changed, 153 insertions(+), 9 deletions(-)
+
+diff --git a/tools/hotplug/Linux/block-tap b/tools/hotplug/Linux/block-tap
+index 89247921b9..5eca09f0f6 100755
+--- a/tools/hotplug/Linux/block-tap
++++ b/tools/hotplug/Linux/block-tap
+@@ -37,10 +37,6 @@ check_tools()
+     if ! command -v tap-ctl > /dev/null 2>&1; then
+         fatal "Unable to find tap-ctl tool"
+     fi
+-    modprobe blktap
+-    if ! tap-ctl check >& /dev/null ; then
+-	fatal "Blocktap kernel module not available"
+-    fi
+ }
+ 
+ # Sets the following global variables based on the params field passed in as
+@@ -81,7 +77,105 @@ find_device()
+     done
+ 
+     if [ -z "$pid" ] || [ -z "$minor" ]; then
+-        fatal "cannot find required parameters"
++        return 1
++    fi
++
++    return 0
++}
++
++count_using()
++{
++  local file="$1"
++  local f
++
++  local i=0
++  local base_path="$XENBUS_BASE_PATH/$XENBUS_TYPE"
++  for dom in $(xenstore-list "$base_path")
++  do
++    for dev in $(xenstore-list "$base_path/$dom")
++    do
++      f=$(xenstore_read_default "$base_path/$dom/$dev/params" "")
++      f=$(echo "$f" | cut -d ":" -f 2)
++
++      if [ -n "$f" ] && [ "$file" = $f ] ; then
++          i=$(( i + 1 ))
++      fi
++    done
++  done
++
++  echo "$i"
++}
++
++# tap_shared is used to determine if a shared tap can be closed
++# Since a stubdom and a guest both use the same tap, it can only
++# be freed when there is a single one left.
++tap_shared() {
++    [ $( count_using "$file" ) -gt 1 ]
++}
++
++check_tap_sharing()
++{
++  local file="$1"
++  local mode="$2"
++  local dev
++
++  local base_path="$XENBUS_BASE_PATH/$XENBUS_TYPE"
++  for dom in $(xenstore-list "$base_path") ; do
++    for dev in $(xenstore-list "$base_path/$dom") ; do
++      f=$(xenstore_read_default "$base_path/$dom/$dev/params" "")
++      f=$(echo "$f" | cut -d ":" -f 2)
++
++      if [ -n "$f" ] && [ "$file" = "$f" ] ; then
++        if [ "$mode" = 'w' ] ; then
++          if ! same_vm $dom ; then
++            echo "guest $f"
++            return
++          fi
++        else
++          local m=$(xenstore_read_default "$base_path/$dom/$dev/mode" "")
++          m=$(canonicalise_mode "$m")
++
++          if [ "$m" = 'w' ] ; then
++            if ! same_vm $dom ; then
++              echo "guest $f"
++              return
++            fi
++          fi
++        fi
++      fi
++    done
++  done
++
++  echo 'ok'
++}
++
++tap_create()
++{
++    if ! minor=$( tap-ctl allocate ) ; then
++        fatal "Could not allocate minor"
++    fi
++
++    # Handle with or without kernel blktap
++    minor=${minor#/run/blktap-control/tapdisk/tapdisk-}
++    minor=${minor#/dev/xen/blktap-2/tapdev}
++
++    # tap-ctl is spawning tapdisk which would hold the _lockfd open.
++    # Ensure it is closed before running tap-ctl spawn, which needs to be
++    # done in a subshell to continue holding the lock in the parent.
++    if ! pid=$( ( eval "exec $_lockfd>&-" ; tap-ctl spawn ) ) ; then
++        tap-ctl free -m "$minor"
++        fatal "Could not spawn tapdisk for $minor"
++    fi
++
++    if ! tap-ctl attach -p "$pid" -m "$minor" ; then
++        tap-ctl free -m "$minor"
++        fatal "Could not attach $pid and $minor"
++    fi
++
++    if ! tap-ctl open -p "$pid" -m "$minor" -a "$target" ; then
++        tap-ctl detach -p "$pid" -m "$minor"
++        tap-ctl free -m "$minor"
++        fatal "Could not open \"$target\""
+     fi
+ }
+ 
+@@ -89,15 +183,57 @@ find_device()
+ # the device
+ add()
+ {
+-    dev=$(tap-ctl create -a $target)
+-    write_dev $dev
++    local minor
++    local pid
++    local res
++
++    claim_lock "block"
++
++    if find_device; then
++        result=$( check_tap_sharing "$file" "$mode" )
++        if [ "$result" != "ok" ] ; then
++            do_ebusy "tap $type file $file in use " "$mode" "${result%% *}"
++        fi
++    else
++        tap_create
++    fi
++
++    # Create nbd unix path
++    dev=$( printf "/run/blktap-control/nbd%ld.%d" "$pid" "$minor" )
++
++    xenstore_write "$XENBUS_PATH/pid" "$pid"
++    xenstore_write "$XENBUS_PATH/minor" "$minor"
++    # dev, as a unix socket, would end up with major:minor 0:0 in
++    # physical-device if write_dev were used.  tapback would be thrown off by
++    # that incorrect minor, so just skip writing physical-device.
++    xenstore_write "$XENBUS_PATH/physical-device-path" "$dev"
++
++    success
++
++    release_lock "block"
+ }
+ 
+ # Disconnects the device
+ remove()
+ {
+-    find_device
+-    do_or_die tap-ctl destroy -p ${pid} -m ${minor} > /dev/null
++    local minor
++    local pid
++
++    claim_lock "block"
++
++    if tap_shared ; then
++        return
++    fi
++
++    minor=$( xenstore_read "$XENBUS_PATH/minor" )
++    pid=$( xenstore_read "$XENBUS_PATH/pid" )
++
++    [ -n "$minor" ] || fatal "minor missing"
++    [ -n "$pid" ] || fatal "pid missing"
++    do_or_die tap-ctl close -p "$pid" -m "$minor" > /dev/null
++    do_or_die tap-ctl detach -p "$pid" -m "$minor" > /dev/null
++
++    release_lock "block"
+ }
+ 
+ command=$1
+@@ -110,6 +246,14 @@ parse_target "$target"
+ 
+ check_tools || exit 1
+ 
++mode=$( xenstore_read $XENBUS_PATH/mode )
++mode=$( canonicalise_mode $mode )
++
++# needed for same_vm
++FRONTEND_ID=$(xenstore_read "$XENBUS_PATH/frontend-id")
++FRONTEND_UUID=$(xenstore_read_default \
++                    "/local/domain/$FRONTEND_ID/vm" 'unknown')
++
+ case $command in
+ add)
+     add
+-- 
+2.43.0
+

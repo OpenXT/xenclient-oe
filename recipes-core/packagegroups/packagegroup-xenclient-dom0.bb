@@ -105,6 +105,7 @@ RDEPENDS_${PN} = " \
     tpm2-tss \
     tpm2-tools \
     blktap3 \
+    tapback \
     pesign \
     ipxe \
     udev-extraconf-dom0 \

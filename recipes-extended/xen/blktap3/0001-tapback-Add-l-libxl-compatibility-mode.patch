@@ -1,0 +1,125 @@
+From 63f3883abe1f94a85428e17e98fe0dbe15606b0b Mon Sep 17 00:00:00 2001
+From: Jason Andryuk <jandryuk@gmail.com>
+Date: Thu, 25 Jan 2024 08:22:55 -0500
+Subject: [PATCH 1/3] tapback: Add -l/--libxl compatibility mode
+
+libxl and xapi/xenopsd have different ordering requirements, and the
+libxl required changes are not readily compatible with xapi.
+
+Add a flag to allow running in libxl compatibility mode to bodge around
+the issue.  The flag has to be passed from the parent tapback process
+into the per-domain ones to ensure it is respected.
+
+Some nearby hard tabs are converted to spaces.
+
+Signed-off-by: Jason Andryuk <jandryuk@gmail.com>
+---
+ tapback/backend.c |  8 +++++---
+ tapback/tapback.c | 17 ++++++++++++++---
+ tapback/tapback.h | 10 ++++++++++
+ 3 files changed, 29 insertions(+), 6 deletions(-)
+
+diff --git a/tapback/backend.c b/tapback/backend.c
+index facae9b..cb607b1 100644
+--- a/tapback/backend.c
++++ b/tapback/backend.c
+@@ -1197,7 +1197,7 @@ tapback_backend_handle_backend_watch(backend_t *backend,
+                  * FIXME Shall we watch the child process?
+                  */
+             } else { /* child */
+-                char *args[7];
++                char *args[8];
+                 int i = 0;
+ 
+                 args[i++] = (char*)tapback_name;
+@@ -1211,8 +1211,10 @@ tapback_backend_handle_backend_watch(backend_t *backend,
+                 }
+                 if (log_level == LOG_DEBUG)
+                     args[i++] = "-v";
+-				if (!backend->barrier)
+-					args[i++] = "-b";
++                if (!backend->barrier)
++                    args[i++] = "-b";
++                if (libxl_mode())
++                    args[i++] = "--libxl";
+                 args[i] = NULL;
+                 /*
+                  * TODO we're hard-coding the name of the binary, better let
+diff --git a/tapback/tapback.c b/tapback/tapback.c
+index fe04d17..6a3098f 100644
+--- a/tapback/tapback.c
++++ b/tapback/tapback.c
+@@ -58,6 +58,7 @@
+ const char tapback_name[] = "tapback";
+ unsigned log_level;
+ int tapdev_major;
++static bool opt_libxl_mode;
+ 
+ struct list_head backends = LIST_HEAD_INIT(backends);
+ 
+@@ -77,6 +78,12 @@ char *xenbus_strstate(const XenbusState xbs)
+     return str[xbs];
+ }
+ 
++bool
++libxl_mode(void)
++{
++    return opt_libxl_mode;
++}
++
+ /**
+  * Read changes that occurred on the "backend/<backend name>" XenStore path
+  * or one of the front-end paths and act accordingly.
+@@ -513,7 +520,8 @@ usage(FILE * const stream, const char * const prog)
+ 			"\t[-h|--help]\n"
+             "\t[-v|--verbose]\n"
+ 			"\t[-b]--nobarrier]\n"
+-            "\t[-n|--name]\n", prog);
++            "\t[-n|--name]\n"
++            "\t[-l|--libxl]\n", prog);
+ }
+ 
+ extern char *optarg;
+@@ -612,8 +620,8 @@ int main(int argc, char **argv)
+             {"name", 0, NULL, 'n'},
+             {"pidfile", 0, NULL, 'p'},
+             {"domain", 0, NULL, 'x'},
+-			{"nobarrier", 0, NULL, 'b'},
+-
++            {"nobarrier", 0, NULL, 'b'},
++            {"libxl", 0, NULL, 'l'},
+         };
+         int c;
+ 
+@@ -628,6 +636,9 @@ int main(int argc, char **argv)
+         case 'd':
+             opt_debug = true;
+             break;
++        case 'l':
++            opt_libxl_mode = true;
++            break;
+         case 'v':
+             opt_verbose = true;
+             break;
+diff --git a/tapback/tapback.h b/tapback/tapback.h
+index 9bde55d..f106f25 100644
+--- a/tapback/tapback.h
++++ b/tapback/tapback.h
+@@ -524,4 +524,14 @@ tapback_backend_destroy(backend_t *backend);
+ 
+ bool verbose(void);
+ 
++/**
++ * Indicates when tapback is running in libxl compatibility mode.  libxl needs
++ * backends to transition to InitWait earlier than xapi/xenopds.
++ *
++ * Returns true if tapback is running in libxl compatibility mode and false
++ * otherwise.
++ */
++bool
++libxl_mode(void);
++
+ #endif /* __TAPBACK_H__ */
+-- 
+2.43.0
+
