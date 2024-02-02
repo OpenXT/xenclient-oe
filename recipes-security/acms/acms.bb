@@ -3,63 +3,42 @@ HOMEPAGE = "https://software.intel.com/en-us/articles/intel-trusted-execution-te
 BUGTRACKER = "https://software.intel.com/en-us/forums/intel-trusted-execution-technology-intel-txt"
 SECTION = "bootloaders"
 LICENSE = "Intel-ACMs"
+FILESEXTRAPATHS ?= "${THISDIR}/acms"
 LIC_FILES_CHKSUM = " \
-    file://GM45_GS45_PM45-SINIT_51/license.txt;md5=60d123634e0b94f8c425003389e64bda \
-    file://Q45_Q43-SINIT_51/license.txt;md5=60d123634e0b94f8c425003389e64bda \
-    file://Q35-SINIT_51/license.txt;md5=60d123634e0b94f8c425003389e64bda \
-    file://i5_i7_DUAL-SINIT_51/license.txt;md5=60d123634e0b94f8c425003389e64bda \
-    file://i7_QUAD-SINIT_51/license.txt;md5=60d123634e0b94f8c425003389e64bda \
-    file://license.txt;md5=203b6b806e49ca139abdf6706024c871 \
-    file://3rd_gen_i5_i7-SINIT_67/license.txt;md5=a879c484244808a2202d65166a2f3f72 \
-    file://4th_gen_i5_i7-SINIT_75/license.txt;md5=a879c484244808a2202d65166a2f3f72 \
-    file://5th_gen_i5_i7-SINIT_79/license.txt;md5=68248a22232ba4fd23010e9c65209406 \
-    file://6th_gen_i5_i7-SINIT_71/license.txt;md5=1d626a5a455fd0bff690b866040198c2 \
-    file://7th_gen_i5_i7-SINIT_74/license.txt;md5=4897766beede80773ddd162b2724a8bb \
-    file://8th_gen_i5_i7-SINIT_76/license.txt;md5=24983614c000aac0d87e5aea9d13b8be \
+    file://license.txt;md5=24983614c000aac0d87e5aea9d13b8be \
 "
 
 SRC_URI = " \
-    ${OPENXT_MIRROR}/GM45_GS45_PM45-SINIT_51.zip;name=gm45 \
-    ${OPENXT_MIRROR}/Q45_Q43-SINIT_51.zip;name=q45 \
-    ${OPENXT_MIRROR}/Q35-SINIT_51.zip;name=q35 \
-    ${OPENXT_MIRROR}/i5_i7_DUAL-SINIT_51.zip;name=i5 \
-    ${OPENXT_MIRROR}/i7_QUAD-SINIT_51.zip;name=i7 \
-    ${OPENXT_MIRROR}/Xeon-5600-3500-SINIT-v1.1.zip;name=xeon_5600 \
-    ${OPENXT_MIRROR}/Xeon-E7-8800-4800-2800-SINIT-v1.1.zip;name=xeon_e7 \
-    ${OPENXT_MIRROR}/3rd-gen-i5-i7-sinit-67.zip;name=ivb_snb \
-    ${OPENXT_MIRROR}/4th-gen-i5-i7-sinit-75.zip;name=hsw \
-    ${OPENXT_MIRROR}/5th_gen_i5_i7-SINIT_79.zip;name=bdw \
-    ${OPENXT_MIRROR}/6th_gen_i5_i7-SINIT_71.zip;name=skl \
-    ${OPENXT_MIRROR}/7th_gen_i5_i7-SINIT_74.zip;name=kbl \
-    ${OPENXT_MIRROR}/8th_gen_i5_i7-SINIT_76.zip;name=cfl \
+    file://license.txt \
+    ${OPENXT_MIRROR}/SNB_IVB_SINIT_20190708_PW.bin;downloadfilename=snb_ivb.bin;name=snb_ivb \
+    ${OPENXT_MIRROR}/BDW_SINIT_20190708_1.3.2_PW.bin;downloadfilename=bdw_hsw.bin;name=bdw_hsw \
+    ${OPENXT_MIRROR}/SKL_KBL_AML_SINIT_20211019_PRODUCTION_REL_NT_O1_1.10.0.bin;downloadfilename=skl_kbl_aml.bin;name=skl_kbl_aml \
+    ${OPENXT_MIRROR}/CFL_SINIT_20221220_PRODUCTION_REL_NT_O1_1.10.1_signed.bin;downloadfilename=cfl_wkl_cml.bin;name=cfl_wkl_cml \
+    ${OPENXT_MIRROR}/CML_S_SINIT_1_13_33_REL_NT_O1.PW_signed.bin;downloadfilename=cml_s.bin;name=cml_s \
+    ${OPENXT_MIRROR}/CMLSTGP_SINIT_v1_14_46_20220819_REL_NT_O1.PW_signed.bin;downloadfilename=cml_s_tgp.bin;name=cml_s_tgp \
+    ${OPENXT_MIRROR}/RKLS_SINIT_v1_14_46_20220819_REL_NT_O1.PW_signed.bin;downloadfilename=rkls.bin;name=rkls \
+    ${OPENXT_MIRROR}/TGL_SINIT_v1_14_46_20220819_REL_NT_O1.PW_signed.bin;downloadfilename=tgl.bin;name=tgl \
+    ${OPENXT_MIRROR}/ADL_SINIT_v1_18_16_20230427_REL_NT_O1.PW_signed.bin;downloadfilename=adl.bin;name=adl \
 "
 
-SRC_URI[gm45.md5sum] = "330c774e71fe390d7ab649d5e2b1d504"
-SRC_URI[gm45.sha256sum] = "2b7c9f76c68b48ea537e8b120a8ecd477f8f7a53eaa656a60435111200be4e6a"
-SRC_URI[q45.md5sum] = "4af698f82ff70f5f25c99968b47e679e"
-SRC_URI[q45.sha256sum] = "98e93222ec02452ac93360cc8a55a422aabfd19098c60bfeb28e7764d8231c29"
-SRC_URI[q35.md5sum] = "f6a72be69ee9884f158bfea932f0f18b"
-SRC_URI[q35.sha256sum] = "698274e267ed7baa5953251dc48b04fc61df636e7720e60e4c140eeee347c569"
-SRC_URI[i5.md5sum] = "81d44790235fc6188ca15776fd42948f"
-SRC_URI[i5.sha256sum] = "1607adf4e2f63c806f01264a5c665279a1964ce05cd28bdbd8ec3d1ef0d9ff06"
-SRC_URI[i7.md5sum] = "5ffbd75cdf76dedd448603e7af8602a0"
-SRC_URI[i7.sha256sum] = "8d2176bf9a0dd3ddd6427164ca3a18941ea86ebb5b8d2cb11bc86677f97c1fe4"
-SRC_URI[xeon_5600.md5sum] = "2deba9adea0881fcd4a9f656389e68fc"
-SRC_URI[xeon_5600.sha256sum] = "36174627a817732cca80635ac27d4ee9d1dd4668b6bf9f0f6146bd1da4f0d9d7"
-SRC_URI[xeon_e7.md5sum] = "069c296cee118f73483eec2e93e23e2b"
-SRC_URI[xeon_e7.sha256sum] = "d28b53cf17adf001db4cb7a7e1cee2342f1f4e9526c9947120107c2f0aa043c1"
-SRC_URI[ivb_snb.md5sum] = "b5d19bc8ac2185e3fa88d78d80a3e254"
-SRC_URI[ivb_snb.sha256sum] = "8618d72c00a824d693836d1334330e1cf831c952bb541a93a5e70e54c9e479a2"
-SRC_URI[hsw.md5sum] = "e1fbdd2b8c255d3ded6f33d14e30d498"
-SRC_URI[hsw.sha256sum] = "63ad2d0b8fdb4422e0f751c23472a0e9bfbc3c643959e21249c66336943b910b"
-SRC_URI[bdw.md5sum] = "f40771addcb12c82b44c2ad53dbbe994"
-SRC_URI[bdw.sha256sum] = "3057efadd6bcf9ddf192c6aa027cc28e07ae6997a5c0037ef1fa09e8938893f0"
-SRC_URI[skl.md5sum] = "b07b5fb355815655be14c84df84a69a5"
-SRC_URI[skl.sha256sum] = "9f7b17dfb87719dc7c789d7e319071a0fbcca5b547bfd8b2aa3bf253760e23c6"
-SRC_URI[kbl.md5sum] = "542133cb3e6911bda1e83d27fc0872b2"
-SRC_URI[kbl.sha256sum] = "a3ea9055c27481ed48e5ce8b7e02d37e8d27cff4fd1cf911ff219b8e210ccfaf"
-SRC_URI[cfl.md5sum] = "b46e104a739a553e30c48e91c3649b7d"
-SRC_URI[cfl.sha256sum] = "401c29887bb6abfa1f3c90ce03e550fd0cf23892aa97bdfab34b7aa2bdc72976"
+SRC_URI[snb_ivb.md5sum] = "e258fecf649b3aaa68af621247e98711"
+SRC_URI[snb_ivb.sha256sum] = "1e888aebc78d637d119c489adffa95387b53429125dc3ad61f10a5cad0496834"
+SRC_URI[bdw_hsw.md5sum] = "cfa4e19d2f8bdc0e231e5059a6f1bb42"
+SRC_URI[bdw_hsw.sha256sum] = "2c64f6f8790049d6cf6024c75bebdb0bbacf4ef78502caeb803f90568f7c18eb"
+SRC_URI[skl_kbl_aml.md5sum] = "03fc1c63b129a18e63023e5d375eedcb"
+SRC_URI[skl_kbl_aml.sha256sum] = "f43470267af72eec5e7354cddbccbc8c6d0263802e48bcd85f95e1b2ae249327"
+SRC_URI[cfl_wkl_cml.md5sum] = "d18ba02daa2c14a50ec7b400589a9f45"
+SRC_URI[cfl_wkl_cml.sha256sum] = "ad6b7fc3ba3f4d4de2932f39cf00b206aa922bade57497e42ce97f2162f9361e"
+SRC_URI[cml_s.md5sum] = "c7554bc5548e440eaf6e2ce289cebfbd"
+SRC_URI[cml_s.sha256sum] = "69075f1153e884ac78fcf0a3e2095dd023d56e9e250d13e9c848ddd88e3764b3"
+SRC_URI[cml_s_tgp.md5sum] = "d7ff2779f82d2752ae0e13c31146c989"
+SRC_URI[cml_s_tgp.sah256sum] = "b24a6e5ead2910b3ccbb8edbe32e3430a1d694481dfdb17c9069de5e50200371"
+SRC_URI[rkls.md5sum] = "bd529b3793cd767badaa8f92bcef5a24"
+SRC_URI[rkls.sha256sum] = "eb4a6044f421fbab6ed018d2692f2afbeb0162e8b228945fcb04b663be4d5ac1"
+SRC_URI[tgl.md5sum] = "1c90662cff90063583b82d42bb9cdc66"
+SRC_URI[tgl.sha256sum] = "e87488bff9c38c5a48056925991131d48a2c9a30e459cf88b8559e4895ec1ba5"
+SRC_URI[adl.md5sum] = "9877356c8b6be640d994c6bf921526e2"
+SRC_URI[adl.sha256sum] = "c2ffa0441d8dd072e3f9287581ca0e982e1a08359bd1b4adca9976380c3e5e13"
 
 PR = "r3"
 
@@ -69,30 +48,26 @@ inherit deploy
 
 do_install() {
     install -d ${D}/boot
-    for i in `find "${WORKDIR}" -iname '*DEBUG*' -prune -o -iname '*NPW*' -prune -o -iname "*.bin" -print`
+    for i in `find "${WORKDIR}" -name "*.bin*"`
     do
         install -m 644 "$i" ${D}/boot
     done
 
     # After inspection of the licenses of the individual ACM files,
     # the most recent Coffee Lake license is sufficient to cover all:
-    install -m 444 8th_gen_i5_i7-SINIT_76/license.txt ${D}/boot/license-SINIT-ACMs.txt
+    install -m 444 license.txt ${D}/boot/license-SINIT-ACMs.txt
 }
 
 do_deploy() {
-    install -m 0644 "${D}/boot/GM45_GS45_PM45_SINIT_51.BIN" "${DEPLOYDIR}/gm45.acm"
-    install -m 0644 "${D}/boot/4th_gen_i5_i7_SINIT_75.BIN" "${DEPLOYDIR}/hsw.acm"
-    install -m 0644 "${D}/boot/i5_i7_DUAL_SINIT_51.BIN" "${DEPLOYDIR}/duali.acm"
-    install -m 0644 "${D}/boot/i7_QUAD_SINIT_51.BIN" "${DEPLOYDIR}/quadi.acm"
-    install -m 0644 "${D}/boot/Q35_SINIT_51.BIN" "${DEPLOYDIR}/q35.acm"
-    install -m 0644 "${D}/boot/Q45_Q43_SINIT_51.BIN" "${DEPLOYDIR}/q45q43.acm"
-    install -m 0644 "${D}/boot/Xeon-5600-3500-SINIT-v1.1.bin" "${DEPLOYDIR}/xeon56.acm"
-    install -m 0644 "${D}/boot/Xeon-E7-8800-4800-2800-SINIT-v1.1.bin" "${DEPLOYDIR}/xeone7.acm"
-    install -m 0644 "${D}/boot/3rd_gen_i5_i7_SINIT_67.BIN" "${DEPLOYDIR}/ivb_snb.acm"
-    install -m 0644 "${D}/boot/5th_gen_i5_i7_SINIT_79.BIN" "${DEPLOYDIR}/bdw.acm"
-    install -m 0644 "${D}/boot/6th_gen_i5_i7_SINIT_71.BIN" "${DEPLOYDIR}/skl.acm"
-    install -m 0644 "${D}/boot/7th_gen_i5_i7-SINIT_74.bin" "${DEPLOYDIR}/kbl.acm"
-    install -m 0644 "${D}/boot/8th_gen_i5_i7-SINIT_76.bin" "${DEPLOYDIR}/cfl.acm"
+    install -m 0644 "${D}/boot/snb_ivb.bin" "${DEPLOYDIR}/snb_ivb.bin"
+    install -m 0644 "${D}/boot/bdw_hsw.bin" "${DEPLOYDIR}/bdw_hsw.bin"
+    install -m 0644 "${D}/boot/skl_kbl_aml.bin" "${DEPLOYDIR}/skl_kbl_aml.bin"
+    install -m 0644 "${D}/boot/cfl_wkl_cml.bin" "${DEPLOYDIR}/cfl_wkl_cml.bin"
+    install -m 0644 "${D}/boot/cml_s.bin" "${DEPLOYDIR}/cml_s.bin"
+    install -m 0644 "${D}/boot/cml_s_tgp.bin" "${DEPLOYDIR}/cml_s_tgp.bin"
+    install -m 0644 "${D}/boot/rkls.bin" "${DEPLOYDIR}/rkls.bin"
+    install -m 0644 "${D}/boot/tgl.bin" "${DEPLOYDIR}/tgl.bin"
+    install -m 0644 "${D}/boot/adl.bin" "${DEPLOYDIR}/adl.bin"
     install -m 0644 "${D}/boot/license-SINIT-ACMs.txt" "${DEPLOYDIR}/license-SINIT-ACMs.txt"
 }
 addtask do_deploy after do_install before do_build
