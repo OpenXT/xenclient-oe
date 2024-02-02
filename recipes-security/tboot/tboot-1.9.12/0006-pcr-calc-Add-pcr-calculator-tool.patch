@@ -894,7 +894,7 @@ new file mode 100644
 index 0000000..b96447f
 --- /dev/null
 +++ b/pcr-calc/eventlog.c
-@@ -0,0 +1,356 @@
+@@ -0,0 +1,354 @@
 +/*
 + *
 + * Copyright (c) 2017 Daniel P. Smith
@@ -942,7 +942,7 @@ index 0000000..b96447f
 +
 +#define error_msg(fmt, ...)         fprintf(stderr, fmt, ##__VA_ARGS__)
 +
-+static int get_ossinit_caps_tboot_common(const txt_caps_t *acm_caps,
++static int get_ossinit_caps_tboot_common(const txt_caps_t acm_caps,
 +		const txt_caps_t *mle_hdr, const txt_caps_t *mask,
 +		uint8_t tpmver, txt_caps_t *caps)
 +{
@@ -950,9 +950,9 @@ index 0000000..b96447f
 +
 +	ossinit_data_caps._raw = mle_hdr->_raw & ~mask->_raw;
 +
-+	if (acm_caps->rlp_wake_monitor)
++	if (acm_caps.rlp_wake_monitor)
 +		ossinit_data_caps.rlp_wake_monitor = 1;
-+	else if (acm_caps->rlp_wake_getsec)
++	else if (acm_caps.rlp_wake_getsec)
 +		ossinit_data_caps.rlp_wake_getsec = 1;
 +	else
 +		return -1;
@@ -964,7 +964,7 @@ index 0000000..b96447f
 +			break;
 +		case TPM20:
 +			/* TODO: Can be forced to legacy on cmdline. */
-+			if (acm_caps->tcg_event_log_format)
++			if (acm_caps.tcg_event_log_format)
 +				ossinit_data_caps.tcg_event_log_format = 1;
 +			break;
 +		default:
@@ -979,11 +979,11 @@ index 0000000..b96447f
 +			ossinit_data_caps.pcr_map_no_legacy = 1;
 +			ossinit_data_caps.pcr_map_da = 0;
 +			/* TODO: Has to be enabled on cmdline (pcr_map). */
-+			if (acm_caps->pcr_map_da && 0)
++			if (acm_caps.pcr_map_da && 0)
 +				ossinit_data_caps.pcr_map_da = 1;
-+			else if (!acm_caps->pcr_map_no_legacy)
++			else if (!acm_caps.pcr_map_no_legacy)
 +				ossinit_data_caps.pcr_map_no_legacy = 0;
-+			else if (acm_caps->pcr_map_da)
++			else if (acm_caps.pcr_map_da)
 +				ossinit_data_caps.pcr_map_da = 1;
 +			else
 +				return -1;
@@ -1004,7 +1004,7 @@ index 0000000..b96447f
 +}
 +
 +/* See tboot/txt/txt.c, include/mle.h */
-+static int get_ossinit_caps_tboot_1_9_6(const struct acm *acm, uint8_t tpmver,
++static int get_ossinit_caps_tboot_1_9_6(const txt_caps_t acm_caps, uint8_t tpmver,
 +		txt_caps_t *caps)
 +{
 +	const txt_caps_t mle_hdr = {
@@ -1031,16 +1031,15 @@ index 0000000..b96447f
 +		.tcg_event_log_format = 0,
 +		.reserved1 = 0,
 +	};
-+	txt_caps_t acm_caps = acm->infotable->capabilities;
 +
-+	return get_ossinit_caps_tboot_common(&acm_caps, &mle_hdr, &mask,
++	return get_ossinit_caps_tboot_common(acm_caps, &mle_hdr, &mask,
 +			tpmver, caps);
 +}
 +
 +/* See tboot/txt/txt.c, include/mle.h */
 +/* Since 1.9.6: tcg_event_log_format is now masked before processing, so the
 + * value from the MLE header defined in TBoot is ignored. */
-+static int get_ossinit_caps_tboot_1_9_9(const struct acm *acm, uint8_t tpmver,
++static int get_ossinit_caps_tboot_1_9_9(const txt_caps_t acm_caps, uint8_t tpmver,
 +		txt_caps_t *caps)
 +{
 +	const txt_caps_t mle_hdr = {
@@ -1067,22 +1066,21 @@ index 0000000..b96447f
 +		.tcg_event_log_format = 1,
 +		.reserved1 = 0,
 +	};
-+	txt_caps_t acm_caps = acm->infotable->capabilities;
 +
-+	return get_ossinit_caps_tboot_common(&acm_caps, &mle_hdr, &mask,
++	return get_ossinit_caps_tboot_common(acm_caps, &mle_hdr, &mask,
 +			tpmver, caps);
 +}
 +
-+static int event_ossinit_data_cap_hash(const struct acm *acm, uint16_t alg,
++static int event_ossinit_data_cap_hash(const txt_caps_t acm_caps, uint16_t alg,
 +		uint8_t tpmver, const tb_version_t *tbver, tb_hash_t *hash)
 +{
 +	txt_caps_t caps;
 +	int rc;
 +
 +	if (tbver->major <= 1 && tbver->minor <= 9 && tbver->micro <= 6)
-+		rc = get_ossinit_caps_tboot_1_9_6(acm, tpmver, &caps);
++		rc = get_ossinit_caps_tboot_1_9_6(acm_caps, tpmver, &caps);
 +	else
-+		rc = get_ossinit_caps_tboot_1_9_9(acm, tpmver, &caps);
++		rc = get_ossinit_caps_tboot_1_9_9(acm_caps, tpmver, &caps);
 +
 +	if (!hash_buffer((unsigned char *)&caps, sizeof (caps), hash, alg))
 +		return -1;
@@ -1090,14 +1088,14 @@ index 0000000..b96447f
 +	return rc;
 +}
 +
-+int emulate_event(const struct acm *acm, uint16_t alg,
++int emulate_event(const txt_caps_t acm_caps, uint16_t alg,
 +		uint8_t tpmver, const tb_version_t *tbver, struct pcr_event *evt)
 +{
 +	int rc;
 +
 +	switch (evt->type) {
 +		case EVTYPE_OSSINITDATA_CAP_HASH:
-+			rc = event_ossinit_data_cap_hash(acm, alg, tpmver, tbver,
++			rc = event_ossinit_data_cap_hash(acm_caps, alg, tpmver, tbver,
 +					&evt->digest);
 +			break;
 +		default:
@@ -1312,7 +1310,7 @@ index 0000000..9d36d56
 +	EVTYPE_LCP_HASH             = EVTYPE_BASE + 17,
 +} txt_event_type_t;
 +
-+int emulate_event(const struct acm *acm, uint16_t alg, uint8_t tpmver,
++int emulate_event(const txt_caps_t acm_caps, uint16_t alg, uint8_t tpmver,
 +	const tb_version_t *tbver, struct pcr_event *evt);
 +
 +struct tpm *parse_tpm12_log(char *buffer, size_t size);
@@ -2461,7 +2459,7 @@ new file mode 100644
 index 0000000..f3dbb90
 --- /dev/null
 +++ b/pcr-calc/pcr-calc.c
-@@ -0,0 +1,447 @@
+@@ -0,0 +1,461 @@
 +/*
 + *
 + * Copyright (c) 2017 Daniel P. Smith
@@ -2502,6 +2500,7 @@ index 0000000..f3dbb90
 +#include <stdbool.h>
 +#include <stdint.h>
 +#include <stdarg.h>
++#include <errno.h>
 +#include <getopt.h>
 +#include <zlib.h>
 +#include <sys/stat.h>
@@ -2549,6 +2548,7 @@ index 0000000..f3dbb90
 +		"\t-e evt_type:<hash_str>|emulate Override PCR events type found in the logs with the provided value or emulate the value entirely (emulation requires TBoot version and ACM to be provided).\n"
 +		"\t-F file Use the given file as tpm event log (replace /sys/kernel/security/txt/*_binary_evtlog).\n"
 +		"\t-A acm-path Path to the ACM that will be used to emulate events for PCR calculations (see -e).\n"
++		"\t-C acm-caps Numeric value of ACM info_table capabilities (decimal or hexadecimal) used to emulate events for PCR calculations (see -e).\n"
 +		"\t-V tboot-version TBoot version targeted to emulate events for PCR calculations (see -e).\n"
 +		"\t-o Assume the event-log to be formated using the legacy format (prior TCG PC Client Platform. EFI Protocol Specification).\n");
 +}
@@ -2674,12 +2674,13 @@ index 0000000..f3dbb90
 +	size_t pol_size = 0;
 +	tb_policy_t *policy_file = NULL;
 +	struct acm *acm = NULL;
++	txt_caps_t acm_caps = { ._raw = 0 };
 +	tb_version_t tbver = TB_VERSION_DEFAULT;
 +	const char *eventlog = NULL;
 +
 +	flags = FLAG_TPM12;
 +
-+	while ((opt = getopt(argc, (char ** const)argv, "h2dclvqa:p:m:e:F:A:V:o")) != -1) {
++	while ((opt = getopt(argc, (char ** const)argv, "h2dclvqa:p:m:e:F:A:C:V:o")) != -1) {
 +		switch (opt) {
 +			case 'm':
 +				if (mb_count >= 20) {
@@ -2760,6 +2761,17 @@ index 0000000..f3dbb90
 +				acm = acm_load(optarg);
 +				if (!acm) {
 +					error_msg("failed to load ACM:%s.\n", optarg);
++					ret = 1;
++					goto out;
++				}
++				acm_caps = acm->infotable->capabilities;
++			break;
++			case 'C':
++				errno = 0;
++				acm_caps._raw = strtoul(optarg, NULL, 0);
++				if (errno != 0) {
++					error_msg("failed parsing acm_caps: %s.\n",
++							optarg);
 +					ret = 1;
 +					goto out;
 +				}
@@ -2862,8 +2874,8 @@ index 0000000..f3dbb90
 +
 +	/* Event-type emulation sanity check. */
 +	for (i = 0; i < evt_count; ++i)
-+		if (evt[i].emulate && acm == NULL) {
-+			error_msg("event-type emulation requires valid ACM passed as argument (-A).\n");
++		if (evt[i].emulate && acm_caps._raw == 0) {
++			error_msg("event-type emulation requires valid ACM (-A) or acm_caps (-C) passed as argument.\n");
 +			ret = 1;
 +			goto out;
 +		}
@@ -2875,7 +2887,7 @@ index 0000000..f3dbb90
 +		ret = 1;
 +		goto out;
 +	}
-+	if (!tpm_emulate_all_events(t, t->alg, evt, evt_count, acm, &tbver)) {
++	if (!tpm_emulate_all_events(t, t->alg, evt, evt_count, acm_caps, &tbver)) {
 +		error_msg("failed to emulate events in the event log.\n");
 +		ret = 1;
 +		goto out;
@@ -3641,7 +3653,7 @@ index 0000000..45aac9b
 +
 +bool tpm_emulate_event(struct tpm *t, uint16_t alg,
 +		       const struct pcr_event *evt,
-+		       const struct acm *acm, const tb_version_t *tbver)
++		       const txt_caps_t acm_caps, const tb_version_t *tbver)
 +{
 +	unsigned int i, j;
 +	struct pcr_bank *b;
@@ -3668,7 +3680,7 @@ index 0000000..45aac9b
 +
 +bool tpm_emulate_all_events(struct tpm *t, uint16_t alg,
 +			    const struct pcr_event *evt, unsigned int evt_count,
-+			    const struct acm *acm, const tb_version_t *tbver)
++			    const txt_caps_t acm_caps, const tb_version_t *tbver)
 +{
 +	unsigned int i;
 +
@@ -3985,10 +3997,10 @@ index 0000000..bb5f30e
 +				unsigned int evt_count);
 +bool tpm_emulate_event(struct tpm *t, uint16_t alg,
 +		       const struct pcr_event *evt,
-+		       const struct acm *acm, const tb_version_t *tbver);
++		       const txt_caps_t acm_caps, const tb_version_t *tbver);
 +bool tpm_emulate_all_events(struct tpm *t, uint16_t alg,
 +			    const struct pcr_event *evt, unsigned int evt_count,
-+			    const struct acm *acm, const tb_version_t *tbver);
++			    const txt_caps_t acm_caps, const tb_version_t *tbver);
 +bool tpm_clear_all_event(struct tpm *t, uint16_t alg, uint32_t evt_type);
 +bool tpm_recalculate(struct tpm *t);
 +void tpm_print(struct tpm *t, uint16_t alg);
