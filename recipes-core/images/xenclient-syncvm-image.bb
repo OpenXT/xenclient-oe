@@ -32,7 +32,6 @@ IMAGE_INSTALL = "\
     packagegroup-base \
     packagegroup-xenclient-common \
     kernel-modules \
-    argo-module \
     libargo \
     libargo-bin \
     rsyslog \
