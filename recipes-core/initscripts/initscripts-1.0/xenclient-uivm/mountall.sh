@@ -40,12 +40,12 @@ test "$VERBOSE" != no && echo "Mounting local filesystems..."
 mount -a $MOUNTALL 2>&1 | logger -s -p user.err
 
 #
-# Check if there's a /dev/xvda3. If so, mount it to /root/.gconf
+# Check if there's a /dev/xvdc. If so, mount it to /root/.gconf
 #
-if test -e /dev/xvda3
+if test -e /dev/xvdc
 then
         umount /root/.gconf
-        mount -t ext3 /dev/xvda3 /root/.gconf
+        mount -t ext3 /dev/xvdc /root/.gconf
         mount --bind /root/.gconf /root/.gnome2
 fi
 
