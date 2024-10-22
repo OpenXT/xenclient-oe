@@ -15,7 +15,7 @@ IMAGE_FEATURES += " \
     root-bash-shell \
     ctrlaltdel-reboot \
 "
-IMAGE_FSTYPES = "ext3.vhd.gz"
+IMAGE_FSTYPES = "ext3.disk.vhd.gz"
 export IMAGE_BASENAME = "xenclient-uivm-image"
 
 COMPATIBLE_MACHINE = "(xenclient-uivm)"
