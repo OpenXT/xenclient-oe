@@ -25,6 +25,13 @@ SRC_URI_append = " \
     file://acpi-slic-support.patch \
     file://tboot-xen-evtlog-support.patch \
     file://add-xc-hypercall-page.patch \
+    \
+    file://0001-block-common-Fix-same_vm-for-no-targets.patch \
+    file://0002-libxl-Add-support-for-blktap-vbd3.patch \
+    file://0003-hotplug-Update-block-tap.patch \
+    file://0004-libxl-Support-blktap-with-HVM-device-model.patch \
+    file://0005-libxl-Switch-to-ndb-unix-format.patch \
+    \
     file://libxl-syslog.patch \
     file://libxl-vif-cleanup.patch \
     file://libxl-vif-make-ioemu-and-stubdom-mac-addresses-configurable.patch \
