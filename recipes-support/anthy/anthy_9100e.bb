@@ -17,7 +17,8 @@ LIC_FILES_CHKSUM = "file://alt-cannadic/COPYING;md5=c93c0550bd3173f4504b2cbd8991
 DEPENDS = "anthy-native"
 PR = "r3"
 
-SRC_URI = "http://osdn.dl.sourceforge.jp/anthy/29142/anthy-9100e.tar.gz \
+# The pre-downloaded anthy package is a workaround as the original URL location no longer exists
+SRC_URI = "file://anthy-9100e.tar.gz \
            file://not_build_elc.patch;patch=1 \
            file://2ch_t.patch;patch=1 \
            file://native-helpers.patch;patch=1 \
