@@ -24,7 +24,6 @@ SRC_URI_append = " \
     file://increase-ap-startup-time.patch;patch=1 \
     file://acpi-slic-support.patch \
     file://tboot-xen-evtlog-support.patch \
-    file://add-xc-hypercall-page.patch \
     file://libxl-syslog.patch \
     file://libxl-vif-cleanup.patch \
     file://libxl-vif-make-ioemu-and-stubdom-mac-addresses-configurable.patch \
