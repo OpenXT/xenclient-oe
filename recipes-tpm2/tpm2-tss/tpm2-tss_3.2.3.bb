@@ -19,7 +19,7 @@ PACKAGECONFIG[oxygen] = ",--disable-doxygen-doc, "
 PACKAGECONFIG[fapi] = "--enable-fapi,--disable-fapi,curl json-c "
 
 EXTRA_OECONF += "--enable-static --with-udevrulesdir=${nonarch_base_libdir}/udev/rules.d/"
-EXTRA_OECONF += "--runstatedir=/run"
+EXTRA_OECONF += "--with-runstatedir=/run"
 EXTRA_OECONF:remove = " --disable-static"
 
 USERADD_PACKAGES = "${PN}"
@@ -86,6 +86,8 @@ FILES:${PN} = "\
     ${sysconfdir}/tmpfiles.d \
     ${sysconfdir}/tpm2-tss \
     ${sysconfdir}/sysusers.d"
+
+FILES:${PN} += "${libdir}/libtss2-tcti-device.so.*"
 
 RDEPENDS:libtss2 = "libgcrypt"
 
