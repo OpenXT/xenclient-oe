@@ -12,5 +12,12 @@ SRC_URI[sha256sum] = "3810d36b5079256f4f2f7ce552e22213d43b1031c131538df8a2dbc3c5
 
 inherit autotools pkgconfig bash-completion
 
+PACKAGES =+ "tpm2-tools-pcr"
+FILES_${PN}-pcr = " \
+    ${bindir}/tpm2_pcrread \
+    ${bindir}/tpm2_pcrextend \
+"
+
 # need tss-esys
-RDEPENDS:${PN} = "libtss2"
+RDEPENDS:${PN} = "libtss2 ${PN}-pcr"
+RDEPENDS:${PN}-pcr = "libgcrypt openssl tpm2-tss-pcr"
