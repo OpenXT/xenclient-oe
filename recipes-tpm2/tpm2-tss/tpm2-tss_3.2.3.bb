@@ -36,6 +36,7 @@ PACKAGES = " \
     ${PN} \
     ${PN}-dbg \
     ${PN}-doc \
+    ${PN}-pcr \
     libtss2-mu \
     libtss2-mu-dev \
     libtss2-mu-staticdev \
@@ -87,9 +88,12 @@ FILES:${PN} = "\
     ${sysconfdir}/tpm2-tss \
     ${sysconfdir}/sysusers.d"
 
-FILES:${PN} += "${libdir}/libtss2-tcti-device.so.*"
-
 RDEPENDS:libtss2 = "libgcrypt"
 
 # This is patched in 3.2.2, NVD DB was not updated to reflect this backport
 CVE_CHECK_IGNORE += "CVE-2023-22745"
+
+# Minimal TSS2 package for initramfs (required libraries for pcr binaries)
+FILES:${PN}-pcr = "${libdir}/libtss2-tcti-device.so.*"
+
+RDEPENDS:${PN}-pcr = "libgcrypt libtss2"
