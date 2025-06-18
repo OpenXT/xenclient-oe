@@ -57,7 +57,7 @@ RDEPENDS_initramfs-module-tpm = "${PN}-base initramfs-module-bootfs tpm-tools-sa
 FILES_initramfs-module-tpm = "/init.d/92-tpm"
 
 SUMMARY_initramfs-module-tpm2 = "initramfs support for tpm2"
-RDEPENDS_initramfs-module-tpm2 = "${PN}-base initramfs-module-bootfs tpm2-tools-initrd"
+RDEPENDS_initramfs-module-tpm2 = "${PN}-base initramfs-module-bootfs tpm2-tools-pcr tpm2-tss-pcr"
 FILES_initramfs-module-tpm2 = "/init.d/92-tpm2"
 
 SUMMARY_initramfs-module-selinux = "initramfs support for selinux"

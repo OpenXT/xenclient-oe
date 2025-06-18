@@ -22,16 +22,18 @@
 # THE SOFTWARE.
 #
 
+# Set TCTI to use direct device communication
+export TPM2TOOLS_TCTI="device"
+
 #listpcrs sample output:
 #Supported Bank/Algorithm: TPM_ALG_SHA1(0x0004) TPM_ALG_SHA256(0x000b)
 #Cuts and for loop isolate "TPM_ALG_<hash_type>" and compare against input
 pcr_bank_exists () {
     local alg_in=$1
 
-    banks=$(tpm2_pcrlist -s | cut -d ':' -f 2)
+    banks=$(tpm2_pcrread | cut -d ':' -f 1 | grep -i "sha")
     for bank in $banks; do
-        alg=$(echo $bank | cut -d '(' -f 1)
-        if [ "$alg" = $alg_in ]; then
+        if [ "$bank" = $alg_in ]; then
             return 0
         fi
     done
@@ -75,15 +77,15 @@ tpm2_run() {
     info -n "Measuring rootfs device..."
     if pcr_bank_exists "sha256"; then
         local digest="$(sha256sum $bootparam_root | head -c64)"
-        local algid="0xB"
+        local algid="sha256"
     else
         local digest="$(sha1sum $bootparam_root | head -c40)"
-        local algid="0x4"
+        local algid="sha1"
     fi
     info "done"
 
     info -n "Extending TPM PCR..."
-    tpm2_extendpcr -c 15 -g ${algid} -s ${digest}
+    tpm2_pcrextend 15:${algid}=${digest}
     if [ $? -ne 0 ]; then
         info "PCR-15 extend failed"
         return
