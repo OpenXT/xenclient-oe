@@ -2,7 +2,7 @@ DEPENDS = "icedtea7-native"
 
 inherit native
 
-SRC_URI = "http://download.dojotoolkit.org/release-${PV}/dojo-release-${PV}-src.tar.gz"
+SRC_URI = "https://download.dojotoolkit.org/release-${PV}/dojo-release-${PV}-src.tar.gz"
 
 S = "${WORKDIR}"
 
