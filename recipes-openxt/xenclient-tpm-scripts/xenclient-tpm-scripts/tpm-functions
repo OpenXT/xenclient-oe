@@ -714,7 +714,7 @@ tpm_get_ev_separator() {
     local evs
 
     if is_tpm_2_0; then
-        # TPM 2.0: `printf "\xff\xff\xff\xff" | sha256sum`, best guess...
+        # TPM 2.0: `printf "\x00\x00\x00\x00" | sha256sum`, best guess...
         evs="df3f619804a92fdb4057192dc43dd748ea778adc52bc498ce80524c014b81119"
     else
         # TPM 1.2 will expose a securityfs node with ASCII values.
@@ -744,10 +744,11 @@ tpm_pcrlist_save() {
     local file="$1"
     shift 1
     local pcrlist=""
+    local p
 
     # Sanity check list of number in PCR id range ([0-23])
     for p in "$@"; do
-        pcrid="${p%%:*}"
+        pcrid="${p%%=*}"
         if [ "$(expr "${pcrid}" : '^[[:digit:]]\+$')" -a \
              "${pcrid}" -gt 23 -o "${pcrid}" -lt 0 ]; then
             return 1
@@ -764,26 +765,29 @@ tpm_pcrlist_save() {
 tpm_pcrs_to_opts() {
     local tss_opt
     local pcr_opts
+    local p
 
     if is_tpm_2_0; then
-        tss_opt="-r"
+        pcr_opts="sha256:$1"
+        shift
+        tss_opt=","
     else
-        tss_opt="-p"
+        tss_opt=" -p"
     fi
     for p in "$@"; do
-        pcr_opts="${pcr_opts} ${tss_opt} ${p}"
+        pcr_opts="$pcr_opts$tss_opt$p"
     done
     echo "${pcr_opts}"
 }
 
 # Usage: tpm_pcr_value_normalize PCR-VALUE
 # Print the PCR-VALUE, from TPM-TSS output, normalized on stdout.
-# Normalized here means no space, all lowercase, no PCR identifier, and only
+# Normalized here means no space, all lowercase, no PCR identifier, no 0x prefix, and only
 # the last line.
 # This is relevant for to be consistent across TSS versions and keeps format
 # sanitizing in one centralized place, should it require to be amended.
 tpm_pcr_value_normalize() {
-    echo "$1" | awk -F ':' 'END{ gsub(" ", "", $2); print tolower($2) }'
+    echo "$1" | awk -F ':' 'END{ gsub(" ", "", $2); gsub("^0x", "", $2); print tolower($2) }'
 }
 
 # Usage: tpm_get_hash_algorithm
@@ -879,14 +883,14 @@ tpm_seal() {
     local secret="${root}/$1"
     local tss="${root}/$2"
 
+    local pcr_opts="$(tpm_pcrs_to_opts ${pcrs})"
+
     if ! tpm_pcrlist_save "${tss}.pcrs" ${pcrs}; then
         echo "tpm_seal: Failed to save PCR ID list." >&2
         return 1
     fi
 
     if is_tpm_2_0; then
-        # Get comma separated list of PCR banks for use in tpm2 utilities
-        local pcrs_arg="$(echo "${pcrs}" | xargs | tr ' ' ',')"
         local alg="$(hashalg_to_alg "${hashalg}")"
         local handle="$(alg_to_handle "${alg}")"
 
@@ -909,7 +913,7 @@ tpm_seal() {
             return 1
         fi
 
-        tpm2_policypcr -S "${session_ctx}" -l "${hashalg}:${pcrs_arg}" -L "${policy_file}" > /dev/null
+        tpm2_policypcr -S "${session_ctx}" -l "${pcr_opts}" -L "${policy_file}" > /dev/null
         if [ $? -ne 0 ]; then
             echo "tpm_seal: Failed to bind PCRs to policy" >&2
             tpm2_flushcontext "${session_ctx}" > /dev/null
@@ -936,7 +940,7 @@ tpm_seal() {
             tss_bin="${tss_bin}_sa"
         fi
         tpm_save_keyfiles "${tss}"
-        allout="$(${tss_bin} -i "${secret}" -o "${tss}.sha1" -z $(tpm_pcrs_to_opts ${pcrs}) 2>&1)"
+        allout="$(${tss_bin} -i "${secret}" -o "${tss}.sha1" -z ${pcr_opts} 2>&1)"
         if [ $? -ne 0 ]; then
             echo "tpm_seal: Failed to seal data (TPM 1.2):" >&2
             echo "${allout}" >&2
@@ -974,10 +978,9 @@ tpm_unseal() {
 
     local tss="${root}/$1"
 
+    local pcr_opts="$(tpm_pcrs_to_opts $(cat "${tss}.pcrs"))"
+
     if is_tpm_2_0; then
-        # Get comma separated list of PCR banks for use in tpm2 utilities
-        local pcrs="$(echo $(cat "${tss}.pcrs"))"
-        local pcrs_arg="$(echo "${pcrs}" | xargs | tr ' ' ',')"
         local alg="$(hashalg_to_alg "${hashalg}")"
         local handle="$(alg_to_handle "${alg}")"
 
@@ -997,7 +1000,7 @@ tpm_unseal() {
 
         # Unseal
         tpm2_startauthsession --policy-session -S "${tss}.session.ctx"
-        tpm2_policypcr -S "${session_ctx}" -l "${hashalg}:${pcrs_arg}" -L "${tss}.policy.dat" > /dev/null
+        tpm2_policypcr -S "${session_ctx}" -l "${pcr_opts}" -L "${tss}.policy.dat" > /dev/null
         { stderr="$(tpm2_unseal -psession:${session_ctx} -c "${obj_ctx}" 2>&1 1>&3 3>&-)"; } 3>&1
         if [ $? -ne 0 ]; then
             echo "tpm_unseal: Failed to unseal data (TPM 2.0) using ${hashalg} algorithm, ${stderr}" >&2
