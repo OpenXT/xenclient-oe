@@ -57,11 +57,10 @@ is_tpm_2_0 () {
 pcr_bank_exists () {
     local alg_in="$1"
     local bank
-    local banks="$(tpm2_pcrlist -s | cut -d ':' -f 2)"
+    local banks=$(tpm2_pcrread | cut -d ':' -f 1 | grep -i "sha")
 
     for bank in $banks; do
-        local alg="$(echo "${bank}" | cut -d '(' -f 1)"
-        if [ "${alg}" = "${alg_in}" ]; then
+        if [ "${bank}" = "${alg_in}" ]; then
             return 0
         fi
     done
@@ -177,13 +176,13 @@ tpm_is_active() {
     local val
 
     if is_tpm_2_0 ; then
-        msg=$(tpm2_getcap --capability=properties-variable 2>&1) || \
+        msg=$(tpm2_getcap properties-variable 2>&1) || \
             return 2
 
         # Ensure Hierarchies are enabled; otherwise the TPM2 is unusable.
         for v in phEnable shEnable ehEnable phEnableNV; do
             val="$( echo "${msg}" | awk "/${v}:/ { print \$2 }" )"
-            [ "${val}" = "set" ] || return 1
+            [ "${val}" = "1" ] || return 1
         done
 
         return 0
@@ -206,7 +205,7 @@ tpm_is_enabled() {
     local state=""
 
     if is_tpm_2_0 ; then
-        tpm2_getcap --capability=properties-fixed 1>/dev/null 2>&1
+        tpm2_getcap properties-fixed 1>/dev/null 2>&1
         return $?
     else
         state=$(cat ${tpm}/enabled)
@@ -226,15 +225,18 @@ tpm_is_enabled() {
 #         2 if the handle is incorrect
 tpm2_handle_defined() {
     local oxt_handle="$1"
-    local handles=$( tpm2_listpersistent )
-    local handle=$( echo "${handles}" | \
-                    sed -nr "/persistent-handle\[[0-9]+\]:${oxt_handle}/p" )
-    if [ -z "${handle}" ]; then
+    local handles=$(tpm2_getcap handles-persistent)
+    local handle_str=$(echo "${handles}" | grep -w "${oxt_handle}")
+    if [ -z "${handle_str}" ]; then
             return 1
     fi
 
-    local h_type=$( echo "${handles}" | cut -d ' ' -f 2 | cut -d ':' -f 2 )
-    local alg=$( echo "${handles}" | cut -d ' ' -f 3 | cut -d ':' -f 2)
+    # Get handle value
+    local handle=$( echo "${handle_str}" | cut -d ' ' -f 2)
+
+    # Parse handle alg and type
+    local alg=$( echo "${handle}" | grep -A1 '^name-alg:' | grep 'value:' | awk '{print $2}')
+    local h_type=$( echo "${handle}" | grep -A1 '^type:' | grep 'value:' | awk '{print $2}')
 
     if [ "${h_type}" != "$( handle_type "${oxt_handle}" )" -o \
             "${alg}" != "$( handle_alg "${oxt_handle}" )" ]; then
@@ -249,7 +251,7 @@ tpm2_handle_defined() {
 #         1 if the handles are not defined
 #         2 if the handles are incorrect
 tpm2_handles_defined() {
-    local num_handles=$( tpm2_listpersistent | wc -l )
+    local num_handles=$( tpm2_getcap handles-persistent | wc -l )
 
     if [ "${num_handles}" -eq 0 ]; then
         return 1
@@ -279,10 +281,10 @@ tpm_handles_defined() {
 }
 
 tpm2_clear_handle() {
-    local passwd="$( cat $1 )"
+    local passwd="$(cat "$1")"
     local handle="$2"
 
-    tpm2_evictcontrol -A o -H "${handle}" -S "${handle}" -P "${passwd}"
+    tpm2_evictcontrol -C o -c "${handle}" -P "${passwd}"
 }
 
 # Clear out all the TPM handles.  This should help avoid issues with a TPM2's
@@ -294,9 +296,9 @@ tpm_clear_handles() {
 
     is_tpm_2_0 || return 0
 
-    handles=$( tpm2_listpersistent | \
-               cut -d ' ' -f 1 | \
-               cut -d ':' -f 2 )
+    # Expected output format: "- <handle>"
+    # Extract just the handle
+    handles=$( tpm2_getcap handles-persistent | cut -d ' ' -f 2 )
     for handle in ${handles} ; do
         tpm2_clear_handle "${passwd}" "${handle}"
     done
@@ -335,7 +337,7 @@ tpm_is_owned() {
     local tpm2=$?
     if [ "${tpm2}" -eq 0 ];
     then
-        tpm2_getcap --capability=properties-variable | grep -q 'ownerAuthSet:[[:space:]]\+set'
+        tpm2_getcap properties-variable | grep -q 'ownerAuthSet:[[:space:]]*1'
         ret=$?
         if [ "${ret}" -eq 0 ]; then
             state=1
@@ -386,26 +388,30 @@ tpm2_check_password() {
     local passwd="$1"
     local msg
 
-    msg=$( tpm2_takeownership -O $(cat "${passwd}") -o $(cat "${passwd}") \
-                              -E $(cat "${passwd}") -e $(cat "${passwd}") \
-                              -L $(cat "${passwd}") -l $(cat "${passwd}") \
-                              2>&1 | head -n 1 )
-    [ $? -eq 0 ] && return 0
+    # Validate owner password by setting
+    err=$(tpm2_changeauth -c owner "${passwd}" -p "${passwd}" 2>&1)
+    ret=$?
+    if [ ${ret} -ne 0 ]; then
+        echo "Failed to set owner auth: ${err}" >&2
+        return ${ret}
+    fi
 
-    msg=${msg#*TPM Error:}
-    case "${msg}" in
-        0x9a2) #TPM_RC_BAD_AUTH
-            return 1
-            ;;
-        0x98e) #TPM_RC_AUTH_FAIL
-            return 1
-            ;;
-        0x921) #TPM_RC_LOCKOUT DA protection
-            return 3
-            ;;
-    esac
+    # Validate endorsement password by setting
+    err=$(tpm2_changeauth -c endorsement "${passwd}" -p "${passwd}" 2>&1)
+    ret=$?
+    if [ ${ret} -ne 0 ]; then
+        echo "Failed to set endorsement auth: ${err}" >&2
+        return ${ret}
+    fi
 
-    return 2
+    # Validate lockout password by setting
+    err=$(tpm2_changeauth -c lockout "${passwd}" -p "${passwd}" 2>&1)
+    ret=$?
+    if [ ${ret} -ne 0 ]; then
+        echo "Failed to set lockout auth: ${err}" >&2
+        return ${ret}
+    fi
+    return 0
 }
 
 # Function to determine if we have the TPM owner password
@@ -503,27 +509,60 @@ tpm_has_ek() {
 #Taking ownership for tpm2 is slightly more complicated. Encapsulate this process
 #in its own function, checking err after each critical operation.
 tpm2_ownership () {
-    local passwd=$( cat $1 )
-
-    #Taking endoresement password AND lockout password to fully own tpm
-    err=$(tpm2_takeownership -o "${passwd}" -e "${passwd}" -l "${passwd}" 2>&1)
+    local passwd=$(cat "$1")
+    # Set owner password
+    err=$(tpm2_changeauth -c owner "${passwd}" 2>&1)
     ret=$?
-    [ ${ret} -ne 0 ] && echo ${err} && return ${ret}
+    if [ ${ret} -ne 0 ]; then
+        echo "Failed to set owner auth: ${err}" >&2
+        return ${ret}
+    fi
 
-    tpm2_create_handle $1
+    # Set endorsement password
+    err=$(tpm2_changeauth -c endorsement "${passwd}" 2>&1)
+    ret=$?
+    if [ ${ret} -ne 0 ]; then
+        echo "Failed to set endorsement auth: ${err}" >&2
+        return ${ret}
+    fi
+
+    # Set lockout password
+    err=$(tpm2_changeauth -c lockout "${passwd}" 2>&1)
+    ret=$?
+    if [ ${ret} -ne 0 ]; then
+        echo "Failed to set lockout auth: ${err}" >&2
+        return ${ret}
+    fi
+    tpm_clear_handles "${passwd}"
+    tpm2_create_handle "$1"
 }
 
 tpm2_create_handle() {
-    local passwd=$( cat $1 )
+    local passwd=$(cat "$1")
 
-    #Create our primary object
-    handle=$(echo -n "${passwd}" | tpm2_createprimary -H o -g ${TPM_ALG_SHA256} -G ${TPM_ALG_RSA} -P | grep Handle | cut -d ':' -f 2)
-    ret=$?
-    [ ${ret} -ne 0 ] && echo "Failed to create primary" && return ${ret}
+    # Create our primary object for SHA256 alg
+    local type="$( handle_type "${OXT_HANDLE_SHA256}" )"
+    local alg="$( handle_alg "${OXT_HANDLE_SHA256}" )"
+    local h_ctx="/tmp/handle.ctx"
+    
+    handle=$(tpm2_createprimary -C o -c ${h_ctx} -g ${alg} -G ${type} -P "${passwd}")
+
+    if [ $? -ne 0 ] || [ ! -f ${h_ctx}]; then
+        echo "Failed to create primary"
+        return 1
+    fi
+
     #Make it permanent for this measured install
-    err=$(tpm2_evictcontrol -A o -H ${handle} -S $(alg_to_handle "${TPM_ALG_SHA256}") -P "${passwd}" 2>&1)
+    err=$(tpm2_evictcontrol -C o -c ${h_ctx} -P "${passwd}" \
+          $(alg_to_handle "${TPM_ALG_SHA256}") 2>&1)
     ret=$?
-    [ ${ret} -ne 0 ] && echo ${err} && return ${ret}
+    rm -f ${h_ctx}
+
+    if [ $ret -ne 0 ]; then
+        echo "${err}"
+        return ${ret}
+    fi
+
     return 0
 }
 
@@ -609,41 +648,49 @@ tpm2_write_tboot_policy() {
                                                  TPMA_NV_TPMA_NV_OWNERREAD  | \
                                                  TPMA_NV_TPMA_NV_AUTHREAD )) )"
 
-    local idx=$( tpm2_nvlist | sed -n "/${tboot_idx}:/,/^$/p" | sed "/^$/d" )
-    local attr=$( echo "${idx}" | \
+    # Check if index exis
+    if tpm2_getcap handles-nv-index | grep -q "${tboot_idx}"; then
+        local idx=$(tpm2_nvreadpublic ${tboot_idx})
+        local attr=$( echo "${idx}" | \
                   sed -n "/attributes:/,/value:/p" | \
                   awk -F: '/value:/ { print $2 }' | \
                   tr -d ' ' )
-    local size=$( echo "${idx}" | \
+        local size=$( echo "${idx}" | \
                   awk -F: '/size:/ { print $2 }' | \
                   tr -d ' ' )
 
-    # Read the current contents into a temp file.
-    # tpm2_nvread could fail, and this ends up being a big pipeline to
-    # create an empty file, but that is fine for below.
-    tpm2_nvread -x "${tboot_idx}" -a "${TPM_RH_OWNER}" -P "${password}" \
-                -s "${size}" -o 0 2>/dev/null \
-        | tail -n 1 | tr -d ' ' | hex2bin > "${old_policy}"
+        # Read the current contents into a temp file.
+        # tpm2_nvread could fail, and this ends up being a big pipeline to
+        # create an empty file, but that is fine for below.
+        tpm2_nvread "${tboot_idx}" -C "${TPM_RH_OWNER}" -P "${password}" \
+            -s "${size}" -o "${old_policy}" >/dev/null 2>&1 || true
 
-    if diff -q "${old_policy}" "${policy}" ; then
-        rm "${old_policy}"
+        if cmp -s "${old_policy}" "${policy}"; then
+            rm -f "${old_policy}"
         return 0
-    fi >/dev/null 2>&1
+        fi
+        rm -f "${old_policy}"
 
-    rm "${old_policy}"
-
-    if [ "${size}" != "${polsize}" -o \
-         "$( tpm2_normalize $(( attr & ~TPMA_NV_TPMA_NV_WRITTEN )) )" != \
-	     "${TBOOT_NV_ATTRIB}" ]; then
-        tpm2_nvrelease -x "${tboot_idx}" -a "${TPM_RH_OWNER}" -P "${password}" \
-                       >/dev/null 2>&1
-        tpm2_nvdefine -x "${tboot_idx}" -a "${TPM_RH_OWNER}" -P "${password}" \
-                      -s "${polsize}" -t "${TBOOT_NV_ATTRIB}" >/dev/null 2>&1 \
-            || return 1
+        # If size or attributes mismatch, undefine
+    if [ "${size}" != "${polsize}" ] || \
+           [ "$( tpm2_normalize $(( attr & ~TPMA_NV_TPMA_NV_WRITTEN )) )" != "${TBOOT_NV_ATTRIB}" ]; then
+            tpm2_nvundefine "${tboot_idx}" -C "${TPM_RH_OWNER}" \
+                -P "${password}" >/dev/null 2>&1 || true
+        fi
     fi
 
-    tpm2_nvwrite -x "${tboot_idx}" -a "${TPM_RH_OWNER}" -P "${password}" \
-                 "${policy}" >/dev/null 2>&1
+    # Define the index
+    tpm2_nvdefine "${tboot_idx}" \
+        -C "${TPM_RH_OWNER}" \
+        -P "${password}" \
+        -s "${polsize}" \
+        -a "${TBOOT_NV_ATTRIB}" >/dev/null 2>&1 || return 1
+
+    # Write the policy
+    tpm2_nvwrite "${tboot_idx}" \
+        -C "${TPM_RH_OWNER}" \
+        -P "${password}" \
+        -i "${policy}" >/dev/null 2>&1
 }
 
 # Usage: tpm_get_syspath [TPM-DEVICE-ID]
@@ -667,7 +714,7 @@ tpm_get_ev_separator() {
     local evs
 
     if is_tpm_2_0; then
-        # TPM 2.0: `printf "\xff\xff\xff\xff" | sha256sum`, best guess...
+        # TPM 2.0: `printf "\x00\x00\x00\x00" | sha256sum`, best guess...
         evs="df3f619804a92fdb4057192dc43dd748ea778adc52bc498ce80524c014b81119"
     else
         # TPM 1.2 will expose a securityfs node with ASCII values.
@@ -684,7 +731,7 @@ tpm_get_ev_separator() {
 # Print all the PCR values of the first TPM on stdout.
 tpm_list_pcrs() {
     if is_tpm_2_0; then
-        tpm2_pcrlist
+        tpm2_pcrread
     else
         cat "$(tpm_get_syspath)/device/pcrs"
     fi
@@ -697,10 +744,11 @@ tpm_pcrlist_save() {
     local file="$1"
     shift 1
     local pcrlist=""
+    local p
 
     # Sanity check list of number in PCR id range ([0-23])
     for p in "$@"; do
-        pcrid="${p%%:*}"
+        pcrid="${p%%=*}"
         if [ "$(expr "${pcrid}" : '^[[:digit:]]\+$')" -a \
              "${pcrid}" -gt 23 -o "${pcrid}" -lt 0 ]; then
             return 1
@@ -717,26 +765,29 @@ tpm_pcrlist_save() {
 tpm_pcrs_to_opts() {
     local tss_opt
     local pcr_opts
+    local p
 
     if is_tpm_2_0; then
-        tss_opt="-r"
+        pcr_opts="sha256:$1"
+        shift
+        tss_opt=","
     else
-        tss_opt="-p"
+        tss_opt=" -p"
     fi
     for p in "$@"; do
-        pcr_opts="${pcr_opts} ${tss_opt} ${p}"
+        pcr_opts="$pcr_opts$tss_opt$p"
     done
     echo "${pcr_opts}"
 }
 
 # Usage: tpm_pcr_value_normalize PCR-VALUE
 # Print the PCR-VALUE, from TPM-TSS output, normalized on stdout.
-# Normalized here means no space, all lowercase, no PCR identifier, and only
+# Normalized here means no space, all lowercase, no PCR identifier, no 0x prefix, and only
 # the last line.
 # This is relevant for to be consistent across TSS versions and keeps format
 # sanitizing in one centralized place, should it require to be amended.
 tpm_pcr_value_normalize() {
-    echo "$1" | awk -F ':' 'END{ gsub(" ", "", $2); print tolower($2) }'
+    echo "$1" | awk -F ':' 'END{ gsub(" ", "", $2); gsub("^0x", "", $2); print tolower($2) }'
 }
 
 # Usage: tpm_get_hash_algorithm
@@ -760,7 +811,7 @@ tpm_get_pcr() {
     local hashalg="$(tpm_get_hash_algorithm)"
 
     if is_tpm_2_0; then
-        tpm_pcr_value_normalize "$(tpm2_pcrlist -L ${hashalg}:${pcr})"
+        tpm_pcr_value_normalize "$(tpm2_pcrread ${hashalg}:${pcr})"
     else
         tpm_pcr_value_normalize "$(grep "$(printf "PCR-%02d" "$pcr")" "$(tpm_get_syspath)/device/pcrs")"
     fi
@@ -850,27 +901,46 @@ tpm_seal() {
         fi
 
         tpm_save_keyfiles "${tss}"
-        allout="$(tpm2_sealdata -H "${handle}" -I "${secret}" \
-            -O "${tss}.${hashalg}" -o "${tss}.pub.${hashalg}" -g "${alg}" \
-            -G "${TPM_ALG_KEYEDHASH}" -b "${OXT_SEAL_ATTR}" \
-            ${pcr_opts} 2>&1)"
+
+        # Create PCR-bound policy
+        local policy_file="${tss}.policy.dat"
+        local session_ctx="${tss}.session.ctx"
+
+        tpm2_startauthsession -S "${session_ctx}" > /dev/null
         if [ $? -ne 0 ]; then
-            echo "tpm_seal: Failed to seal data (TPM 2.0) "\
-                "using ${hashalg} algorithm:" >&2
+            echo "tpm_seal: Failed to start policy session" >&2
+            tpm_restore_keyfiles "${tss}"
+            return 1
+        fi
+
+        tpm2_policypcr -S "${session_ctx}" -l "${pcr_opts}" -L "${policy_file}" > /dev/null
+        if [ $? -ne 0 ]; then
+            echo "tpm_seal: Failed to bind PCRs to policy" >&2
+            tpm2_flushcontext "${session_ctx}" > /dev/null
+            tpm_restore_keyfiles "${tss}"
+            return 1
+        fi
+
+        tpm2_flushcontext "${session_ctx}" > /dev/null
+
+        # Seal the data using the policy
+        local out_priv="${tss}.priv.${hashalg}"
+        local out_pub="${tss}.pub.${hashalg}"
+
+        allout="$(tpm2_create -C "${handle}" -i "${secret}" -u "${out_pub}" -r "${out_priv}" -L "${policy_file}" 2>&1)"
+        if [ $? -ne 0 ]; then
+            echo "tpm_seal: Failed to seal data (TPM 2.0):" >&2
             echo "${allout}" >&2
             tpm_restore_keyfiles "${tss}"
             return 1
         fi
     else
         local tss_bin="tpm_sealdata"
-
-        # Use the standalone binary if tcsd is not running.
         if ! tcsd_running; then
             tss_bin="${tss_bin}_sa"
         fi
         tpm_save_keyfiles "${tss}"
-        allout="$(${tss_bin} -i "${secret}" -o "${tss}.sha1" \
-            -z ${pcr_opts} 2>&1)"
+        allout="$(${tss_bin} -i "${secret}" -o "${tss}.sha1" -z ${pcr_opts} 2>&1)"
         if [ $? -ne 0 ]; then
             echo "tpm_seal: Failed to seal data (TPM 1.2):" >&2
             echo "${allout}" >&2
@@ -907,25 +977,33 @@ tpm_unseal() {
     shift $((OPTIND-1))
 
     local tss="${root}/$1"
+
     local pcr_opts="$(tpm_pcrs_to_opts $(cat "${tss}.pcrs"))"
 
     if is_tpm_2_0; then
         local alg="$(hashalg_to_alg "${hashalg}")"
         local handle="$(alg_to_handle "${alg}")"
 
-        if [ -z "${alg}" -o -z "${handle}" ] || \
-            ! pcr_bank_exists "${hashalg}"; then
+        if [ -z "${alg}" ] || ! pcr_bank_exists "${hashalg}"; then
             echo "tpm_unseal: Algorithm \"${hashalg}\" is not supported." >&2
             return 1
         fi
+    
+        # Load the sealed object
+        local obj_ctx="${tss}.sealed.ctx"
+        local session_ctx="${tss}.session.ctx"
+        tpm2_load -C "${handle}" -u "${tss}.pub.${hashalg}" -r "${tss}.priv.${hashalg}" -c "${obj_ctx}" > /dev/null 2>&1
+        if [ $? -ne 0 ]; then
+            echo "tpm_unseal: Failed to load sealed object" >&2
+            return 1
+        fi
 
-        { stderr="$(tpm2_unsealdata -H "${handle}" \
-            -n "${tss}.${hashalg}" -u "${tss}.pub.${hashalg}" \
-            -g "${alg}" ${pcr_opts} 2>&1 1>&3 3>&-)"; } 3>&1
-        if [ "$?" -ne 0 ]; then
-            echo "tpm_unseal: Failed to unseal data (TPM 2.0) "\
-                "using ${hashalg} algorithm:" >&2
-            echo "${stderr}" >&2
+        # Unseal
+        tpm2_startauthsession --policy-session -S "${tss}.session.ctx"
+        tpm2_policypcr -S "${session_ctx}" -l "${pcr_opts}" -L "${tss}.policy.dat" > /dev/null
+        { stderr="$(tpm2_unseal -psession:${session_ctx} -c "${obj_ctx}" 2>&1 1>&3 3>&-)"; } 3>&1
+        if [ $? -ne 0 ]; then
+            echo "tpm_unseal: Failed to unseal data (TPM 2.0) using ${hashalg} algorithm, ${stderr}" >&2
             return 1
         fi
     else
