@@ -46,7 +46,7 @@ SRC_URI += " \
     https://uefi.org/sites/default/files/resources/dbxupdate_x64.bin;downloadfilename=dbx.auth \
 "
 
-SRC_URI[sha256sum] = "46ba1f2a0a2ed7aabe20f9b7b2a8d717cb0b514cea83c7a1a24fe25f6b208784"
+SRC_URI[sha256sum] = "2378fdfe035a8373529ce9acb013fc31b59d3a71d4f9bbbc590bfc8536f90787"
 
 USERADD_PACKAGES = "${PN}"
 USERADD_PARAM_${PN} = "--system --no-create-home \
