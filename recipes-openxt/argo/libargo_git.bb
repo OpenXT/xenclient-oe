@@ -10,3 +10,5 @@ S = "${WORKDIR}/git/libargo"
 inherit autotools-brokensep pkgconfig lib_package
 
 EXTRA_OECONF += "--with-pic"
+
+RDEPENDS_${PN} += "argo-module"

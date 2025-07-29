@@ -57,7 +57,6 @@ IMAGE_INSTALL += "\
     openssh \
     packagegroup-base \
     kernel-modules \
-    argo-module \
     libargo \
     libargo-bin \
     xinit \
