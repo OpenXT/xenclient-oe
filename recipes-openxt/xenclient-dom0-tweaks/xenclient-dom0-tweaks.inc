@@ -17,6 +17,7 @@ SRC_URI = "file://enter-s3.sh \
 	   file://unifont.pf2 \
 	   file://firstboot.sh \
 	   file://firstboot.initscript \
+	   file://delayed-seal.initscript \
 	   file://dom0_add_vif.sh \
 	   file://create-ndvm \
 	   file://status-report \
@@ -35,15 +36,27 @@ FILES_${PN} = "/"
 
 inherit update-rc.d
 
-INITSCRIPT_PACKAGES = "${PN}"
+PACKAGE_BEFORE_PN = "delayed-seal"
+INITSCRIPT_PACKAGES = "${PN} delayed-seal"
 
 INITSCRIPT_NAME_${PN} = "firstboot"
 INITSCRIPT_PARAMS_${PN} = "start 70 S ."
+
+INITSCRIPT_NAME_delayed-seal = "delayed-seal"
+INITSCRIPT_PARAMS_delayed-seal = "stop 15 0 6 ."
+
+FILES_delayed-seal = " \
+	${sysconfdir}/init.d/delayed-seal \
+"
+RDEPENDS_${PN} += "delayed-seal"
+RDEPENDS_delayed-seal += "bash"
 
 do_install () {
 	install -d ${D}/etc/init.d
 	install -m 0755 ${WORKDIR}/firstboot.initscript \
 		${D}/etc/init.d/firstboot
+	install -m 0755 ${WORKDIR}/delayed-seal.initscript \
+		${D}${sysconfdir}/init.d/delayed-seal
 
 	install -d ${D}/usr/share/xenclient
 	install -m 0755 ${WORKDIR}/enter-s3.sh \
