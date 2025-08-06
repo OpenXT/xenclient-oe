@@ -38,7 +38,7 @@ SRC_URI[pca.sha256sum] = "e8e95f0733a55e8bad7be0a1413ee23c51fcea64b3c8fa6a786935
 SRC_URI[kekca.sha256sum] = "a1117f516a32cefcba3f2d1ace10a87972fd6bbe8fe0d0b996e09e65d802a503"
 
 # MS is particular about the user-agent, clobber the wget call here
-FETCHCMD_wget = "/usr/bin/env wget -t 2 -T 30 --passive-ftp --user-agent 'curl/7.76.1' --no-check-certificate"
+FETCHCMD_wget = "/usr/bin/env wget -t 2 -T 30 --passive-ftp --user-agent 'Chrome/125.0.0.0' --no-check-certificate"
 
 # download the ever-growing community dbx.auth file, which contains
 # a list of known malicious guids that we should never boot with.
