@@ -1,0 +1,115 @@
+#!/bin/bash
+
+# This script runs on shutdown to check for the marker file.  When found
+# it runs seal-system out of new, upgrade dom0 rootfs.  This allows the
+# TPM interactions to run when all VMs are shutdown to avoid mmio
+# snooping attacks.
+
+log() {
+	logger -t delayed-seal -- "$@"
+}
+
+err() {
+	log "Error:" "$@"
+	exit 1
+}
+
+case "$1" in
+	stop)
+		;;
+	*)
+		log "called with '$1' - exiting"
+		exit 0;
+		;;
+esac
+
+if [ ! -e /tmp/upgrade-delayed-seal ] ; then
+	log "Sealing not requested"
+	exit 0;
+fi
+
+log "Sealing requested"
+
+DOM0_MOUNT=/mnt/upgrade/dom0
+ROOT_DEV=/dev/xenclient/root
+
+do_mount() {
+	mount "$@"
+}
+
+mount_dom0() {
+    local ROOT="$1"
+    local tmpfsopts="size=64M"
+    if [ "$( getenforce )" = "Enforcing" ] ; then
+        tmpfsopts="$tmpfsopts,rootcontext=system_u:object_r:tmp_t:s0"
+    fi
+
+    do_mount -o ro ${ROOT} ${DOM0_MOUNT} &&
+    do_mount -o bind /proc ${DOM0_MOUNT}/proc &&
+    do_mount -o bind /sys ${DOM0_MOUNT}/sys &&
+    do_mount -o bind /dev ${DOM0_MOUNT}/dev &&
+    do_mount -t tmpfs -o $tmpfsopts tmpfs ${DOM0_MOUNT}/tmp &&
+    do_mount /dev/xenclient/boot ${DOM0_MOUNT}/boot/system &&
+    do_mount -o user_xattr /dev/xenclient/storage ${DOM0_MOUNT}/storage &&
+    if grep -qs "^securityfs " /proc/mounts ; then
+        do_mount -o bind /sys/kernel/security ${DOM0_MOUNT}/sys/kernel/security ||
+            return 1
+    fi &&
+    if grep -qs "^selinuxfs " /proc/mounts ; then
+        do_mount -o bind /sys/fs/selinux ${DOM0_MOUNT}/sys/fs/selinux ||
+            return 1
+    fi
+}
+
+do_umount() {
+	umount "$@"
+}
+
+umount_all() {
+	local MNT_ROOT="$1"
+	local MNT
+	local RET=0
+
+	echo "Unmounting all filesystems under '$MNT_ROOT'" >&2
+	for MNT in $(cut -f2 -d' ' /proc/mounts |
+			grep "^$MNT_ROOT/." |
+			sed '1!G;h;$!d') ; do
+		do_umount "${MNT}" || RET=1
+	done
+
+	do_umount "$MNT_ROOT"
+
+	return ${RET}
+}
+
+running_vms=$( xec-vm | grep running | cut -d'|' -f 3 )
+if [ -n "$running_vms" ] ; then
+	log "VMs still running"
+	for uuid in $running_vms ; do
+		log "Destroying $uuid"
+		xec-vm -u "$uuid" destroy
+	done
+	running_vms=$( xec-vm | grep running | cut -d'|' -f 3 )
+	if [ -n "$running_vms" ] ; then
+		log "VMs still running:" $running_vms
+		exit 1
+	else
+		log "VMs now shutdown"
+	fi
+fi
+
+[ -e "$DOM0_MOUNT" ] || mkdir -p "$DOM0_MOUNT"
+
+mount_dom0 "$ROOT_DEV" || err "mount_dom0"
+
+mount --bind /config "$DOM0_MOUNT/config" || err "mount config"
+
+/etc/init.d/trousers stop || err "stopping trousers"
+log "Calling seal-system"
+chroot $DOM0_MOUNT /usr/sbin/seal-system -f -r "$ROOT_DEV" || log "Error: chroot seal-system error"
+# Leave trousers disabled since we are shutting down.
+#/etc/init.d/trousers start
+
+umount_all "$DOM0_MOUNT" || log "error umount_all - continuing"
+
+log "Finished"
