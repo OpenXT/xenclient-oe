@@ -13,9 +13,19 @@ RDEPENDS_${PN}-libxenlight += " varstored-watch"
 PACKAGES += " \
     ${PN}-libxenhypfs \
     ${PN}-libxenhypfs-dev \
+    ${PN}-libxenmanage \
+    ${PN}-libxenmanage-dev \
     "
 
 PROVIDES =+ "virtual/xenstored"
+
+FILES_${PN}-libxenmanage = "${libdir}/libxenmanage.so.*"
+FILES_${PN}-libxenmanage-dev = " \
+    ${libdir}/libxenmanage.so \
+    ${libdir}/pkgconfig/xenmanage.pc \
+    ${datadir}/pkgconfig/xenmanage.pc \
+"
+
 
 # OpenXT uses init scripts rather than systemd
 FILES_${PN}-console += "${INIT_D_DIR}/xenconsoled"
