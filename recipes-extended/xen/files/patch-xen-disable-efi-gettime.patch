@@ -10,6 +10,8 @@ Disable EFI rtc for x86"):
 hope that this driver will work - it won't, and your machine is likely
 to crash."
 
+Modified by rogersc to apply to refactor on xen 4.21
+
 Signed-off-by: Ross Lagerwall <ross.lagerwall@xxxxxxxxxx>
 ---
  xen/arch/x86/time.c | 9 +++++++--
@@ -17,31 +19,51 @@ Signed-off-by: Ross Lagerwall <ross.lagerwall@xxxxxxxxxx>
 
 --- a/xen/arch/x86/time.c
 +++ b/xen/arch/x86/time.c
-@@ -1084,20 +1084,25 @@ static void __get_cmos_time(struct rtc_t
-         rtc->year += 100;
+@@ -1552,6 +1552,8 @@ static const char *__init wallclock_type
+     return "";
  }
  
-+/* EFI's GetTime() is frequently broken so don't use it by default. */
 +#undef USE_EFI_GET_TIME
 +
- static unsigned long get_cmos_time(void)
+ static int __init cf_check parse_wallclock(const char *arg)
  {
--    unsigned long res, flags;
-+    unsigned long flags;
-     struct rtc_time rtc;
-     unsigned int seconds = 60;
-     static bool __read_mostly cmos_rtc_probe;
-     boolean_param("cmos-rtc-probe", cmos_rtc_probe);
- 
+     wallclock_source = WALLCLOCK_UNSET;
+@@ -1570,12 +1572,14 @@ static int __init cf_check parse_wallclo
+     }
+     else if ( !strcmp("cmos", arg) )
+         wallclock_source = WALLCLOCK_CMOS;
 +#ifdef USE_EFI_GET_TIME
-     if ( efi_enabled(EFI_RS) )
+     else if ( !strcmp("efi", arg) )
+         /*
+          * Checking if run-time services are available must be done after
+          * command line parsing.
+          */
+         wallclock_source = WALLCLOCK_EFI;
++#endif
+     else
+         return -EINVAL;
+ 
+@@ -1597,11 +1601,13 @@ static void __init probe_wallclock(void)
+         wallclock_source = WALLCLOCK_CMOS;
+         return;
+     }
++#ifdef USE_EFI_GET_TIME
+     if ( efi_enabled(EFI_RS) && efi_get_time() )
      {
--        res = efi_get_time();
-+        unsigned long res = efi_get_time();
-         if ( res )
-             return res;
+         wallclock_source = WALLCLOCK_EFI;
+         return;
      }
 +#endif
  
-     if ( likely(!(acpi_gbl_FADT.boot_flags & ACPI_FADT_NO_CMOS_RTC)) )
-         cmos_rtc_probe = false;
+     panic("No usable wallclock found, probed:%s%s%s\n%s",
+           !opt_cmos_rtc_probe && !efi_enabled(EFI_RS) ? " None" : "",
+@@ -1624,6 +1630,9 @@ static unsigned long get_wallclock_time(
+     case WALLCLOCK_CMOS:
+         return cmos_rtc_read();
+ 
++    // Leaving this in to satisfy the switch, but wallclock_source
++    // should be impossible to set to WALLCLOCK_EFI with the other
++    // preprocessor guards
+     case WALLCLOCK_EFI:
+         return efi_get_time();
+ 

@@ -9,7 +9,7 @@ Signed-off-by: Tamas K Lengyel <lengyelt@ainfosec.com>
 
 --- a/xen/common/efi/boot.c
 +++ b/xen/common/efi/boot.c
-@@ -66,8 +66,17 @@ typedef EFI_STATUS
+@@ -68,8 +68,17 @@ typedef EFI_STATUS
      IN const VOID *Buffer,
      IN UINT32 Size);
  
@@ -26,17 +26,82 @@ Signed-off-by: Tamas K Lengyel <lengyelt@ainfosec.com>
 +    EFI_SHIM_LOCK_MEASURE Measure;
  } EFI_SHIM_LOCK_PROTOCOL;
  
- struct _EFI_APPLE_PROPERTIES;
-@@ -1265,7 +1274,7 @@ void EFIAPI __init noreturn efi_start(EF
-     unsigned int i, argc;
-     CHAR16 **argv, *file_name, *cfg_file_name = L"openxt.cfg", *options = NULL;
-     UINTN gop_mode = ~0;
+ typedef struct _SHIM_IMAGE_LOADER {
+@@ -1057,49 +1066,20 @@ static UINTN __init efi_find_gop_mode(EF
+     return gop_mode;
+ }
+ 
+-static void __init efi_verify_kernel(EFI_HANDLE ImageHandle)
++static void __init efi_verify_kernel(EFI_HANDLE ImageHandle, EFI_SHIM_LOCK_PROTOCOL *shim_lock)
+ {
+-    static EFI_GUID __initdata shim_image_guid = SHIM_IMAGE_LOADER_GUID;
+-    static EFI_GUID __initdata shim_lock_guid = SHIM_LOCK_PROTOCOL_GUID;
+-    SHIM_IMAGE_LOADER *shim_loader;
+-    EFI_HANDLE loaded_kernel = NULL;
 -    EFI_SHIM_LOCK_PROTOCOL *shim_lock;
+     EFI_STATUS status;
+-    bool verified = false;
+-
+-    /* Look for SHIM_IMAGE_LOADER first. */
+-    if ( !EFI_ERROR(efi_bs->LocateProtocol(&shim_image_guid, NULL,
+-                                           (void **)&shim_loader)) )
+-    {
+-        status = shim_loader->LoadImage(false, ImageHandle, NULL,
+-                                        (void *)kernel.ptr, kernel.size,
+-                                        &loaded_kernel);
+-        if ( !EFI_ERROR(status) )
+-            verified = true;
+-
+-        /*
+-         * If the kernel was loaded, unload it. We only needed LoadImage() to
+-         * perform verification anyway, and in the case of a failure there may
+-         * still be cleanup needing to be performed.
+-         */
+-        if ( loaded_kernel &&
+-             (!EFI_ERROR(status) || status == EFI_SECURITY_VIOLATION) )
+-            shim_loader->UnloadImage(loaded_kernel);
+-    }
+ 
+     /* Otherwise, fall back to SHIM_LOCK. */
+-    if ( !verified &&
+-         !EFI_ERROR(efi_bs->LocateProtocol(&shim_lock_guid, NULL,
+-                                           (void **)&shim_lock)) &&
+-         shim_lock->Verify(kernel.ptr, kernel.size) == EFI_SUCCESS )
+-        verified = true;
+-
+-    if ( !verified )
++    if ( efi_secureboot_enabled() )
+     {
+-        PrintStr(L"Kernel was not verified\n");
+-
+-        if ( efi_secure_boot )
+-            blexit(L"Refusing to boot unverified kernel with UEFI SecureBoot enabled");
++        if ( (status = shim_lock->Verify(kernel.ptr, kernel.size)) != EFI_SUCCESS )
++            PrintErrMesg(L"Dom0 kernel image could not be verified", status);
++    }
++    else
++    {
++        if ( (status = shim_lock->Measure(kernel.ptr, kernel.size, 4)) != EFI_SUCCESS )
++            PrintErrMesg(L"Dom0 kernel image could not be measured", status);
+     }
+ }
+ 
+@@ -1390,12 +1370,14 @@ void EFIAPI __init noreturn efi_start(EF
+                                       EFI_SYSTEM_TABLE *SystemTable)
+ {
+     static EFI_GUID __initdata loaded_image_guid = LOADED_IMAGE_PROTOCOL;
++    static EFI_GUID __initdata shim_lock_guid = SHIM_LOCK_PROTOCOL_GUID;
+     EFI_LOADED_IMAGE *loaded_image;
+     EFI_STATUS status;
+     unsigned int i;
+     static CHAR16 __initdata str_openxt[] = L"openxt.cfg";
+     CHAR16 *file_name, *cfg_file_name = str_openxt, *options = NULL;
+     UINTN gop_mode = ~0;
 +    EFI_SHIM_LOCK_PROTOCOL *shim_lock = NULL;
      EFI_GRAPHICS_OUTPUT_PROTOCOL *gop = NULL;
      union string section = { NULL }, name;
      bool base_video = false;
-@@ -1359,6 +1368,8 @@ void EFIAPI __init noreturn efi_start(EF
+@@ -1483,6 +1465,8 @@ void EFIAPI __init noreturn efi_start(EF
      PrintStr(L"Xen " XEN_VERSION_STRING XEN_EXTRAVERSION
  	     " (c/s " XEN_CHANGESET ") EFI loader\r\n");
  
@@ -45,7 +110,7 @@ Signed-off-by: Tamas K Lengyel <lengyelt@ainfosec.com>
      efi_arch_relocate_image(0);
  
      if ( use_cfg_file )
-@@ -1400,6 +1411,11 @@ void EFIAPI __init noreturn efi_start(EF
+@@ -1524,6 +1508,11 @@ void EFIAPI __init noreturn efi_start(EF
          }
          else if ( !read_file(dir_handle, cfg_file_name, &cfg, NULL) )
              blexit(L"Configuration file not found.");
@@ -57,7 +122,7 @@ Signed-off-by: Tamas K Lengyel <lengyelt@ainfosec.com>
          pre_parse(&cfg);
  
          if ( section.w )
-@@ -1449,6 +1465,11 @@ void EFIAPI __init noreturn efi_start(EF
+@@ -1578,6 +1567,11 @@ void EFIAPI __init noreturn efi_start(EF
              {
                  read_file(dir_handle, s2w(&name), &ramdisk, NULL);
                  efi_bs->FreePool(name.w);
@@ -69,7 +134,7 @@ Signed-off-by: Tamas K Lengyel <lengyelt@ainfosec.com>
              }
          }
  
-@@ -1459,6 +1480,11 @@ void EFIAPI __init noreturn efi_start(EF
+@@ -1588,6 +1582,11 @@ void EFIAPI __init noreturn efi_start(EF
              {
                  read_file(dir_handle, s2w(&name), &xsm, NULL);
                  efi_bs->FreePool(name.w);
@@ -81,48 +146,33 @@ Signed-off-by: Tamas K Lengyel <lengyelt@ainfosec.com>
              }
          }
  
-@@ -1526,11 +1552,22 @@ void EFIAPI __init noreturn efi_start(EF
+@@ -1646,8 +1645,8 @@ void EFIAPI __init noreturn efi_start(EF
       * device tree through the efi_check_dt_boot function, in this stage
       * verify it.
       */
--    if ( kernel.ptr &&
--         !EFI_ERROR(efi_bs->LocateProtocol(&shim_lock_guid, NULL,
--                                           (void **)&shim_lock)) &&
--         (status = shim_lock->Verify(kernel.ptr, kernel.size)) != EFI_SUCCESS )
--        PrintErrMesg(L"Dom0 kernel image could not be verified", status);
-+    if ( kernel.ptr && shim_lock ) {
-+        if ( efi_secureboot_enabled() )
-+        {
-+            if ( (status = shim_lock->Verify(kernel.ptr, kernel.size))
-+                != EFI_SUCCESS )
-+                PrintErrMesg(L"Dom0 kernel image could not be verified",
-+                             status);
-+        }
-+        else
-+        {
-+            if ( (status = shim_lock->Measure(kernel.ptr, kernel.size, 4))
-+                != EFI_SUCCESS )
-+                PrintErrMesg(L"Dom0 kernel image could not be measured",
-+                             status);
-+        }
-+    }
+-    if ( kernel.ptr && !kernel_verified )
+-        efi_verify_kernel(ImageHandle);
++    if ( kernel.ptr && shim_lock )
++        efi_verify_kernel(ImageHandle, shim_lock);
  
      efi_arch_edd();
  
 --- a/xen/common/efi/runtime.c
 +++ b/xen/common/efi/runtime.c
-@@ -211,6 +211,32 @@ void efi_reset_system(bool warm)
+@@ -214,6 +214,34 @@ void efi_reset_system(bool warm)
      printk(XENLOG_WARNING "EFI: could not reset system (%#lx)\n", status);
  }
  
 +bool efi_secureboot_enabled(void)
 +{
 +    EFI_GUID efi_gv = EFI_GLOBAL_VARIABLE;
++    static CHAR16 __initdata str_SecureBoot[] = L"SecureBoot";
++    static CHAR16 __initdata str_SetupMode[] = L"SetupMode";
 +    UINT8 SecureBoot = 0, SetupMode = 0;
 +    UINTN DataSize = sizeof(SecureBoot);
 +    EFI_STATUS efi_status;
 +
-+    efi_status = efi_rs->GetVariable(L"SecureBoot", &efi_gv, NULL,
++    efi_status = efi_rs->GetVariable(str_SecureBoot, &efi_gv, NULL,
 +                                     &DataSize, &SecureBoot);
 +    if ( EFI_ERROR(efi_status) )
 +        return false;
@@ -130,7 +180,7 @@ Signed-off-by: Tamas K Lengyel <lengyelt@ainfosec.com>
 +    if ( !SecureBoot )
 +        return false;
 +
-+    efi_status = efi_rs->GetVariable(L"SetupMode", &efi_gv, NULL,
++    efi_status = efi_rs->GetVariable(str_SetupMode, &efi_gv, NULL,
 +                                     &DataSize, &SetupMode);
 +    if ( EFI_ERROR(efi_status) )
 +        return false;
@@ -146,11 +196,10 @@ Signed-off-by: Tamas K Lengyel <lengyelt@ainfosec.com>
  const CHAR16 *wmemchr(const CHAR16 *s, CHAR16 c, UINTN n)
 --- a/xen/include/xen/efi.h
 +++ b/xen/include/xen/efi.h
-@@ -44,6 +44,7 @@ int efi_runtime_call(struct xenpf_efi_ru
+@@ -50,5 +50,6 @@ int efi_runtime_call(struct xenpf_efi_ru
  #endif
  int efi_compat_get_info(uint32_t idx, union compat_pf_efi_info *info);
  int efi_compat_runtime_call(struct compat_pf_efi_runtime_call *op);
 +bool efi_secureboot_enabled(void);
  
- #endif /* !__ASSEMBLY__ */
- 
+ #endif /* __XEN_EFI_H__ */
