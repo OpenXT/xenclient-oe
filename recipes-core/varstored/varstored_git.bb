@@ -1,6 +1,6 @@
 SUMMARY = "Package for managing guest EFI variables"
 LICENSE = "BSD"
-LIC_FILES_CHKSUM = "file://LICENSE;md5=4aa0fe4b47a2c3ecbddcbcf6a20f654b"
+LIC_FILES_CHKSUM = "file://LICENSE;md5=4eaeb1d21fb0eea915fc93068fdf00be"
 
 inherit useradd xc-rpcgen-c
 
