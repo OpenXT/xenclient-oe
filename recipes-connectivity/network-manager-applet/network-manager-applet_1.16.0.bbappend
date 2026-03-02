@@ -6,7 +6,6 @@ SRC_URI += " \
     file://always-use-psk-hash.patch \
     file://disable-show-password.patch \
     file://disable-auto-ethernet.patch \
-    file://default-certs-dir.patch \
     file://org.openxt.nmapplet.xml \
 "
 

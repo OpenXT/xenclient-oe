@@ -11,32 +11,14 @@
  #include "nm-default.h"
  
  #include "nm-settings-connection.h"
-@@ -45,6 +47,8 @@
- #define AUTOCONNECT_RETRIES_FOREVER      -1
- #define AUTOCONNECT_RESET_RETRIES_TIMER 300
- 
-+static void update_seen_bssids_db ();
-+
- /*****************************************************************************/
- 
- NMConnection **
-@@ -684,6 +688,8 @@ remove_entry_from_db (NMSettingsConnecti
- 		data = g_key_file_to_data (key_file, &len, &error);
- 		if (data) {
- 			g_file_set_contents (db_file, data, len, &error);
-+			if (!strcmp (db_name, "seen-bssids"))
-+				update_seen_bssids_db ();
- 			g_free (data);
- 		}
- 		if (error) {
 @@ -2491,6 +2497,26 @@ nm_settings_connection_has_seen_bssid (N
  	return !!g_hash_table_lookup (NM_SETTINGS_CONNECTION_GET_PRIVATE (self)->seen_bssids, bssid);
  }
  
-+static void
++void
 +update_seen_bssids_db (void)
 +{
-+	char *argv[6] = { "/usr/bin/nm_sync.sh", "-n", "seen-bssids", "-w", SETTINGS_SEEN_BSSIDS_FILE, NULL };
++	char *argv[6] = { "/usr/bin/nm_sync.sh", "-n", "seen-bssids", "-w", NMSTATEDIR "/seen-bssids", NULL };
 +	int err, stat_loc;
 +
 +	err = fork();
@@ -57,10 +39,29 @@
   * nm_settings_connection_add_seen_bssid:
   * @self: the #NMSettingsConnection
 @@ -2547,6 +2573,7 @@ nm_settings_connection_add_seen_bssid (N
- 	data = g_key_file_to_data (seen_bssids_file, &len, &error);
- 	if (data) {
- 		g_file_set_contents (SETTINGS_SEEN_BSSIDS_FILE, data, len, &error);
-+		update_seen_bssids_db ();
- 		g_free (data);
- 	}
- 	g_key_file_free (seen_bssids_file);
+		priv->seen_bssids = _seen_bssids_hash_new ();
+
+	g_hash_table_add (priv->seen_bssids, g_strdup (seen_bssid));
++	update_seen_bssids_db ();
+
+	if (!priv->kf_db_seen_bssids)
+		return;
+--- a/src/settings/nm-settings-connection.h
++++ b/src/settings/nm-settings-connection.h
+@@ -371,5 +371,6 @@ void _nm_settings_connection_emit_signal_updated_internal (NMSettingsConnection
+                                                            NMSettingsConnectionUpdateReason update_reason);
+ 
+ void _nm_settings_connection_cleanup_after_remove (NMSettingsConnection *self);
++void update_seen_bssids_db ();
+ 
+ #endif /* __NETWORKMANAGER_SETTINGS_CONNECTION_H__ */
+--- a/src/settings/nm-settings.c
++++ b/src/settings/nm-settings.c
+@@ -1205,6 +1205,7 @@ _connection_changed_delete (NMSettings *self,
+ 
+ 	nm_key_file_db_remove_key (priv->kf_db_timestamps, uuid);
+ 	nm_key_file_db_remove_key (priv->kf_db_seen_bssids, uuid);
++	update_seen_bssids_db ();
+ 
+ 	if (   !priv->started
+ 	    || priv->startup_complete_idx)
