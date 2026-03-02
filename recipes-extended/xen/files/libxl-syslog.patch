@@ -67,7 +67,7 @@ PATCHES
  /*
   *  userlookup_helper_getpwnam(libxl__gc*, const char *user,
   *                             struct passwd **pwd_r);
-@@ -2589,7 +2568,7 @@ static void spawn_qmp_proxy(libxl__egc *
+@@ -2372,7 +2351,7 @@ static void spawn_qmp_proxy(libxl__egc *
      const char *dom_path = libxl__xs_get_dompath(gc, dm_domid);
      char **args;
      int nr = 0;
@@ -76,7 +76,7 @@ PATCHES
  
      if (access(STUBDOM_QMP_PROXY_PATH, X_OK) < 0) {
          LOGED(ERROR, guest_domid, "qmp proxy %s is not executable", STUBDOM_QMP_PROXY_PATH);
-@@ -2618,12 +2597,6 @@ static void spawn_qmp_proxy(libxl__egc *
+@@ -2401,12 +2380,6 @@ static void spawn_qmp_proxy(libxl__egc *
      args[nr++] = NULL;
      assert(nr == arraysize);
  
@@ -89,7 +89,7 @@ PATCHES
      null = open("/dev/null", O_RDWR);
      if (null < 0) {
          LOGED(ERROR, guest_domid, "unable to open /dev/null");
-@@ -2636,15 +2609,13 @@ static void spawn_qmp_proxy(libxl__egc *
+@@ -2419,15 +2392,13 @@ static void spawn_qmp_proxy(libxl__egc *
          goto out_close;
      if (!rc) { /* inner child */
          setsid();
@@ -106,22 +106,65 @@ PATCHES
      if (null >= 0)
          close(null);
  out:
-@@ -2854,11 +2825,10 @@ void libxl__spawn_local_dm(libxl__egc *e
+@@ -2649,11 +2620,10 @@ void libxl__spawn_local_dm(libxl__egc *e
+     STATE_AO_GC(dmss->spawn.ao);
  
+     libxl_domain_config *guest_config = dmss->guest_config;
+-    const libxl_domain_create_info *c_info = &guest_config->c_info;
+     const libxl_domain_build_info *b_info = &guest_config->b_info;
+     int rc;
+     const char *dm;
+-    int logfile_w = -1, null = -1;
++    int null = -1;
+     int qmp_probe_fd = -1;
+     bool probe_spawned = false;
+ 
+@@ -2683,12 +2653,6 @@ void libxl__spawn_local_dm(libxl__egc *e
+     if (b_info->device_model_version
+         == LIBXL_DEVICE_MODEL_VERSION_QEMU_XEN) {
+ 
+-        logfile_w = libxl__create_qemu_logfile(
+-            gc, GCSPRINTF("qemu-probe-%s", c_info->name));
+-        if (logfile_w < 0) {
+-            rc = logfile_w;
+-            goto out;
+-        }
+         null = open("/dev/null", O_RDONLY);
+         if (null < 0) {
+             LOGED(ERROR, domid, "unable to open /dev/null");
+@@ -2739,7 +2703,7 @@ void libxl__spawn_local_dm(libxl__egc *e
+             goto out;
+         if (!rc) { /* inner child */
+             setsid();
+-            libxl__exec(gc, null, logfile_w, logfile_w, dm, exec_args, NULL);
++            libxl__exec(gc, null, null, null, dm, exec_args, NULL);
+         }
+         probe_spawned = true;
+     } else {
+@@ -2752,8 +2716,6 @@ out:
+         close(qmp_probe_fd);
+     if (null >= 0)
+         close(null);
+-    if (logfile_w >= 0)
+-        close(logfile_w);
+     if (rc || !probe_spawned)
+         device_model_launch(egc, dmss, rc);
+ }
+@@ -2879,10 +2841,9 @@ static void device_model_launch(libxl__e
+     STATE_AO_GC(dmss->spawn.ao);
      libxl_ctx *ctx = CTX;
      libxl_domain_config *guest_config = dmss->guest_config;
 -    const libxl_domain_create_info *c_info = &guest_config->c_info;
      const libxl_domain_build_info *b_info = &guest_config->b_info;
-     const libxl_vnc_info *vnc = libxl__dm_vnc(guest_config);
      char *path;
 -    int logfile_w, null;
 +    int null;
-     int rc;
      char **args, **arg, **envs;
-     xs_transaction_t t;
-@@ -2929,12 +2899,6 @@ void libxl__spawn_local_dm(libxl__egc *e
-         libxl__xs_printf(gc, XBT_NULL, GCSPRINTF("%s/disable_pf", path),
-                          "%d", !libxl_defbool_val(b_info->u.hvm.xen_platform_pci));
+     int dm_state_fd = -1;
+ 
+@@ -2930,12 +2891,6 @@ static void device_model_launch(libxl__e
+     path = DEVICE_MODEL_XS_PATH(gc, LIBXL_TOOLSTACK_DOMID, domid, "");
+     xs_mkdir(ctx->xsh, XBT_NULL, path);
  
 -    logfile_w = libxl__create_qemu_logfile(gc, GCSPRINTF("qemu-dm-%s",
 -                                                         c_info->name));
@@ -132,7 +175,7 @@ PATCHES
      null = open("/dev/null", O_RDONLY);
      if (null < 0) {
          LOGED(ERROR, domid, "unable to open /dev/null");
-@@ -3012,14 +2976,13 @@ retry_transaction:
+@@ -2994,14 +2949,13 @@ static void device_model_launch(libxl__e
              if (rc)
                  _exit(-1);
          }
@@ -148,7 +191,7 @@ PATCHES
  out:
      if (dm_state_fd >= 0) close(dm_state_fd);
      if (rc)
-@@ -3360,7 +3323,7 @@ void libxl__spawn_qdisk_backend(libxl__e
+@@ -3343,7 +3297,7 @@ void libxl__spawn_qemu_xenpv_backend(lib
      flexarray_t *dm_args, *dm_envs;
      char **args, **envs;
      const char *dm;
@@ -157,8 +200,8 @@ PATCHES
      uint32_t domid = dmss->guest_domid;
  
      dmss_init(dmss);
-@@ -3387,11 +3350,6 @@ void libxl__spawn_qdisk_backend(libxl__e
-     libxl__set_qemu_env_for_xsa_180(gc, dm_envs);
+@@ -3369,11 +3323,6 @@ void libxl__spawn_qemu_xenpv_backend(lib
+ 
      envs = (char **) flexarray_contents(dm_envs);
  
 -    logfile_w = libxl__create_qemu_logfile(gc, GCSPRINTF("qdisk-%u", domid));
@@ -169,7 +212,7 @@ PATCHES
      null = open("/dev/null", O_RDONLY);
      if (null < 0) {
         rc = ERROR_FAIL;
-@@ -3424,13 +3382,12 @@ void libxl__spawn_qdisk_backend(libxl__e
+@@ -3406,13 +3355,12 @@ void libxl__spawn_qemu_xenpv_backend(lib
          goto out;
      if (!rc) { /* inner child */
          setsid();
@@ -258,7 +301,7 @@ PATCHES
 +++ b/tools/libs/light/libxl_internal.h
 @@ -60,6 +60,9 @@
  
- #include <xen-tools/libs.h>
+ #include <xen-tools/common-macros.h>
  
 +/* OpenXT: we use syslog */
 +#include <syslog.h>
@@ -278,7 +321,7 @@ PATCHES
  #include <libxl.h>
  #include <libxl_utils.h>
  #include <libxlutil.h>
-@@ -370,6 +373,8 @@ static void xl_ctx_free(void)
+@@ -374,6 +377,8 @@ static void xl_ctx_free(void)
          free(lockfile);
          lockfile = NULL;
      }
@@ -287,7 +330,7 @@ PATCHES
  }
  
  int main(int argc, char **argv)
-@@ -419,6 +424,11 @@ int main(int argc, char **argv)
+@@ -423,6 +428,11 @@ int main(int argc, char **argv)
          xtl_flags |= XTL_STDIOSTREAM_SHOW_DATE | XTL_STDIOSTREAM_SHOW_PID;
      logger = xtl_createlogger_stdiostream(stderr, minmsglevel, xtl_flags);
      if (!logger) exit(EXIT_FAILURE);
@@ -309,7 +352,7 @@ PATCHES
  
  #include <libxl.h>
  #include <libxl_utils.h>
-@@ -36,10 +37,12 @@ void dolog(const char *file, int line, c
+@@ -40,10 +41,12 @@ void dolog(const char *file, int line, c
      va_start(ap, fmt);
      rc = vasprintf(&s, fmt, ap);
      va_end(ap);
@@ -323,7 +366,7 @@ PATCHES
      free(s);
  }
  
-@@ -250,7 +253,6 @@ void print_bitmap(uint8_t *map, int mapl
+@@ -254,7 +257,6 @@ void print_bitmap(uint8_t *map, int mapl
  
  int do_daemonize(const char *name, const char *pidfile)
  {
@@ -331,7 +374,7 @@ PATCHES
      pid_t child1;
      int nullfd, ret = 0;
  
-@@ -271,23 +270,19 @@ int do_daemonize(const char *name, const char *pidfile)
+@@ -268,24 +270,20 @@ int do_daemonize(const char *name, const
  
      postfork();
  
@@ -352,7 +395,7 @@ PATCHES
 -    dup2(logfile, 1);
 -    dup2(logfile, 2);
  
-+    close(nullfd);
+     close(nullfd);
 +	
 +	CHK_SYSCALL(nullfd = open("/dev/null", O_WRONLY));
 +    assert(nullfd >= 3);
@@ -360,7 +403,7 @@ PATCHES
 +    dup2(nullfd, 1);
 +    dup2(nullfd, 2);
 + 
-     close(nullfd);
++    close(nullfd);
  
      CHK_SYSCALL(daemon(0, 1));
-
+ 

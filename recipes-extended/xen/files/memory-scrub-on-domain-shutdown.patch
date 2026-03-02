@@ -20,6 +20,21 @@ scrub_free_pages (the logic called from the idle loop) is ultimately called on
 boot when the idle loop is initialized, but after the first run, pages are no
 longer scrubbed from this function.
 
+Xen 4.21:
+Added hot/cold scrub to page, and mapped scrubs directly to clear_page for non
+debug builds.  This path is effectively the same as it used to be.
+scrub_one_page()
+ -> clear_domain_page()
+  -> clear_page()
+   -> clear_page_sse2()
+
+scrub_one_page()
+ -> scrub_page_cold() (aliased to clear_page_cold in prod builds)
+  and #define clear_page(_p)      clear_page_cold(_p)
+  -> clear_page_cold()
+   -> clear_page_sse2
+ 
+
 ################################################################################
 CHANGELOG
 ################################################################################
@@ -48,7 +63,7 @@ PATCHES
 
 --- a/xen/common/page_alloc.c
 +++ b/xen/common/page_alloc.c
-@@ -2237,10 +2237,15 @@ void free_xenheap_pages(void *v, unsigne
+@@ -2520,10 +2520,15 @@ void free_xenheap_pages(void *v, unsigne
  
      pg = virt_to_page(v);
  
@@ -56,7 +71,7 @@ PATCHES
 +    /* Scrub the pages here, not in the idle loop */
      for ( i = 0; i < (1u << order); i++ )
 +    {
-+        scrub_one_page(&pg[i]);
++        scrub_one_page(&pg[i], true);
          pg[i].count_info &= ~PGC_xen_heap;
 +    }
  
@@ -65,7 +80,7 @@ PATCHES
  }
  
  #endif  /* CONFIG_SEPARATE_XENHEAP */
-@@ -2493,8 +2498,13 @@ void free_domheap_pages(struct page_info
+@@ -2785,8 +2790,13 @@ void free_domheap_pages(struct page_info
              drop_dom_ref = false;
              scrub = 1;
          }
@@ -74,7 +89,7 @@ PATCHES
 +        /* scrub the pages here, not in the idle loop */
 +        if ( unlikely(scrub) ) {
 +            for ( i = 0; i < (1 << order); i++ ) {
-+                scrub_one_page(&pg[i]);
++                scrub_one_page(&pg[i], true);
 +            }
 +        }
 +        free_heap_pages(pg, order, false);
