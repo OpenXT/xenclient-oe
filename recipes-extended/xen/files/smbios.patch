@@ -29,16 +29,16 @@ PATCHES
 ################################################################################
 --- a/tools/firmware/hvmloader/smbios.c
 +++ b/tools/firmware/hvmloader/smbios.c
-@@ -77,6 +77,8 @@ static void *
+@@ -85,7 +85,7 @@ static void *
  smbios_type_4_init(void *start, unsigned int cpu_number,
                     char *cpu_manufacturer);
  static void *
+-smbios_type_7_init(void *start);
 +smbios_type_7_init(void *start, uint32_t memory_size_mb, int instance);
-+static void *
- smbios_type_11_init(void *start);
  static void *
- smbios_type_16_init(void *start, uint32_t memory_size_mb, int nr_mem_devs);
-@@ -101,6 +103,14 @@ static uint32_t *smbios_pt_addr = NULL;
+ smbios_type_8_init(void *start);
+ static void *
+@@ -121,6 +121,14 @@ static uint32_t *smbios_pt_addr = NULL;
  static uint32_t smbios_pt_length = 0;
  
  static void
@@ -53,26 +53,25 @@ PATCHES
  smbios_pt_init(void)
  {
      const char *s;
-@@ -205,6 +215,7 @@ write_smbios_tables(void *ep, void *star
+@@ -186,6 +194,7 @@ smbios_pt_copy(void *start, uint8_t type
+     {
+         memcpy(start, pts, length);
+         header->handle = handle;
++	 trace_record(header, 0);
+         return start + length;
+     }
+ 
+@@ -243,7 +252,7 @@ write_smbios_tables(void *ep, void *star
      do_struct(smbios_type_3_init(p));
      for ( cpu_num = 1; cpu_num <= vcpus; cpu_num++ )
          do_struct(smbios_type_4_init(p, cpu_num, cpu_manufacturer));
+-    do_struct(smbios_type_7_init(p));
 +    do_struct(smbios_type_7_init(p, memsize, 1));
+     do_struct(smbios_type_8_init(p));
+     do_struct(smbios_type_9_init(p));
      do_struct(smbios_type_11_init(p));
- 
-     /* Each 'memory device' covers up to 16GB of address space. */
-@@ -389,6 +400,9 @@ smbios_type_0_init(void *start, const ch
-     {
-         memcpy(start, pts, length);
-         p->header.handle = SMBIOS_HANDLE_TYPE0;
-+
-+        trace_record(&p->header, 0);
-+
-         return (start + length);
-     }
- 
-@@ -398,6 +412,8 @@ smbios_type_0_init(void *start, const ch
-     p->header.length = sizeof(struct smbios_type_0);
+@@ -443,6 +452,8 @@ smbios_type_0_init(void *start, const ch
+     p->header.length = sizeof(*p);
      p->header.handle = SMBIOS_HANDLE_TYPE0;
  
 +    trace_record(&p->header, 1);
@@ -80,18 +79,8 @@ PATCHES
      p->vendor_str = 1;
      p->version_str = 2;
      p->starting_address_segment = 0xe800;
-@@ -448,6 +464,9 @@ smbios_type_1_init(void *start, const ch
-     {
-         memcpy(start, pts, length);
-         p->header.handle = SMBIOS_HANDLE_TYPE1;
-+
-+        trace_record(&p->header, 0);
-+
-         return (start + length);
-     }
- 
-@@ -457,6 +476,8 @@ smbios_type_1_init(void *start, const ch
-     p->header.length = sizeof(struct smbios_type_1);
+@@ -500,6 +511,8 @@ smbios_type_1_init(void *start, const ch
+     p->header.length = sizeof(*p);
      p->header.handle = SMBIOS_HANDLE_TYPE1;
  
 +    trace_record(&p->header, 1);
@@ -99,27 +88,17 @@ PATCHES
      p->manufacturer_str = 1;
      p->product_name_str = 2;
      p->version_str = 3;
-@@ -517,6 +538,8 @@ smbios_type_2_init(void *start)
-                 *((uint16_t*)ptr) = SMBIOS_HANDLE_TYPE3;
+@@ -563,6 +576,8 @@ smbios_type_2_init(void *start)
+                 p->chassis_handle = SMBIOS_HANDLE_TYPE3;
          }
  
 +        trace_record(&p->header, 0);
 +
-         return (start + length);
+         return next;
      }
  
-@@ -602,6 +625,9 @@ smbios_type_3_init(void *start)
-     {
-         memcpy(start, pts, length);
-         p->header.handle = SMBIOS_HANDLE_TYPE3;
-+
-+        trace_record(&p->header, 0);
-+
-         return (start + length);
-     }
-     
-@@ -611,6 +637,8 @@ smbios_type_3_init(void *start)
-     p->header.length = sizeof(struct smbios_type_3);
+@@ -660,6 +675,8 @@ smbios_type_3_init(void *start)
+     p->header.length = sizeof(*p);
      p->header.handle = SMBIOS_HANDLE_TYPE3;
  
 +    trace_record(&p->header, 1);
@@ -127,8 +106,8 @@ PATCHES
      p->manufacturer_str = ++counter;
      p->type = 0x01; /* other */
      p->version_str = 0;
-@@ -662,6 +690,8 @@ smbios_type_4_init(
-     p->header.length = sizeof(struct smbios_type_4);
+@@ -714,6 +731,8 @@ smbios_type_4_init(
+     p->header.length = sizeof(*p);
      p->header.handle = SMBIOS_HANDLE_TYPE4 + cpu_number;
  
 +    trace_record(&p->header, 1);
@@ -136,7 +115,7 @@ PATCHES
      p->socket_designation_str = 1;
      p->processor_type = 0x03; /* CPU */
      p->processor_family = 0x01; /* other */
-@@ -680,7 +710,7 @@ smbios_type_4_init(
+@@ -732,7 +751,7 @@ smbios_type_4_init(
  
      p->status = 0x41; /* socket populated, CPU enabled */
      p->upgrade = 0x01; /* other */
@@ -145,16 +124,20 @@ PATCHES
      p->l2_cache_handle = 0xffff; /* No cache information structure provided. */
      p->l3_cache_handle = 0xffff; /* No cache information structure provided. */
  
-@@ -700,6 +730,41 @@ smbios_type_4_init(
-     return start+1;
- }
+@@ -754,14 +773,37 @@ smbios_type_4_init(
  
-+/* Type 7 -- Cache Information */
-+static void *
+ /* Type 7 -- Cache Information */
+ static void *
+-smbios_type_7_init(void *start)
 +smbios_type_7_init(void *start, uint32_t memory_size_mb, int instance)
-+{
+ {
+-    /* Specification says Type 7 table has length of 13h for v2.1+. */
+-    BUILD_BUG_ON(sizeof(struct smbios_type_7) != 19);
 +    struct smbios_type_7 *p = (struct smbios_type_7 *)start;
-+
+ 
+-    /* Only present when passed in. */
+-    return smbios_pt_copy(start, 7, SMBIOS_HANDLE_TYPE7,
+-                          sizeof(struct smbios_type_7));
 +    memset(p, 0, sizeof(*p));
 +
 +    p->header.type = 7;
@@ -166,12 +149,12 @@ PATCHES
 +    p->socket_designation_str = 1;
 +    /* Cache level 1; Not socketed; Write Through, Enabled; Internal */
 +    p->cache_configuration = 0x0080;
-+    p->max_cache_size = 2 * 1024; /* @TODO: Consider switching based on memory_size_mb */
++    p->maximum_cache_size = 2 * 1024; /* @TODO: Consider switching based on memory_size_mb */
 +    p->installed_size = 2 * 1024;
-+    p->supported_sram_type = 0x2; /* Unknown */
-+    p->current_sram_type = 0x2; /* Unknown */
++    p->supported_SRAM_type = 0x2; /* Unknown */
++    p->current_SRAM_type = 0x2; /* Unknown */
 +    p->cache_speed = 0; /* Unknown */
-+    p->err_correction_type = 0x2; /* Unknown */
++    p->error_connection_type = 0x2; /* Unknown */
 +    p->system_cache_type =  0x2; /* Unknown */
 +    p->associativity = 0x2; /* Unknown */
 +
@@ -182,43 +165,29 @@ PATCHES
 +
 +    *((uint8_t *)start) = 0;
 +    return start+1;
-+}
-+
- /* Type 11 -- OEM Strings */
- static void *
- smbios_type_11_init(void *start) 
-@@ -716,6 +781,9 @@ smbios_type_11_init(void *start)
-     {
-         memcpy(start, pts, length);
-         p->header.handle = SMBIOS_HANDLE_TYPE11;
-+
-+        trace_record(&p->header, 0);
-+
-         return (start + length);
-     }
+ }
  
-@@ -723,6 +791,8 @@ smbios_type_11_init(void *start)
-     p->header.length = sizeof(struct smbios_type_11);
+ /* Type 8 -- Port Connector Information */
+@@ -809,6 +851,8 @@ smbios_type_11_init(void *start)
+     p->header.length = sizeof(*p);
      p->header.handle = SMBIOS_HANDLE_TYPE11;
  
 +    trace_record(&p->header, 1);
 +
      p->count = 0;
  
-     start += sizeof(struct smbios_type_11);
-@@ -761,7 +831,9 @@ smbios_type_16_init(void *start, uint32_
-     p->header.type = 16;
+     start += sizeof(*p);
+@@ -851,6 +895,8 @@ smbios_type_16_init(void *start, uint32_
      p->header.handle = SMBIOS_HANDLE_TYPE16;
-     p->header.length = sizeof(struct smbios_type_16);
--    
-+
+     p->header.length = sizeof(*p);
+ 
 +    trace_record(&p->header, 1);
 +
      p->location = 0x01; /* other */
      p->use = 0x03; /* system memory */
      p->error_correction = 0x06; /* Multi-bit ECC to make Microsoft happy */
-@@ -787,6 +859,8 @@ smbios_type_17_init(void *start, uint32_
-     p->header.length = sizeof(struct smbios_type_17);
+@@ -879,6 +925,8 @@ smbios_type_17_init(void *start, uint32_
+     p->header.length = sizeof(*p);
      p->header.handle = SMBIOS_HANDLE_TYPE17 + instance;
  
 +    trace_record(&p->header, 1);
@@ -226,8 +195,8 @@ PATCHES
      p->physical_memory_array_handle = 0x1000;
      p->total_width = 64;
      p->data_width = 64;
-@@ -822,6 +896,8 @@ smbios_type_19_init(void *start, uint32_
-     p->header.length = sizeof(struct smbios_type_19);
+@@ -917,6 +965,8 @@ smbios_type_19_init(void *start, uint32_
+     p->header.length = sizeof(*p);
      p->header.handle = SMBIOS_HANDLE_TYPE19 + instance;
  
 +    trace_record(&p->header, 1);
@@ -235,8 +204,8 @@ PATCHES
      p->starting_address = instance << 24;
      p->ending_address = p->starting_address + (memory_size_mb << 10) - 1;
      p->memory_array_handle = 0x1000;
-@@ -844,6 +920,8 @@ smbios_type_20_init(void *start, uint32_
-     p->header.length = sizeof(struct smbios_type_20);
+@@ -942,6 +992,8 @@ smbios_type_20_init(void *start, uint32_
+     p->header.length = sizeof(*p);
      p->header.handle = SMBIOS_HANDLE_TYPE20 + instance;
  
 +    trace_record(&p->header, 1);
@@ -244,18 +213,8 @@ PATCHES
      p->starting_address = instance << 24;
      p->ending_address = p->starting_address + (memory_size_mb << 10) - 1;
      p->memory_device_handle = 0x1100 + instance;
-@@ -873,6 +951,9 @@ smbios_type_22_init(void *start)
-     {
-         memcpy(start, pts, length);
-         p->header.handle = SMBIOS_HANDLE_TYPE22;
-+
-+        trace_record(&p->header, 0);
-+
-         return (start + length);
-     }
- 
-@@ -886,6 +967,8 @@ smbios_type_22_init(void *start)
-     p->header.length = sizeof(struct smbios_type_22);
+@@ -982,6 +1034,8 @@ smbios_type_22_init(void *start)
+     p->header.length = sizeof(*p);
      p->header.handle = SMBIOS_HANDLE_TYPE22;
  
 +    trace_record(&p->header, 1);
@@ -263,27 +222,17 @@ PATCHES
      p->location_str = 1;
      p->manufacturer_str = 2;
      p->manufacturer_date_str = 3;
-@@ -934,6 +1017,9 @@ smbios_type_32_init(void *start)
+@@ -1084,6 +1138,9 @@ smbios_type_32_init(void *start)
      p->header.type = 32;
-     p->header.length = sizeof(struct smbios_type_32);
+     p->header.length = sizeof(*p);
      p->header.handle = SMBIOS_HANDLE_TYPE32;
 +
 +    trace_record(&p->header, 1);
 +
      memset(p->reserved, 0, 6);
      p->boot_status = 0; /* no errors detected */
-     
-@@ -955,6 +1041,9 @@ smbios_type_39_init(void *start)
-     {
-         memcpy(start, pts, length);
-         p->header.handle = SMBIOS_HANDLE_TYPE39;
-+
-+        trace_record(&p->header, 0);
-+
-         return (start + length);
-     }
  
-@@ -967,15 +1056,15 @@ smbios_type_vendor_oem_init(void *start)
+@@ -1114,15 +1171,15 @@ smbios_type_vendor_oem_init(void *start)
  {
      uint32_t *sep = smbios_pt_addr;
      uint32_t total = 0;
@@ -302,7 +251,7 @@ PATCHES
          {
              /* Vendor/OEM table, copy it in. Note the handle values cannot
               * be changed since it is unknown what is in each of these tables
-@@ -983,12 +1072,13 @@ smbios_type_vendor_oem_init(void *start)
+@@ -1130,12 +1187,13 @@ smbios_type_vendor_oem_init(void *start)
               * means a slight risk of collision with the tables above but that
               * would have to be dealt with on a case by case basis.
               */
@@ -318,13 +267,13 @@ PATCHES
      }
  
      return start;
-@@ -1006,6 +1096,8 @@ smbios_type_127_init(void *start)
-     p->header.length = sizeof(struct smbios_type_127);
+@@ -1153,6 +1211,8 @@ smbios_type_127_init(void *start)
+     p->header.length = sizeof(*p);
      p->header.handle = SMBIOS_HANDLE_TYPE127;
  
 +    trace_record(&p->header, 1);
 +
-     start += sizeof(struct smbios_type_127);
+     start += sizeof(*p);
      *((uint16_t *)start) = 0;
      return start + 2;
 --- a/tools/firmware/hvmloader/smbios_types.h
@@ -340,25 +289,3 @@ PATCHES
  /* SMBIOS entry point -- must be written to a 16-bit aligned address
     between 0xf0000 and 0xfffff. 
   */
-@@ -149,6 +153,21 @@ struct smbios_type_4 {
-     uint8_t part_number_str;
- } __attribute__ ((packed));
- 
-+/* SMBIOS type 7 - Cache Information */
-+struct smbios_type_7 {
-+    struct smbios_structure_header header;
-+    uint8_t socket_designation_str;
-+    uint16_t cache_configuration;
-+    uint16_t max_cache_size;
-+    uint16_t installed_size;
-+    uint16_t supported_sram_type;
-+    uint16_t current_sram_type;
-+    uint8_t cache_speed;
-+    uint8_t err_correction_type;
-+    uint8_t system_cache_type;
-+    uint8_t associativity;
-+} __attribute__ ((packed));
-+
- /* SMBIOS type 11 - OEM Strings */
- struct smbios_type_11 {
-     struct smbios_structure_header header;

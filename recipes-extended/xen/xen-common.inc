@@ -52,7 +52,6 @@ SRC_URI_append = " \
     file://shim-support-for-shim-lock-measure.patch \
     file://efi-require-shim.patch \
     file://tboot-measure-and-launch-from-xen-efi.patch \
-    file://efi-load-options-no-default-image-name.patch \
     file://argo-add-viptables.patch \
     file://argo-quiet-xsm-check-during-init.patch \
     file://libxl-seabios-ipxe.patch \
@@ -63,7 +62,6 @@ SRC_URI_append = " \
     file://libxl-add-ovmf-varstored.patch \
     file://libxl-disable-dom0-qemu.patch \
     file://libxl-xen-disable-dom0-qemu.patch \
-    file://0001-libxl-Enable-stubdom-cdrom-changing.patch \
     file://libxl-add-xen-acpi-pm.patch \
     file://0001-vchan-socket-proxy-add-reconnect-marker-support.patch \
     file://0002-tools-libxl-enable-in-band-reconnect-marker-for-stub.patch \
