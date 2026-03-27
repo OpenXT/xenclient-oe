@@ -29,6 +29,7 @@ require manager.inc
 
 SRC_URI += " \
     file://updatemgr.initscript \
+    file://updatemgr-verify-packages.patch \
 "
 
 S = "${WORKDIR}/git/updatemgr"

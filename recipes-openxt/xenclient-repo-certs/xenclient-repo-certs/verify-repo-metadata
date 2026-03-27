@@ -5,15 +5,22 @@
 PROD_CERT_FILE="/usr/share/xenclient/repo-certs/prod/cert.pem"
 DEV_CERT_FILE="/usr/share/xenclient/repo-certs/dev/cert.pem"
 
+VERIFY_PACKAGES=0
+
 parse_args()
 {
     ALLOW_DEV_KEY=0
 
-    if [ "$1" = "-d" ] ; then
-        ALLOW_DEV_KEY=1
-        shift
-    fi
+    while getopts "dp" opt ; do
+        case "$opt" in
+        d) ALLOW_DEV_KEY=1 ;;
+        p) VERIFY_PACKAGES=1 ;;
+        \?) die "unknown option" ;;
+        *) die "getopts error" ;;
+        esac
+    done
 
+    shift "$(( OPTIND - 1 ))"
     if [ $# -ne 1 ] ; then
         usage
         exit 2
@@ -29,7 +36,7 @@ parse_args()
 usage()
 {
     cat <<EOF
-Usage: $(basename $0) [-d] REPOSITORY_DIR
+Usage: $(basename $0) [-d] [-p] REPOSITORY_DIR
 
 Verifies the integrity of the metadata files (XC-REPOSITORY, XC-PACKAGES and
 XC-SIGNATURE) in a XenClient repository:
@@ -39,7 +46,7 @@ XC-SIGNATURE) in a XenClient repository:
 
 Note that this only verifies the integrity of the metadata files: it does not
 verify that the packages in the repository match the checksums listed in
-XC-PACKAGES.
+XC-PACKAGES.  The -p option enables package checksum checking.
 
 The -d option should only be used for testing purposes. It allows signatures
 created with the XenClient development signing certificate in addition to
@@ -48,10 +55,41 @@ signatures created with the XenClient production signing certificate.
 Exit status:
 
     0  metadata is valid
-    1  metadata is valid except for invalid signature
+    1  invalid signature
     2  metadata is not valid or another error occurred
 
 EOF
+}
+
+get_hasher()
+{
+    case "${#1}" in
+    64)
+        echo "sha256sum"
+        ;;
+    96)
+        echo "sha384sum"
+        ;;
+    128)
+        echo "sha512sum"
+        ;;
+    *)
+        die "invalid checksum length"
+        ;;
+    esac
+}
+
+verify_xc_packages_contents()
+{
+    local hasher
+    while read n sz hash _ _ file _ ; do
+        hasher=$( get_hasher "$hash" )
+        [ "$sz" = "$( du -b "$REPOSITORY_DIR/$file" | awk '{print $1}' )" ] ||
+            die "file size mismatch $n $file"
+        [ "$( "$hasher" "$REPOSITORY_DIR/$file" | awk '{print $1}' )" = "$hash" ] ||
+            die "hash mismatch $n $file"
+    done < "$PACKAGES_FILE"
+
 }
 
 verify_xc_packages()
@@ -62,7 +100,8 @@ verify_xc_packages()
     [ -n "${PACKAGES_CHECKSUM}" ] ||
         die "XC-PACKAGES checksum MISSING"
 
-    local FILE_CHECKSUM=$(sha256sum "${PACKAGES_FILE}" | cut -f1 -d' ') ||
+    local hasher="$( get_hasher "${PACKAGES_CHECKSUM}" )"
+    local FILE_CHECKSUM=$( "$hasher" "${PACKAGES_FILE}" | cut -f1 -d' ') ||
         die "error calculating checksum of '${PACKAGES_FILE}'"
 
     [ -n "${FILE_CHECKSUM}" ] ||
@@ -116,11 +155,14 @@ die()
 
 parse_args "$@"
 
+# Verify XC-REPOSITORY against signature in XC-SIGNATURE.
+verify_xc_repository
+
 # Verify XC-PACKAGES against checksum in XC-REPOSITORY.
 verify_xc_packages
 
-# Verify XC-REPOSITORY against signature in XC-SIGNATURE. Must be done last,
-# so we only exit with status 1 if metadata is valid except for signature.
-verify_xc_repository
+if [ "$VERIFY_PACKAGES" -eq 1 ] ; then
+    verify_xc_packages_contents
+fi
 
 exit 0
