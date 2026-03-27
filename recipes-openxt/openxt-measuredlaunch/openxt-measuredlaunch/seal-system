@@ -156,20 +156,47 @@ forward)
     pcr_forward=()
     if ! contains_only "${pcr8}" "0"; then
         # PCR4 is first extended with the digest of EV_SEPARATOR
+        # It may also first extend the "Calling EFI Application from Boot Option" string, depending on the system
         # See TCG EFI Protocol Specification 5.2 Crypto Agile Log Entry Format
         ev_separator="$(tpm_get_ev_separator)"
 
-        pcr4=$(hash_extend 0 "${ev_separator}" "${hashalg}")
+        # Get current PCR4 value to check if ev_string should be extended
+        current_pcr4="$(tpm_get_pcr 4)"
+        
+        # Calculate PCR4 with ev_string extension
+        ev_string="$(printf "Calling EFI Application from Boot Option" | sha256sum | awk '{print $1}')"
+        pcr4_with_ev=$(hash_extend 0 "${ev_string}" "${hashalg}")
+        pcr4_with_ev=$(hash_extend "${pcr4_with_ev}" "${ev_separator}" "${hashalg}")
 
         hash=$(pesign -h -d "${hashalg}" -i "${pcr4_objs[0]}" | awk '{ print $2 }')
-        pcr4=$(hash_extend "${pcr4}" "${hash}" "${hashalg}") ||
+        pcr4_with_ev=$(hash_extend "${pcr4_with_ev}" "${hash}" "${hashalg}") ||
             err "failed to calculate pcr4"
 
         for o in ${pcr4_objs[@]:1}; do
             hash=$(${hashalg}sum "${o}" | awk '{ print $1 }')
-            pcr4=$(hash_extend "${pcr4}" "${hash}" "${hashalg}") ||
+            pcr4_with_ev=$(hash_extend "${pcr4_with_ev}" "${hash}" "${hashalg}") ||
                 err "failed to calculate pcr4"
         done
+
+        # Use the PCR4 calculation with string extended only if it matches the current PCR value
+        # Rather than checking the value and "guessing", it would be better to check the PCR4 event log to see if the ev_string was extended.
+        # This log is currently not available to us, but it may be worth it in the future to investigate this further.
+        if [[ "${pcr4_with_ev}" == *"${current_pcr4}"* ]]; then
+            pcr4="${pcr4_with_ev}"
+        else
+            # Calculate PCR4 without ev_string extension
+            pcr4=$(hash_extend 0 "${ev_separator}" "${hashalg}")
+
+            hash=$(pesign -h -d "${hashalg}" -i "${pcr4_objs[0]}" | awk '{ print $2 }')
+            pcr4=$(hash_extend "${pcr4}" "${hash}" "${hashalg}") ||
+                err "failed to calculate pcr4"
+
+            for o in ${pcr4_objs[@]:1}; do
+                hash=$(${hashalg}sum "${o}" | awk '{ print $1 }')
+                pcr4=$(hash_extend "${pcr4}" "${hash}" "${hashalg}") ||
+                    err "failed to calculate pcr4"
+            done
+        fi
 
         pcr8="0"
 
@@ -186,8 +213,8 @@ forward)
                 err "failed to calculate pcr8"
         done
 
-        pcr_forward[4]=":${pcr4}"
-        pcr_forward[8]=":${pcr8}"
+        pcr_forward[4]="=${pcr4}"
+        pcr_forward[8]="=${pcr8}"
     fi
 
     if pcr_in_selection 15 ; then
@@ -208,7 +235,7 @@ forward)
         pcr15=$(hash_extend 0 ${root_hash} ${hashalg}) ||
                 err "failed to hash root device"
 
-        pcr_forward[15]=":${pcr15}"
+        pcr_forward[15]="=${pcr15}"
     fi
 
     # Calculate DRTM PCRs if set (ie. PCR17 is not all f)
@@ -225,9 +252,9 @@ forward)
         pcr18=$(echo $pcrs | awk '{ print $2 }')
         pcr19=$(echo $pcrs | awk '{ print $3 }')
 
-        pcr_forward[17]=":${pcr17}"
-        pcr_forward[18]=":${pcr18}"
-        pcr_forward[19]=":${pcr19}"
+        pcr_forward[17]="=${pcr17}"
+        pcr_forward[18]="=${pcr18}"
+        pcr_forward[19]="=${pcr19}"
     fi
 
     rm -f /boot/system/tpm/forward_pcr.lst
