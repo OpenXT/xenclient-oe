@@ -42,7 +42,8 @@ SRC_URI += "file://compile-time-stubdom-flag.patch \
             file://net-Remove-unused-network-options.patch \
             file://round-pci-region-sizes.patch \
             file://ac97-compatibility.patch \
-            file://0001-vnc-stubs-Allow-vnc-none.patch \
+	    file://0001-vnc-stubs-Allow-vnc-none.patch \
+            file://0001-xen-hvm-Allow-disabling-buffer.patch \
             "
 
 SRC_URI[md5sum] = "5862fc984bb955c4c24427d3bceddca5"
@@ -63,12 +64,14 @@ FILES_${PN}-dbg += "/usr/lib/.debug/* /usr/libexec/.debug/*"
 FILES_${PN}-extra-keymaps = "/usr/share/qemu/keymaps/*"
 FILES_${PN}-extra-roms = "/usr/share/qemu/*"
 INSANE_SKIP_${PN}-extra-roms = "arch"
-FILES_${PN}-utils = "/usr/libexec/* \
+FILES_${PN}-utils = "/usr/libexec \
                      /usr/bin/qemu-pr-helper \
 "
+FILES_${PN}-icons = "/usr/share/icons"
 
 PACKAGES += "${PN}-extra-keymaps ${PN}-extra-roms"
 PACKAGES =+ "${PN}-utils"
+PACKAGES =+ "${PN}-icons"
 
 EXTRA_OECONF += " \
     --target-list=i386-softmmu \

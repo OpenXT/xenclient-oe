@@ -1,0 +1,54 @@
+From ff031d2eb2ff50a321f059418a93f80a78637999 Mon Sep 17 00:00:00 2001
+From: Jason Andryuk <jandryuk@gmail.com>
+Date: Thu, 9 Dec 2021 13:54:29 -0500
+Subject: [PATCH] xen-hvm: Allow disabling buffer
+
+commit f37f29d31488 "xen: slightly simplify bufioreq handling" hard
+coded setting req.count = 1 during initial field setup before the main
+loop.  This missed a subtltey that an early exit from the loop when
+there are no ioreqs to process, would have req.count == 0 for the return
+value.  Would handle_buffered_io() would then remove
+state->buffered_io_timer.  Instead handle_buffered_iopage() is basically
+always returning true and handle_buffered_io() always re-setting the timer.
+
+Restore the disabling of the timer by introducing a new handled_ioreq
+boolean and use as the return value.  The named variable will more
+clearly show the intent of the code.
+
+Signed-off-by: Jason Andryuk <jandryuk@gmail.com>
+---
+ hw/i386/xen/xen-hvm.c | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/hw/i386/xen/xen-hvm.c b/hw/i386/xen/xen-hvm.c
+index 482be95415..da9d926919 100644
+--- a/hw/i386/xen/xen-hvm.c
++++ b/hw/i386/xen/xen-hvm.c
+@@ -1087,10 +1087,11 @@ static void handle_ioreq(XenIOState *state, ioreq_t *req)
+     }
+ }
+ 
+-static int handle_buffered_iopage(XenIOState *state)
++static bool handle_buffered_iopage(XenIOState *state)
+ {
+     buffered_iopage_t *buf_page = state->buffered_io_page;
+     buf_ioreq_t *buf_req = NULL;
++    bool handled_ioreq = false;
+     ioreq_t req;
+     int qw;
+ 
+@@ -1144,9 +1145,10 @@ static int handle_buffered_iopage(XenIOState *state)
+         assert(!req.data_is_ptr);
+ 
+         atomic_add(&buf_page->read_pointer, qw + 1);
++        handled_ioreq = true;
+     }
+ 
+-    return req.count;
++    return handled_ioreq;
+ }
+ 
+ static void handle_buffered_io(void *opaque)
+-- 
+2.33.1
+
