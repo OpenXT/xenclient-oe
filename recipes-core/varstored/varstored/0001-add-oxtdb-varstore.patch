@@ -109,6 +109,8 @@ PATCHES
 +TOOLLIBS := -lcrypto -lseccomp $$(pkg-config --libs libxml-2.0) $(OXT_LIBS)
  TOOLOBJS := tools/xapidb-cmdline.o \
 +            tools/oxtdb-cmdline.o \
+             tools/xapidb-file.o \
+             tools/cert-check.o \
              tools/tool-lib.o \
              depriv.o \
              guid.o \
@@ -136,7 +138,7 @@ PATCHES
              ERR("Failed to set gid to %u: %d, %s\n", opt_gid,
 --- a/include/backend.h
 +++ b/include/backend.h
-@@ -55,6 +55,8 @@ struct backend {
+@@ -68,6 +68,8 @@ struct backend {
  };
  
  extern const struct backend *db;
@@ -144,6 +146,7 @@ PATCHES
 +extern const struct backend oxtdb_cmdline;
  extern const struct backend xapidb;
  extern const struct backend xapidb_cmdline;
+ extern const struct backend xapidb_file;
  
 --- a/include/debug.h
 +++ b/include/debug.h
@@ -239,7 +242,7 @@ PATCHES
 +extern char *oxtdb_arg_uuid;
 +
 +size_t oxtdb_serialize_variables(uint8_t **out, size_t *len, bool only_nv);
-+bool oxtdb_set_variable(void);
++bool oxtdb_set_variable(bool update);
 +bool oxtdb_parse_blob(uint8_t **buf, int len);
 +enum backend_init_status oxtdb_init(void);
 +bool oxtdb_sb_notify(void);
@@ -247,13 +250,14 @@ PATCHES
 +#endif // OXTDB_H
 --- a/include/xapidb.h
 +++ b/include/xapidb.h
-@@ -59,4 +59,7 @@ enum backend_init_status xapidb_init(voi
+@@ -63,6 +63,8 @@ bool xapidb_parse_blob(uint8_t **buf, int len);
+ enum backend_init_status xapidb_init(void);
  enum backend_init_status xapidb_file_init(void);
  bool xapidb_sb_notify(void);
- 
 +// expose this fn over xapidb API so we can use it.
 +bool base64_encode(const uint8_t *buf, size_t len, char **out);
-+
+ 
+ 
  #endif
 --- /dev/null
 +++ b/oxtdb-lib.c
@@ -539,7 +543,7 @@ PATCHES
 +}
 +
 +bool
-+oxtdb_set_variable(void)
++oxtdb_set_variable(bool update)
 +{
 +    uint8_t *buf;
 +    char *encoded;
