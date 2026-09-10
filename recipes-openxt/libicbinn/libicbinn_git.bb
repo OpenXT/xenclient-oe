@@ -13,7 +13,8 @@ SRC_URI += " \
 DEPENDS = "libargo libtirpc libxcdbus"
 EXTRA_OECONF += "--with-argo --with-xcdbus"
 # server.c calls fallocate64(); glibc only declares it under _GNU_SOURCE.
-CFLAGS:append = " -D_GNU_SOURCE"
+# -fcommon: client/prototypes.h tentatively defines icb in every TU.
+CFLAGS:append = " -D_GNU_SOURCE -fcommon"
 
 PACKAGES =+ "${PN}-server"
 FILES:${PN}-server = "${sysconfdir}/init.d ${bindir}/icbinn_svc"
