@@ -30,6 +30,9 @@ S = "${UNPACKDIR}/${BPN}-${PV}"
 
 inherit gettext autotools-brokensep
 
+# tpm_sealdata.c assigns strchr() (const char *) to char * under -Werror.
+CFLAGS:append = " -Wno-error=discarded-qualifiers"
+
 PACKAGES =+ "${PN}-sa"
 FILES:${PN}-sa = " \
     ${bindir}/tpm_extendpcr_sa \
