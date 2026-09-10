@@ -16,17 +16,36 @@ FILES:${PN} = "${datadir}/xenclient/repo-certs \
 
 inherit allarch
 
+# file:// sources only; default S = ${UNPACKDIR}/${BP} does not exist.
+S = "${UNPACKDIR}"
+
 do_install() {
     CERTDIR_PROD=${D}${datadir}/xenclient/repo-certs/prod
     CERTDIR_DEV=${D}${datadir}/xenclient/repo-certs/dev
     install -d ${CERTDIR_PROD}
     install -d ${CERTDIR_DEV}
 
+    # YP 6.0 unpacks file:// basenames to ${UNPACKDIR}/<name> and absolute
+    # file:// paths to ${UNPACKDIR}<abspath>.
+    install_unpacked_cert() {
+        local src="$1"
+        local dest="$2"
+        local cert
+        if [ -f "${UNPACKDIR}/$(basename "$src")" ]; then
+            cert="${UNPACKDIR}/$(basename "$src")"
+        elif [ -f "${UNPACKDIR}${src}" ]; then
+            cert="${UNPACKDIR}${src}"
+        else
+            bbfatal "certificate '$src' not found under ${UNPACKDIR}"
+        fi
+        install -m 0644 "$cert" "$dest"
+    }
+
     if [ -n "${REPO_PROD_CACERT}" ]; then
-        install -m 0644 ${UNPACKDIR}/${REPO_PROD_CACERT} ${CERTDIR_PROD}/cert.pem
+        install_unpacked_cert "${REPO_PROD_CACERT}" ${CERTDIR_PROD}/cert.pem
     fi
     if [ -n "${REPO_DEV_CACERT}" ]; then
-        install -m 0644 ${UNPACKDIR}/${REPO_DEV_CACERT} ${CERTDIR_DEV}/cert.pem
+        install_unpacked_cert "${REPO_DEV_CACERT}" ${CERTDIR_DEV}/cert.pem
     fi
 
     install -d ${D}${bindir}
