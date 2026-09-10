@@ -94,7 +94,6 @@ SRC_URI += " \
 "
 # Patches.
 SRC_URI += " \
-    file://patches/0001-udev-allow-udev_t-to-watch-udev_rules_t-dir.patch \
     file://patches/fc-subs-config-aliases.patch \
     file://patches/policy.modules.admin.alsa.diff \
     file://patches/policy.modules.admin.brctl.diff \
@@ -103,7 +102,6 @@ SRC_URI += " \
     file://patches/policy.modules.admin.firstboot.diff \
     file://patches/policy.modules.admin.logrotate.diff \
     file://patches/policy.modules.apps.qemu.diff \
-    file://patches/policy.modules.kernel.devices.diff \
     file://patches/policy.modules.kernel.domain.diff \
     file://patches/policy.modules.kernel.filesystem.diff \
     file://patches/policy.modules.kernel.kernel.diff \
@@ -113,11 +111,7 @@ SRC_URI += " \
     file://patches/policy.modules.roles.sysadm.diff \
     file://patches/policy.modules.services.acpi.diff \
     file://patches/policy.modules.services.cron.diff \
-    file://patches/policy.modules.services.dbus.diff \
     file://patches/policy.modules.services.dnsmasq.diff \
-    file://patches/policy.modules.services.hal.diff \
-    file://patches/policy.modules.services.networkmanager.diff \
-    file://patches/policy.modules.services.ssh.diff \
     file://patches/policy.modules.services.virt.diff \
     file://patches/policy.modules.system.authlogin.diff \
     file://patches/policy.modules.system.fstools.diff \
@@ -127,14 +121,11 @@ SRC_URI += " \
     file://patches/policy.modules.system.lvm.diff \
     file://patches/policy.modules.system.miscfiles.diff \
     file://patches/policy.modules.system.modutils.diff \
-    file://patches/policy.modules.system.mount.diff \
     file://patches/policy.modules.system.selinuxutil.diff \
-    file://patches/policy.modules.system.sysnetwork.patch \
     file://patches/policy.modules.system.udev.diff \
     file://patches/policy.modules.system.unconfined.diff \
     file://patches/policy.modules.system.userdomain.diff \
     file://patches/policy.support.misc_patterns.spt.diff \
-    file://patches/policy.modules.system.xen.diff \
     file://patches/policy.modules.services.tcsd.patch \
     file://patches/policy.modules.services.networkmanager_xt.diff \
     file://patches/policy.modules.system.init_xt.diff \
@@ -161,12 +152,10 @@ SRC_URI += " \
     file://patches/busybox-mmap-read-execute-checks-from-new-domain.patch \
     file://patches/policy.modules.admin.su.patch \
     file://patches/signed-kernel-modprobe.patch \
-    file://patches/add-missing-dbusd-permissions.patch \
     file://patches/xl-sysadm-interfaces.patch \
     file://patches/policy.modules.admin.bootloader.diff \
     file://patches/monit-volatiles.patch \
     file://patches/xenstore-labeling.patch \
-    file://patches/xen-privcmd.patch \
 "
 
 DEPENDS:append = " \
