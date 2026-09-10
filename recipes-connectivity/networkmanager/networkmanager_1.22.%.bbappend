@@ -1,4 +1,4 @@
-FILESEXTRAPATHS_prepend := "${THISDIR}/${BPN}-${PV}:${THISDIR}/files:"
+FILESEXTRAPATHS:prepend := "${THISDIR}/${BPN}-${PV}:${THISDIR}/files:"
 
 SRC_URI += " \
     file://fix-compatibility-with-network-slave.patch \
@@ -19,7 +19,7 @@ SRC_URI += " \
     file://dbus-system.conf \
 "
 
-do_install_append () {
+do_install:append () {
     install -m 0755 -d ${D}${nmidldatadir}
     install -m 0644 ${S}/introspection/*.xml ${D}${nmidldatadir}/
     install -m 0644 ${S}/openxt/*.xml ${D}${nmidldatadir}/
@@ -38,7 +38,7 @@ do_install_append () {
     install -m 0644 ${WORKDIR}/dbus-system.conf ${D}${sysconfdir}/dbus-1/system-local.conf
 }
 
-FILES_${PN} += " \
+FILES:${PN} += " \
     ${nmidldatadir} \
     ${datadir}/xenclient/nm_scripts/db_to_nm.awk \
     ${datadir}/xenclient/nm_scripts/nm_to_db.awk \

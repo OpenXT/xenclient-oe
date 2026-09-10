@@ -6,7 +6,7 @@ DEPENDS = "xkeyboard-config"
 SRC_URI = "file://supported-keyboards \
            file://generate-keyboard-list"
 
-FILES_${PN} = "${datadir}/xenclient/keyboards"
+FILES:${PN} = "${datadir}/xenclient/keyboards"
 
 S = "${WORKDIR}/src"
 

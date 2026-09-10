@@ -6,14 +6,14 @@ SRC_URI = " \
     file://key-functions \
 "
 
-FILES_${PN} = "${libdir}/openxt/key-functions"
+FILES:${PN} = "${libdir}/openxt/key-functions"
 
 do_install() {
 	install -d ${D}${libdir}/openxt
 	install -m 0755 ${WORKDIR}/key-functions ${D}${libdir}/openxt
 }
 
-RDEPENDS_${PN} = " \
+RDEPENDS:${PN} = " \
     xenclient-tpm-scripts \
     tpm-tools-sa \
 "

@@ -8,14 +8,14 @@ inherit syslinux
 #   ${SYSLINUX_MULTIBOOT} with empty lines for the sparse case
 #
 
-syslinux_iso_populate_append() {
+syslinux_iso_populate:append() {
     if [ -n "${SYSLINUX_MULTIBOOT}" ]; then
         install -m 0444 ${STAGING_DATADIR}/syslinux/libcom32.c32 $iso_dir${ISOLINUXDIR}
         install -m 0444 ${STAGING_DATADIR}/syslinux/mboot.c32 $iso_dir${ISOLINUXDIR}
     fi
 }
 
-syslinux_hddimg_populate_append() {
+syslinux_hddimg_populate:append() {
     if [ -n "${SYSLINUX_MULTIBOOT}" ]; then
         install -m 0444 ${STAGING_DATADIR}/syslinux/libcom32.c32 $hdd_dir${SYSLINUXDIR}
         install -m 0444 ${STAGING_DATADIR}/syslinux/mboot.c32 $hdd_dir${SYSLINUXDIR}

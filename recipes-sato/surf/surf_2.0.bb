@@ -22,7 +22,7 @@ SRC_URI[sha256sum] = "faee4c7a62c38fc9791eff1ad06787c3c9b2b79f338806827f5152a7bc
 inherit pkgconfig
 
 # Squash the config.mk with one OE compliant.
-do_configure_prepend() {
+do_configure:prepend() {
     cp ${WORKDIR}/config.mk ${S}/config.mk
 }
 

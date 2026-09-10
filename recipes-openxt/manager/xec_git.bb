@@ -9,7 +9,7 @@ DEPENDS = " \
     libxchargo \
     libxchutils \
 "
-RDEPENDS_${PN} += "\
+RDEPENDS:${PN} += "\
     glibc-gconv-utf-32 \
 "
 
@@ -20,7 +20,7 @@ S = "${WORKDIR}/git/xec"
 HPV = "0.1"
 inherit haskell
 
-do_install_append() {
+do_install:append() {
     install -m 0755 -d ${D}/etc/compleat.d
     install -m 0644 ${S}/xec-vm.usage ${D}/etc/compleat.d/xec-vm.usage
     install -m 0644 ${S}/xec.usage ${D}/etc/compleat.d/xec.usage

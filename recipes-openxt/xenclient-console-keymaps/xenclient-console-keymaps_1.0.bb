@@ -5,7 +5,7 @@ DEPENDS = "console-setup-ckbcomp-native \
            xkeyboard-config \
            xenclient-keyboard-list"
 
-FILES_${PN} = "${datadir}/keymaps"
+FILES:${PN} = "${datadir}/keymaps"
 
 S = "${WORKDIR}/src"
 

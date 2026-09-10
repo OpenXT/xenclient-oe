@@ -1,4 +1,4 @@
-FILESEXTRAPATHS_prepend := "${THISDIR}/patches:"
+FILESEXTRAPATHS:prepend := "${THISDIR}/patches:"
 SRC_URI += " \
     file://dnsmasq_dnsout_interface.patch;patch=1 \
 "
@@ -8,7 +8,7 @@ SRC_URI += " \
 # and very minimal dnsmasq containing just a single binary
 PACKAGES =+ "${PN}-full"
 INITSCRIPT_PACKAGES = "${PN}-full"
-RDEPENDS_${PN}-full = "${PN}"
-FILES_${PN}-full = "${sysconfdir}/*"
-CONFFILES_${PN}-full = "${sysconfdir}/dnsmasq.conf"
-CONFFILES_${PN} = ""
+RDEPENDS:${PN}-full = "${PN}"
+FILES:${PN}-full = "${sysconfdir}/*"
+CONFFILES:${PN}-full = "${sysconfdir}/dnsmasq.conf"
+CONFFILES:${PN} = ""

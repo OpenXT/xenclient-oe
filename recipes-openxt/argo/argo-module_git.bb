@@ -23,16 +23,16 @@ MODULES_INSTALL_TARGET += "headers_install"
 
 KERNEL_MODULE_AUTOLOAD += "xen-argo"
 
-RRECOMMENDS_${PN} = "${PN}-udev"
+RRECOMMENDS:${PN} = "${PN}-udev"
 PACKAGE_BEFORE_PN += "${PN}-udev"
-FILES_${PN}-udev = " \
+FILES:${PN}-udev = " \
     ${sysconfdir}/udev/rules.d/ \
 "
 
 USERADD_PACKAGES = "${PN}-udev"
-GROUPADD_PARAM_${PN}-udev = "-r argo"
+GROUPADD_PARAM:${PN}-udev = "-r argo"
 
-do_install_append() {
+do_install:append() {
     install -d ${D}${sysconfdir}/udev/rules.d
     install -m 0644 ${WORKDIR}/60-argo.rules ${D}${sysconfdir}/udev/rules.d/
 }

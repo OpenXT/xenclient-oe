@@ -18,12 +18,12 @@ S = "${WORKDIR}/git/nwd"
 inherit haskell update-rc.d xc-rpcgen
 
 INITSCRIPT_PACKAGES = "${PN}"
-INITSCRIPT_NAME_${PN} = "network-daemon"
-INITSCRIPT_PARAMS_${PN} = "defaults 28 15"
+INITSCRIPT_NAME:${PN} = "network-daemon"
+INITSCRIPT_PARAMS:${PN} = "defaults 28 15"
 
-FILES_${PN} += "/usr/bin/network-daemon"
+FILES:${PN} += "/usr/bin/network-daemon"
 
-do_configure_append() {
+do_configure:append() {
     # generate rpc stubs
     mkdir -p ${S}/Rpc/Autogen
 
@@ -44,7 +44,7 @@ do_configure_append() {
     xc-rpcgen --haskell --templates-dir=${STAGING_RPCGENDATADIR_NATIVE} -o Rpc/Autogen --module-prefix=Rpc.Autogen ${STAGING_IDLDATADIR}/vm_nic.xml
 }
 
-do_install_append() {
+do_install:append() {
     install -m 0755 -d ${D}${sysconfdir}/init.d
     install -m 0755 ${S}/nwd.initscript ${D}${sysconfdir}/init.d/network-daemon
 

@@ -9,7 +9,7 @@ SRC_URI = " \
     file://seal-system.conf \
 "
 
-FILES_${PN} = "\
+FILES:${PN} = "\
     ${libdir}/openxt/ml-functions \
     ${sbindir}/seal-system \
     ${sbindir}/recovery-method \
@@ -26,7 +26,7 @@ do_install() {
     install -m 0644 ${WORKDIR}/seal-system.conf ${D}${sysconfdir}/openxt/seal-system.conf
 }
 
-RDEPENDS_${PN} = " \
+RDEPENDS:${PN} = " \
     bash \
     tboot-lcptools \
     tboot-lcptools-v2 \

@@ -72,17 +72,17 @@ PACKAGES =+ " \
     ${PN}-tools-vm \
 "
 INITSCRIPT_PACKAGES = "${PN}"
-INITSCRIPT_NAME_${PN} = "dbd"
-INITSCRIPT_PARAMS_${PN} = "defaults 25 19"
+INITSCRIPT_NAME:${PN} = "dbd"
+INITSCRIPT_PARAMS:${PN} = "defaults 25 19"
 
-FILES_${PN} += " \
+FILES:${PN} += " \
     ${datadir}/xenclient/db.default \
     ${sysconfdir}/init.d/* \
 "
-RDEPENDS_${PN} += "bash"
-RRECOMMENDS_${PN} += "dbd-tools"
+RDEPENDS:${PN} += "bash"
+RRECOMMENDS:${PN} += "dbd-tools"
 
-FILES_${PN}-tools = " \
+FILES:${PN}-tools = " \
     ${bindir}/db-cmd \
     ${bindir}/db-exists \
     ${bindir}/db-ls \
@@ -93,7 +93,7 @@ FILES_${PN}-tools = " \
     ${bindir}/db-cat \
 "
 
-FILES_${PN}-tools-vm = " \
+FILES:${PN}-tools-vm = " \
     ${bindir}/db-exists-dom0 \
     ${bindir}/db-ls-dom0 \
     ${bindir}/db-nodes-dom0 \
@@ -102,7 +102,7 @@ FILES_${PN}-tools-vm = " \
     ${bindir}/db-write-dom0 \
     ${bindir}/db-cat-dom0 \
 "
-RDEPENDS_${PN}-tools-vm += " \
+RDEPENDS:${PN}-tools-vm += " \
     libargo \
     ${PN}-tools \
 "

@@ -72,4 +72,4 @@ do_deploy() {
 }
 addtask do_deploy after do_install before do_build
 
-FILES_${PN} = "/boot"
+FILES:${PN} = "/boot"

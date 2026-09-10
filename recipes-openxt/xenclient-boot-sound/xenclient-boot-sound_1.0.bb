@@ -2,7 +2,7 @@ DESCRIPTION = "XenClient set sound on boot"
 
 LICENSE = "GPLv2"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/GPL-2.0;md5=801f80980d171dd6425610833a22dbe6"
-RDEPENDS_${PN} += "alsa-utils-amixer"
+RDEPENDS:${PN} += "alsa-utils-amixer"
 
 # This should go away with everything put into the packages it really
 # belongs to. For now it's just a convenient place to stash certain things.
@@ -10,7 +10,7 @@ RDEPENDS_${PN} += "alsa-utils-amixer"
 SRC_URI = "file://xenclient-boot-sound.initscript \
 	   file://update-pcm-config"
 PACKAGES = "${PN}"
-FILES_${PN} = "/"
+FILES:${PN} = "/"
 
 inherit update-rc.d
 

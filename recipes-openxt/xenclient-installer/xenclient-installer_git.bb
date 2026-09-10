@@ -47,17 +47,17 @@ PACKAGES += " \
     ${PN}-part2 \
 "
 
-FILES_${PN} = "/install/*"
-FILES_${PN}-answerfiles = "/*.ans"
-FILES_${PN}-part2 = "/*"
+FILES:${PN} = "/install/*"
+FILES:${PN}-answerfiles = "/*.ans"
+FILES:${PN}-part2 = "/*"
 
-RDEPENDS_${PN} = " \
+RDEPENDS:${PN} = " \
     busybox \
     xenclient-eula \
     xenclient-keyboard-list \
     xenclient-repo-certs \
     xenclient-caps \
 "
-RDEPENDS_${PN}-part2 += " \
+RDEPENDS:${PN}-part2 += " \
     busybox \
 "

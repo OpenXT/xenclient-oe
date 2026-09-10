@@ -4,6 +4,6 @@ PR = "r0"
 
 inherit packagegroup
 
-RDEPENDS_${PN} = " \
+RDEPENDS:${PN} = " \
             ${@bb.utils.contains("DISTRO_FEATURES", "bats", "bats-suite", "", d)} \
             "

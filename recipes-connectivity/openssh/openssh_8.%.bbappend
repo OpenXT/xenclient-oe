@@ -1,4 +1,4 @@
-FILESEXTRAPATHS_prepend := "${THISDIR}/files:${THISDIR}/${BPN}:${THISDIR}/${BPN}-7:"
+FILESEXTRAPATHS:prepend := "${THISDIR}/files:${THISDIR}/${BPN}:${THISDIR}/${BPN}-7:"
 
 SRC_URI += " \
     file://sshd_config \
@@ -12,7 +12,7 @@ SRC_URI += " \
     file://init \
 "
 
-do_install_append() {
+do_install:append() {
     install -m 0755 ${WORKDIR}/sshargo ${D}${bindir}/sshargo
     install -m 0755 ${WORKDIR}/scpargo ${D}${bindir}/scpargo
     install -m 0755 ${WORKDIR}/sshd_check_keys_argo ${D}${libexecdir}/openssh/sshd_check_keys_argo
@@ -34,36 +34,36 @@ do_install_append() {
         ${D}${sysconfdir}/ssh/sshd_config_readonly
 }
 
-FILES_${PN}-ssh += " \
+FILES:${PN}-ssh += " \
     ${bindir}/sshargo \
 "
-FILES_${PN}-sshd += " \
+FILES:${PN}-sshd += " \
     ${sysconfdir}/init.d/sshd-argo \
     ${sysconfdir}/ssh/sshd_config_argo \
     ${sysconfdir}/ssh/sshd_config_readonly_argo \
     ${libexecdir}/openssh/sshd_check_keys_argo \
     ${sysconfdir}/default/volatiles/99_ssh-keygen \
 "
-FILES_${PN}-scp += " \
+FILES:${PN}-scp += " \
     ${bindir}/scpargo \
 "
 
 # Override sshd initscript with sshd-argo.
 # The initial sshd initscript will be shipped with sshd-tcp-init
-INITSCRIPT_NAME_${PN}-sshd = "sshd-argo"
-CONFFILES_${PN}-sshd += " \
+INITSCRIPT_NAME:${PN}-sshd = "sshd-argo"
+CONFFILES:${PN}-sshd += " \
     ${sysconfdir}/ssh/sshd_config_argo \
     ${sysconfdir}/ssh/sshd_config_readonly_argo \
 "
 
 # sshd-tcp-init
 PACKAGES =+ "${PN}-sshd-tcp-init"
-FILES_${PN}-sshd-tcp-init = "/etc/init.d/sshd"
+FILES:${PN}-sshd-tcp-init = "/etc/init.d/sshd"
 
 INITSCRIPT_PACKAGES += "${PN}-sshd-tcp-init"
-INITSCRIPT_NAME_${PN}-sshd-tcp-init = "sshd"
-INITSCRIPT_PARAMS_${PN}-sshd-tcp-init = "defaults 9 91"
+INITSCRIPT_NAME:${PN}-sshd-tcp-init = "sshd"
+INITSCRIPT_PARAMS:${PN}-sshd-tcp-init = "defaults 9 91"
 
-RDEPENDS_${PN}-sshd += "libargo"
-RDEPENDS_${PN}-ssh += "bash libargo"
-RDEPENDS_${PN}-scp += "bash libargo"
+RDEPENDS:${PN}-sshd += "libargo"
+RDEPENDS:${PN}-ssh += "bash libargo"
+RDEPENDS:${PN}-scp += "bash libargo"

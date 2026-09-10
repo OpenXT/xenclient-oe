@@ -4,7 +4,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/GPL-2.0;md5=801f80980d171dd6425
 
 SRC_URI = "file://EULA-en-us"
 
-FILES_${PN} = "${datadir}/xenclient"
+FILES:${PN} = "${datadir}/xenclient"
 
 # Check the en-us version of the EULA doesn't contain non-ASCII characters -
 # the installer can't display them.

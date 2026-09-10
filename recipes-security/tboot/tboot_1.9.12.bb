@@ -24,7 +24,7 @@ SRC_URI[sha256sum] = "007212deacab8eb159d71449766f9b2e0523439f1c4fd64d1932eb38cb
 inherit deploy
 
 # safestringlib/safeclib/mem_primitives_lib.c has a lot of fallthrough.
-CFLAGS_append = "-Wno-implicit-fallthrough"
+CFLAGS:append = "-Wno-implicit-fallthrough"
 EXTRA_OEMAKE = "INSTALL_STRIP=''"
 
 do_compile() {

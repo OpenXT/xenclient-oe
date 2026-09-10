@@ -2,7 +2,7 @@ DESCRIPTION = "Configuration files for online package repositories aka feeds"
 LICENSE = "GPLv2"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/GPL-2.0;md5=801f80980d171dd6425610833a22dbe6"
 
-#RRECOMMENDS_${PN} += "opkg-nogpg-nocurl"
+#RRECOMMENDS:${PN} += "opkg-nogpg-nocurl"
 
 PV = "${XENCLIENT_BUILD}"
 PR = "r15"
@@ -30,13 +30,13 @@ do_install () {
 	install -m 0644  ${S}/${sysconfdir}/opkg/* ${D}${sysconfdir}/opkg/
 }
 
-FILES_${PN} = " ${sysconfdir}/opkg/${MACHINE_ARCH}-feed.conf \
+FILES:${PN} = " ${sysconfdir}/opkg/${MACHINE_ARCH}-feed.conf \
 					${sysconfdir}/opkg/${TUNE_PKGARCH}-feed.conf \
 					${sysconfdir}/opkg/all-feed.conf \
 					${sysconfdir}/opkg/arch.conf \
 					"
 
-CONFFILES_${PN} += " ${sysconfdir}/opkg/${MACHINE_ARCH}-feed.conf \
+CONFFILES:${PN} += " ${sysconfdir}/opkg/${MACHINE_ARCH}-feed.conf \
 					${sysconfdir}/opkg/${TUNE_PKGARCH}-feed.conf \
 					${sysconfdir}/opkg/all-feed.conf \
 				    ${sysconfdir}/opkg/arch.conf \

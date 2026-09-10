@@ -6,7 +6,7 @@ DEPENDS += " \
     xen-tools \
     hkg-utf8-string \
 "
-RDEPENDS_${PN} += " \
+RDEPENDS:${PN} += " \
     glibc-gconv-utf-32 \
     ghc-runtime \
 "

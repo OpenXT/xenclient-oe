@@ -1,4 +1,4 @@
-FILESEXTRAPATHS_prepend := "${THISDIR}/files:"
+FILESEXTRAPATHS:prepend := "${THISDIR}/files:"
 
 DEPENDS += "libselinux"
 
@@ -70,6 +70,6 @@ python create_sh_wrapper_reset_alternative_vars_openxt () {
 }
 
 # Add to PACKAGEBUILDPKGD so it could override the alternatives, which are set in
-# do_package_prepend() section of busybox_*.bb.
-PACKAGEBUILDPKGD_remove = "create_sh_wrapper_reset_alternative_vars "
-PACKAGEBUILDPKGD_prepend = "create_sh_wrapper_reset_alternative_vars_openxt "
+# do_package:prepend() section of busybox_*.bb.
+PACKAGEBUILDPKGD:remove = "create_sh_wrapper_reset_alternative_vars "
+PACKAGEBUILDPKGD:prepend = "create_sh_wrapper_reset_alternative_vars_openxt "

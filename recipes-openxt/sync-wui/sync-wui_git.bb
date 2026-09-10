@@ -51,5 +51,5 @@ do_package_write_ipk() {
 
 PACKAGES += "${PN}-sources"
 
-FILES_${PN} = "/sync-wui"
-FILES_${PN}-sources = "/sync-wui-sources"
+FILES:${PN} = "/sync-wui"
+FILES:${PN}-sources = "/sync-wui-sources"

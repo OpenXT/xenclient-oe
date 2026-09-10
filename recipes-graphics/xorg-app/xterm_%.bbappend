@@ -1,7 +1,7 @@
 # Enable TrueType fonts
 PACKAGECONFIG += "xft"
 
-do_configure_prepend() {
+do_configure:prepend() {
 	echo >> ${S}/XTerm.ad
 	echo '*metaSendsEscape: true' >> ${S}/XTerm.ad
 	echo '*eightBitInput: false' >> ${S}/XTerm.ad

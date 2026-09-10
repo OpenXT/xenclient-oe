@@ -1,4 +1,4 @@
-FILESEXTRAPATHS_prepend := "${THISDIR}/${BPN}-${PV}:"
+FILESEXTRAPATHS:prepend := "${THISDIR}/${BPN}-${PV}:"
 
 SRC_URI += " \
     file://openxt-menus.patch \
@@ -9,6 +9,6 @@ SRC_URI += " \
     file://org.openxt.nmapplet.xml \
 "
 
-do_configure_prepend() {
+do_configure:prepend() {
     gdbus-codegen --generate-c-code ${S}/src/popup-menu --c-namespace OpenXT --interface-prefix org.openxt. ${WORKDIR}/org.openxt.nmapplet.xml
 }

@@ -14,7 +14,7 @@ SRC_URI = "file://enter-s3.sh \
 
 PACKAGES = "${PN}"
 
-FILES_${PN} = "/"
+FILES:${PN} = "/"
 
 do_install () {
 	install -d ${D}/etc

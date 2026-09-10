@@ -1,14 +1,14 @@
 XEN_TARGET_ARCH = "x86_64"
 
-SRC_URI_append = "\
+SRC_URI:append = "\
     file://xenconsoled.initscript \
     file://xenstored.initscript \
     file://xen-init-dom0.initscript \
     file://xl.conf \
 "
 
-RDEPENDS_${PN}-xl += " ${PN}-scripts-block"
-RDEPENDS_${PN}-libxenlight += " varstored-watch"
+RDEPENDS:${PN}-xl += " ${PN}-scripts-block"
+RDEPENDS:${PN}-libxenlight += " varstored-watch"
 
 PACKAGES += " \
     ${PN}-libxenhypfs \
@@ -19,8 +19,8 @@ PACKAGES += " \
 
 PROVIDES =+ "virtual/xenstored"
 
-FILES_${PN}-libxenmanage = "${libdir}/libxenmanage.so.*"
-FILES_${PN}-libxenmanage-dev = " \
+FILES:${PN}-libxenmanage = "${libdir}/libxenmanage.so.*"
+FILES:${PN}-libxenmanage-dev = " \
     ${libdir}/libxenmanage.so \
     ${libdir}/pkgconfig/xenmanage.pc \
     ${datadir}/pkgconfig/xenmanage.pc \
@@ -28,41 +28,41 @@ FILES_${PN}-libxenmanage-dev = " \
 
 
 # OpenXT uses init scripts rather than systemd
-FILES_${PN}-console += "${INIT_D_DIR}/xenconsoled"
+FILES:${PN}-console += "${INIT_D_DIR}/xenconsoled"
 
-FILES_${PN}-xenstored = " \
+FILES:${PN}-xenstored = " \
     ${sbindir}/xenstored.${PN}-xenstored \
     ${localstatedir}/lib/xenstored \
     ${INIT_D_DIR}/xenstored.${PN}-xenstored \
     ${sysconfdir}/xen/xenstored.conf \
     "
 
-FILES_${PN}-libxenhypfs = " \
+FILES:${PN}-libxenhypfs = " \
     ${libdir}/libxenhypfs.so.* \
 "
 RDPENDS_${PN} += "${PN}-libxenhypfs"
 
-FILES_${PN}-libxenhypfs-dev = " \
+FILES:${PN}-libxenhypfs-dev = " \
     ${libdir}/libxenhypfs.so \
     ${libdir}/pkgconfig/xenhypfs.pc \
     ${datadir}/pkgconfig/xenhypfs.pc \
 "
-FILES_${PN}-xenhypfs = " \
+FILES:${PN}-xenhypfs = " \
     ${sbindir}/xenhypfs \
 "
 PACKAGES += "${PN}-xenhypfs"
 
-FILES_${PN}-xen-ucode = " \
+FILES:${PN}-xen-ucode = " \
     ${sbindir}/xen-ucode \
 "
 PACKAGES += "${PN}-xen-ucode"
 
-FILES_${PN}-tests = " \
+FILES:${PN}-tests = " \
     ${libdir}/xen/bin/test-* \
 "
 PACKAGES += "${PN}-tests"
 
-FILES_${PN}-misc += " \
+FILES:${PN}-misc += " \
     ${sbindir}/xen-access \
     ${sbindir}/xen-mceinj \
     ${sbindir}/xen-memshare \
@@ -71,51 +71,51 @@ FILES_${PN}-misc += " \
 
 # Python programs we don't want inby default, but they are
 # actually libxl runtime dependencies.
-FILES_${PN}-migration-helpers = " \
+FILES:${PN}-migration-helpers = " \
     ${libdir}/xen/bin/convert-legacy-stream \
     ${libdir}/xen/bin/verify-stream-v2 \
 "
 PACKAGES =+ "${PN}-migration-helpers"
 
-FILES_${PN}-bash-complete = " \
+FILES:${PN}-bash-complete = " \
     ${sysconfdir}/bash_completion.d \
 "
 PACKAGES += "${PN}-bash-complete"
 
-FILES_${PN}-xl-examples += " \
+FILES:${PN}-xl-examples += " \
     ${sysconfdir}/xen/xlexample.pvhlinux \
 "
 
 # This init script is added by OpenXT and runs the xen-init-dom0 script
 # that meta-virtualization has packaged in the ${PN}-xl package.
-FILES_${PN}-xl += " ${INIT_D_DIR}/xen-init-dom0"
+FILES:${PN}-xl += " ${INIT_D_DIR}/xen-init-dom0"
 
 INITSCRIPT_PACKAGES =+ " \
     ${PN}-console \
     ${PN}-xenstored \
     ${PN}-xl \
 "
-INITSCRIPT_NAME_${PN}-console = "xenconsoled"
-INITSCRIPT_PARAMS_${PN}-console = "defaults 20 80"
-INITSCRIPT_NAME_${PN}-xenstored = "xenstored"
-INITSCRIPT_PARAMS_${PN}-xenstored = "defaults 05 95"
-INITSCRIPT_NAME_${PN}-xl = "xen-init-dom0"
-INITSCRIPT_PARAMS_${PN}-xl = "defaults 21 79"
-INITSCRIPT_NAME_${PN}-xl = "xen-init-dom0"
-INITSCRIPT_PARAMS_${PN}-xl = "defaults 21 79"
+INITSCRIPT_NAME:${PN}-console = "xenconsoled"
+INITSCRIPT_PARAMS:${PN}-console = "defaults 20 80"
+INITSCRIPT_NAME:${PN}-xenstored = "xenstored"
+INITSCRIPT_PARAMS:${PN}-xenstored = "defaults 05 95"
+INITSCRIPT_NAME:${PN}-xl = "xen-init-dom0"
+INITSCRIPT_PARAMS:${PN}-xl = "defaults 21 79"
+INITSCRIPT_NAME:${PN}-xl = "xen-init-dom0"
+INITSCRIPT_PARAMS:${PN}-xl = "defaults 21 79"
 
 EXTRA_OEMAKE += "ETHERBOOT_ROMS=${STAGING_DIR_HOST}/usr/share/firmware/intel.rom"
 
-pkg_postinst_${PN}-xenstored () {
+pkg_postinst:${PN}-xenstored () {
     update-alternatives --install ${sbindir}/xenstored xenstored xenstored.${PN}-xenstored 200
     update-alternatives --install ${INIT_D_DIR}/xenstored xenstored-initscript xenstored.${PN}-xenstored 200
 }
-pkg_prerm_${PN}-xenstored () {
+pkg_prerm:${PN}-xenstored () {
     update-alternatives --remove xenstored xenstored.${PN}-xenstored
     update-alternatives --remove xenstored-initscript xenstored.${PN}-xenstored
 }
 
-do_install_append() {
+do_install:append() {
     install -d ${D}${datadir}/pkgconfig
 
     install -d ${D}${INIT_D_DIR}

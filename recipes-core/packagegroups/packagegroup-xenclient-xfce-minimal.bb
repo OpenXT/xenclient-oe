@@ -6,7 +6,7 @@ PR = "r2"
 
 inherit packagegroup
 
-RDEPENDS_${PN} = " \
+RDEPENDS:${PN} = " \
     xfwm4 \
     xfwm4-theme-default \
     xfce4-session \     

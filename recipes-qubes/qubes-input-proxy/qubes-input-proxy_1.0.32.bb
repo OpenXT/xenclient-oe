@@ -12,8 +12,8 @@ S = "${WORKDIR}/git"
 
 PACKAGES =+ "${PN}-sender ${PN}-receiver"
 
-FILES_${PN}-sender = "${bindir}/input-proxy-sender"
-FILES_${PN}-receiver = "\
+FILES:${PN}-sender = "${bindir}/input-proxy-sender"
+FILES:${PN}-receiver = "\
     ${bindir}/input-proxy-receiver \
     ${sysconfdir}/modules-load.d/ \
 "

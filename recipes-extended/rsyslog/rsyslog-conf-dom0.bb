@@ -6,10 +6,10 @@ inherit allarch
 
 SRC_URI = "file://rsyslog.conf"
 
-RPROVIDES_${PN} = "rsyslog-conf"
-RCONFLICTS_${PN} = "rsyslog-conf"
+RPROVIDES:${PN} = "rsyslog-conf"
+RCONFLICTS:${PN} = "rsyslog-conf"
 
-CONFFILES_${PN} = "${sysconfdir}/rsyslog.conf"
+CONFFILES:${PN} = "${sysconfdir}/rsyslog.conf"
 
 do_install() {
     install -d ${D}${sysconfdir}

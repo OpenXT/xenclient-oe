@@ -9,5 +9,5 @@ do_install() {
 	install -m 0755 ${WORKDIR}/init.root-ro ${D}/sbin/init.root-ro
 }
 
-FILES_${PN} = "/sbin/init.root-ro \
+FILES:${PN} = "/sbin/init.root-ro \
 "

@@ -5,7 +5,7 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=4641e94ec96f98fabc56ff9cc48be14b"
 # FIXME: xen-tools-xenstore can be removed when xenmgr supports disks
 # with icbinn paths.
 
-RDEPENDS_${PN} += "python3-core \
+RDEPENDS:${PN} += "python3-core \
                    python3-daemon \
                    python3-dbus \
                    python3-fcntl \
@@ -19,7 +19,7 @@ RDEPENDS_${PN} += "python3-core \
                    curl \
                    xen-tools-xenstore"
 
-RDEPENDS_sync-cmd += " \
+RDEPENDS:sync-cmd += " \
     python3-core \
     python3-dbus \
     pyicbinn \
@@ -39,16 +39,16 @@ S = "${WORKDIR}/git"
 inherit distutils3
 inherit update-rc.d
 
-FILES_${PN} += "/etc/init.d/${INITSCRIPT_NAME}"
+FILES:${PN} += "/etc/init.d/${INITSCRIPT_NAME}"
 
 PACKAGE_BEFORE_PN = "sync-cmd"
 
-FILES_sync-cmd = " \
+FILES:sync-cmd = " \
        ${bindir}/sync-cmd \
        ${PYTHON_SITEPACKAGES_DIR}/pysynchronizer \
 "
 
-do_install_append() {
+do_install:append() {
     install -d ${D}${sysconfdir}/init.d
     install -m 0755 ${WORKDIR}/${INITSCRIPT_NAME}.initscript \
             ${D}${sysconfdir}/init.d/${INITSCRIPT_NAME}

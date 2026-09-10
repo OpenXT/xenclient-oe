@@ -2,7 +2,7 @@
 
 # Since dom0 is shipped as a full image, the installer copies relevant files
 # from /boot to the boot partition.
-do_install_append() {
+do_install:append() {
     install -d "${D}/boot"
     # intel-microcode recipe installs in ${WORKDIR}.
     install "${WORKDIR}/microcode_${PV}.bin" "${D}/boot/microcode_${PV}.bin"
@@ -15,4 +15,4 @@ do_deploy() {
     install "${WORKDIR}/microcode_${PV}.bin" "${DEPLOYDIR}/microcode_intel.bin"
 }
 
-FILES_${PN} += "/boot"
+FILES:${PN} += "/boot"

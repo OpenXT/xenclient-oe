@@ -32,7 +32,7 @@ PCBIOS_CLASS = "${@['','openxt-syslinux'][d.getVar('PCBIOS') == '1']}"
 inherit ${EFI_CLASS}
 inherit ${PCBIOS_CLASS}
 
-CONVERSIONTYPES_append = " disk"
+CONVERSIONTYPES:append = " disk"
 
 CONVERSION_DEPENDS_disk = "syslinux \
                            syslinux-native \
@@ -121,7 +121,7 @@ validate_disk_signature() {
         bbfatal "DISK_SIGNATURE ${DISK_SIGNATURE} must be an 8 digit hex string"
 }
 
-CONVERSION_CMD_disk() {
+CONVERSION_CMD:disk() {
 	validate_disk_signature
 	if [ "${PCBIOS}" = "1" ]; then
 		build_syslinux_cfg

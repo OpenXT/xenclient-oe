@@ -14,26 +14,26 @@ SRC_URI = " \
     file://45-trousers.rules \
     file://tcsd.conf \
 "
-INSANE_SKIP_${PN} = "src-uri-bad"
+INSANE_SKIP:${PN} = "src-uri-bad"
 
 S = "${WORKDIR}/${BPN}-${PV}"
 
 EXTRA_OECONF += " --disable-usercheck"
-CFLAGS_append = " -Wno-error=unused-parameter -Wno-error=strict-aliasing -std=gnu89"
+CFLAGS:append = " -Wno-error=unused-parameter -Wno-error=strict-aliasing -std=gnu89"
 
 inherit update-rc.d useradd autotools-brokensep pkgconfig
 
 
 INITSCRIPT_PACKAGES = "${PN}"
 
-INITSCRIPT_NAME_${PN} = "trousers"
-INITSCRIPT_PARAMS_${PN} = "defaults 85 15"
+INITSCRIPT_NAME:${PN} = "trousers"
+INITSCRIPT_PARAMS:${PN} = "defaults 85 15"
 
 USERADD_PACKAGES = "${PN}"
-GROUPADD_PARAM_${PN} = "--gid 421 tss"
-USERADD_PARAM_${PN} = "--system --home-dir /boot/system/tpm --shell /bin/false --gid tss --uid 421 tss"
+GROUPADD_PARAM:${PN} = "--gid 421 tss"
+USERADD_PARAM:${PN} = "--system --home-dir /boot/system/tpm --shell /bin/false --gid tss --uid 421 tss"
 
-do_install_append() {
+do_install:append() {
     install -o tss -g tss -m 0644 ${WORKDIR}/tcsd.conf ${D}${sysconfdir}/tcsd.conf
 
     install -o tss -g tss -m 0755 -d ${D}${datadir}/trousers
@@ -68,21 +68,21 @@ PACKAGES =+ " \
     ${PN}-conf \
     libtspi-sa \
 "
-FILES_${PN} += " \
+FILES:${PN} += " \
     /boot/system/tpm \
 "
-FILES_${PN}-data = " \
+FILES:${PN}-data = " \
     ${datadir}/trousers/system.data.auth \
     ${datadir}/trousers/system.data.noauth \
 "
-FILES_${PN}-conf = " \
+FILES:${PN}-conf = " \
     ${sysconfdir}/tcsd.conf \
 "
-CONFFILES_${PN}-conf = " \
+CONFFILES:${PN}-conf = " \
     ${sysconfdir}/tcsd.conf \
 "
-FILES_libtspi-sa = " \
+FILES:libtspi-sa = " \
     ${libdir}/libtspi_sa${SOLIBS} \
 "
 
-RRECOMMENDS_${PN}_append += "${PN}-conf"
+RRECOMMENDS:${PN}:append += "${PN}-conf"

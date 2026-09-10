@@ -29,16 +29,16 @@ SRC_URI = "file://enter-s3.sh \
 	   file://inputrc \
 "
 
-RDEPENDS_${PN} += "bash"
+RDEPENDS:${PN} += "bash"
 
-FILES_${PN} = "/"
+FILES:${PN} = "/"
 
 inherit update-rc.d
 
 INITSCRIPT_PACKAGES = "${PN}"
 
-INITSCRIPT_NAME_${PN} = "firstboot"
-INITSCRIPT_PARAMS_${PN} = "start 70 S ."
+INITSCRIPT_NAME:${PN} = "firstboot"
+INITSCRIPT_PARAMS:${PN} = "start 70 S ."
 
 do_install () {
 	install -d ${D}/etc/init.d

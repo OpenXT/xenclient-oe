@@ -1,6 +1,6 @@
 # Undo some of the upstream xen.inc configuration to retain
 # the classic OpenXT Xen build configuration:
-EXTRA_OECONF_remove = " \
+EXTRA_OECONF:remove = " \
     --exec-prefix=/usr \
     --prefix=/usr \
     --host=${HOST_SYS} \
@@ -26,7 +26,7 @@ EXTRA_OEMAKE += " \
     "
 # Since this recipe forces the hypervisor build to target 64-bit architecture
 # even when MACHINE is 32-bit, disable this usual arch sanity check:
-INSANE_SKIP_${PN}-dbg = "arch"
+INSANE_SKIP:${PN}-dbg = "arch"
 
 do_configure() {
     echo "debug := n" > .config
@@ -51,7 +51,7 @@ do_configure() {
                PYTHON="${PYTHON}"
 }
 
-do_install_append() {
+do_install:append() {
     install -d ${D}/boot
     ln -sf "`basename ${D}/boot/xen-*xc.gz`" ${D}/boot/xen-debug.gz
 

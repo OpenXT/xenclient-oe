@@ -11,7 +11,7 @@ SRC_URI = "git://github.com/OpenXT/xsm-policy.git;protocol=https"
 
 S = "${WORKDIR}/git"
 
-FILES_${PN} += "/etc/xen/refpolicy/policy/policy.24"
+FILES:${PN} += "/etc/xen/refpolicy/policy/policy.24"
 
 EXTRA_OEMAKE = " -j 1 "
 

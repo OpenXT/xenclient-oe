@@ -56,18 +56,18 @@ inherit autotools-brokensep pkgconfig python3native
 require recipes-extended/qemu-dm/qemu-dm-vglass.inc
 
 # Include a minimal amount of blobs by default.
-FILES_${PN} += "/usr/share/qemu/keymaps/en-us       \
+FILES:${PN} += "/usr/share/qemu/keymaps/en-us       \
                 /usr/share/qemu/keymaps/commons     \
                 /usr/share/qemu/keymaps/modifiers   \
                 "
-FILES_${PN}-dbg += "/usr/lib/.debug/* /usr/libexec/.debug/*"
-FILES_${PN}-extra-keymaps = "/usr/share/qemu/keymaps/*"
-FILES_${PN}-extra-roms = "/usr/share/qemu/*"
-INSANE_SKIP_${PN}-extra-roms = "arch"
-FILES_${PN}-utils = "/usr/libexec \
+FILES:${PN}-dbg += "/usr/lib/.debug/* /usr/libexec/.debug/*"
+FILES:${PN}-extra-keymaps = "/usr/share/qemu/keymaps/*"
+FILES:${PN}-extra-roms = "/usr/share/qemu/*"
+INSANE_SKIP:${PN}-extra-roms = "arch"
+FILES:${PN}-utils = "/usr/libexec \
                      /usr/bin/qemu-pr-helper \
 "
-FILES_${PN}-icons = "/usr/share/icons"
+FILES:${PN}-icons = "/usr/share/icons"
 
 PACKAGES += "${PN}-extra-keymaps ${PN}-extra-roms"
 PACKAGES =+ "${PN}-utils"
@@ -142,11 +142,11 @@ EXTRA_OEMAKE += "AUTOCONF_HOST='--host=`arch`' DESTDIR=${D} STRIP=''"
 
 INC_PR = "r17"
 
-do_configure_append() {
+do_configure:append() {
 	sed -i -s '/^CONFIG_L2TPV3=y/d' config-host.mak
 }
 
-do_compile_prepend() {
+do_compile:prepend() {
 	rm -f i386-softmmu/config-devices.mak
 	oe_runmake i386-softmmu/config-devices.mak
 

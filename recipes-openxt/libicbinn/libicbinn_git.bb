@@ -10,11 +10,11 @@ DEPENDS = "libargo libtirpc libxcdbus"
 EXTRA_OECONF += "--with-argo --with-xcdbus"
 
 PACKAGES =+ "${PN}-server"
-FILES_${PN}-server = "${sysconfdir}/init.d ${bindir}/icbinn_svc"
+FILES:${PN}-server = "${sysconfdir}/init.d ${bindir}/icbinn_svc"
 PROVIDES += "${PN}-server"
 
 PACKAGES =+ "${PN}-client"
-FILES_${PN}-client = "${bindir}/icbinn_ftp"
+FILES:${PN}-client = "${bindir}/icbinn_ftp"
 PROVIDES += "${PN}-client"
 
 S = "${WORKDIR}/git/libicbinn"
@@ -25,7 +25,7 @@ INITSCRIPT_NAME = "icbinn_svc"
 INITSCRIPT_PARAMS = "defaults 76 24"
 INITSCRIPT_PACKAGES = "${PN}-server"
 inherit update-rc.d
-do_install_append() {
+do_install:append() {
 	install -d ${D}/${sysconfdir}/init.d
 	install -m 0755 ${WORKDIR}/icbinn_svc.initscript ${D}/${sysconfdir}/init.d/icbinn_svc
 }

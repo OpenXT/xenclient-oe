@@ -1,4 +1,4 @@
-FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
+FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 
 SRC_URI += " \
     file://powerbtn \
@@ -6,7 +6,7 @@ SRC_URI += " \
     file://ac_actions \
 "
 
-do_install_append () {
+do_install:append () {
     install -m 644 ${WORKDIR}/powerbtn ${D}${sysconfdir}/acpi/events
     install -m 644 ${WORKDIR}/ac ${D}${sysconfdir}/acpi/events
 

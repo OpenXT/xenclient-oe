@@ -17,11 +17,11 @@ do_install() {
     install -m 0755 ${WORKDIR}/qemu-xvdc-add-fd.sh ${D}${bindir}
 }
 
-FILES_${PN} = " \
+FILES:${PN} = " \
     /init \
     ${bindir} \
 "
-RDEPENDS_${PN} += " \
+RDEPENDS:${PN} += " \
     qemu-dm-stubdom \
     vchan-socket-proxy \
     xen-tools-xenstore \

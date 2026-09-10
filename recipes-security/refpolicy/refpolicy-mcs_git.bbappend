@@ -1,4 +1,4 @@
-FILESEXTRAPATHS_prepend := "${THISDIR}/${BPN}:"
+FILESEXTRAPATHS:prepend := "${THISDIR}/${BPN}:"
 
 # Configuration.
 SRC_URI += " \
@@ -169,13 +169,13 @@ SRC_URI += " \
     file://patches/xen-privcmd.patch \
 "
 
-DEPENDS_append += " \
+DEPENDS:append += " \
     strace-native \
 "
 
 S = "${WORKDIR}/refpolicy"
 
-FILES_${PN} += " \
+FILES:${PN} += " \
     ${sysconfdir}/selinux \
 "
 
@@ -212,22 +212,22 @@ modules.conf) from the configuration elements passed by the layer. \
 See 'make conf' of the refpolicy for more information."
 do_policy_conf[dirs] = "${B}"
 
-do_install_append() {
+do_install:append() {
     install -d ${D}/etc/selinux
     install -m 644 ${WORKDIR}/config ${D}/etc/selinux/config
 }
 
-sysroot_stage_all_append () {
+sysroot_stage_all:append () {
     sysroot_stage_dir ${D}${sysconfdir} ${SYSROOT_DESTDIR}${sysconfdir}
 }
 
-pkg_postinst_${PN} () {
+pkg_postinst:${PN} () {
     if [ -z "$D" ]; then
         ${base_sbindir}/setfiles "${sysconfdir}/selinux/${POLICY_NAME}/contexts/files/file_contexts" /
     fi
 }
 
-pkg_postinst_${PN}_append_xenclient-dom0 () {
+pkg_postinst:${PN}:append:xenclient-dom0 () {
     if [ -z "$D" ]; then
         ${base_sbindir}/setfiles "${sysconfdir}/selinux/${POLICY_NAME}/contexts/files/file_contexts" /config /storage
     fi

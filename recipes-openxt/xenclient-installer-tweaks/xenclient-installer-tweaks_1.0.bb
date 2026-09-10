@@ -10,7 +10,7 @@ SRC_URI = "file://status-report \
 LICENSE = "Proprietary"
 PR = "r6"
 
-FILES_${PN} = "/"
+FILES:${PN} = "/"
 
 inherit update-rc.d
 
@@ -33,6 +33,6 @@ do_install () {
     install -m 0755 ${WORKDIR}/console-bell.initscript ${D}/etc/init.d/console-bell
 }
 
-RDEPENDS_${PN} = " \
+RDEPENDS:${PN} = " \
     busybox \
 "

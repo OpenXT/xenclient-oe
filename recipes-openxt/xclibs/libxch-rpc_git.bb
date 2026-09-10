@@ -9,7 +9,7 @@ DEPENDS = " \
     hkg-transformers-base \
     hkg-monad-control \
 "
-RDEPENDS_${PN} += "glibc-gconv-utf-32"
+RDEPENDS:${PN} += "glibc-gconv-utf-32"
 
 require xclibs.inc
 

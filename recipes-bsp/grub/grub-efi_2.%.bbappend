@@ -1,4 +1,4 @@
-FILESEXTRAPATHS_prepend := "${THISDIR}/files:"
+FILESEXTRAPATHS:prepend := "${THISDIR}/files:"
 
 SRC_URI += " \
     file://grub-efi-installer.cfg \
@@ -21,7 +21,7 @@ EXTRA_OECONF += " \
     --enable-efiemu=no \
 "
 
-# grub-efi_2.%.bb defines do_deploy, but overrides do_deploy_class-native.
+# grub-efi_2.%.bb defines do_deploy, but overrides do_deploy:class-native.
 # Under these circumstances, _append will not work as it will append both
 # class-target and class-native.
 # Appending only class-target will override the target step altogether.

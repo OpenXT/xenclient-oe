@@ -19,6 +19,6 @@ inherit module-signing
 
 KERNEL_MODULE_AUTOLOAD += "txt_info"
 
-RDEPENDS_${PN} += " \
+RDEPENDS:${PN} += " \
     kernel-module-txt \
 "

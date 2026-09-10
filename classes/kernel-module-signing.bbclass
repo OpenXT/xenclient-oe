@@ -6,7 +6,7 @@ SIGN_FILE = "${B}/scripts/sign-file"
 # to embed in the kernel to verify signed modules
 export KERNEL_MODULE_SIG_CERT
 
-do_configure_append() {
+do_configure:append() {
     if ! grep -q '^CONFIG_MODULE_SIG=y' ${B}/.config ; then
         return
     fi

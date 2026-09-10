@@ -9,9 +9,9 @@ SRC_URI = "file://argo.modutils \
 
 PACKAGES = "${PN}"
 
-RDEPENDS_${PN} += "dbd-tools-vm"
+RDEPENDS:${PN} += "dbd-tools-vm"
 
-FILES_${PN} = "/"
+FILES:${PN} = "/"
 
 inherit update-rc.d
 

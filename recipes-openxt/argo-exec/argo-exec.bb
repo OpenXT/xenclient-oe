@@ -21,21 +21,21 @@ export LDLIBS="-largo"
 
 PACKAGES =+ "argo-input-receiver argo-input-sender"
 
-RDEPENDS_argo-input-receiver = "argo-exec qubes-input-proxy-receiver"
-RDEPENDS_argo-input-sender = "argo-exec qubes-input-proxy-sender"
+RDEPENDS:argo-input-receiver = "argo-exec qubes-input-proxy-receiver"
+RDEPENDS:argo-input-sender = "argo-exec qubes-input-proxy-sender"
 
 INITSCRIPT_PACKAGES="argo-input-receiver argo-input-sender"
-INITSCRIPT_NAME_argo-input-receiver = "argo-input-receiver"
-INITSCRIPT_PARAMS_argo-input-receiver = "defaults 50"
-INITSCRIPT_NAME_argo-input-sender = "argo-input-sender-kick"
-INITSCRIPT_PARAMS_argo-input-sender = "start 99 S ."
+INITSCRIPT_NAME:argo-input-receiver = "argo-input-receiver"
+INITSCRIPT_PARAMS:argo-input-receiver = "defaults 50"
+INITSCRIPT_NAME:argo-input-sender = "argo-input-sender-kick"
+INITSCRIPT_PARAMS:argo-input-sender = "start 99 S ."
 
-FILES_argo-input-sender = " \
+FILES:argo-input-sender = " \
     ${bindir}/argo-input-sender \
     ${sysconfdir}/udev/rules.d/argo-input-sender.rules \
     ${sysconfdir}/init.d/argo-input-sender-kick \
 "
-FILES_argo-input-receiver = " \
+FILES:argo-input-receiver = " \
     ${bindir}/argo-input-receiver \
     ${sysconfdir}/init.d/argo-input-receiver \
 "

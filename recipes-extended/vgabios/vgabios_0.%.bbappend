@@ -1,4 +1,4 @@
-FILESEXTRAPATHS_prepend := "${THISDIR}/${BPN}:"
+FILESEXTRAPATHS:prepend := "${THISDIR}/${BPN}:"
 SRC_URI += " \
     file://xen-fix-vbe-size-computation-overflow.patch \
     file://xen-fix-vbe-unsupported-mode.patch \
@@ -10,7 +10,7 @@ SRC_URI += " \
     file://vbe-extended-edid-modes.patch \
 "
 
-do_install_append() {
+do_install:append() {
     install -m 0644 VGABIOS-lgpl-latest.debug.bin ${D}${datadir}/firmware/${BPN}-${PV}.debug.bin
     install -m 0644 VGABIOS-lgpl-latest.cirrus.debug.bin ${D}${datadir}/firmware/${BPN}-${PV}.cirrus.debug.bin
 }

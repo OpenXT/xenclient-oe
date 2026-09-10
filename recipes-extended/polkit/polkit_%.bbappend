@@ -1,1 +1,1 @@
-USERADD_PARAM_${PN}_prepend = "-s /bin/false "
+USERADD_PARAM:${PN}:prepend = "-s /bin/false "

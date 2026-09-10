@@ -16,4 +16,4 @@ do_install() {
         ${D}${sysconfdir}/udev/rules.d/50-usb-powersave.rules
 }
 
-RDEPENDS_${PN} += "udev"
+RDEPENDS:${PN} += "udev"

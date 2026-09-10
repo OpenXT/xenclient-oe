@@ -5,8 +5,8 @@ DEPENDS = "libargo xen-tools"
 
 require xctools.inc
 
-FILES_${PN} += "/usr/lib/xen/bin/atapi_pt_helper"
-FILES_${PN}-dbg += " /usr/lib/xen/bin/.debug "
+FILES:${PN} += "/usr/lib/xen/bin/atapi_pt_helper"
+FILES:${PN}-dbg += " /usr/lib/xen/bin/.debug "
 
 S = "${WORKDIR}/git/atapi_pt_helper"
 

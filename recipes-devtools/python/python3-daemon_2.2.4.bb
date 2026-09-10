@@ -14,7 +14,7 @@ SRC_URI += " \
 PYPI_PACKAGE = "python-daemon"
 inherit pypi setuptools3
 
-RDEPENDS_${PN} += " \
+RDEPENDS:${PN} += " \
         python3-io \
         python3-resource \
 "

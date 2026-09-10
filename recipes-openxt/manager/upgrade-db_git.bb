@@ -7,7 +7,7 @@ DEPENDS = " \
     hkg-utf8-string \
     openssl \
 "
-RDEPENDS_${PN} += " \
+RDEPENDS:${PN} += " \
     glibc-gconv-utf-32 \
     openssl-bin \
 "

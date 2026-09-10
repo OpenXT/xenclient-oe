@@ -1,7 +1,7 @@
 inherit openxt-image
 
 DEPENDS += "policycoreutils-native attr-native"
-IMAGE_INSTALL_append += " \
+IMAGE_INSTALL:append += " \
     libselinux-bin \
     policycoreutils-loadpolicy \
     policycoreutils-newrole \

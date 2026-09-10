@@ -8,7 +8,7 @@ DEPENDS = " \
     xen-tools \
 "
 
-RDEPENDS_${PN} = " \
+RDEPENDS:${PN} = " \
     varstored \
 "
 

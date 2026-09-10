@@ -85,7 +85,7 @@ do_install () {
     install -m 755 ${WORKDIR}/keyboard ${D}${bindir}/
 }
 
-FILES_${PN} = " \
+FILES:${PN} = " \
     ${sysconfdir} \
     ${bindir} \
     ${libdir} \
@@ -98,7 +98,7 @@ FILES_${PN} = " \
     /root/.uim.d \
 "
 
-RDEPENDS_${PN} += " \
+RDEPENDS:${PN} += " \
     xrdb \
     bash \
     dbus \

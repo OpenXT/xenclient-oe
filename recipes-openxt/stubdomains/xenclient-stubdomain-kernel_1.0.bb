@@ -7,7 +7,7 @@ COMPATIBLE_MACHINE = "xenclient-dom0"
 
 STUBDOMAIN_DIR = "${DEPLOY_DIR}/images/${STUBDOMAIN_MACHINE}"
 
-FILESEXTRAPATHS_prepend := "${STUBDOMAIN_DIR}:"
+FILESEXTRAPATHS:prepend := "${STUBDOMAIN_DIR}:"
 
 SRC_URI = " \
         file://${STUBDOMAIN_KERNEL}-${STUBDOMAIN_MACHINE}.bin \
@@ -26,5 +26,5 @@ do_checkimage() {
 }
 addtask checkimage before do_fetch
 
-FILES_${PN} = "${libdir}/xen/boot/qemu-stubdom-linux-kernel"
+FILES:${PN} = "${libdir}/xen/boot/qemu-stubdom-linux-kernel"
 

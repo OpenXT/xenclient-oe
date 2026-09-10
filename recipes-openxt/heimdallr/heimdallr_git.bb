@@ -5,7 +5,7 @@ DEPENDS = "json-c pciutils"
 
 PV = "0+git${SRCPV}"
 
-FILESEXTRAPATHS_prepend := "${THISDIR}/files:${THISDIR}/patches:"
+FILESEXTRAPATHS:prepend := "${THISDIR}/files:${THISDIR}/patches:"
 SRC_URI = "git://github.com/achartier/heimdallr.git;protocol=https \
            file://pci-quirks.json \
            file://fix-json-pkgconfig-name.patch \
@@ -18,7 +18,7 @@ S = "${WORKDIR}/git"
 # Hack to get CFLAGS not wiped out by OE
 EXTRA_OEMAKE = ""
 
-CFLAGS_append += "-Wno-deprecated-declarations"
+CFLAGS:append += "-Wno-deprecated-declarations"
 
 inherit pkgconfig
 

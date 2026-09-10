@@ -1,5 +1,5 @@
 PR .= ".1"
 
-RDEPENDS_packagegroup-base-keyboard = "\
+RDEPENDS:packagegroup-base-keyboard = "\
     kbd \
     xenclient-console-keymaps"

@@ -5,8 +5,8 @@ DEPENDS = "libargo"
 
 require xctools.inc
 
-FILES_${PN} += "/usr/lib/xen/bin/qmp_helper"
-FILES_${PN}-dbg += " /usr/lib/xen/bin/.debug "
+FILES:${PN} += "/usr/lib/xen/bin/qmp_helper"
+FILES:${PN}-dbg += " /usr/lib/xen/bin/.debug "
 
 S = "${WORKDIR}/git/qmp_helper"
 

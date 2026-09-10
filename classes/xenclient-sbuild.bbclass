@@ -102,27 +102,27 @@ EOF
 
 
 
-do_compile_append() {
+do_compile:append() {
 EOF
 }
 
-do_configure_prepend() {
+do_configure:prepend() {
 cat <<EOF > "${S}/oe_do_configure.sh"
 }
 
-do_configure_append() {
+do_configure:append() {
 EOF
 }
 
-do_compile_prepend() {
+do_compile:prepend() {
 cat <<EOF > "${S}/oe_do_compile.sh"
 }
 
-do_install_prepend() {
+do_install:prepend() {
 cat <<EOF > "${S}/oe_do_install.sh"
 }
 
-do_install_append() {
+do_install:append() {
 EOF
         my_step "install"
 }

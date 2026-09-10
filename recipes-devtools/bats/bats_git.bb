@@ -13,6 +13,6 @@ do_install () {
     ${S}/install.sh ${D}/${exec_prefix}
 }
 
-RDEPENDS_${PN} += " \
+RDEPENDS:${PN} += " \
     bash \
 "

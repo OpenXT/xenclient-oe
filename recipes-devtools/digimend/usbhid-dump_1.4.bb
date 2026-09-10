@@ -11,6 +11,6 @@ SRC_URI = "https://github.com/DIGImend/${PN}/releases/download/${PV}/${PN}-${PV}
 SRC_URI[tarball.md5sum] = "35a9d0d7febc98a0072a92fdf04d7194"
 SRC_URI[tarball.sha256sum] = "065bdf713ca2446e455f3b71e6fc9d401dc694d73ac9f3c7b66940771660f46c"
 
-FILES_${PN} += " /usr/bin/usbhid-dump "
+FILES:${PN} += " /usr/bin/usbhid-dump "
 
 S = "${WORKDIR}/${PN}-${PV}/"

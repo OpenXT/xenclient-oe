@@ -1,7 +1,7 @@
 # Hack to work around grub2.inc settings SRC_URI
 # OE_CORE_PATH defaults to a bordel build layout
 OE_CORE_PATH ?= "${TOPDIR}/layers/openembedded-core"
-FILESEXTRAPATHS_prepend := "${OE_CORE_PATH}/meta/recipes-bsp/grub/files:"
+FILESEXTRAPATHS:prepend := "${OE_CORE_PATH}/meta/recipes-bsp/grub/files:"
 require recipes-bsp/grub/grub2.inc
 
 require conf/image-uefi.conf
@@ -12,10 +12,10 @@ SECURITY_CFLAGS = ""
 # Prevent generation of .text.unlikely which would be placed ahead of the
 # expected _start at the beginning of the .text section.  .text.unlikely
 # would then get executed and fault.
-CFLAGS_append = "-fno-reorder-functions"
+CFLAGS:append = "-fno-reorder-functions"
 
-DEPENDS_append_class-target = " grub-efi-native"
-RDEPENDS_${PN}_class-target = "grub-common virtual/grub-bootconf"
+DEPENDS:append:class-target = " grub-efi-native"
+RDEPENDS:${PN}:class-target = "grub-common virtual/grub-bootconf"
 
 SRC_URI += " \
 	file://grub-xen.cfg \
@@ -54,17 +54,17 @@ do_mkimage() {
 
 addtask mkimage before do_install after do_compile
 
-do_mkimage_class-native() {
+do_mkimage:class-native() {
 	:
 }
 
-do_install_class-target() {
+do_install:class-target() {
     install -d "${D}${libdir}/xen/boot"
     install -m 644 "${GRUB_BINARY}" "${D}${libdir}/xen/boot"
     ln -s "${GRUB_BINARY}" "${D}${libdir}/xen/boot/${GRUB_BINARY}.bin"
 }
 
-FILES_${PN} = "${libdir}/xen/boot"
+FILES:${PN} = "${libdir}/xen/boot"
 
 # grub.xen_pvh is a 32bit binary, so it may not match.
-INSANE_SKIP_${PN} += "arch"
+INSANE_SKIP:${PN} += "arch"

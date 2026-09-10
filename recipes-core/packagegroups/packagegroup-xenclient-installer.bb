@@ -6,7 +6,7 @@ PR = "r11"
 
 inherit packagegroup
 
-RDEPENDS_${PN} = " \
+RDEPENDS:${PN} = " \
     acms \
     bc \
     cryptsetup \

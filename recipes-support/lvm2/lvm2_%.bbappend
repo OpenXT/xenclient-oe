@@ -1,4 +1,4 @@
-FILESEXTRAPATHS_prepend := "${THISDIR}/${BPN}:"
+FILESEXTRAPATHS:prepend := "${THISDIR}/${BPN}:"
 
 SRC_URI += " \
     file://0001-apply-obtain_device_list_from_udev-to-all-libudev-us.patch \
@@ -9,8 +9,8 @@ SRC_URI += " \
 # meta-oe recipe will already _append the autotools do_install(), and
 # do_<something>_append() cannot be overridden...
 # So instead, overwrite the files since this is a bbappend it should be done
-# after the initial do_install_append()
-do_install_append() {
+# after the initial do_install:append()
+do_install:append() {
     if ! ${@bb.utils.contains('DISTRO_FEATURES','systemd','true','false',d)}; then
         # Use Yocto compatible initscripts instead of the RHEL ones provided by
         # the tarball.
@@ -23,18 +23,18 @@ do_install_append() {
 }
 
 PACKAGES =+ "${PN}-conf"
-RRECOMMENDS_${PN}_append += "${PN}-conf"
+RRECOMMENDS:${PN}:append += "${PN}-conf"
 
-FILES_${PN}-conf = " \
+FILES:${PN}-conf = " \
     ${sysconfdir}/lvm/lvm.conf \
 "
-CONFFILES_${PN}-conf = " \
+CONFFILES:${PN}-conf = " \
     ${sysconfdir}/lvm/lvm.conf \
 "
 
-FILES_${PN} += " \
+FILES:${PN} += " \
     ${sysconfdir}/default/volatiles \
 "
-RDEPENDS_${PN} += " \
+RDEPENDS:${PN} += " \
     bash \
 "

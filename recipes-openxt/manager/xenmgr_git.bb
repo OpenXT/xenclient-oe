@@ -38,7 +38,7 @@ inherit haskell update-rc.d xc-rpcgen
 # so replace it with the standard pkgid of xenmgr-1.0.
 EXTRA_CABAL_CONF += "--datasubdir=xenmgr-1.0"
 
-do_configure_append() {
+do_configure:append() {
     # generate rpc stubs
     mkdir -p Rpc/Autogen
     # Server objects
@@ -56,7 +56,7 @@ do_configure_append() {
     xc-rpcgen --haskell --templates-dir="${STAGING_RPCGENDATADIR_NATIVE}" -c -o "Rpc/Autogen" --module-prefix="Rpc.Autogen" "${STAGING_IDLDATADIR}/ctxusb_daemon.xml"
 }
 
-do_install_append() {
+do_install:append() {
     install -m 0755 ${S}/setup-ica-vm ${D}${bindir}/setup-ica-vm
     install -m 0755 -d ${D}${sysconfdir}/dbus-1/system.d
     install -m 0644 ${WORKDIR}/xenmgr_dbus.conf ${D}${sysconfdir}/dbus-1/system.d/
@@ -69,7 +69,7 @@ do_install_append() {
     install -m 0644 ${S}/../templates/default/* ${D}${datadir}/xenmgr-1.0/templates/default/
 }
 
-RDEPENDS_${PN} += " \
+RDEPENDS:${PN} += " \
     glibc-gconv-utf-32 \
     xenclient-eula \
     xenclient-caps \
@@ -83,7 +83,7 @@ RDEPENDS_${PN} += " \
 INITSCRIPT_NAME = "xenmgr"
 INITSCRIPT_PARAMS = "defaults 80 16"
 
-FILES_${PN} += " \
+FILES:${PN} += " \
     ${datadir}/xenmgr-1.0/templates/default/* \
     ${datadir}/xenclient \
     ${sysconfdir}/dbus-1/system.d/xenmgr_dbus.conf \

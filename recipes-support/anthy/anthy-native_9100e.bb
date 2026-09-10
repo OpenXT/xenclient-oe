@@ -1,6 +1,6 @@
 require anthy_${PV}.bb
 
-FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
+FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 
 DEPENDS = ""
 PACKAGES = ""

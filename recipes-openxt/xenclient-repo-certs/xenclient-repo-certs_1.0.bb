@@ -6,7 +6,7 @@ SRC_URI = "file://${REPO_PROD_CACERT} \
            file://${REPO_DEV_CACERT} \
            file://verify-repo-metadata"
 
-FILES_${PN} = "${datadir}/xenclient/repo-certs \
+FILES:${PN} = "${datadir}/xenclient/repo-certs \
                ${bindir}/verify-repo-metadata"
 
 inherit allarch
@@ -24,6 +24,6 @@ do_install() {
     install -m 0755 ${WORKDIR}/verify-repo-metadata ${D}${bindir}/
 }
 
-RDEPENDS_${PN} += " \
+RDEPENDS:${PN} += " \
     openssl-bin \
 "

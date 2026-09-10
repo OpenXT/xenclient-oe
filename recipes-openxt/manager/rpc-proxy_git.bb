@@ -19,7 +19,7 @@ DEPENDS += " \
     hkg-errors \
     hkg-hashtables \
 "
-RDEPENDS_${PN} += "glibc-gconv-utf-32 bash"
+RDEPENDS:${PN} += "glibc-gconv-utf-32 bash"
 
 require manager.inc
 
@@ -39,14 +39,14 @@ INITSCRIPT_PARAMS = "defaults 30 18"
 
 # ToDo: move xc-rpcgen into compile?
 
-do_configure_append() {
+do_configure:append() {
 	# generate rpc stubs
 	mkdir -p Rpc/Autogen
 	xc-rpcgen --haskell --templates-dir=${STAGING_RPCGENDATADIR_NATIVE} -s -o Rpc/Autogen --module-prefix=Rpc.Autogen ${STAGING_IDLDATADIR}/rpc_proxy.xml
 	xc-rpcgen --haskell --templates-dir=${STAGING_RPCGENDATADIR_NATIVE} -c -o Rpc/Autogen --module-prefix=Rpc.Autogen ${STAGING_IDLDATADIR}/dbus.xml
 }
 
-do_install_append() {
+do_install:append() {
 	install -m 0755 -d ${D}/etc
 	install -m 0755 -d ${D}/etc/init.d
 	install -m 0644 ${WORKDIR}/rpc-proxy.rules ${D}/etc/rpc-proxy.rules

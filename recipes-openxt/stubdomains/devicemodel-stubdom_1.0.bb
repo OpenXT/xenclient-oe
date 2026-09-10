@@ -8,7 +8,7 @@ COMPATIBLE_MACHINE = "xenclient-dom0"
 STUBDOMAIN_DIR = "${DEPLOY_DIR}/images/${STUBDOMAIN_MACHINE}"
 STUBDOMAIN_NAME = "xenclient-stubdomain-initramfs-image"
 
-FILESEXTRAPATHS_prepend := "${STUBDOMAIN_DIR}:"
+FILESEXTRAPATHS:prepend := "${STUBDOMAIN_DIR}:"
 
 SRC_URI = " \
         file://${STUBDOMAIN_NAME}-${STUBDOMAIN_MACHINE}.cpio.gz;unpack=0 \
@@ -27,7 +27,7 @@ do_checkimage() {
 }
 addtask checkimage before do_fetch
 
-FILES_${PN} = "${libdir}/xen/boot/qemu-stubdom-linux-rootfs"
+FILES:${PN} = "${libdir}/xen/boot/qemu-stubdom-linux-rootfs"
 
-RDEPENDS_${PN} = "${STUBDOMAIN_MACHINE}-kernel"
+RDEPENDS:${PN} = "${STUBDOMAIN_MACHINE}-kernel"
 

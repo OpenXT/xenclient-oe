@@ -10,7 +10,7 @@ DEPENDS = " \
     hkg-regex-posix \
     hkg-network \
 "
-RDEPENDS_${PN} += " \
+RDEPENDS:${PN} += " \
     bridge-utils \
     carrier-detect \
     glibc-gconv-utf-32 \
@@ -26,12 +26,12 @@ S = "${WORKDIR}/git/nws"
 inherit haskell update-rc.d xc-rpcgen
 
 INITSCRIPT_PACKAGES = "${PN}"
-INITSCRIPT_NAME_${PN} = "network-slave"
-INITSCRIPT_PARAMS_${PN} = "defaults 29 15"
+INITSCRIPT_NAME:${PN} = "network-slave"
+INITSCRIPT_PARAMS:${PN} = "defaults 29 15"
 
-FILES_${PN} += "/usr/bin/network-slave"
+FILES:${PN} += "/usr/bin/network-slave"
 
-do_configure_append() {
+do_configure:append() {
     # generate rpc stubs
     mkdir -p ${S}/Rpc/Autogen
 
@@ -52,7 +52,7 @@ do_configure_append() {
     xc-rpcgen --haskell --templates-dir=${STAGING_RPCGENDATADIR_NATIVE} -o Rpc/Autogen --module-prefix=Rpc.Autogen ${STAGING_IDLDATADIR}/dbus.xml
 }
 
-do_install_append() {
+do_install:append() {
     install -m 0755 -d ${D}${sysconfdir}/network-daemon
     install -m 0755 ${S}/dnsmasq-template ${D}${sysconfdir}/network-daemon/dnsmasq-template
     install -m 0755 ${S}/dnsmasq-script-template ${D}${sysconfdir}/network-daemon/dnsmasq-script-template

@@ -20,7 +20,7 @@ DEPENDS = " \
     hkg-transformers-base \
     hkg-monad-loops \
 "
-RDEPENDS_${PN} += " \
+RDEPENDS:${PN} += " \
     glibc-gconv-utf-32 \
     openssl-bin \
 "
@@ -37,10 +37,10 @@ S = "${WORKDIR}/git/updatemgr"
 inherit update-rc.d haskell xc-rpcgen
 
 INITSCRIPT_PACKAGES = "${PN}"
-INITSCRIPT_NAME_${PN} = "updatemgr"
-INITSCRIPT_PARAMS_${PN} = "defaults 80 20"
+INITSCRIPT_NAME:${PN} = "updatemgr"
+INITSCRIPT_PARAMS:${PN} = "defaults 80 20"
 
-do_configure_append() {
+do_configure:append() {
 	# generate rpc stubs
 	mkdir -p ${S}/Rpc/Autogen
 	# Server objects
@@ -52,7 +52,7 @@ do_configure_append() {
 	xc-rpcgen --haskell --templates-dir=${STAGING_RPCGENDATADIR_NATIVE} -c -o ${S}/Rpc/Autogen --module-prefix=Rpc.Autogen ${STAGING_IDLDATADIR}/xenmgr_host.xml
 }
 
-do_install_append() {
+do_install:append() {
 	install -m 0755 -d ${D}${sysconfdir}/init.d
 	install -m 0755 ${WORKDIR}/updatemgr.initscript ${D}${sysconfdir}/init.d/updatemgr
 }

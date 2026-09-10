@@ -1,4 +1,4 @@
-FILESEXTRAPATHS_prepend := "${THISDIR}/files:"
+FILESEXTRAPATHS:prepend := "${THISDIR}/files:"
 
 SRC_URI += " \
     file://pxelinux.cfg \
@@ -28,7 +28,7 @@ do_deploy() {
     install -m 0644 "${WORKDIR}/isolinux.cfg" "${DEPLOYDIR}/iso/isolinux.cfg"
     install -m 0644 "${WORKDIR}/bootmsg.txt" "${DEPLOYDIR}/iso/bootmsg.txt"
 }
-do_deploy_class-native() {
+do_deploy:class-native() {
     :
 }
 
@@ -42,17 +42,17 @@ PACKAGES =+ " \
 # Since version 5.00, all Syslinux variants require an additional module,
 # ldlinux, to be loaded too.
 # (http://www.syslinux.org/wiki/index.php?title=Library_modules).
-FILES_${PN}-ldlinux += "\
+FILES:${PN}-ldlinux += "\
     ${datadir}/${BPN}/ldlinux.c32 \
 "
 
 # mboot.c32 requires libcom32.c32 library
 # (http://www.syslinux.org/wiki/index.php?title=Library_modules).
-FILES_${PN}-mboot = " \
+FILES:${PN}-mboot = " \
     ${datadir}/${BPN}/mboot.c32 \
     ${datadir}/${BPN}/libcom32.c32 \
 "
 
 # Don't let the sanity checker trip on the 32 bit real mode BIOS binaries
-INSANE_SKIP_${PN}-ldlinux = "arch"
-INSANE_SKIP_${PN}-mboot = "arch"
+INSANE_SKIP:${PN}-ldlinux = "arch"
+INSANE_SKIP:${PN}-mboot = "arch"

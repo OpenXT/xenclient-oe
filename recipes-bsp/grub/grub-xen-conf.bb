@@ -18,4 +18,4 @@ do_install() {
     echo "}" >> "${D}/boot/grub2/grub.cfg"
 }
 
-FILES_${PN} = "/boot"
+FILES:${PN} = "/boot"

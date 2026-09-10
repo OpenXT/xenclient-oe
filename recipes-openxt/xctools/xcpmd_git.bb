@@ -8,9 +8,9 @@ SRC_URI += " \
     file://xcpmd.initscript \
 "
 
-CFLAGS_prepend += " -I${STAGING_INCDIR}/libnl3 "
+CFLAGS:prepend += " -I${STAGING_INCDIR}/libnl3 "
 
-CFLAGS_append += " -Wno-unused-parameter -Wno-deprecated-declarations "
+CFLAGS:append += " -Wno-unused-parameter -Wno-deprecated-declarations "
 
 S = "${WORKDIR}/git/xcpmd"
 
@@ -21,7 +21,7 @@ inherit autotools update-rc.d pkgconfig xc-rpcgen-c
 INITSCRIPT_NAME = "xcpmd"
 INITSCRIPT_PARAMS = "defaults 60 19"
 
-do_install_append() {
+do_install:append() {
 # RJP TODO remove xenpmd from xenclient-tools clam bake
 	install -d ${D}${sysconfdir}/init.d
 	install -m 0755 ${WORKDIR}/xcpmd.initscript ${D}${sysconfdir}/init.d/xcpmd

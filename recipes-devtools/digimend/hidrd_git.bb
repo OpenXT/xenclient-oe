@@ -14,4 +14,4 @@ SRC_URI = "git://github.com/DIGImend/${PN}.git;protocol=https;branch=master"
 
 S = "${WORKDIR}/git/"
 
-FILES_${PN} += " /usr/bin/hidrd-convert "
+FILES:${PN} += " /usr/bin/hidrd-convert "

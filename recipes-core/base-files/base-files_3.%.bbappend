@@ -1,4 +1,4 @@
-FILESEXTRAPATHS_prepend := "${THISDIR}/files:"
+FILESEXTRAPATHS:prepend := "${THISDIR}/files:"
 SRC_URI += " \
     file://fstab.early \
     file://openxt-aliases.sh \
@@ -16,23 +16,23 @@ dirs2775 = " \
 # Add /var/log back as OpenXT uses encrypted partition for it (... and
 # installer is ramfs)
 # Add /media/ram for the key-functions scripts (mount point).
-dirs755_append = " \
+dirs755:append = " \
     ${localstatedir}/log \
     /media/ram \
 "
 # Remove the volatile directories. OpenXT does not leverage them.
-dirs755_remove = " \
+dirs755:remove = " \
     ${localstatedir}/volatile/log \
     ${localstatedir}/volatile/tmp \
 "
 
 # OpenXT: Dom0 specific additional directories.
-dirs755_append_xenclient-dom0 = " \
+dirs755:append:xenclient-dom0 = " \
     /storage \
     ${localstatedir}/cores \
 "
 # OpenXT: UIVM has only root as user, pre-create local conf directories.
-dirs755_append_xenclient-uivm = " \
+dirs755:append:xenclient-uivm = " \
     /root/.gconf \
     /root/.gnome2 \
     /root/.cache \
@@ -48,7 +48,7 @@ conffiles = " \
     ${sysconfdir}/default \
 "
 
-do_install_append() {
+do_install:append() {
     install -m 0644 ${WORKDIR}/fstab.early ${D}${sysconfdir}/fstab.early
     install -m 0755 -d ${D}${sysconfdir}/profile.d
     install -m 0644 ${WORKDIR}/openxt-aliases.sh ${D}${sysconfdir}/profile.d/openxt-aliases.sh

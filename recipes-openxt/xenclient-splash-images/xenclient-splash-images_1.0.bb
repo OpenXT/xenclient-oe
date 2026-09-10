@@ -14,7 +14,7 @@ SRC_URI = "file://black.png \
 
 PACKAGES = "${PN}"
 
-FILES_${PN} = "/"
+FILES:${PN} = "/"
 
 do_install () {
 	install -d ${D}/usr/share/xenclient/bootloader/images

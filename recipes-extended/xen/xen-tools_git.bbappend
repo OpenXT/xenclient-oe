@@ -14,7 +14,7 @@ B = "${S}"
 DEFAULT_PREFERENCE = "1"
 
 PACKAGES += "vchan-socket-proxy"
-FILES_vchan-socket-proxy = " \
+FILES:vchan-socket-proxy = " \
     ${bindir}/vchan-socket-proxy \
 "
-RDEPENDS_${PN}-libxenlight += "vchan-socket-proxy"
+RDEPENDS:${PN}-libxenlight += "vchan-socket-proxy"

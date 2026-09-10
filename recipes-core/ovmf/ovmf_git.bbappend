@@ -1,4 +1,4 @@
-FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
+FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 
 # xcp-ng patches taken from:
 # https://github.com/xcp-ng-rpms/edk2/tree/master/SOURCES
@@ -11,7 +11,7 @@ SRC_URI += " \
     file://xcp-ng-keep-caching-enabled.patch \
 "
 
-DEPENDS_append += " \
+DEPENDS:append += " \
     unzip-native \
 "
 
@@ -28,7 +28,7 @@ do_extract_bootutil[doc] = "Extract Intel's proprietary E1000 NIC driver to be e
 do_extract_bootutil[depends] = "${PN}:do_prepare_recipe_sysroot"
 do_extract_bootutil[dirs] = "${B}"
 
-do_compile_class-target_append() {
+do_compile:append:class-target() {
     bbnote "Building with E1000 (support for netboot)."
     rm -rf ${S}/Build/Ovmf$OVMF_DIR_SUFFIX
     ${S}/OvmfPkg/build.sh $PARALLEL_JOBS -a $OVMF_ARCH -b RELEASE -t ${FIXED_GCCVER} -D E1000_ENABLE -D XEN_VARIABLE_ENABLE=TRUE -D SECURE_BOOT_ENABLE=TRUE
@@ -36,7 +36,7 @@ do_compile_class-target_append() {
     ln ${build_dir}/FV/OVMF_CODE.fd ${WORKDIR}/ovmf/ovmf.e1000.code.fd
 }
 
-do_install_class-target_append() {
+do_install:append:class-target() {
     install -d ${D}${datadir}/firmware
     install -m 0600 ${WORKDIR}/ovmf/ovmf.e1000.fd ${D}${datadir}/firmware/ovmf.e1000.bin
     ln -sf ovmf.e1000.bin ${D}${datadir}/firmware/ovmf.bin
@@ -46,6 +46,6 @@ PACKAGES += " \
     ${PN}-firmware \
 "
 
-FILES_${PN}-firmware += " \
+FILES:${PN}-firmware += " \
     ${datadir}/firmware \
 "

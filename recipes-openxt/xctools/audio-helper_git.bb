@@ -23,11 +23,11 @@ do_install(){
     install -m 755 "${WORKDIR}/audio_helper_start" "${D}${libdir}/xen/bin/audio_helper_start"
 }
 
-FILES_${PN} += " \
+FILES:${PN} += " \
     ${libdir}/xen/bin/audio_helper \
     ${libdir}/xen/bin/audio_helper_start \
 "
-FILES_${PN}-dbg += " \
+FILES:${PN}-dbg += " \
     ${libdir}/xen/bin/.debug \
 "
-RDEPENDS_${PN} += "dbd-tools"
+RDEPENDS:${PN} += "dbd-tools"

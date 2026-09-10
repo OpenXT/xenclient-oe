@@ -14,4 +14,4 @@ do_install() {
 	install -m 0755 ${WORKDIR}/secure-vm ${D}${bindir}
 }
 
-RDEPENDS_${PN} += "bash"
+RDEPENDS:${PN} += "bash"

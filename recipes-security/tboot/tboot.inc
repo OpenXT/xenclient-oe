@@ -6,12 +6,12 @@ DEPENDS = "trousers"
 
 COMPATIBLE_HOST = "(i.86|x86_64).*-linux"
 COMPATIBLE_MACHINE = "(-)"
-COMPATIBLE_MACHINE_x86 = ".*"
-COMPATIBLE_MACHINE_x86-64 = ".*"
+COMPATIBLE_MACHINE:x86 = ".*"
+COMPATIBLE_MACHINE:x86-64 = ".*"
 
 require tboot-arch.inc
 
-INSANE_SKIP_${PN} = "arch"
+INSANE_SKIP:${PN} = "arch"
 
 export TBOOT_TARGET_ARCH = "${@map_tboot_arch(d.getVar('TARGET_ARCH'), d)}"
 
@@ -39,18 +39,18 @@ PACKAGES += " \
     ${PN}-pcr-calc \
 "
 
-FILES_${PN} = " \
+FILES:${PN} = " \
     ${base_prefix}/boot/tboot \
     ${base_prefix}/boot/tboot.gz \
 "
-FILES_${PN}-dbg += " \
+FILES:${PN}-dbg += " \
     ${base_prefix}/boot/tboot-syms \
 "
-FILES_${PN}-grub = " \
+FILES:${PN}-grub = " \
     ${sysconfdir}/grub.d/20_linux_tboot \
     ${sysconfdir}/grub.d/20_linux_xen_tboot \
 "
-FILES_${PN}-lcptools = " \
+FILES:${PN}-lcptools = " \
     ${sbindir}/lcp_readpol \
     ${sbindir}/lcp_writepol \
     ${sbindir}/tb_polgen \
@@ -60,19 +60,19 @@ FILES_${PN}-lcptools = " \
     ${sbindir}/tpmnv_relindex \
 "
 
-FILES_${PN}-lcptools-v2 = " \
+FILES:${PN}-lcptools-v2 = " \
     ${sbindir}/lcp2_mlehash \
     ${sbindir}/lcp2_crtpol \
     ${sbindir}/lcp2_crtpollist \
     ${sbindir}/lcp2_crtpolelt \
 "
 
-FILES_${PN}-utils = " \
+FILES:${PN}-utils = " \
     ${sbindir}/txt-stat \
     ${sbindir}/parse_err \
     ${sbindir}/acminfo \
 "
-FILES_${PN}-pcr-calc = " \
+FILES:${PN}-pcr-calc = " \
     ${sbindir}/module_hash \
     ${sbindir}/pcr-calc \
     ${sbindir}/acmmatch \

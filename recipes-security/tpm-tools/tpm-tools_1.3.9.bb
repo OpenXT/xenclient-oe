@@ -31,13 +31,13 @@ S = "${WORKDIR}/${BPN}-${PV}"
 inherit gettext autotools-brokensep
 
 PACKAGES =+ "${PN}-sa"
-FILES_${PN}-sa = " \
+FILES:${PN}-sa = " \
     ${bindir}/tpm_extendpcr_sa \
     ${bindir}/tpm_sealdata_sa \
     ${bindir}/tpm_unsealdata_sa \
     ${bindir}/tpm_quote_sa \
 "
 
-do_install_append() {
+do_install:append() {
     rm ${D}${sbindir}/tpm_clear
 }

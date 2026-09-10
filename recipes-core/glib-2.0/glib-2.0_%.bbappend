@@ -1,3 +1,3 @@
-EXTRA_OECONF_append = " \
+EXTRA_OECONF:append = " \
     --disable-Bsymbolic \
 "

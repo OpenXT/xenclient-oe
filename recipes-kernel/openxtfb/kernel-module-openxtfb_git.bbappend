@@ -1,3 +1,3 @@
 inherit module-signing
 
-KERNEL_MODULE_AUTOLOAD_append_xenclient-uivm += "openxtfb"
+KERNEL_MODULE_AUTOLOAD:append:xenclient-uivm += "openxtfb"

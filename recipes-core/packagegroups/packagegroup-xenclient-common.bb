@@ -11,7 +11,7 @@ inherit packagegroup
 # when removing shadow dependecy please remove also shadow-native
 DEPENDS += "shadow-native"
 
-RDEPENDS_${PN} = " \
+RDEPENDS:${PN} = " \
     xenclient-feed-configs \
     shadow \
     bash \

@@ -1,14 +1,14 @@
 PR .= ".1"
 
-FILESEXTRAPATHS_prepend := "${THISDIR}/patches:"
+FILESEXTRAPATHS:prepend := "${THISDIR}/patches:"
 
 SRC_URI += " \
     file://remove-editing-and-shell.patch \
     file://no-multiboot-display-reset.patch \
 "
 
-PACKAGECONFIG_append = "device-mapper"
+PACKAGECONFIG:append = "device-mapper"
 
-# PACKAGECONFIG seems to not append the RDEPENDS_${PN}-*... not sure why yet.
-RDEPENDS_${PN}-editenv += "libdevmapper"
-RDEPENDS_${PN}-common += "libdevmapper"
+# PACKAGECONFIG seems to not append the RDEPENDS:${PN}-*... not sure why yet.
+RDEPENDS:${PN}-editenv += "libdevmapper"
+RDEPENDS:${PN}-common += "libdevmapper"

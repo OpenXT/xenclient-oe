@@ -20,10 +20,10 @@ do_install () {
 }
 
 INITSCRIPT_PACKAGES = "${PN}"
-INITSCRIPT_NAME_${PN} = "populate-certs.sh"
-INITSCRIPT_PARAMS_${PN} = "start 28 2 3 4 5 ."
+INITSCRIPT_NAME:${PN} = "populate-certs.sh"
+INITSCRIPT_PARAMS:${PN} = "start 28 2 3 4 5 ."
 
-RDEPENDS_${PN} += " \
+RDEPENDS:${PN} += " \
     libtirpc \
     libicbinn \
     libicbinn-client \

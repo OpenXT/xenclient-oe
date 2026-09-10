@@ -27,10 +27,10 @@ do_install () {
 
 }
 
-FILES_${PN} = " \
+FILES:${PN} = " \
     ${libexecdir} \
 "
 
-RDEPENDS_${PN} = " \
+RDEPENDS:${PN} = " \
     bats \
 "

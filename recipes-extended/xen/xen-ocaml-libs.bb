@@ -40,15 +40,15 @@ DEPENDS += " \
 
 # OpenXT packages both the C and OCaml versions of XenStored.
 # This recipe packages the OCaml daemon; xen.bb packages the C one.
-FILES_${PN}-xenstored = " \
+FILES:${PN}-xenstored = " \
     ${sbindir}/xenstored.${PN}-xenstored \
     ${localstatedir}/lib/xenstored \
     ${INIT_D_DIR}/xenstored.${PN}-xenstored \
     ${sysconfdir}/xen/oxenstored.conf \
     "
-RPROVIDES_${PN}-xenstored = "virtual/xenstored"
+RPROVIDES:${PN}-xenstored = "virtual/xenstored"
 
-EXTRA_OECONF_remove = "--disable-ocamltools"
+EXTRA_OECONF:remove = "--disable-ocamltools"
 
 # OCAMLDESTDIR is set to $DESTDIR/$(ocamlfind printconf destdir), yet DESTDIR
 # is required for other binaries installation, so override OCAMLDESTDIR.
@@ -64,15 +64,15 @@ TARGET_CC_ARCH += "${LDFLAGS}"
 CC_FOR_OCAML="${TARGET_PREFIX}gcc"
 
 INITSCRIPT_PACKAGES = "${PN}-xenstored"
-INITSCRIPT_NAME_${PN}-xenstored = "xenstored"
-INITSCRIPT_PARAMS_${PN}-xenstored = "defaults 05 95"
+INITSCRIPT_NAME:${PN}-xenstored = "xenstored"
+INITSCRIPT_PARAMS:${PN}-xenstored = "defaults 05 95"
 
-pkg_postinst_${PN}-xenstored () {
+pkg_postinst:${PN}-xenstored () {
     update-alternatives --install ${sbindir}/xenstored xenstored xenstored.${PN}-xenstored 100
     update-alternatives --install ${INIT_D_DIR}/xenstored xenstored-initscript xenstored.${PN}-xenstored 100
 }
 
-pkg_prerm_${PN}-xenstored () {
+pkg_prerm:${PN}-xenstored () {
     update-alternatives --remove xenstored xenstored.${PN}-xenstored
     update-alternatives --remove xenstored-initscript xenstored.${PN}-xenstored
 }
@@ -109,4 +109,4 @@ do_install() {
                     ${D}${sysconfdir}/xen/oxenstored.conf
 }
 
-INSANE_SKIP_${PN}-dev = "file-rdeps"
+INSANE_SKIP:${PN}-dev = "file-rdeps"

@@ -61,7 +61,7 @@ do_install() {
     install -m 0600 "${B}/fbx64.efi" ${D}/boot/
 }
 
-FILES_${PN} += "\
+FILES:${PN} += "\
     /boot/shimx64.efi \
     /boot/fbx64.efi \
 "
