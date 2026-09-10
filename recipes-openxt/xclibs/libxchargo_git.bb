@@ -10,7 +10,7 @@ RDEPENDS:${PN} += "glibc-gconv-utf-32"
 
 require xclibs.inc
 
-S = "${WORKDIR}/git/xchargo"
+S = "${UNPACKDIR}/${BP}/xchargo"
 
 HPN = "xchargo"
 HPV = "0.1"

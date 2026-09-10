@@ -6,5 +6,5 @@ SRC_URI = "file://caps.default"
 
 do_install() {
     install -d ${D}${sysconfdir}
-    install -m 0644 ${WORKDIR}/caps.default ${D}${sysconfdir}/
+    install -m 0644 ${UNPACKDIR}/caps.default ${D}${sysconfdir}/
 }

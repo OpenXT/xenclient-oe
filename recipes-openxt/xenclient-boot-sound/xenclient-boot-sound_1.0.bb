@@ -19,9 +19,9 @@ INITSCRIPT_PARAMS = "defaults 75 25"
 
 do_install () {
 	install -d ${D}/etc/init.d
-	install -m 0755 ${WORKDIR}/xenclient-boot-sound.initscript \
+	install -m 0755 ${UNPACKDIR}/xenclient-boot-sound.initscript \
 		${D}/etc/init.d/xenclient-boot-sound
 	install -d ${D}/usr/sbin
-	install -m 0755 ${WORKDIR}/update-pcm-config \
+	install -m 0755 ${UNPACKDIR}/update-pcm-config \
 		${D}/usr/sbin/update-pcm-config
 }

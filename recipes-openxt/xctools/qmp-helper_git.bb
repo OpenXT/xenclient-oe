@@ -8,7 +8,7 @@ require xctools.inc
 FILES:${PN} += "/usr/lib/xen/bin/qmp_helper"
 FILES:${PN}-dbg += " /usr/lib/xen/bin/.debug "
 
-S = "${WORKDIR}/git/qmp_helper"
+S = "${UNPACKDIR}/${BP}/qmp_helper"
 
 ASNEEDED = ""
 

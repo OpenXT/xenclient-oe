@@ -13,7 +13,6 @@ SRC_URI = "git://github.com/achartier/heimdallr.git;protocol=https \
            "
 SRCREV = "16b0da1e69e92ef8c0834e8a377c13aea823cfa2"
 
-S = "${WORKDIR}/git"
 
 # Hack to get CFLAGS not wiped out by OE
 EXTRA_OEMAKE = ""
@@ -26,5 +25,5 @@ do_install() {
         oe_runmake DESTDIR="${D}/usr/bin" install
 
         install -d ${D}${sysconfdir}
-        install -m 0644 ${WORKDIR}/pci-quirks.json ${D}${sysconfdir}
+        install -m 0644 ${UNPACKDIR}/pci-quirks.json ${D}${sysconfdir}
 }

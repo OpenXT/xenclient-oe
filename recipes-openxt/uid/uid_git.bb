@@ -19,7 +19,6 @@ SRC_URI += " \
     file://uid.initscript \
 "
 
-S = "${WORKDIR}/git"
 
 inherit update-rc.d ocaml findlib pkgconfig
 
@@ -47,11 +46,11 @@ do_install() {
     rm -rf ${D}${libdir}
 
     install -m 0755 -d ${D}${sysconfdir}
-    install -m 0644 ${WORKDIR}/uid.conf ${D}${sysconfdir}/uid.conf
+    install -m 0644 ${UNPACKDIR}/uid.conf ${D}${sysconfdir}/uid.conf
 
     install -m 0755 -d ${D}${sysconfdir}/dbus-1/system.d
-    install -m 0644 ${WORKDIR}/uid_dbus.conf ${D}${sysconfdir}/dbus-1/system.d/uid_dbus.conf
+    install -m 0644 ${UNPACKDIR}/uid_dbus.conf ${D}${sysconfdir}/dbus-1/system.d/uid_dbus.conf
 
     install -m 0755 -d ${D}${sysconfdir}/init.d
-    install -m 0755 ${WORKDIR}/uid.initscript ${D}${sysconfdir}/init.d/uid
+    install -m 0755 ${UNPACKDIR}/uid.initscript ${D}${sysconfdir}/init.d/uid
 }

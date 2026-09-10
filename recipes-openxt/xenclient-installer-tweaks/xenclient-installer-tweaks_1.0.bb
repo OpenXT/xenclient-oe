@@ -20,17 +20,17 @@ INITSCRIPT_PARAMS = "start 90 S ."
 do_install () {
     install -d ${D}/etc
     install -d ${D}/etc/udhcpc.d
-    install -m 755 ${WORKDIR}/60installer ${D}/etc/udhcpc.d
+    install -m 755 ${UNPACKDIR}/60installer ${D}/etc/udhcpc.d
 
     install -d ${D}/usr/bin
-    install -m 0755 ${WORKDIR}/status-report ${D}/usr/bin/status-report
-    install -m 0755 ${WORKDIR}/prepare-hd-install ${D}/usr/bin/prepare-hd-install
+    install -m 0755 ${UNPACKDIR}/status-report ${D}/usr/bin/status-report
+    install -m 0755 ${UNPACKDIR}/prepare-hd-install ${D}/usr/bin/prepare-hd-install
 
     install -d ${D}/etc/modprobe.d
-    install -m 0644 ${WORKDIR}/i915.conf ${D}/etc/modprobe.d/i915.conf
+    install -m 0644 ${UNPACKDIR}/i915.conf ${D}/etc/modprobe.d/i915.conf
 
     install -d ${D}/etc/init.d
-    install -m 0755 ${WORKDIR}/console-bell.initscript ${D}/etc/init.d/console-bell
+    install -m 0755 ${UNPACKDIR}/console-bell.initscript ${D}/etc/init.d/console-bell
 }
 
 RDEPENDS:${PN} = " \

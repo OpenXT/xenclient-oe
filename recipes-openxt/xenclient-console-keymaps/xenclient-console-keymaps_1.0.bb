@@ -7,7 +7,7 @@ DEPENDS = "console-setup-ckbcomp-native \
 
 FILES:${PN} = "${datadir}/keymaps"
 
-S = "${WORKDIR}/src"
+S = "${UNPACKDIR}"
 
 do_compile() {
     while read LINE ; do

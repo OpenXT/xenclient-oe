@@ -14,7 +14,6 @@ PV = "0+git${SRCPV}"
 SRCREV = "${AUTOREV}"
 SRC_URI = "git://github.com/OpenXT/sync-wui.git;protocol=https"
 
-S = "${WORKDIR}/git"
 
 inherit package_tar
 

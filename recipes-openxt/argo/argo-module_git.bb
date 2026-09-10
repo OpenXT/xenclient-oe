@@ -12,7 +12,7 @@ SRC_URI += " \
     file://60-argo.rules \
 "
 
-S = "${WORKDIR}/git/argo-linux"
+S = "${UNPACKDIR}/${BP}/argo-linux"
 
 inherit module
 inherit module-signing
@@ -34,5 +34,5 @@ GROUPADD_PARAM:${PN}-udev = "-r argo"
 
 do_install:append() {
     install -d ${D}${sysconfdir}/udev/rules.d
-    install -m 0644 ${WORKDIR}/60-argo.rules ${D}${sysconfdir}/udev/rules.d/
+    install -m 0644 ${UNPACKDIR}/60-argo.rules ${D}${sysconfdir}/udev/rules.d/
 }

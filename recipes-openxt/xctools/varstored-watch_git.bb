@@ -12,7 +12,7 @@ RDEPENDS:${PN} = " \
     varstored \
 "
 
-S = "${WORKDIR}/git/varstored-watch"
+S = "${UNPACKDIR}/${BP}/varstored-watch"
 
 do_install() {
     oe_runmake install DESTDIR=${D}

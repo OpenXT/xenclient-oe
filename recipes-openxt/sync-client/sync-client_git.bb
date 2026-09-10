@@ -34,7 +34,6 @@ SRC_URI = "git://github.com/OpenXT/sync-client.git;protocol=https \
 INITSCRIPT_NAME = "sync-client-daemon"
 INITSCRIPT_PARAMS = "defaults 85 15"
 
-S = "${WORKDIR}/git"
 
 inherit distutils3
 inherit update-rc.d
@@ -50,6 +49,6 @@ FILES:sync-cmd = " \
 
 do_install:append() {
     install -d ${D}${sysconfdir}/init.d
-    install -m 0755 ${WORKDIR}/${INITSCRIPT_NAME}.initscript \
+    install -m 0755 ${UNPACKDIR}/${INITSCRIPT_NAME}.initscript \
             ${D}${sysconfdir}/init.d/${INITSCRIPT_NAME}
 }

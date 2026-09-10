@@ -7,13 +7,13 @@ SRC_URI = "file://vhd-copy \
            file://vhd-dm-remove \
 "
 
-S = "${WORKDIR}"
+S = "${UNPACKDIR}"
 
 do_install() {
 	install -d ${D}${bindir}
-	install -m 0755 ${WORKDIR}/vhd-copy ${D}${bindir}
-	install -m 0755 ${WORKDIR}/vhd-dm-create ${D}${bindir}
-	install -m 0755 ${WORKDIR}/vhd-dm-remove ${D}${bindir}
+	install -m 0755 ${UNPACKDIR}/vhd-copy ${D}${bindir}
+	install -m 0755 ${UNPACKDIR}/vhd-dm-create ${D}${bindir}
+	install -m 0755 ${UNPACKDIR}/vhd-dm-remove ${D}${bindir}
 }
 
 RDEPENDS:${PN} += "bash"

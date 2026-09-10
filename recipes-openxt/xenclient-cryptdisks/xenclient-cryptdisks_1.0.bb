@@ -11,14 +11,14 @@ SRC_URI = "file://cryptdisks.initscript \
 INITSCRIPT_NAME = "cryptdisks"
 INITSCRIPT_PARAMS = "start 34 S ."
 
-S = "${WORKDIR}"
+S = "${UNPACKDIR}"
 
 inherit update-rc.d
 
 do_install() {
 	install -d ${D}${sysconfdir}/init.d
-	install -m 0755 ${WORKDIR}/cryptdisks.initscript \
+	install -m 0755 ${UNPACKDIR}/cryptdisks.initscript \
 		${D}${sysconfdir}/init.d/cryptdisks
-	install -m 0755 ${WORKDIR}/crypttab \
+	install -m 0755 ${UNPACKDIR}/crypttab \
 		${D}${sysconfdir}/crypttab
 }

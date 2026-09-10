@@ -28,7 +28,7 @@ SRC_URI += " \
     file://xenmgr.initscript \
 "
 
-S = "${WORKDIR}/git/xenmgr"
+S = "${UNPACKDIR}/${BP}/xenmgr"
 
 inherit haskell update-rc.d xc-rpcgen
 
@@ -59,11 +59,11 @@ do_configure:append() {
 do_install:append() {
     install -m 0755 ${S}/setup-ica-vm ${D}${bindir}/setup-ica-vm
     install -m 0755 -d ${D}${sysconfdir}/dbus-1/system.d
-    install -m 0644 ${WORKDIR}/xenmgr_dbus.conf ${D}${sysconfdir}/dbus-1/system.d/
+    install -m 0644 ${UNPACKDIR}/xenmgr_dbus.conf ${D}${sysconfdir}/dbus-1/system.d/
     install -m 0755 -d ${D}${datadir}/xenclient
-    install -m 0755 ${WORKDIR}/xenstore-init-extra ${D}${datadir}/xenclient/
+    install -m 0755 ${UNPACKDIR}/xenstore-init-extra ${D}${datadir}/xenclient/
     install -m 0755 -d ${D}${sysconfdir}/init.d
-    install -m 0755 ${WORKDIR}/xenmgr.initscript ${D}${sysconfdir}/init.d/xenmgr
+    install -m 0755 ${UNPACKDIR}/xenmgr.initscript ${D}${sysconfdir}/init.d/xenmgr
     install -m 0755 -d ${D}${datadir}/xenmgr-1.0/templates
     install -m 0755 -d ${D}${datadir}/xenmgr-1.0/templates/default
     install -m 0644 ${S}/../templates/default/* ${D}${datadir}/xenmgr-1.0/templates/default/

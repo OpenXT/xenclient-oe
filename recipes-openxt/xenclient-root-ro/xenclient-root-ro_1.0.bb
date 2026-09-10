@@ -6,7 +6,7 @@ SRC_URI = "file://init.root-ro \
 
 do_install() {
 	install -d ${D}/sbin
-	install -m 0755 ${WORKDIR}/init.root-ro ${D}/sbin/init.root-ro
+	install -m 0755 ${UNPACKDIR}/init.root-ro ${D}/sbin/init.root-ro
 }
 
 FILES:${PN} = "/sbin/init.root-ro \

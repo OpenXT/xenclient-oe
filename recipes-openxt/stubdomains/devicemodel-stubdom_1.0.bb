@@ -16,7 +16,7 @@ SRC_URI = " \
 
 do_install() {
         install -d ${D}${libdir}/xen/boot
-        install -m 0644 ${WORKDIR}/${STUBDOMAIN_NAME}-${STUBDOMAIN_MACHINE}.cpio.gz \
+        install -m 0644 ${UNPACKDIR}/${STUBDOMAIN_NAME}-${STUBDOMAIN_MACHINE}.cpio.gz \
             ${D}${libdir}/xen/boot/qemu-stubdom-linux-rootfs
 }
 

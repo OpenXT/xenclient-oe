@@ -6,7 +6,7 @@ RDEPENDS:${PN} += "glibc-gconv-utf-32"
 
 require xclibs.inc
 
-S = "${WORKDIR}/git/xchutils"
+S = "${UNPACKDIR}/${BP}/xchutils"
 
 HPN = "xchutils"
 HPV = "0.1"

@@ -9,6 +9,6 @@ SRC_URI = " \
 
 do_install() {
 	install -d ${D}${bindir}
-	install -m 0755 ${WORKDIR}/pcr-state ${D}${bindir}
-	install -m 0755 ${WORKDIR}/pcr-data ${D}${bindir}
+	install -m 0755 ${UNPACKDIR}/pcr-state ${D}${bindir}
+	install -m 0755 ${UNPACKDIR}/pcr-data ${D}${bindir}
 }

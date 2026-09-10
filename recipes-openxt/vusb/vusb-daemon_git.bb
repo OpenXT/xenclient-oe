@@ -15,7 +15,6 @@ SRC_URI = "git://github.com/OpenXT/vusb-daemon.git;protocol=https \
 EXTRA_OECONF += "--with-libexpat=${STAGING_LIBDIR}"
 EXTRA_OECONF += "--with-libxenstore=${STAGING_LIBDIR}"
 
-S = "${WORKDIR}/git"
 
 inherit autotools update-rc.d pkgconfig xc-rpcgen-c
 
@@ -28,7 +27,7 @@ PACKAGE_BEFORE_PN += "${PN}-stub"
 
 do_install:append (){
         install -d ${D}/etc/init.d
-	install -m 0755 ${WORKDIR}/xenclient-vusb.initscript \
+	install -m 0755 ${UNPACKDIR}/xenclient-vusb.initscript \
 		${D}/etc/init.d/xenclient-vusb-daemon
 	install -d ${D}${sysconfdir}/default
 	echo 'VUSB_MODE="stub-mode"' >> ${D}${sysconfdir}/default/vusb-mode

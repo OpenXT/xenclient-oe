@@ -10,7 +10,7 @@ RDEPENDS:${PN} += "glibc-gconv-utf-32"
 
 require manager.inc
 
-S = "${WORKDIR}/git/xenmgr-core"
+S = "${UNPACKDIR}/${BP}/xenmgr-core"
 
 HPN = "xenmgr-core"
 HPV = "0.1"

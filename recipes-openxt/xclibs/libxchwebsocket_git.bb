@@ -8,7 +8,7 @@ RDEPENDS:${PN} += "glibc-gconv-utf-32 hkg-utf8-string"
 
 require xclibs.inc
 
-S = "${WORKDIR}/git/xchwebsocket"
+S = "${UNPACKDIR}/${BP}/xchwebsocket"
 
 HPN = "xchwebsocket"
 HPV = "0.1"

@@ -11,6 +11,5 @@ PV = "0+git${SRCPV}"
 SRCREV = "${AUTOREV}"
 SRC_URI = "git://github.com/OpenXT/libxcdbus.git;protocol=https"
 
-S = "${WORKDIR}/git"
 
 inherit autotools-brokensep pkgconfig lib_package xc-rpcgen-c

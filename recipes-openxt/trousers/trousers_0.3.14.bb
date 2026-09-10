@@ -16,7 +16,7 @@ SRC_URI = " \
 "
 INSANE_SKIP:${PN} = "src-uri-bad"
 
-S = "${WORKDIR}/${BPN}-${PV}"
+S = "${UNPACKDIR}/${BPN}-${PV}"
 
 EXTRA_OECONF += " --disable-usercheck"
 CFLAGS:append = " -Wno-error=unused-parameter -Wno-error=strict-aliasing -std=gnu89"
@@ -34,17 +34,17 @@ GROUPADD_PARAM:${PN} = "--gid 421 tss"
 USERADD_PARAM:${PN} = "--system --home-dir /boot/system/tpm --shell /bin/false --gid tss --uid 421 tss"
 
 do_install:append() {
-    install -o tss -g tss -m 0644 ${WORKDIR}/tcsd.conf ${D}${sysconfdir}/tcsd.conf
+    install -o tss -g tss -m 0644 ${UNPACKDIR}/tcsd.conf ${D}${sysconfdir}/tcsd.conf
 
     install -o tss -g tss -m 0755 -d ${D}${datadir}/trousers
     install -o tss -g tss -m 0644 ${B}/dist/system.data.auth ${D}${datadir}/trousers/
     install -o tss -g tss -m 0644 ${B}/dist/system.data.noauth ${D}${datadir}/trousers/
 
     install -m 0755 -d ${D}/etc/init.d
-    install -m 0755 ${WORKDIR}/trousers.initscript ${D}/etc/init.d/trousers
+    install -m 0755 ${UNPACKDIR}/trousers.initscript ${D}/etc/init.d/trousers
 
     install -m 0755 -d ${D}/etc/udev/rules.d
-    install -m 0644 ${WORKDIR}/45-trousers.rules ${D}/etc/udev/rules.d
+    install -m 0644 ${UNPACKDIR}/45-trousers.rules ${D}/etc/udev/rules.d
 
     # HACK: system.data is supposed to be created when taking ownership of the
     # TPM. It then serves as a system scope persistent storage for keys that

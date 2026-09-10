@@ -34,55 +34,55 @@ inherit allarch
 
 do_install () {
     install -d ${D}/root/.config/xfce4
-    install -m 644 ${WORKDIR}/helpers.rc ${D}/root/.config/xfce4/
-    install -m 755 ${WORKDIR}/xinitrc ${D}/root/.config/xfce4/
-    install -m 644 ${WORKDIR}/Xft.xrdb ${D}/root/.config/xfce4/
+    install -m 644 ${UNPACKDIR}/helpers.rc ${D}/root/.config/xfce4/
+    install -m 755 ${UNPACKDIR}/xinitrc ${D}/root/.config/xfce4/
+    install -m 644 ${UNPACKDIR}/Xft.xrdb ${D}/root/.config/xfce4/
 
     install -d ${D}/root/.config/xfce4/xfconf/xfce-perchannel-xml
-    install -m 644 ${WORKDIR}/xfce4-keyboard-shortcuts.xml ${D}/root/.config/xfce4/xfconf/xfce-perchannel-xml/
-    install -m 644 ${WORKDIR}/xfwm4.xml ${D}/root/.config/xfce4/xfconf/xfce-perchannel-xml/
-    install -m 644 ${WORKDIR}/xsettings.xml ${D}/root/.config/xfce4/xfconf/xfce-perchannel-xml/
+    install -m 644 ${UNPACKDIR}/xfce4-keyboard-shortcuts.xml ${D}/root/.config/xfce4/xfconf/xfce-perchannel-xml/
+    install -m 644 ${UNPACKDIR}/xfwm4.xml ${D}/root/.config/xfce4/xfconf/xfce-perchannel-xml/
+    install -m 644 ${UNPACKDIR}/xsettings.xml ${D}/root/.config/xfce4/xfconf/xfce-perchannel-xml/
 
     # Work around https://bugzilla.xfce.org/show_bug.cgi?id=8056
     sed -i 's/&lt;Shift&gt;&lt;Control&gt;/\&lt;Primary\&gt;\&lt;Shift\&gt;/g' ${D}/root/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-keyboard-shortcuts.xml
 
     install -d ${D}/root/.config/xfce4/mcs_settings
-    install -m 644 ${WORKDIR}/workspaces.xml ${D}/root/.config/xfce4/mcs_settings/
+    install -m 644 ${UNPACKDIR}/workspaces.xml ${D}/root/.config/xfce4/mcs_settings/
 
     install -d ${D}/root/.config/xfce4/xfwm4
 
     install -d ${D}/root/.local/share/xfce4/helpers
-    install -m 644 ${WORKDIR}/custom-WebBrowser.desktop ${D}/root/.local/share/xfce4/helpers
-    install -m 644 ${WORKDIR}/custom-MailReader.desktop ${D}/root/.local/share/xfce4/helpers
+    install -m 644 ${UNPACKDIR}/custom-WebBrowser.desktop ${D}/root/.local/share/xfce4/helpers
+    install -m 644 ${UNPACKDIR}/custom-MailReader.desktop ${D}/root/.local/share/xfce4/helpers
 
     install -d ${D}${sysconfdir}/modprobe.d
-    install -m 644 ${WORKDIR}/framebuffer.conf ${D}${sysconfdir}/modprobe.d/
+    install -m 644 ${UNPACKDIR}/framebuffer.conf ${D}${sysconfdir}/modprobe.d/
 
-    install -m 644 ${WORKDIR}/Xdefaults ${D}/root/.Xdefaults
+    install -m 644 ${UNPACKDIR}/Xdefaults ${D}/root/.Xdefaults
 
     install -d ${D}/root/.gnome2/keyrings
-    install -m 600 ${WORKDIR}/default ${D}/root/.gnome2/keyrings/
-    install -m 600 ${WORKDIR}/default.keyring ${D}/root/.gnome2/keyrings/
+    install -m 600 ${UNPACKDIR}/default ${D}/root/.gnome2/keyrings/
+    install -m 600 ${UNPACKDIR}/default.keyring ${D}/root/.gnome2/keyrings/
 
     install -d ${D}/root/.themes/XenClient/gtk-2.0
-    install -m 644 ${WORKDIR}/gtkrc ${D}/root/.themes/XenClient/gtk-2.0/
-    install -m 644 ${WORKDIR}/footer_bar_bgslice.png ${D}/root/.themes/XenClient/gtk-2.0/
+    install -m 644 ${UNPACKDIR}/gtkrc ${D}/root/.themes/XenClient/gtk-2.0/
+    install -m 644 ${UNPACKDIR}/footer_bar_bgslice.png ${D}/root/.themes/XenClient/gtk-2.0/
     install -d ${D}/root/.themes/XenClient/xfwm4
-    install -m 644 ${WORKDIR}/xfwm4/* ${D}/root/.themes/XenClient/xfwm4/
+    install -m 644 ${UNPACKDIR}/xfwm4/* ${D}/root/.themes/XenClient/xfwm4/
 
     install -d ${D}/root/.uim.d/customs
-    install -m 644 ${WORKDIR}/custom-global.scm ${D}/root/.uim.d/customs/
-    install -m 644 ${WORKDIR}/custom-toolbar.scm ${D}/root/.uim.d/customs/
+    install -m 644 ${UNPACKDIR}/custom-global.scm ${D}/root/.uim.d/customs/
+    install -m 644 ${UNPACKDIR}/custom-toolbar.scm ${D}/root/.uim.d/customs/
 
     install -d ${D}${libdir}/openxt
-    install -m 644 ${WORKDIR}/ui-functions ${D}${libdir}/openxt/ui-functions
+    install -m 644 ${UNPACKDIR}/ui-functions ${D}${libdir}/openxt/ui-functions
 
     install -d ${D}${bindir}
-    install -m 755 ${WORKDIR}/nm-applets-agent ${D}${bindir}/
-    install -m 755 ${WORKDIR}/uim-toolbar-gtk-agent ${D}${bindir}/
-    install -m 755 ${WORKDIR}/keymap-agent ${D}${bindir}/
-    install -m 755 ${WORKDIR}/xdg-open ${D}${bindir}/
-    install -m 755 ${WORKDIR}/keyboard ${D}${bindir}/
+    install -m 755 ${UNPACKDIR}/nm-applets-agent ${D}${bindir}/
+    install -m 755 ${UNPACKDIR}/uim-toolbar-gtk-agent ${D}${bindir}/
+    install -m 755 ${UNPACKDIR}/keymap-agent ${D}${bindir}/
+    install -m 755 ${UNPACKDIR}/xdg-open ${D}${bindir}/
+    install -m 755 ${UNPACKDIR}/keyboard ${D}${bindir}/
 }
 
 FILES:${PN} = " \

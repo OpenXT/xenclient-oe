@@ -18,7 +18,7 @@ TEMPLATES_DIR="xc-rpcgen-${RPCGEN_VERSION}/templates"
 
 BBCLASSEXTEND = "native"
 
-S = "${WORKDIR}/git/rpcgen"
+S = "${UNPACKDIR}/${BP}/rpcgen"
 
 do_install() {
     install -d ${D}/${bindir}

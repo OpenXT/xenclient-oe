@@ -22,7 +22,7 @@ SRC_URI += " \
     file://db-cat-dom0 \
 "
 
-S = "${WORKDIR}/git/dbd"
+S = "${UNPACKDIR}/${BP}/dbd"
 # brokensep.
 B = "${S}"
 
@@ -47,9 +47,9 @@ do_install() {
 
     # dbd
     install -m 0755 -d ${D}${sysconfdir}/init.d
-    install -m 0755 ${WORKDIR}/dbd.initscript ${D}${sysconfdir}/init.d/dbd
+    install -m 0755 ${UNPACKDIR}/dbd.initscript ${D}${sysconfdir}/init.d/dbd
     install -m 0755 -d ${D}${datadir}/xenclient
-    install -m 0644 ${WORKDIR}/db.default ${D}${datadir}/xenclient/db.default
+    install -m 0644 ${UNPACKDIR}/db.default ${D}${datadir}/xenclient/db.default
 
     # dbd-tools
     for bin in \
@@ -63,7 +63,7 @@ do_install() {
         db-exists-dom0 db-ls-dom0 db-nodes-dom0 db-read-dom0 db-rm-dom0 \
         db-write-dom0 db-cat-dom0
     do
-        install -m 0755 ${WORKDIR}/${bin} ${D}${bindir}/${bin}
+        install -m 0755 ${UNPACKDIR}/${bin} ${D}${bindir}/${bin}
     done
 }
 

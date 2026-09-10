@@ -14,7 +14,7 @@ SRC_URI = "file://tpm-setup \
 
 do_install() {
 	install -d ${D}${bindir}
-	install -m 0755 ${WORKDIR}/tpm-setup ${D}${bindir}
-	install -m 0755 ${WORKDIR}/tpm-setup-squashfs ${D}${bindir}
-	install -m 0755 ${WORKDIR}/tpm-setup-quotekey ${D}${bindir}
+	install -m 0755 ${UNPACKDIR}/tpm-setup ${D}${bindir}
+	install -m 0755 ${UNPACKDIR}/tpm-setup-squashfs ${D}${bindir}
+	install -m 0755 ${UNPACKDIR}/tpm-setup-quotekey ${D}${bindir}
 }

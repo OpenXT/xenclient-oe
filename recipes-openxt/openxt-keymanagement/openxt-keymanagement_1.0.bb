@@ -10,7 +10,7 @@ FILES:${PN} = "${libdir}/openxt/key-functions"
 
 do_install() {
 	install -d ${D}${libdir}/openxt
-	install -m 0755 ${WORKDIR}/key-functions ${D}${libdir}/openxt
+	install -m 0755 ${UNPACKDIR}/key-functions ${D}${libdir}/openxt
 }
 
 RDEPENDS:${PN} = " \

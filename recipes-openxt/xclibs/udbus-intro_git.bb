@@ -6,7 +6,7 @@ RDEPENDS:${PN} += "glibc-gconv-utf-32"
 
 require xclibs.inc
 
-S = "${WORKDIR}/git/udbus-intro"
+S = "${UNPACKDIR}/${BP}/udbus-intro"
 
 HPV = "0.1"
 require xclibs-haskell.inc

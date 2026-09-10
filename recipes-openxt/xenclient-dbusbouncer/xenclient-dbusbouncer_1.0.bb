@@ -12,7 +12,7 @@ SRC_URI = "file://dbusbouncer.c \
 INITSCRIPT_NAME = "dbusbouncer"
 INITSCRIPT_PARAMS = "defaults 29 71"
 
-S = "${WORKDIR}"
+S = "${UNPACKDIR}"
 
 inherit update-rc.d
 
@@ -24,9 +24,9 @@ do_compile() {
 
 do_install() {
 	install -d ${D}${sbindir}
-	install -m 0755 ${WORKDIR}/dbusbouncer ${D}${sbindir}
+	install -m 0755 ${UNPACKDIR}/dbusbouncer ${D}${sbindir}
 	install -d ${D}${sysconfdir}/init.d
-	install -m 0755 ${WORKDIR}/dbusbouncer.initscript ${D}${sysconfdir}/init.d/dbusbouncer
+	install -m 0755 ${UNPACKDIR}/dbusbouncer.initscript ${D}${sysconfdir}/init.d/dbusbouncer
 }
 
 DEBUG_BUILD = "1"

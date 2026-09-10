@@ -8,12 +8,12 @@ SRC_URI = "file://config-access.initscript \
 INITSCRIPT_NAME = "xenclient-config-access"
 INITSCRIPT_PARAMS = "start 32 S ."
 
-S = "${WORKDIR}"
+S = "${UNPACKDIR}"
 
 inherit update-rc.d
 
 do_install() {
 	install -d ${D}${sysconfdir}/init.d
-	install -m 0755 ${WORKDIR}/config-access.initscript \
+	install -m 0755 ${UNPACKDIR}/config-access.initscript \
 		${D}${sysconfdir}/init.d/xenclient-config-access
 }

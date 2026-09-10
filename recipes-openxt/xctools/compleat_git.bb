@@ -5,7 +5,7 @@ RDEPENDS:${PN} += "glibc-gconv-utf-32"
 
 require xctools.inc
 
-S = "${WORKDIR}/git/compleat"
+S = "${UNPACKDIR}/${BP}/compleat"
 
 HPV = "0.1"
 inherit haskell

@@ -4,7 +4,7 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=4641e94ec96f98fabc56ff9cc48be14b"
 
 require argo.inc
 
-S = "${WORKDIR}/git/argo-linux"
+S = "${UNPACKDIR}/${BP}/argo-linux"
 
 do_configure() {
 :

@@ -8,12 +8,12 @@ SRC_URI = "file://supported-keyboards \
 
 FILES:${PN} = "${datadir}/xenclient/keyboards"
 
-S = "${WORKDIR}/src"
+S = "${UNPACKDIR}"
 
 do_compile() {
-    perl ${WORKDIR}/generate-keyboard-list \
+    perl ${UNPACKDIR}/generate-keyboard-list \
         ${STAGING_DATADIR}/X11/xkb/rules/evdev.lst \
-        ${WORKDIR}/supported-keyboards > keyboards
+        ${UNPACKDIR}/supported-keyboards > keyboards
 }
 
 do_install() {

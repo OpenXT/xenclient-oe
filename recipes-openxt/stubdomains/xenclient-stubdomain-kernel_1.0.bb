@@ -15,7 +15,7 @@ SRC_URI = " \
 
 do_install() {
         install -d ${D}${libdir}/xen/boot
-        install -m 0644 ${WORKDIR}/${STUBDOMAIN_KERNEL}-${STUBDOMAIN_MACHINE}.bin \
+        install -m 0644 ${UNPACKDIR}/${STUBDOMAIN_KERNEL}-${STUBDOMAIN_MACHINE}.bin \
             ${D}${libdir}/xen/boot/qemu-stubdom-linux-kernel
 }
 

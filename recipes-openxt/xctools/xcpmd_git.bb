@@ -12,7 +12,7 @@ CFLAGS:prepend += " -I${STAGING_INCDIR}/libnl3 "
 
 CFLAGS:append += " -Wno-unused-parameter -Wno-deprecated-declarations "
 
-S = "${WORKDIR}/git/xcpmd"
+S = "${UNPACKDIR}/${BP}/xcpmd"
 
 ASNEEDED = ""
 
@@ -24,5 +24,5 @@ INITSCRIPT_PARAMS = "defaults 60 19"
 do_install:append() {
 # RJP TODO remove xenpmd from xenclient-tools clam bake
 	install -d ${D}${sysconfdir}/init.d
-	install -m 0755 ${WORKDIR}/xcpmd.initscript ${D}${sysconfdir}/init.d/xcpmd
+	install -m 0755 ${UNPACKDIR}/xcpmd.initscript ${D}${sysconfdir}/init.d/xcpmd
 }

@@ -18,13 +18,13 @@ FILES:${PN} = "/"
 
 do_install () {
 	install -d ${D}/usr/share/xenclient/bootloader/images
-	install -m 0644 ${WORKDIR}/black.png \
+	install -m 0644 ${UNPACKDIR}/black.png \
 			${D}/usr/share/xenclient/bootloader/images/
 
 	for l in en-us ; do
 	    install -d ${D}/usr/share/xenclient/bootloader/images/$l
 	    for f in booting reboot please-reboot shutdown hibernate startup ; do
-		install -m 0644 ${WORKDIR}/$f-$l.png \
+		install -m 0644 ${UNPACKDIR}/$f-$l.png \
 			${D}/usr/share/xenclient/bootloader/images/$l/$f.png
 		ln -sf ../black.png ${D}/usr/share/xenclient/bootloader/images/$l/
 	    done

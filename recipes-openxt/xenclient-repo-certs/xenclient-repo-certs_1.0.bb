@@ -17,11 +17,11 @@ do_install() {
     install -d ${CERTDIR_PROD}
     install -d ${CERTDIR_DEV}
 
-    install -m 0644 ${WORKDIR}/${REPO_PROD_CACERT} ${CERTDIR_PROD}/cert.pem
-    install -m 0644 ${WORKDIR}/${REPO_DEV_CACERT} ${CERTDIR_DEV}/cert.pem
+    install -m 0644 ${UNPACKDIR}/${REPO_PROD_CACERT} ${CERTDIR_PROD}/cert.pem
+    install -m 0644 ${UNPACKDIR}/${REPO_DEV_CACERT} ${CERTDIR_DEV}/cert.pem
 
     install -d ${D}${bindir}
-    install -m 0755 ${WORKDIR}/verify-repo-metadata ${D}${bindir}/
+    install -m 0755 ${UNPACKDIR}/verify-repo-metadata ${D}${bindir}/
 }
 
 RDEPENDS:${PN} += " \

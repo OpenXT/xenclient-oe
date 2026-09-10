@@ -15,7 +15,7 @@ RDEPENDS:${PN} += "\
 
 require manager.inc
 
-S = "${WORKDIR}/git/xec"
+S = "${UNPACKDIR}/${BP}/xec"
 
 HPV = "0.1"
 inherit haskell

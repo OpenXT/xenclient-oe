@@ -17,7 +17,7 @@ PACKAGES =+ "${PN}-client"
 FILES:${PN}-client = "${bindir}/icbinn_ftp"
 PROVIDES += "${PN}-client"
 
-S = "${WORKDIR}/git/libicbinn"
+S = "${UNPACKDIR}/${BP}/libicbinn"
 
 inherit autotools-brokensep pkgconfig lib_package xc-rpcgen-c
 
@@ -27,5 +27,5 @@ INITSCRIPT_PACKAGES = "${PN}-server"
 inherit update-rc.d
 do_install:append() {
 	install -d ${D}/${sysconfdir}/init.d
-	install -m 0755 ${WORKDIR}/icbinn_svc.initscript ${D}/${sysconfdir}/init.d/icbinn_svc
+	install -m 0755 ${UNPACKDIR}/icbinn_svc.initscript ${D}/${sysconfdir}/init.d/icbinn_svc
 }

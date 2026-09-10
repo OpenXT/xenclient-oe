@@ -6,7 +6,7 @@ SRC_URI = " \
     file://get-config-key.c \
 "
 
-S = "${WORKDIR}"
+S = "${UNPACKDIR}"
 
 do_compile() {
 	oe_runmake get-config-key
@@ -14,5 +14,5 @@ do_compile() {
 
 do_install() {
 	install -d ${D}${sbindir}
-	install -m 0755 ${WORKDIR}/get-config-key ${D}${sbindir}
+	install -m 0755 ${UNPACKDIR}/get-config-key ${D}${sbindir}
 }

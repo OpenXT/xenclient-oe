@@ -7,6 +7,6 @@ SRC_URI += " file://helper.sh	\
            "
 do_install () {
 	install -d ${D}/usr/bin
-	install -m 0755 ${WORKDIR}/helper.sh	\
+	install -m 0755 ${UNPACKDIR}/helper.sh	\
 		${D}/usr/bin/helper.sh
 }

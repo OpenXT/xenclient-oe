@@ -5,6 +5,6 @@ DEPENDS = "libnl"
 
 require xctools.inc
 
-S = "${WORKDIR}/git/carrier-detect"
+S = "${UNPACKDIR}/${BP}/carrier-detect"
 
 inherit autotools pkgconfig

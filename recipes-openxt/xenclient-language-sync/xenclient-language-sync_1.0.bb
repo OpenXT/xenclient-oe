@@ -9,15 +9,15 @@ SRC_URI = "file://language-sync \
 INITSCRIPT_NAME = "language-sync"
 INITSCRIPT_PARAMS = "defaults 80 11"
 
-S = "${WORKDIR}"
+S = "${UNPACKDIR}"
 
 inherit update-rc.d
 
 do_install() {
     install -d ${D}${sbindir}
-    install -m 0755 ${WORKDIR}/language-sync ${D}${sbindir}
+    install -m 0755 ${UNPACKDIR}/language-sync ${D}${sbindir}
 
     install -d ${D}${sysconfdir}/init.d
-    install -m 0755 ${WORKDIR}/language-sync.initscript \
+    install -m 0755 ${UNPACKDIR}/language-sync.initscript \
             ${D}${sysconfdir}/init.d/language-sync
 }

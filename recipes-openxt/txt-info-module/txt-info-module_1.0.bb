@@ -12,7 +12,7 @@ SRC_URI = " \
     file://sources/txt_info.c \
 "
 
-S = "${WORKDIR}/sources"
+S = "${UNPACKDIR}/sources"
 
 inherit module
 inherit module-signing

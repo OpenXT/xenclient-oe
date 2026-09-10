@@ -8,7 +8,7 @@ require xctools.inc
 FILES:${PN} += "/usr/lib/xen/bin/atapi_pt_helper"
 FILES:${PN}-dbg += " /usr/lib/xen/bin/.debug "
 
-S = "${WORKDIR}/git/atapi_pt_helper"
+S = "${UNPACKDIR}/${BP}/atapi_pt_helper"
 
 ASNEEDED = ""
 

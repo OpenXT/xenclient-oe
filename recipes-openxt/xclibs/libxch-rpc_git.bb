@@ -13,7 +13,7 @@ RDEPENDS:${PN} += "glibc-gconv-utf-32"
 
 require xclibs.inc
 
-S = "${WORKDIR}/git/xch-rpc"
+S = "${UNPACKDIR}/${BP}/xch-rpc"
 
 HPN = "xch-rpc"
 HPV = "0.1"

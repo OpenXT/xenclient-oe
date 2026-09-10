@@ -6,7 +6,7 @@ RDEPENDS:${PN} += "glibc-gconv-utf-32"
 
 require xclibs.inc
 
-S = "${WORKDIR}/git/xchdb"
+S = "${UNPACKDIR}/${BP}/xchdb"
 
 HPN = "xchdb"
 HPV = "0.1"

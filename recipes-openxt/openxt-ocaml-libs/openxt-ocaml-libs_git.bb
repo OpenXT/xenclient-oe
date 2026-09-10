@@ -15,7 +15,6 @@ PV = "0+git${SRCPV}"
 SRC_URI = "git://github.com/OpenXT/toolstack.git;protocol=https"
 SRCREV = "${AUTOREV}"
 
-S = "${WORKDIR}/git"
 
 inherit ocaml findlib
 

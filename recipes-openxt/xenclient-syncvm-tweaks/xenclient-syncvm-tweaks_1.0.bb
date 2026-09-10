@@ -20,11 +20,11 @@ INITSCRIPT_PARAMS = "start 39 S ."
 
 do_install () {
     install -d ${D}/etc/modutils
-    install -m 644 ${WORKDIR}/argo.modutils ${D}/etc/modutils
+    install -m 644 ${UNPACKDIR}/argo.modutils ${D}/etc/modutils
 
     install -d ${D}/etc/default/volatiles
-    install -m 644 ${WORKDIR}/volatiles ${D}/etc/default/volatiles/01_syncvm
+    install -m 644 ${UNPACKDIR}/volatiles ${D}/etc/default/volatiles/01_syncvm
 
     install -d ${D}/etc/init.d
-    install -m 0755 ${WORKDIR}/network-config.initscript ${D}/etc/init.d/network-config
+    install -m 0755 ${UNPACKDIR}/network-config.initscript ${D}/etc/init.d/network-config
 }

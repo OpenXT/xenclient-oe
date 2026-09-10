@@ -6,7 +6,7 @@ require icbinn.inc
 
 DEPENDS = "libicbinn"
 
-S = "${WORKDIR}/git/libicbinn_resolved"
+S = "${UNPACKDIR}/${BP}/libicbinn_resolved"
 
 inherit autotools
 inherit pkgconfig

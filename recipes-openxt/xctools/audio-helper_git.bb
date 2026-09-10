@@ -12,7 +12,7 @@ SRC_URI += " \
     file://audio_helper_start \
 "
 
-S = "${WORKDIR}/git/audio_helper"
+S = "${UNPACKDIR}/${BP}/audio_helper"
 
 inherit autotools
 inherit pkgconfig
@@ -20,7 +20,7 @@ inherit pkgconfig
 do_install(){
     install -d "${D}${libdir}/xen/bin"
     install -m 755 "${B}/src/audio_helper" "${D}${libdir}/xen/bin/audio_helper"
-    install -m 755 "${WORKDIR}/audio_helper_start" "${D}${libdir}/xen/bin/audio_helper_start"
+    install -m 755 "${UNPACKDIR}/audio_helper_start" "${D}${libdir}/xen/bin/audio_helper_start"
 }
 
 FILES:${PN} += " \

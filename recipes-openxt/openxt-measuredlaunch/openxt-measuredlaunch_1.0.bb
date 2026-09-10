@@ -19,11 +19,11 @@ FILES:${PN} = "\
 do_install() {
     install -d ${D}${libdir}/openxt
     install -d ${D}${sbindir}
-    install -m 0755 ${WORKDIR}/ml-functions ${D}${libdir}/openxt
-    install -m 0755 ${WORKDIR}/seal-system ${D}${sbindir}
-    install -m 0755 ${WORKDIR}/recovery-method ${D}${sbindir}
+    install -m 0755 ${UNPACKDIR}/ml-functions ${D}${libdir}/openxt
+    install -m 0755 ${UNPACKDIR}/seal-system ${D}${sbindir}
+    install -m 0755 ${UNPACKDIR}/recovery-method ${D}${sbindir}
     install -d ${D}${sysconfdir}/openxt
-    install -m 0644 ${WORKDIR}/seal-system.conf ${D}${sysconfdir}/openxt/seal-system.conf
+    install -m 0644 ${UNPACKDIR}/seal-system.conf ${D}${sysconfdir}/openxt/seal-system.conf
 }
 
 RDEPENDS:${PN} = " \

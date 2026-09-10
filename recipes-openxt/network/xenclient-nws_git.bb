@@ -21,7 +21,7 @@ RDEPENDS:${PN} += " \
 
 require network.inc
 
-S = "${WORKDIR}/git/nws"
+S = "${UNPACKDIR}/${BP}/nws"
 
 inherit haskell update-rc.d xc-rpcgen
 

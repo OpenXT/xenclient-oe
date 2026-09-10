@@ -19,16 +19,16 @@ FILES:${PN} = "/"
 do_install () {
 	install -d ${D}/etc
 	install -d ${D}/etc/modprobe.d
-	install -m 0644 ${WORKDIR}/iwlwifi.conf \
+	install -m 0644 ${UNPACKDIR}/iwlwifi.conf \
 		${D}/etc/modprobe.d/iwlwifi.conf
 
 	install -d ${D}/usr/share/xenclient
-	install -m 0755 ${WORKDIR}/enter-s3.sh \
+	install -m 0755 ${UNPACKDIR}/enter-s3.sh \
 		${D}/usr/share/xenclient/enter-s3.sh
-	install -m 0755 ${WORKDIR}/xenstore-init \
+	install -m 0755 ${UNPACKDIR}/xenstore-init \
 		${D}/usr/share/xenclient/xenstore-init
 
 	install -d ${D}/etc/NetworkManager/system-connections
-	install -m 0644 ${WORKDIR}/netcon \
+	install -m 0644 ${UNPACKDIR}/netcon \
 		"${D}/etc/NetworkManager/system-connections/Wired Ethernet Connection"
 }

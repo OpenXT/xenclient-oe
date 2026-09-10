@@ -28,7 +28,7 @@ SRC_URI += " \
     file://rpc-proxy.initscript \
 "
 
-S = "${WORKDIR}/git/rpc-proxy"
+S = "${UNPACKDIR}/${BP}/rpc-proxy"
 
 HPV = "1.0"
 require recipes-openxt/xclibs/xclibs-haskell.inc
@@ -49,6 +49,6 @@ do_configure:append() {
 do_install:append() {
 	install -m 0755 -d ${D}/etc
 	install -m 0755 -d ${D}/etc/init.d
-	install -m 0644 ${WORKDIR}/rpc-proxy.rules ${D}/etc/rpc-proxy.rules
-	install -m 0755 ${WORKDIR}/rpc-proxy.initscript ${D}${sysconfdir}/init.d/rpc-proxy
+	install -m 0644 ${UNPACKDIR}/rpc-proxy.rules ${D}/etc/rpc-proxy.rules
+	install -m 0755 ${UNPACKDIR}/rpc-proxy.initscript ${D}${sysconfdir}/init.d/rpc-proxy
 }

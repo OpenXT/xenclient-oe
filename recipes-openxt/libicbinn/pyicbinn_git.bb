@@ -4,7 +4,7 @@ LIC_FILES_CHKSUM = "file://../COPYING;md5=321bf41f280cf805086dd5a720b37785"
 
 require icbinn.inc
 
-S = "${WORKDIR}/git/pyicbinn"
+S = "${UNPACKDIR}/${BP}/pyicbinn"
 
 DEPENDS = "swig-native libicbinn xenclient-rpcgen-native"
 
