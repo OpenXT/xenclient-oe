@@ -60,7 +60,7 @@ RDEPENDS:${PN} = " \
     acms \
     read-edid \
     openssl \
-    ntpdate \
+    ntp \
     dd-buffered \
     vhd-scripts \
     secure-vm \
