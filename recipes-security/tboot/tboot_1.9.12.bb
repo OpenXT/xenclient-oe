@@ -1,6 +1,6 @@
 require tboot.inc
 
-LICENSE = "BSD"
+LICENSE = "BSD-3-Clause"
 LIC_FILES_CHKSUM = "file://COPYING;md5=7730ab1e15a162ca347bcc1722486d89"
 
 S = "${UNPACKDIR}/${PN}-${PV}"
