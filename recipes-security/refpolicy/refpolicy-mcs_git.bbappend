@@ -222,6 +222,67 @@ for line in conf.read_text().splitlines():
         out.append("# dropped missing module %s" % name)
 conf.write_text("\n".join(out) + "\n")
 PY
+    if ! grep -q xen_dontaudit_rw_unix_stream_sockets "${S}/policy/modules/system/xen.if"; then
+        cat >> "${S}/policy/modules/system/xen.if" <<'EOF'
+
+interface(`xen_dontaudit_rw_unix_stream_sockets',`
+	gen_require(`
+		type xend_t;
+	')
+	dontaudit $1 xend_t:unix_stream_socket rw_stream_socket_perms;
+')
+interface(`xen_write_tmp',`
+	gen_require(`
+		type xend_tmp_t;
+	')
+	files_search_tmp($1)
+	allow $1 xend_tmp_t:file write_file_perms;
+')
+interface(`xen_dbus_chat',`
+	gen_require(`
+		type xend_t;
+		class dbus send_msg;
+	')
+	allow $1 xend_t:dbus send_msg;
+	allow xend_t $1:dbus send_msg;
+')
+interface(`xen_dbus_send',`
+	gen_require(`
+		type xend_t;
+		class dbus send_msg;
+	')
+	allow $1 xend_t:dbus send_msg;
+')
+interface(`xen_geattr_config_files',`
+	gen_require(`
+		type xend_config_t;
+	')
+	getattr_files_pattern($1, xend_config_t, xend_config_t)
+')
+interface(`xen_run_xm',`
+	gen_require(`
+		type xm_t;
+	')
+	xen_domtrans_xm($1)
+	role $2 types xm_t;
+')
+interface(`xen_use_fds',`
+	gen_require(`
+		type xend_t;
+	')
+	allow $1 xend_t:fd use;
+')
+interface(`xen_domtrans',`
+	gen_require(`
+		type xm_t;
+	')
+	domtrans_pattern($1, $2, xm_t)
+')
+EOF
+    fi
+    if ! grep -q 'type xend_config_t' "${S}/policy/modules/system/xen.te"; then
+        printf '\ntype xend_config_t;\nfiles_type(xend_config_t)\n' >> "${S}/policy/modules/system/xen.te"
+    fi
     disable_policy_modules
     oe_runmake policy
 }
