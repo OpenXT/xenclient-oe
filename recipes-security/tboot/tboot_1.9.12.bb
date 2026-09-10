@@ -17,6 +17,7 @@ SRC_URI = " \
     file://0008-tboot-Export-TPM-event-log-to-VMM-Kernel.patch \
     file://0009-Find-e820-regions-that-include-the-limit.patch \
     file://0010-Add-support-for-launching-64-bit-PE-kernels.patch \
+    file://0011-gcc15-Wno-error-array-parameter.patch \
 "
 SRC_URI[md5sum] = "29cc2524e48eaba12249d3476be219b2"
 SRC_URI[sha256sum] = "007212deacab8eb159d71449766f9b2e0523439f1c4fd64d1932eb38cb60e053"
