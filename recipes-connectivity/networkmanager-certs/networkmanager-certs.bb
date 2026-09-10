@@ -11,10 +11,10 @@ inherit allarch update-rc.d
 
 do_install () {
     install -d ${D}/usr/bin
-    install -m 0755 ${WORKDIR}/certs-sync ${D}/usr/bin
+    install -m 0755 ${UNPACKDIR}/certs-sync ${D}/usr/bin
 
     install -d ${D}${sysconfdir}/init.d
-    install -m 0755 ${WORKDIR}/populate-certs.sh ${D}${sysconfdir}/init.d
+    install -m 0755 ${UNPACKDIR}/populate-certs.sh ${D}${sysconfdir}/init.d
 
     install -d ${D}/${localstatedir}/lib/NetworkManager
 }

@@ -13,23 +13,23 @@ do_install:append() {
     install -d ${D}/init.d
 
     # functions
-    install -m 0755 ${WORKDIR}/functions ${D}/init.d/00-functions
+    install -m 0755 ${UNPACKDIR}/functions ${D}/init.d/00-functions
 
     # lvm (override oe-core do_install step)
     rm ${D}/init.d/09-lvm
-    install -m 0755 ${WORKDIR}/lvm ${D}/init.d/89-lvm
+    install -m 0755 ${UNPACKDIR}/lvm ${D}/init.d/89-lvm
 
     # bootfs
-    install -m 0755 ${WORKDIR}/bootfs ${D}/init.d/91-bootfs
+    install -m 0755 ${UNPACKDIR}/bootfs ${D}/init.d/91-bootfs
 
     # tpm
-    install -m 0755 ${WORKDIR}/tpm ${D}/init.d/92-tpm
+    install -m 0755 ${UNPACKDIR}/tpm ${D}/init.d/92-tpm
 
     # tpm2
-    install -m 0755 ${WORKDIR}/tpm2 ${D}/init.d/92-tpm2
+    install -m 0755 ${UNPACKDIR}/tpm2 ${D}/init.d/92-tpm2
 
     # selinux
-    install -m 0755 ${WORKDIR}/selinux ${D}/init.d/93-selinux
+    install -m 0755 ${UNPACKDIR}/selinux ${D}/init.d/93-selinux
 }
 
 PACKAGES += " \

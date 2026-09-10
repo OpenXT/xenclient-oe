@@ -6,6 +6,6 @@ DEPENDS = ""
 PACKAGES = ""
 PR = "r1"
 
-S = "${WORKDIR}/anthy-${PV}"
+S = "${UNPACKDIR}/anthy-${PV}"
 
 inherit native

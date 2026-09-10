@@ -23,7 +23,7 @@ inherit pkgconfig
 
 # Squash the config.mk with one OE compliant.
 do_configure:prepend() {
-    cp ${WORKDIR}/config.mk ${S}/config.mk
+    cp ${UNPACKDIR}/config.mk ${S}/config.mk
 }
 
 do_install() {
@@ -31,5 +31,5 @@ do_install() {
 
     install -d ${D}${sysconfdir}/default
     install -d ${D}${sysconfdir}/default/volatiles
-    install -m 0644 ${WORKDIR}/volatiles.99_surf ${D}${sysconfdir}/default/volatiles/99_surf
+    install -m 0644 ${UNPACKDIR}/volatiles.99_surf ${D}${sysconfdir}/default/volatiles/99_surf
 }

@@ -6,11 +6,11 @@ SRC_URI = " \
     file://selinux-load.sh \
 "
 
-S = "${WORKDIR}"
+S = "${UNPACKDIR}"
 
 inherit allarch
 
 do_install() {
     install -d ${D}/sbin
-    install -m 0755 ${WORKDIR}/selinux-load.sh ${D}/sbin
+    install -m 0755 ${UNPACKDIR}/selinux-load.sh ${D}/sbin
 }

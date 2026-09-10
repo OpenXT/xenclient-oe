@@ -23,19 +23,19 @@ do_install:append () {
     install -m 0755 -d ${D}${nmidldatadir}
     install -m 0644 ${S}/introspection/*.xml ${D}${nmidldatadir}/
     install -m 0644 ${S}/openxt/*.xml ${D}${nmidldatadir}/
-    install -m 0644 ${WORKDIR}/NetworkManager.conf ${D}/etc/NetworkManager/
+    install -m 0644 ${UNPACKDIR}/NetworkManager.conf ${D}/etc/NetworkManager/
 
-    install -m 0755 ${WORKDIR}/nm_sync.sh ${D}${bindir}/nm_sync.sh
+    install -m 0755 ${UNPACKDIR}/nm_sync.sh ${D}${bindir}/nm_sync.sh
     install -m 0755 -d ${D}${datadir}/xenclient/nm_scripts
-    install -m 0755 ${WORKDIR}/db_to_nm.awk ${D}${datadir}/xenclient/nm_scripts/db_to_nm.awk
-    install -m 0755 ${WORKDIR}/nm_to_db.awk ${D}${datadir}/xenclient/nm_scripts/nm_to_db.awk
+    install -m 0755 ${UNPACKDIR}/db_to_nm.awk ${D}${datadir}/xenclient/nm_scripts/db_to_nm.awk
+    install -m 0755 ${UNPACKDIR}/nm_to_db.awk ${D}${datadir}/xenclient/nm_scripts/nm_to_db.awk
     install -m 0644 ${D}${sysconfdir}/NetworkManager/NetworkManager.conf ${D}${datadir}/xenclient/nm_scripts/
 
     # Install dbus conf file for allowing nm-applet to own a bus name
-    install -m 0755 ${WORKDIR}/org.openxt.nmapplet.conf ${D}${sysconfdir}/dbus-1/system.d/org.openxt.nmapplet.conf
+    install -m 0755 ${UNPACKDIR}/org.openxt.nmapplet.conf ${D}${sysconfdir}/dbus-1/system.d/org.openxt.nmapplet.conf
 
     # Install system-local.conf file to allow nm-applet to connect to system dbus.
-    install -m 0644 ${WORKDIR}/dbus-system.conf ${D}${sysconfdir}/dbus-1/system-local.conf
+    install -m 0644 ${UNPACKDIR}/dbus-system.conf ${D}${sysconfdir}/dbus-1/system-local.conf
 }
 
 FILES:${PN} += " \

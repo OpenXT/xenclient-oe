@@ -18,7 +18,6 @@ DEPENDS = " \
 SRCREV = "${AUTOREV}"
 PV = "0+git${SRCPV}"
 
-S = "${WORKDIR}/git"
 
 SRC_URI = " \
     git://github.com/xapi-project/varstored.git;protocol=https;branch=master \
@@ -64,9 +63,9 @@ do_configure:append() {
 
 # generate auth signing keys
 do_compile:append() {
-    openssl x509 -inform DER -in ${WORKDIR}/MicCorUEFCA2011_2011-06-27.crt -outform PEM -out ${S}/MicCorUEFCA2011_2011-06-27.pem -text
-    openssl x509 -inform DER -in ${WORKDIR}/MicWinProPCA2011_2011-10-19.crt -outform PEM -out ${S}/MicWinProPCA2011_2011-10-19.pem -text
-    openssl x509 -inform DER -in ${WORKDIR}/MicCorKEKCA2011_2011-06-24.crt -outform PEM -out ${S}/MicCorKEKCA2011_2011-06-24.pem
+    openssl x509 -inform DER -in ${UNPACKDIR}/MicCorUEFCA2011_2011-06-27.crt -outform PEM -out ${S}/MicCorUEFCA2011_2011-06-27.pem -text
+    openssl x509 -inform DER -in ${UNPACKDIR}/MicWinProPCA2011_2011-10-19.crt -outform PEM -out ${S}/MicWinProPCA2011_2011-10-19.pem -text
+    openssl x509 -inform DER -in ${UNPACKDIR}/MicCorKEKCA2011_2011-06-24.crt -outform PEM -out ${S}/MicCorKEKCA2011_2011-06-24.pem
 
     echo ${S}/MicCorKEKCA2011_2011-06-24.pem > ${S}/KEK.list
     echo ${S}/MicWinProPCA2011_2011-10-19.pem > ${S}/db.list
@@ -84,5 +83,5 @@ do_install() {
 
     install -d ${D}/var/lib/varstored
     install -m 0755 ${S}/{PK.auth,KEK.auth,db.auth} ${D}/var/lib/varstored
-    install -m 0755 ${WORKDIR}/dbx.auth ${D}/var/lib/varstored
+    install -m 0755 ${UNPACKDIR}/dbx.auth ${D}/var/lib/varstored
 }

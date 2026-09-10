@@ -28,5 +28,5 @@ EXTRA_OECONF += " \
 do_deploy() {
     install -m 0644 "${B}/${GRUB_IMAGE_PREFIX}${GRUB_IMAGE}" "${DEPLOYDIR}"
     install -m 0755 -d "${DEPLOYDIR}/iso"
-    install -m 0644 "${WORKDIR}/grub-efi-installer.cfg" "${DEPLOYDIR}/iso/grub.cfg"
+    install -m 0644 "${UNPACKDIR}/grub-efi-installer.cfg" "${DEPLOYDIR}/iso/grub.cfg"
 }

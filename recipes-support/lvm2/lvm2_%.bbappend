@@ -19,7 +19,7 @@ do_install:append() {
         rm -rf ${D}${sysconfdir}/rc.d
     fi
     install -d ${D}${sysconfdir}/default/volatiles
-    install -m 0644 ${WORKDIR}/volatiles.99_cryptsetup ${D}${sysconfdir}/default/volatiles/99_cryptsetup
+    install -m 0644 ${UNPACKDIR}/volatiles.99_cryptsetup ${D}${sysconfdir}/default/volatiles/99_cryptsetup
 }
 
 PACKAGES =+ "${PN}-conf"

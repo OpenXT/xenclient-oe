@@ -13,4 +13,4 @@ SRC_URI[tarball.sha256sum] = "065bdf713ca2446e455f3b71e6fc9d401dc694d73ac9f3c7b6
 
 FILES:${PN} += " /usr/bin/usbhid-dump "
 
-S = "${WORKDIR}/${PN}-${PV}/"
+S = "${UNPACKDIR}/${PN}-${PV}"

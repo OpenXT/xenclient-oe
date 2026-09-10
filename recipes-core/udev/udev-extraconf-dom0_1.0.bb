@@ -12,7 +12,7 @@ inherit allarch
 do_install() {
     install -d ${D}${sysconfdir}/udev/rules.d
 
-    install -m 0644 ${WORKDIR}/50-usb-powersave.rules \
+    install -m 0644 ${UNPACKDIR}/50-usb-powersave.rules \
         ${D}${sysconfdir}/udev/rules.d/50-usb-powersave.rules
 }
 

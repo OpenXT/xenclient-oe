@@ -25,5 +25,5 @@ FILES:${PN} += " \
 "
 
 do_configure:prepend() {
-    gdbus-codegen --generate-c-code ${S}/src/popup-menu --c-namespace OpenXT --interface-prefix org.openxt. ${WORKDIR}/org.openxt.nmapplet.xml
+    gdbus-codegen --generate-c-code ${S}/src/popup-menu --c-namespace OpenXT --interface-prefix org.openxt. ${UNPACKDIR}/org.openxt.nmapplet.xml
 }

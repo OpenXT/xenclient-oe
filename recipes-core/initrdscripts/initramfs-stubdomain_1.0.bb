@@ -12,9 +12,9 @@ SRC_URI = " \
 inherit allarch
 
 do_install() {
-    install -m 0755 ${WORKDIR}/init.sh ${D}/init
+    install -m 0755 ${UNPACKDIR}/init.sh ${D}/init
     install -d ${D}${bindir}
-    install -m 0755 ${WORKDIR}/qemu-xvdc-add-fd.sh ${D}${bindir}
+    install -m 0755 ${UNPACKDIR}/qemu-xvdc-add-fd.sh ${D}${bindir}
 }
 
 FILES:${PN} = " \

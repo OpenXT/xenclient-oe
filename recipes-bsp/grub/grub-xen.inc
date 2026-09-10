@@ -21,7 +21,7 @@ SRC_URI += " \
 	file://grub-xen.cfg \
 "
 
-S = "${WORKDIR}/grub-${PV}"
+S = "${UNPACKDIR}/grub-${PV}"
 
 CACHED_CONFIGUREVARS += "ac_cv_path_HELP2MAN="
 EXTRA_OECONF += "--enable-efiemu=no"

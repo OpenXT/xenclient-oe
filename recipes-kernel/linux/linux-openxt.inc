@@ -3,7 +3,7 @@ require classes/kernel-module-signing.bbclass
 
 DEPENDS += "bc-native"
 
-S = "${WORKDIR}/linux-${PV}"
+S = "${UNPACKDIR}/linux-${PV}"
 
 # Don't use update-alternatives for kernel at all. 
 pkg_postinst:kernel-image () {

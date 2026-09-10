@@ -173,7 +173,7 @@ DEPENDS:append += " \
     strace-native \
 "
 
-S = "${WORKDIR}/refpolicy"
+S = "${UNPACKDIR}/refpolicy"
 
 FILES:${PN} += " \
     ${sysconfdir}/selinux \
@@ -190,7 +190,7 @@ POLICY_MLS_CATS = "256"
 EXTRA_OEMAKE += "PKGNAME=${POLICY_NAME}-${PV}"
 
 do_srctree_copy() {
-    cp -r "${WORKDIR}/policy/modules" "${S}/policy"
+    cp -r "${UNPACKDIR}/policy/modules" "${S}/policy"
 }
 addtask do_srctree_copy after do_unpack before do_patch
 do_srctree_copy[doc] = "Copy layer provided policy files in work directory."
@@ -199,7 +199,7 @@ do_srctree_copy[dirs] = "${B}"
 do_policy_conf() {
     for conf in modules booleans; do
         rm -f "${S}/policy/${conf}.conf"
-        for e in ${WORKDIR}/policy/${conf}*.conf; do
+        for e in ${UNPACKDIR}/policy/${conf}*.conf; do
             if [ -e "${e}" ]; then
                 cat "${e}" >> "${S}/policy/${conf}.conf"
             fi
@@ -214,7 +214,7 @@ do_policy_conf[dirs] = "${B}"
 
 do_install:append() {
     install -d ${D}/etc/selinux
-    install -m 644 ${WORKDIR}/config ${D}/etc/selinux/config
+    install -m 644 ${UNPACKDIR}/config ${D}/etc/selinux/config
 }
 
 sysroot_stage_all:append () {

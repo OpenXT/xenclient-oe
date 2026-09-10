@@ -49,7 +49,7 @@ conffiles = " \
 "
 
 do_install:append() {
-    install -m 0644 ${WORKDIR}/fstab.early ${D}${sysconfdir}/fstab.early
+    install -m 0644 ${UNPACKDIR}/fstab.early ${D}${sysconfdir}/fstab.early
     install -m 0755 -d ${D}${sysconfdir}/profile.d
-    install -m 0644 ${WORKDIR}/openxt-aliases.sh ${D}${sysconfdir}/profile.d/openxt-aliases.sh
+    install -m 0644 ${UNPACKDIR}/openxt-aliases.sh ${D}${sysconfdir}/profile.d/openxt-aliases.sh
 }

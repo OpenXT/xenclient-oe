@@ -12,6 +12,5 @@ PV = "0+git${SRCPV}"
 SRCREV = "82c5cdd05ffcfead8f48c89d4403f12f2f8cfd20"
 SRC_URI = "git://github.com/DIGImend/${PN}.git;protocol=https;branch=master"
 
-S = "${WORKDIR}/git/"
 
 FILES:${PN} += " /usr/bin/hidrd-convert "

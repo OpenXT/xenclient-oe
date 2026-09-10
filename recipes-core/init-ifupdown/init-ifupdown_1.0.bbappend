@@ -25,15 +25,15 @@ do_install () {
 
     for dir in if-pre-up.d if-up.d if-down.d if-post-down.d
     do
-        for script in `ls -1 "${WORKDIR}/${dir}"`
+        for script in `ls -1 "${UNPACKDIR}/${dir}"`
         do
-            install -m 0755 "${WORKDIR}/${dir}/${script}" "${D}${sysconfdir}/network/${dir}"
+            install -m 0755 "${UNPACKDIR}/${dir}/${script}" "${D}${sysconfdir}/network/${dir}"
         done
     done
 
-    install -m 0644 ${WORKDIR}/options ${D}${sysconfdir}/network/options
-    install -m 0755 ${WORKDIR}/init ${D}${sysconfdir}/init.d/networking
-    install -m 0644 ${WORKDIR}/interfaces ${D}${sysconfdir}/network/interfaces
+    install -m 0644 ${UNPACKDIR}/options ${D}${sysconfdir}/network/options
+    install -m 0755 ${UNPACKDIR}/init ${D}${sysconfdir}/init.d/networking
+    install -m 0644 ${UNPACKDIR}/interfaces ${D}${sysconfdir}/network/interfaces
 }
 
 

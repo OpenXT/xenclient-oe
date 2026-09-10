@@ -3,7 +3,7 @@ require tboot.inc
 LICENSE = "BSD"
 LIC_FILES_CHKSUM = "file://COPYING;md5=7730ab1e15a162ca347bcc1722486d89"
 
-S = "${WORKDIR}/${PN}-${PV}"
+S = "${UNPACKDIR}/${PN}-${PV}"
 
 SRC_URI = " \
     https://downloads.sourceforge.net/project/${BPN}/${BPN}/${BPN}-${PV}.tar.gz \

@@ -15,7 +15,7 @@ do_deploy() {
         install -m 0644 "${D}${datadir}/syslinux/${bin}" "${DEPLOYDIR}/netboot"
     done
     # Netboot configuration
-    install -m 0644 "${WORKDIR}/pxelinux.cfg" "${DEPLOYDIR}/netboot/pxelinux.cfg"
+    install -m 0644 "${UNPACKDIR}/pxelinux.cfg" "${DEPLOYDIR}/netboot/pxelinux.cfg"
 
     # ISO installer modules
     install -m 0755 -d "${DEPLOYDIR}/iso"
@@ -25,8 +25,8 @@ do_deploy() {
     # ISO-hybrid packaging (see build-scripts).
     install -m 0644 "${D}${datadir}/syslinux/isohdpfx.bin" "${DEPLOYDIR}/"
     # ISO configuration
-    install -m 0644 "${WORKDIR}/isolinux.cfg" "${DEPLOYDIR}/iso/isolinux.cfg"
-    install -m 0644 "${WORKDIR}/bootmsg.txt" "${DEPLOYDIR}/iso/bootmsg.txt"
+    install -m 0644 "${UNPACKDIR}/isolinux.cfg" "${DEPLOYDIR}/iso/isolinux.cfg"
+    install -m 0644 "${UNPACKDIR}/bootmsg.txt" "${DEPLOYDIR}/iso/bootmsg.txt"
 }
 do_deploy:class-native() {
     :

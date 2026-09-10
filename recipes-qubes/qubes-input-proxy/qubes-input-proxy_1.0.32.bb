@@ -8,7 +8,6 @@ SRC_URI = " \
 "
 SRCREV = "e952c35a7c46a18931880b0b08da7382e472406d"
 
-S = "${WORKDIR}/git"
 
 PACKAGES =+ "${PN}-sender ${PN}-receiver"
 
@@ -22,5 +21,5 @@ do_install() {
     oe_runmake -C src install DESTDIR=${D}
 
     install -d ${D}${sysconfdir}/modules-load.d/
-    install -m 0644 ${WORKDIR}/uinput.conf ${D}${sysconfdir}/modules-load.d/
+    install -m 0644 ${UNPACKDIR}/uinput.conf ${D}${sysconfdir}/modules-load.d/
 }

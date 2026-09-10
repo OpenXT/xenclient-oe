@@ -7,10 +7,10 @@ SRC_URI += " \
 "
 
 do_install:append () {
-    install -m 644 ${WORKDIR}/powerbtn ${D}${sysconfdir}/acpi/events
-    install -m 644 ${WORKDIR}/ac ${D}${sysconfdir}/acpi/events
+    install -m 644 ${UNPACKDIR}/powerbtn ${D}${sysconfdir}/acpi/events
+    install -m 644 ${UNPACKDIR}/ac ${D}${sysconfdir}/acpi/events
 
-    install -m 755 ${WORKDIR}/ac_actions ${D}${sysconfdir}/acpi/ac 
+    install -m 755 ${UNPACKDIR}/ac_actions ${D}${sysconfdir}/acpi/ac 
 
     install -d ${D}${sysconfdir}/acpi/actions
 }

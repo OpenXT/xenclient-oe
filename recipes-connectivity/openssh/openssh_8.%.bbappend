@@ -13,20 +13,20 @@ SRC_URI += " \
 "
 
 do_install:append() {
-    install -m 0755 ${WORKDIR}/sshargo ${D}${bindir}/sshargo
-    install -m 0755 ${WORKDIR}/scpargo ${D}${bindir}/scpargo
-    install -m 0755 ${WORKDIR}/sshd_check_keys_argo ${D}${libexecdir}/openssh/sshd_check_keys_argo
+    install -m 0755 ${UNPACKDIR}/sshargo ${D}${bindir}/sshargo
+    install -m 0755 ${UNPACKDIR}/scpargo ${D}${bindir}/scpargo
+    install -m 0755 ${UNPACKDIR}/sshd_check_keys_argo ${D}${libexecdir}/openssh/sshd_check_keys_argo
 
-    install -m 0755 ${WORKDIR}/init_argo ${D}${sysconfdir}/init.d/sshd-argo
+    install -m 0755 ${UNPACKDIR}/init_argo ${D}${sysconfdir}/init.d/sshd-argo
     sed -i -e 's,@LIBEXECDIR@,${libexecdir}/${BPN},g' ${D}${sysconfdir}/init.d/sshd-argo
 
-    install -m 0644 ${WORKDIR}/sshd_config_argo ${D}${sysconfdir}/ssh/sshd_config_argo
+    install -m 0644 ${UNPACKDIR}/sshd_config_argo ${D}${sysconfdir}/ssh/sshd_config_argo
 
-    install -m 0644 ${WORKDIR}/sshd_config_argo ${D}${sysconfdir}/ssh/sshd_config_readonly_argo
+    install -m 0644 ${UNPACKDIR}/sshd_config_argo ${D}${sysconfdir}/ssh/sshd_config_readonly_argo
     sed -i -e 's|^HostKey /etc/ssh/|HostKey /var/run/ssh/|' \
         ${D}${sysconfdir}/ssh/sshd_config_readonly_argo
 
-    install -m 0644 ${WORKDIR}/volatiles.99_ssh-keygen ${D}${sysconfdir}/default/volatiles/99_ssh-keygen
+    install -m 0644 ${UNPACKDIR}/volatiles.99_ssh-keygen ${D}${sysconfdir}/default/volatiles/99_ssh-keygen
 
     # CONFIG_IPV6 is not set in every linux-openxt.
     sed -i -e 's/^[#]AddressFamily .\+/AddressFamily inet/' \

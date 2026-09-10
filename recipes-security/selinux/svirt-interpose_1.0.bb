@@ -5,7 +5,7 @@ LIC_FILES_CHKSUM="file://${COMMON_LICENSE_DIR}/GPL-2.0;md5=801f80980d171dd642561
 
 SRC_URI = "file://svirt-interpose.c"
 
-S = "${WORKDIR}"
+S = "${UNPACKDIR}"
 
 LDFLAGS += "-lxenstore -lselinux"
 
@@ -18,7 +18,7 @@ do_compile() {
 
 do_install() {
 	     install -d ${D}${sbindir}
-	     install -m 0755 ${WORKDIR}/svirt-interpose ${D}${sbindir}
+	     install -m 0755 ${UNPACKDIR}/svirt-interpose ${D}${sbindir}
 }
 
 DEBUG_BUILD = "1"

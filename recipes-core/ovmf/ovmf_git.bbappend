@@ -21,7 +21,7 @@ SRC_URI[PREBOOT.sha256sum] = "83dac749d74a6a54d7451bee79f9e1d605c4e2775d6b524d39
 
 do_extract_bootutil() {
     mkdir -p "${S}/Intel3.5/EFIX64"
-    unzip -q -p "${WORKDIR}/PREBOOT.EXE" "APPS/EFI/EFIx64/E3522X2.EFI" > "${S}/Intel3.5/EFIX64/E3522X2.EFI"
+    unzip -q -p "${UNPACKDIR}/PREBOOT.EXE" "APPS/EFI/EFIx64/E3522X2.EFI" > "${S}/Intel3.5/EFIX64/E3522X2.EFI"
 }
 addtask do_extract_bootutil before do_configure after do_unpack
 do_extract_bootutil[doc] = "Extract Intel's proprietary E1000 NIC driver to be embedded in OVMF image."

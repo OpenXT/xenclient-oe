@@ -6,7 +6,7 @@ require recipes-kernel/linux-libc-headers/linux-libc-headers.inc
 # Hack to get the -rc* libc-headers.
 SRC_URI = "${KERNELORG_MIRROR}/linux/kernel/v${HEADER_FETCH_VER}/linux-${PV}.tar.${KORG_ARCHIVE_COMPRESSION}"
 
-S = "${WORKDIR}/linux-${PV}"
+S = "${UNPACKDIR}/linux-${PV}"
 
 DEPENDS = "flex-native bison-native"
 

@@ -26,7 +26,7 @@ SRC_URI = " \
 SRC_URI[md5sum] = "03839674d51eb07437eccca8fd3bab3d"
 SRC_URI[sha256sum] = "ea126c5cd2ada56beb5118a141a498053f2d85f56263d215784f0ed86fff4213"
 
-S = "${WORKDIR}/${BPN}-${PV}"
+S = "${UNPACKDIR}/${BPN}-${PV}"
 
 inherit gettext autotools-brokensep
 
