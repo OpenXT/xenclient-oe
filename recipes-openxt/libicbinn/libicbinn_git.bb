@@ -4,7 +4,10 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=321bf41f280cf805086dd5a720b37785"
 
 require icbinn.inc
 
-SRC_URI += "file://icbinn_svc.initscript"
+SRC_URI += " \
+    file://icbinn_svc.initscript \
+    file://0001-canary-fix-icbinn_rand-prototype.patch \
+"
 
 DEPENDS = "libargo libtirpc libxcdbus"
 EXTRA_OECONF += "--with-argo --with-xcdbus"
