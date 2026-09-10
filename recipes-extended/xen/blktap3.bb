@@ -28,7 +28,6 @@ SRC_URI = "git://github.com/xapi-project/blktap.git;protocol=https \
     file://0001-tap-ctl-Default-to-read-only-opening.patch \
 "
 
-S = "${WORKDIR}/git"
 
 inherit autotools-brokensep update-rc.d
 
@@ -49,7 +48,7 @@ do_install:append() {
         rm -rf ${D}/usr/lib/systemd
     fi
     install -d ${D}${INIT_D_DIR}
-    install -m 0755 ${WORKDIR}/tapback.initscript \
+    install -m 0755 ${UNPACKDIR}/tapback.initscript \
                     ${D}${INIT_D_DIR}/tapback
 }
 

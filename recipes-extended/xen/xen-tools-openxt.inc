@@ -119,17 +119,17 @@ do_install:append() {
     install -d ${D}${datadir}/pkgconfig
 
     install -d ${D}${INIT_D_DIR}
-    install -m 0755 ${WORKDIR}/xenconsoled.initscript \
+    install -m 0755 ${UNPACKDIR}/xenconsoled.initscript \
                     ${D}${INIT_D_DIR}/xenconsoled
-    install -m 0755 ${WORKDIR}/xen-init-dom0.initscript \
+    install -m 0755 ${UNPACKDIR}/xen-init-dom0.initscript \
                     ${D}${INIT_D_DIR}/xen-init-dom0
 
     install -d ${D}${sysconfdir}/xen
-    install -m 0644 ${WORKDIR}/xl.conf \
+    install -m 0644 ${UNPACKDIR}/xl.conf \
                     ${D}${sysconfdir}/xen/xl.conf
 
     mv ${D}${sbindir}/xenstored ${D}${sbindir}/xenstored.${PN}-xenstored
-    install -m 0755 ${WORKDIR}/xenstored.initscript \
+    install -m 0755 ${UNPACKDIR}/xenstored.initscript \
                     ${D}${INIT_D_DIR}/xenstored.${PN}-xenstored
 
     # The C xenstored uses one additional command line argument:

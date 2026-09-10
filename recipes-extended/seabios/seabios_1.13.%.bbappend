@@ -13,6 +13,6 @@ SRC_URI += " \
 
 do_configure() {
     echo "${PV}" > .version
-    cp "${WORKDIR}/defconfig" ${B}/.config
+    cp "${UNPACKDIR}/defconfig" ${B}/.config
     oe_runmake oldconfig
 }

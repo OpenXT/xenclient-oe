@@ -12,8 +12,8 @@ CONFFILES:${PN} = " \
 # ... also install our configuration and wrapper (for rsyslog).
 do_install:append() {
     rm -f ${D}${localstatedir}/lib/logrotate.status
-    install -p -m 644 ${WORKDIR}/logrotate.conf ${D}${sysconfdir}/logrotate.conf
-    install -p -m 755 ${WORKDIR}/logrotate-wrapper ${D}${sbindir}/logrotate-wrapper
+    install -p -m 644 ${UNPACKDIR}/logrotate.conf ${D}${sysconfdir}/logrotate.conf
+    install -p -m 755 ${UNPACKDIR}/logrotate-wrapper ${D}${sbindir}/logrotate-wrapper
 }
 
 INSANE_SKIP:${PN} = "src-uri-bad"

@@ -33,7 +33,7 @@ do_configure() {
     echo "XSM_ENABLE := y" >> .config
     echo "FLASK_ENABLE := y" >> .config
 
-    cp "${WORKDIR}/defconfig" "${B}/xen/.config"
+    cp "${UNPACKDIR}/defconfig" "${B}/xen/.config"
     #Define CONFIG_TXT_OP in the hypervisor build to export tboot evtlog data
     #It's stubbed out for the pv-shim since it's not supported, but uses the
     #same hypercall headers

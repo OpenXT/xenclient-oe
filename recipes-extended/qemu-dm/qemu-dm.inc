@@ -49,7 +49,7 @@ SRC_URI += "file://compile-time-stubdom-flag.patch \
 SRC_URI[md5sum] = "5862fc984bb955c4c24427d3bceddca5"
 SRC_URI[sha256sum] = "49f0de77410d4d0f7d0321ff2c2888b281381f06e1e2dac9ec4d061e3934f4ae"
 
-S = "${WORKDIR}/qemu-${PV}"
+S = "${UNPACKDIR}/qemu-${PV}"
 
 inherit autotools-brokensep pkgconfig python3native
 

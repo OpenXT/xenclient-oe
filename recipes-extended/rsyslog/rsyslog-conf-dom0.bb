@@ -13,5 +13,5 @@ CONFFILES:${PN} = "${sysconfdir}/rsyslog.conf"
 
 do_install() {
     install -d ${D}${sysconfdir}
-    install -m 644 ${WORKDIR}/rsyslog.conf ${D}${sysconfdir}
+    install -m 644 ${UNPACKDIR}/rsyslog.conf ${D}${sysconfdir}
 }

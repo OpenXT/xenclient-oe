@@ -13,5 +13,5 @@ EXTRA_OECONF += " --audio-drv-list=alsa "
 PR = "${INC_PR}.6"
 
 do_install:append() {
-	install -m 0755 ${WORKDIR}/qemu-dm-wrapper ${D}${bindir}
+	install -m 0755 ${UNPACKDIR}/qemu-dm-wrapper ${D}${bindir}
 }

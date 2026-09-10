@@ -14,11 +14,11 @@ SRC_URI:append:xenclient-dom0 = " \
 
 do_install:append() {
     install -d -m 700 ${D}${sysconfdir}/default/volatiles
-    install -m 600 ${WORKDIR}/volatiles \
+    install -m 600 ${UNPACKDIR}/volatiles \
         ${D}${sysconfdir}/default/volatiles/50_monit
 }
 
 do_install:append:xenclient-dom0() {
     install -d -m 700 ${D}${sysconfdir}/monit.d/
-    install -m 600 ${WORKDIR}/dom0-cfg ${D}${sysconfdir}/monit.d/
+    install -m 600 ${UNPACKDIR}/dom0-cfg ${D}${sysconfdir}/monit.d/
 }

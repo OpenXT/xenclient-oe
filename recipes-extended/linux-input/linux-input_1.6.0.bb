@@ -9,7 +9,7 @@ SRC_URI[sha256sum] = "ced2efed00b67b45f82eddc69be07385835d558f658016315ac621fe2e
 LICENSE = "GPLv2+"
 LIC_FILES_CHKSUM = "file://inputattach.c;beginline=18;endline=33;md5=cddf4f732a5c3cf90f973c746407781c"
 
-S = "${WORKDIR}/linuxconsoletools-${PV}/utils"
+S = "${UNPACKDIR}/linuxconsoletools-${PV}/utils"
 
 do_compile() {
         oe_runmake inputattach
@@ -19,5 +19,5 @@ do_install() {
 	install -d ${D}${sbindir}
 	install inputattach ${D}${sbindir}
 	install -d ${D}/etc/udev/rules.d
-	install -c -m 655 ${WORKDIR}/99-wacom-serial.rules ${D}/etc/udev/rules.d/ 
+	install -c -m 655 ${UNPACKDIR}/99-wacom-serial.rules ${D}/etc/udev/rules.d/ 
 }

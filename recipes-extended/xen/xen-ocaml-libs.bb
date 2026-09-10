@@ -14,7 +14,6 @@ LIC_FILES_CHKSUM ?= "file://COPYING;md5=d1a1e216f80b6d8da95fec897d0dbec9"
 
 PV = "${XEN_REL}+git${SRCPV}"
 
-S = "${WORKDIR}/git"
 
 require recipes-extended/xen/xen.inc
 require xen-common.inc
@@ -102,10 +101,10 @@ do_install() {
 
     mv ${D}/usr/sbin/oxenstored ${D}/${sbindir}/xenstored.${PN}-xenstored
     install -d ${D}${INIT_D_DIR}
-    install -m 0755 ${WORKDIR}/xenstored.initscript \
+    install -m 0755 ${UNPACKDIR}/xenstored.initscript \
                     ${D}${INIT_D_DIR}/xenstored.${PN}-xenstored
     rm ${D}${sysconfdir}/xen/oxenstored.conf
-    install -m 0644 ${WORKDIR}/oxenstored.conf \
+    install -m 0644 ${UNPACKDIR}/oxenstored.conf \
                     ${D}${sysconfdir}/xen/oxenstored.conf
 }
 
