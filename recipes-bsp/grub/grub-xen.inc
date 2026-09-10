@@ -1,7 +1,5 @@
-# Hack to work around grub2.inc settings SRC_URI
-# OE_CORE_PATH defaults to a bordel build layout
-OE_CORE_PATH ?= "${TOPDIR}/layers/openembedded-core"
-FILESEXTRAPATHS:prepend := "${OE_CORE_PATH}/meta/recipes-bsp/grub/files:"
+# grub2.inc file:// patches live in oe-core, not this layer.
+FILESEXTRAPATHS:prepend := "${COREBASE}/meta/recipes-bsp/grub/files:"
 require recipes-bsp/grub/grub2.inc
 
 require conf/image-uefi.conf
