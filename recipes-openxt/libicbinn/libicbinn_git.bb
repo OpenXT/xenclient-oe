@@ -7,6 +7,7 @@ require icbinn.inc
 SRC_URI += " \
     file://icbinn_svc.initscript \
     file://0001-canary-fix-icbinn_rand-prototype.patch \
+    file://0002-client-include-ctype.h-for-isspace.patch \
 "
 
 DEPENDS = "libargo libtirpc libxcdbus"
