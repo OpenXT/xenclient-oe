@@ -386,6 +386,16 @@ interface(`vt_ioctl',`
 		type device_t;
 	')
 ')
+interface(`hal_setattr_cache_dirs',`
+	gen_require(`
+		type device_t;
+	')
+')
+interface(`hal_setattr_pid_dirs',`
+	gen_require(`
+		type device_t;
+	')
+')
 EOF
     echo 'openxtcompat = module' >> "${S}/policy/modules.conf"
     disable_policy_modules
