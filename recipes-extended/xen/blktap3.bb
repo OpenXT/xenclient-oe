@@ -38,6 +38,8 @@ INITSCRIPT_NAME:tapback = "tapback"
 INITSCRIPT_PARAMS:tapback = "defaults 61 39"
 
 TARGET_CPPFLAGS += "-DTAP_CTL_NO_DEFAULT_CGROUP_SLICE -DOPEN_XT"
+# util.h header guard name does not match the following #define (GCC 15 -Werror).
+TARGET_CFLAGS:append = " -Wno-error=header-guard"
 
 do_configure:prepend() {
 	touch ${S}/EXTRAVERSION

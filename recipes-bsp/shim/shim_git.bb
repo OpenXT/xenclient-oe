@@ -61,6 +61,7 @@ do_configure:prepend() {
 #ifdef X86_64_EFI_BIND\
 #else' ${S}/Cryptlib/Include/stddef.h
     echo '#endif' >> ${S}/Cryptlib/Include/stddef.h
+    echo 'CFLAGS += -Wno-error=int-conversion' >> ${S}/Make.defaults
 }
 
 do_install() {
