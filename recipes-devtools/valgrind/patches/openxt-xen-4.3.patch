@@ -1,10 +1,8 @@
 Upstream-Status: Inappropriate [OpenXT]
 
-Index: valgrind-3.12.0/coregrind/m_syswrap/syswrap-linux.c
-===================================================================
---- valgrind-3.12.0.orig/coregrind/m_syswrap/syswrap-linux.c
-+++ valgrind-3.12.0/coregrind/m_syswrap/syswrap-linux.c
-@@ -7471,6 +7471,15 @@ PRE(sys_ioctl)
+--- a/coregrind/m_syswrap/syswrap-linux.c
++++ b/coregrind/m_syswrap/syswrap-linux.c
+@@ -9632,6 +9632,15 @@ PRE(sys_ioctl)
                      (Addr)args->arr, sizeof(*(args->arr)) * args->num);
        break;
     }
@@ -20,7 +18,7 @@ Index: valgrind-3.12.0/coregrind/m_syswrap/syswrap-linux.c
  
     case VKI_XEN_IOCTL_EVTCHN_BIND_VIRQ: {
           struct vki_xen_ioctl_evtchn_bind_virq *args =
-@@ -9875,6 +9884,9 @@ POST(sys_ioctl)
+@@ -12342,6 +12351,9 @@ POST(sys_ioctl)
         POST_MEM_WRITE((Addr)args->err, sizeof(*(args->err)) * args->num);
        }
        break;
@@ -30,11 +28,9 @@ Index: valgrind-3.12.0/coregrind/m_syswrap/syswrap-linux.c
  
     case VKI_XEN_IOCTL_EVTCHN_BIND_VIRQ:
     case VKI_XEN_IOCTL_EVTCHN_BIND_INTERDOMAIN:
-Index: valgrind-3.12.0/coregrind/m_syswrap/syswrap-xen.c
-===================================================================
---- valgrind-3.12.0.orig/coregrind/m_syswrap/syswrap-xen.c
-+++ valgrind-3.12.0/coregrind/m_syswrap/syswrap-xen.c
-@@ -389,33 +389,6 @@ PRE(xsm_op)
+--- a/coregrind/m_syswrap/syswrap-xen.c
++++ b/coregrind/m_syswrap/syswrap-xen.c
+@@ -387,33 +387,6 @@ PRE(xsm_op)
  #undef PRE_XEN_XSM_OP_READ
  }
  
@@ -68,7 +64,7 @@ Index: valgrind-3.12.0/coregrind/m_syswrap/syswrap-xen.c
  static void pre_evtchn_op(ThreadId tid,
                            SyscallArgLayout*     layout,
                            /*MOD*/SyscallArgs*   arrghs,
-@@ -1170,6 +1143,59 @@ PRE(domctl)
+@@ -1427,6 +1400,59 @@ PRE(domctl)
  #undef __PRE_XEN_DOMCTL_READ
  }
  
@@ -128,9 +124,9 @@ Index: valgrind-3.12.0/coregrind/m_syswrap/syswrap-xen.c
  PRE(hvm_op)
  {
     unsigned long op = ARG1;
-@@ -1263,6 +1289,26 @@ PRE(hvm_op)
-       PRE_XEN_HVMOP_READ(inject_trap, cr2);
+@@ -1552,6 +1578,26 @@ PRE(hvm_op)
        break;
+    }
  
 +   case VKI_XEN_HVMOP_modified_memory:
 +      PRE_XEN_HVMOP_READ(modified_memory, domid);
@@ -155,7 +151,7 @@ Index: valgrind-3.12.0/coregrind/m_syswrap/syswrap-xen.c
     default:
        bad_subop(tid, layout, arrghs, status, flags,
                  "__HYPERVISOR_hvm_op", op);
-@@ -1380,6 +1426,14 @@ POST(memory_op)
+@@ -1669,6 +1715,14 @@ POST(memory_op)
     case VKI_XENMEM_get_sharing_shared_pages:
         /* No outputs */
         break;
@@ -170,7 +166,7 @@ Index: valgrind-3.12.0/coregrind/m_syswrap/syswrap-xen.c
     }
  }
  
-@@ -1996,6 +2050,21 @@ POST(hvm_op)
+@@ -2426,6 +2480,21 @@ POST(hvm_op)
     case VKI_XEN_HVMOP_get_mem_access:
        POST_XEN_HVMOP_WRITE(get_mem_access, hvmmem_access);
        break;
@@ -192,23 +188,19 @@ Index: valgrind-3.12.0/coregrind/m_syswrap/syswrap-xen.c
     }
  #undef __POST_XEN_HVMOP_WRITE
  #undef POST_XEN_HVMOP_WRITE
-Index: valgrind-3.12.0/include/Makefile.am
-===================================================================
---- valgrind-3.12.0.orig/include/Makefile.am
-+++ valgrind-3.12.0/include/Makefile.am
-@@ -78,6 +78,7 @@ nobase_pkginclude_HEADERS = \
- 	vki/vki-scnums-darwin.h         \
- 	vki/vki-scnums-solaris.h	\
+--- a/include/Makefile.am
++++ b/include/Makefile.am
+@@ -96,6 +96,7 @@ nobase_pkginclude_HEADERS = \
+ 	vki/vki-scnums-shared-linux.h	\
+ 	vki/vki-scnums-32bit-linux.h	\
  	vki/vki-xen.h                   \
 +	vki/vki-xen-sched.h		\
  	vki/vki-xen-domctl.h		\
  	vki/vki-xen-evtchn.h		\
  	vki/vki-xen-gnttab.h		\
-Index: valgrind-3.12.0/include/vki/vki-linux.h
-===================================================================
---- valgrind-3.12.0.orig/include/vki/vki-linux.h
-+++ valgrind-3.12.0/include/vki/vki-linux.h
-@@ -3309,11 +3309,17 @@ struct vki_xen_privcmd_mmapbatch_v2 {
+--- a/include/vki/vki-linux.h
++++ b/include/vki/vki-linux.h
+@@ -3594,11 +3594,17 @@ struct vki_xen_privcmd_mmapbatch_v2 {
          int __user *err;  /* array of error codes */
  };
  
@@ -226,11 +218,9 @@ Index: valgrind-3.12.0/include/vki/vki-linux.h
  
  //----------------------------------------------------------------------
  // Xen evtchn IOCTL
-Index: valgrind-3.12.0/include/vki/vki-xen-hvm.h
-===================================================================
---- valgrind-3.12.0.orig/include/vki/vki-xen-hvm.h
-+++ valgrind-3.12.0/include/vki/vki-xen-hvm.h
-@@ -70,6 +70,14 @@ struct vki_xen_hvm_track_dirty_vram {
+--- a/include/vki/vki-xen-hvm.h
++++ b/include/vki/vki-xen-hvm.h
+@@ -68,6 +68,14 @@ struct vki_xen_hvm_track_dirty_vram {
  };
  typedef struct vki_xen_hvm_track_dirty_vram vki_xen_hvm_track_dirty_vram_t;
  
@@ -245,7 +235,7 @@ Index: valgrind-3.12.0/include/vki/vki-xen-hvm.h
  #define VKI_XEN_HVMOP_set_mem_type 8
  struct vki_xen_hvm_set_mem_type {
      vki_xen_domid_t  domid;
-@@ -79,6 +87,29 @@ struct vki_xen_hvm_set_mem_type {
+@@ -77,6 +85,29 @@ struct vki_xen_hvm_set_mem_type {
  };
  typedef struct vki_xen_hvm_set_mem_type vki_xen_hvm_set_mem_type_t;
  
@@ -275,11 +265,9 @@ Index: valgrind-3.12.0/include/vki/vki-xen-hvm.h
  #define VKI_XEN_HVMOP_set_mem_access        12
  struct vki_xen_hvm_set_mem_access {
      vki_xen_domid_t domid;
-Index: valgrind-3.12.0/include/vki/vki-xen-memory.h
-===================================================================
---- valgrind-3.12.0.orig/include/vki/vki-xen-memory.h
-+++ valgrind-3.12.0/include/vki/vki-xen-memory.h
-@@ -51,6 +51,18 @@
+--- a/include/vki/vki-xen-memory.h
++++ b/include/vki/vki-xen-memory.h
+@@ -49,6 +49,18 @@
  #define VKI_XENMEM_claim_pages                24
  #define VKI_XENMEM_machphys_compat_mfn_list   25
  
@@ -298,10 +286,8 @@ Index: valgrind-3.12.0/include/vki/vki-xen-memory.h
  struct vki_xen_memory_map {
      unsigned int nr_entries;
      VKI_XEN_GUEST_HANDLE(void) buffer;
-Index: valgrind-3.12.0/include/vki/vki-xen-sched.h
-===================================================================
 --- /dev/null
-+++ valgrind-3.12.0/include/vki/vki-xen-sched.h
++++ b/include/vki/vki-xen-sched.h
 @@ -0,0 +1,36 @@
 +#ifndef __VKI_XEN_SCHED_H
 +#define __VKI_XEN_SCHED_H
@@ -339,11 +325,9 @@ Index: valgrind-3.12.0/include/vki/vki-xen-sched.h
 +/*--- end                                                          ---*/
 +/*--------------------------------------------------------------------*/
 +
-Index: valgrind-3.12.0/include/vki/vki-xen.h
-===================================================================
---- valgrind-3.12.0.orig/include/vki/vki-xen.h
-+++ valgrind-3.12.0/include/vki/vki-xen.h
-@@ -116,6 +116,7 @@ struct vki_xenctl_bitmap {
+--- a/include/vki/vki-xen.h
++++ b/include/vki/vki-xen.h
+@@ -114,6 +114,7 @@ struct vki_xenctl_bitmap {
  #include <vki/vki-xen-tmem.h>
  #include <vki/vki-xen-xsm.h>
  #include <vki/vki-xen-physdev.h>
