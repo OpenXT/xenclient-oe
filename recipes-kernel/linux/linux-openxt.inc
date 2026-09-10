@@ -8,6 +8,14 @@ DEPENDS += "bc-native"
 
 S = "${UNPACKDIR}/linux-${PV}"
 
+# meta-oe linux.inc still reads ${WORKDIR}/defconfig. file:// unpacks to
+# UNPACKDIR on Wrynose, so stage it where that prepend expects it.
+do_configure:prepend() {
+    if [ ! -e ${WORKDIR}/defconfig ] && [ -e ${UNPACKDIR}/defconfig ]; then
+        cp ${UNPACKDIR}/defconfig ${WORKDIR}/defconfig
+    fi
+}
+
 # Don't use update-alternatives for kernel at all. 
 pkg_postinst:kernel-image () {
     mv $D/${KERNEL_IMAGEDEST}/${KERNEL_IMAGETYPE}-${KERNEL_VERSION} $D/${KERNEL_IMAGEDEST}/${KERNEL_IMAGETYPE}
