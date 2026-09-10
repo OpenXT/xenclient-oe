@@ -6,7 +6,7 @@ SRC_URI = "https://download.sourceforge.net/project/linuxconsole/linuxconsoletoo
 SRC_URI[md5sum] = "fd52fa4a81455eb95a6c81efb087ce98"
 SRC_URI[sha256sum] = "ced2efed00b67b45f82eddc69be07385835d558f658016315ac621fe2eaa8146"
 
-LICENSE = "GPLv2+"
+LICENSE = "GPL-2.0-or-later"
 LIC_FILES_CHKSUM = "file://inputattach.c;beginline=18;endline=33;md5=cddf4f732a5c3cf90f973c746407781c"
 
 S = "${UNPACKDIR}/linuxconsoletools-${PV}/utils"

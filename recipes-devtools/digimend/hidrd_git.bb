@@ -2,7 +2,7 @@ DESCRIPTION = "HID report descriptor I/O library and conversion tool"
 
 inherit autotools pkgconfig lib_package
 
-LICENSE = "GPLv2"
+LICENSE = "GPL-2.0-only"
 LIC_FILES_CHKSUM = "file://COPYING;md5=80e4bb872435a76f22ff66bc5542c74d"
 
 DEPENDS += " libxml2 "

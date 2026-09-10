@@ -1,5 +1,5 @@
 DESCRIPTION = "haskell dbus library"
-LICENSE = "LGPLv2.1"
+LICENSE = "LGPL-2.1-only"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=784a6790a51378ef1cc78d5c6999b241"
 DEPENDS = " \
     hkg-cereal \

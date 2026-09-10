@@ -1,5 +1,5 @@
 SUMMARY = "Qubes Simple input events proxy"
-LICENSE="GPLv2+"
+LICENSE="GPL-2.0-or-later"
 LIC_FILES_CHKSUM = "file://debian/copyright;beginline=8;endline=22;md5=e4f60d1e5c91bab4e89cc83acb62bb9b"
 
 SRC_URI = " \

@@ -1,5 +1,5 @@
 DESCRIPTION = "read-edid elucidates various very useful informations from a conforming PnP monitor"
-LICENSE = "GPLv2"
+LICENSE = "GPL-2.0-only"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=292c42e2aedc4af636636bf7af0e2b26"
 
 SRC_URI = "http://polypux.org/projects/read-edid/read-edid-${PV}.tar.gz "

@@ -1,6 +1,6 @@
 DESCRIPTION = "Python library to implement a well-behaved UNIX daemon process"
 HOMEPAGE = "https://pagure.io/python-daemon/"
-LICENSE = "Apache-2.0 & GPLv3"
+LICENSE = "Apache-2.0 & GPL-3.0-only"
 LIC_FILES_CHKSUM = "file://LICENSE.ASF-2;md5=3b83ef96387f14655fc854ddc3c6bd57 \
                     file://LICENSE.GPL-3;md5=d32239bcb673463ab874e80d47fae504"
 DEPENDS = "python3-docutils-native"

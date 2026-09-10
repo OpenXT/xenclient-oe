@@ -1,4 +1,4 @@
-LICENSE = "BSD-3-Clause & AFLv2"
+LICENSE = "BSD-3-Clause & AFL-2.0"
 LIC_FILES_CHKSUM = "file://dojo-release-${PV}-src/dijit/LICENSE;md5=7a697b953bf9e661d81e8c23725526c8    \
                     file://dojo-release-${PV}-src/dojo/LICENSE;md5=7a697b953bf9e661d81e8c23725526c8     \
                     file://dojo-release-${PV}-src/dojox/LICENSE;md5=7a697b953bf9e661d81e8c23725526c8    \

@@ -1,4 +1,4 @@
-LICENSE = "GPLv2 & LGPLv2"
+LICENSE = "GPL-2.0-only & LGPL-2.0-only"
 LIC_FILES_CHKSUM = "file://COPYING;md5=441c28d2cf86e15a37fa47e15a72fbac  \
                     file://COPYING.LIB;md5=4fbd65380cdd255951079008b364516c"
 DEPENDS = " \

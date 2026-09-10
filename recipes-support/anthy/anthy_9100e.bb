@@ -10,7 +10,7 @@ SECTION = "inputmethods"
 SECTION:libanthy0 = "libs/inputmethods"
 SECTION:libanthy-dev = "devel/libs"
 
-LICENSE = "GPLv2 & LGPLv2.1"
+LICENSE = "GPL-2.0-only & LGPL-2.1-only"
 LIC_FILES_CHKSUM = "file://alt-cannadic/COPYING;md5=c93c0550bd3173f4504b2cbd8991e50b    \
                     file://COPYING;md5=11f384074d8e93e263b5664ef08a411a"
 
