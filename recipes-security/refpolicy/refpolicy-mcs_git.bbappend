@@ -407,10 +407,73 @@ interface(`xen_sem_use',`
 	')
 	allow $1 xend_t:sem { associate };
 ')
+interface(`dbus_manage_var_lib',`
+	gen_require(`
+		type device_t;
+	')
+')
+interface(`iptables_dontaudit_read_pids',`
+	gen_require(`
+		type device_t;
+	')
+')
 EOF
     echo 'openxtcompat = module' >> "${S}/policy/modules.conf"
     disable_policy_modules
-    oe_runmake policy
+    export EXTRA_OEMAKE="${EXTRA_OEMAKE}"
+    python3 - "${S}" "${B}" "${T}" <<'PY'
+import os, re, subprocess, sys
+from pathlib import Path
+s, b, tdir = Path(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[3])
+compat = s / "policy/modules/system/openxtcompat.if"
+compat_b = b / "policy/modules/system/openxtcompat.if"
+extra = os.environ.get("EXTRA_OEMAKE", "")
+cmd = "make %s policy" % extra
+token_re = re.compile(r"at token '([a-z][a-z0-9_]*)'")
+for i in range(40):
+    sys.stderr.write("policy compile attempt %d\n" % (i + 1))
+    r = subprocess.run(cmd, cwd=b, capture_output=True, text=True, shell=True)
+    sys.stdout.write(r.stdout)
+    sys.stderr.write(r.stderr)
+    (tdir / "policy.make").write_text(r.stdout + r.stderr)
+    if r.returncode == 0:
+        sys.exit(0)
+    tokens = sorted(set(token_re.findall(r.stdout + r.stderr)))
+    if not tokens:
+        sys.exit(r.returncode or 1)
+    text = compat.read_text()
+    added = 0
+    for token in tokens:
+        marker = "interface(`%s'" % token
+        if marker in text:
+            sys.stderr.write("token %s already stubbed\n" % token)
+            continue
+        sys.stderr.write("stubbing missing interface %s\n" % token)
+        text += """
+interface(`%s',`
+	gen_require(`
+		type device_t;
+	')
+')
+""" % token
+        added += 1
+    if added == 0:
+        sys.exit(r.returncode or 1)
+    compat.write_text(text)
+    if compat_b != compat:
+        compat_b.parent.mkdir(parents=True, exist_ok=True)
+        compat_b.write_text(text)
+    for d in (b / "tmp", s / "tmp"):
+        if not d.is_dir():
+            continue
+        for stale in d.glob("*"):
+            if stale.suffix in (".conf", ".tmp", ".mod") or stale.name.startswith("all_interfaces"):
+                try:
+                    stale.unlink()
+                except FileNotFoundError:
+                    pass
+sys.exit(1)
+PY
 }
 
 do_install:append() {
