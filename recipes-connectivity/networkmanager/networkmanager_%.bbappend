@@ -1,4 +1,4 @@
-FILESEXTRAPATHS:prepend := "${THISDIR}/${BPN}-${PV}:${THISDIR}/files:"
+FILESEXTRAPATHS:prepend := "${THISDIR}/patches:${THISDIR}/files:"
 
 SRC_URI += " \
     file://fix-compatibility-with-network-slave.patch \
