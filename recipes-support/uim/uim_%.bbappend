@@ -7,7 +7,7 @@ SRC_URI += " \
     file://hide-toolbar-from-env.patch \
 "
 
-EXTRA_OEMAKE:append += "CFLAGS+=-DOPENXT_BRANDING"
+EXTRA_OEMAKE:append = " CFLAGS+=-DOPENXT_BRANDING"
 
 # This should not be necessary, yet autoconf will not set PKG_CONFIG
 # automatically (it does for other projects...), which in turn will fail all

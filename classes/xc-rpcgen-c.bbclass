@@ -2,7 +2,7 @@
 # run against the XML IDL and templates (xenclient-idl).
 # xc-rpcgen, for c rpcs, needs dbus-binding-tool (dbus-glib-native), and will
 # link against dbus-glib.
-DEPENDS:append += " \
+DEPENDS:append = " \
     xenclient-idl \
     xenclient-rpcgen-native \
     dbus-glib-native \

@@ -17,7 +17,7 @@ SRCREV = "16b0da1e69e92ef8c0834e8a377c13aea823cfa2"
 # Hack to get CFLAGS not wiped out by OE
 EXTRA_OEMAKE = ""
 
-CFLAGS:append += "-Wno-deprecated-declarations"
+CFLAGS:append = " -Wno-deprecated-declarations"
 
 inherit pkgconfig
 

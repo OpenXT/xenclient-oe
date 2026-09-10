@@ -1,1 +1,1 @@
-PACKAGECONFIG:append += "attr"
+PACKAGECONFIG:append = " attr"

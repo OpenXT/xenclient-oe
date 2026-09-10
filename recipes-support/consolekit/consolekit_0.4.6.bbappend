@@ -2,4 +2,4 @@ DEPENDS += " \
     polkit \
     libpam \
 "
-PACKAGECONFIG:append += "polkit pam" 
+PACKAGECONFIG:append = " polkit pam" 

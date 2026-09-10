@@ -11,7 +11,7 @@ SRC_URI += " \
     file://xcp-ng-keep-caching-enabled.patch \
 "
 
-DEPENDS:append += " \
+DEPENDS:append = " \
     unzip-native \
 "
 

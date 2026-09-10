@@ -23,7 +23,7 @@ do_install:append() {
 }
 
 PACKAGES =+ "${PN}-conf"
-RRECOMMENDS:${PN}:append += "${PN}-conf"
+RRECOMMENDS:${PN}:append = " ${PN}-conf"
 
 FILES:${PN}-conf = " \
     ${sysconfdir}/lvm/lvm.conf \

@@ -169,7 +169,7 @@ SRC_URI += " \
     file://patches/xen-privcmd.patch \
 "
 
-DEPENDS:append += " \
+DEPENDS:append = " \
     strace-native \
 "
 

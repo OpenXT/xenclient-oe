@@ -8,9 +8,9 @@ SRC_URI += " \
     file://xcpmd.initscript \
 "
 
-CFLAGS:prepend += " -I${STAGING_INCDIR}/libnl3 "
+CFLAGS:prepend = " -I${STAGING_INCDIR}/libnl3 "
 
-CFLAGS:append += " -Wno-unused-parameter -Wno-deprecated-declarations "
+CFLAGS:append = " -Wno-unused-parameter -Wno-deprecated-declarations "
 
 S = "${UNPACKDIR}/${BP}/xcpmd"
 

@@ -85,4 +85,4 @@ FILES:libtspi-sa = " \
     ${libdir}/libtspi_sa${SOLIBS} \
 "
 
-RRECOMMENDS:${PN}:append += "${PN}-conf"
+RRECOMMENDS:${PN}:append = " ${PN}-conf"
