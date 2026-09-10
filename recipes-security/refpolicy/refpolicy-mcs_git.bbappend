@@ -222,7 +222,7 @@ for line in conf.read_text().splitlines():
         out.append("# dropped missing module %s" % name)
 conf.write_text("\n".join(out) + "\n")
 PY
-    if ! grep -q xen_dontaudit_rw_unix_stream_sockets "${S}/policy/modules/system/xen.if"; then
+    if ! grep -q "interface(\`xen_dontaudit_rw_unix_stream_sockets'" "${S}/policy/modules/system/xen.if"; then
         cat >> "${S}/policy/modules/system/xen.if" <<'EOF'
 
 interface(`xen_dontaudit_rw_unix_stream_sockets',`
@@ -395,6 +395,17 @@ interface(`hal_setattr_pid_dirs',`
 	gen_require(`
 		type device_t;
 	')
+')
+interface(`dev_create_generic_fifo_files',`
+	gen_require(`
+		type device_t;
+	')
+')
+interface(`xen_sem_use',`
+	gen_require(`
+		type xend_t;
+	')
+	allow $1 xend_t:sem { associate };
 ')
 EOF
     echo 'openxtcompat = module' >> "${S}/policy/modules.conf"
