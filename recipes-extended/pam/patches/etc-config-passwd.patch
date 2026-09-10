@@ -1,9 +1,14 @@
-Upstream-Status: Inappropriate [OpenXT]
+OpenXT: point pam_unix passwd/shadow at /config/etc
 
-diff --git a/modules/pam_unix/lckpwdf.-c b/modules/pam_unix/lckpwdf.-c
-index 7145617..d6c7874 100644
---- a/modules/pam_unix/lckpwdf.-c
-+++ b/modules/pam_unix/lckpwdf.-c
+OpenXT keeps /etc/passwd and /etc/shadow on a writable overlay under
+/config/etc because the rootfs is read-only. Redirect pam_unix lock,
+verify, and update paths accordingly.
+
+Upstream-Status: Inappropriate [OpenXT read-only rootfs]
+
+diff -urN a/modules/pam_unix/lckpwdf.-c b/modules/pam_unix/lckpwdf.-c
+--- a/modules/pam_unix/lckpwdf.-c	2026-09-10 10:59:24.783752466 -0400
++++ b/modules/pam_unix/lckpwdf.-c	2026-09-10 10:59:24.783752466 -0400
 @@ -30,7 +30,7 @@
  #include <selinux/selinux.h>
  #endif
@@ -13,33 +18,32 @@ index 7145617..d6c7874 100644
  #define TIMEOUT 15
  
  static int lockfd = -1;
-@@ -76,7 +76,7 @@ static int lckpwdf(void)
- 			security_context_t create_context;
+@@ -67,7 +67,7 @@
+ 			char *create_context_raw;
  			int rc;
  
--			if(getfilecon("/etc/passwd", &create_context))
-+			if(getfilecon("/config/etc/passwd", &create_context))
+-			if(getfilecon_raw("/etc/passwd", &create_context_raw))
++			if(getfilecon_raw("/config/etc/passwd", &create_context_raw))
  				return -1;
- 			rc = setfscreatecon(create_context);
- 			freecon(create_context);
-diff --git a/modules/pam_unix/passverify.c b/modules/pam_unix/passverify.c
-index 4840bb2..749a601 100644
---- a/modules/pam_unix/passverify.c
-+++ b/modules/pam_unix/passverify.c
-@@ -286,9 +286,9 @@ PAMH_ARG_DECL(int check_shadow_expiry,
+ 			rc = setfscreatecon_raw(create_context_raw);
+ 			freecon(create_context_raw);
+diff -urN a/modules/pam_unix/passverify.c b/modules/pam_unix/passverify.c
+--- a/modules/pam_unix/passverify.c	2026-09-10 10:59:24.783752466 -0400
++++ b/modules/pam_unix/passverify.c	2026-09-10 10:59:24.783752466 -0400
+@@ -336,9 +336,9 @@
  
  /* passwd/salt conversion macros */
  
--#define PW_TMPFILE              "/etc/npasswd"
--#define SH_TMPFILE              "/etc/nshadow"
--#define OPW_TMPFILE             "/etc/security/nopasswd"
-+#define PW_TMPFILE              "/config/etc/npasswd"
-+#define SH_TMPFILE              "/config/etc/nshadow"
-+#define OPW_TMPFILE             "/config/etc/security/nopasswd"
+-#define PW_TMPFILE              "/etc/.pam.passwdXXXXXX"
+-#define SH_TMPFILE              "/etc/.pam.shadowXXXXXX"
+-#define OPW_TMPFILE             SCONFIG_DIR "/.pam.opasswdXXXXXX"
++#define PW_TMPFILE              "/config/etc/.pam.passwdXXXXXX"
++#define SH_TMPFILE              "/config/etc/.pam.shadowXXXXXX"
++#define OPW_TMPFILE             "/config/etc/.pam.opasswdXXXXXX"
  
  /*
-  * i64c - convert an integer to a radix 64 character
-@@ -447,7 +447,7 @@ unix_selinux_confined(void)
+  * fmkstemp - creates and opens a temporary file from given pattern
+@@ -542,7 +542,7 @@
  {
      static int confined = -1;
      int fd;
@@ -48,101 +52,99 @@ index 4840bb2..749a601 100644
  
      if (confined != -1)
  	return confined;
-@@ -459,7 +459,7 @@ unix_selinux_confined(void)
+@@ -554,7 +554,7 @@
      }
  
      /* let's try opening shadow read only */
--    if ((fd=open("/etc/shadow", O_RDONLY)) != -1) {
-+    if ((fd=open("/config/etc/shadow", O_RDONLY)) != -1) {
+-    if ((fd=open("/etc/shadow", O_RDONLY | O_CLOEXEC)) != -1) {
++    if ((fd=open("/config/etc/shadow", O_RDONLY | O_CLOEXEC)) != -1) {
          close(fd);
          confined = 0;
          return confined;
-@@ -582,7 +582,7 @@ save_old_password(pam_handle_t *pamh, const char *forwho, const char *oldpass,
+@@ -675,7 +675,7 @@
  #ifdef WITH_SELINUX
      if (SELINUX_ENABLED) {
-       security_context_t passwd_context=NULL;
--      if (getfilecon("/etc/passwd",&passwd_context)<0) {
-+      if (getfilecon("/config/etc/passwd",&passwd_context)<0) {
+       char *passwd_context_raw = NULL;
+-      if (getfilecon_raw("/etc/passwd",&passwd_context_raw)<0) {
++      if (getfilecon_raw("/config/etc/passwd",&passwd_context_raw)<0) {
          return PAM_AUTHTOK_ERR;
        };
-       if (getfscreatecon(&prev_context)<0) {
-@@ -732,7 +732,7 @@ PAMH_ARG_DECL(int unix_update_passwd,
+       if (getfscreatecon_raw(&prev_context_raw)<0) {
+@@ -835,7 +835,7 @@
  #ifdef WITH_SELINUX
      if (SELINUX_ENABLED) {
-       security_context_t passwd_context=NULL;
--      if (getfilecon("/etc/passwd",&passwd_context)<0) {
-+      if (getfilecon("/config/etc/passwd",&passwd_context)<0) {
+       char *passwd_context_raw = NULL;
+-      if (getfilecon_raw("/etc/passwd",&passwd_context_raw)<0) {
++      if (getfilecon_raw("/config/etc/passwd",&passwd_context_raw)<0) {
  	return PAM_AUTHTOK_ERR;
        };
-       if (getfscreatecon(&prev_context)<0) {
-@@ -754,7 +754,7 @@ PAMH_ARG_DECL(int unix_update_passwd,
-       goto done;
+       if (getfscreatecon_raw(&prev_context_raw)<0) {
+@@ -856,7 +856,7 @@
+       goto tmp_error;
      }
  
--    opwfile = fopen("/etc/passwd", "r");
-+    opwfile = fopen("/config/etc/passwd", "r");
+-    opwfile = fopen("/etc/passwd", "re");
++    opwfile = fopen("/config/etc/passwd", "re");
      if (opwfile == NULL) {
  	fclose(pwfile);
  	err = 1;
-@@ -815,7 +815,7 @@ PAMH_ARG_DECL(int unix_update_passwd,
+@@ -917,7 +917,7 @@
  
  done:
      if (!err) {
--	if (!rename(PW_TMPFILE, "/etc/passwd"))
-+	if (!rename(PW_TMPFILE, "/config/etc/passwd"))
+-	if (!rename(tempfile, "/etc/passwd"))
++	if (!rename(tempfile, "/config/etc/passwd"))
  	    pam_syslog(pamh,
  		LOG_NOTICE, "password changed for %s", forwho);
  	else
-@@ -857,7 +857,7 @@ PAMH_ARG_DECL(int unix_update_shadow,
+@@ -955,7 +955,7 @@
  #ifdef WITH_SELINUX
      if (SELINUX_ENABLED) {
-       security_context_t shadow_context=NULL;
--      if (getfilecon("/etc/shadow",&shadow_context)<0) {
-+      if (getfilecon("/config/etc/shadow",&shadow_context)<0) {
+       char *shadow_context_raw = NULL;
+-      if (getfilecon_raw("/etc/shadow",&shadow_context_raw)<0) {
++      if (getfilecon_raw("/config/etc/shadow",&shadow_context_raw)<0) {
  	return PAM_AUTHTOK_ERR;
        };
-       if (getfscreatecon(&prev_context)<0) {
-@@ -879,7 +879,7 @@ PAMH_ARG_DECL(int unix_update_shadow,
- 	goto done;
+       if (getfscreatecon_raw(&prev_context_raw)<0) {
+@@ -976,7 +976,7 @@
+ 	goto tmp_error;
      }
  
--    opwfile = fopen("/etc/shadow", "r");
-+    opwfile = fopen("/config/etc/shadow", "r");
+-    opwfile = fopen("/etc/shadow", "re");
++    opwfile = fopen("/config/etc/shadow", "re");
      if (opwfile == NULL) {
  	fclose(pwfile);
  	err = 1;
-@@ -958,7 +958,7 @@ PAMH_ARG_DECL(int unix_update_shadow,
+@@ -1057,7 +1057,7 @@
  
   done:
      if (!err) {
--	if (!rename(SH_TMPFILE, "/etc/shadow"))
-+	if (!rename(SH_TMPFILE, "/config/etc/shadow"))
+-	if (!rename(tempfile, "/etc/shadow"))
++	if (!rename(tempfile, "/config/etc/shadow"))
  	    pam_syslog(pamh,
  		LOG_NOTICE, "password changed for %s", forwho);
  	else
-diff --git a/modules/pam_unix/passverify.h b/modules/pam_unix/passverify.h
-index 3de6759..5afaf9c 100644
---- a/modules/pam_unix/passverify.h
-+++ b/modules/pam_unix/passverify.h
-@@ -10,7 +10,7 @@
+diff -urN a/modules/pam_unix/passverify.h b/modules/pam_unix/passverify.h
+--- a/modules/pam_unix/passverify.h	2026-09-10 10:59:24.783752466 -0400
++++ b/modules/pam_unix/passverify.h	2026-09-10 10:59:24.783752466 -0400
+@@ -9,7 +9,7 @@
  
- #define MAXPASS		200	/* the maximum length of a password */
+ #define PAM_UNIX_RUN_HELPER PAM_CRED_INSUFFICIENT
  
--#define OLD_PASSWORDS_FILE      "/etc/security/opasswd"
+-#define OLD_PASSWORDS_FILE      SCONFIG_DIR "/opasswd"
 +#define OLD_PASSWORDS_FILE      "/config/etc/opasswd"
  
  int
- verify_pwd_hash(const char *p, char *hash, unsigned int nullok);
-diff --git a/modules/pam_unix/support.c b/modules/pam_unix/support.c
-index ab04535..47ab541 100644
---- a/modules/pam_unix/support.c
-+++ b/modules/pam_unix/support.c
-@@ -281,7 +281,7 @@ int _unix_getpwnam(pam_handle_t *pamh, const char *name,
+ is_pwd_shadowed(const struct passwd *pwd);
+diff -urN a/modules/pam_unix/support.c b/modules/pam_unix/support.c
+--- a/modules/pam_unix/support.c	2026-09-10 10:59:24.783752466 -0400
++++ b/modules/pam_unix/support.c	2026-09-10 10:59:24.783752466 -0400
+@@ -357,7 +357,7 @@
+ 	if (!matched && files && strchr(name, ':') == NULL) {
+ 		FILE *passwd;
  
- 	if (!matched && files) {
- 		int userlen = strlen(name);
--		passwd = fopen("/etc/passwd", "r");
-+		passwd = fopen("/config/etc/passwd", "r");
+-		passwd = fopen("/etc/passwd", "re");
++		passwd = fopen("/config/etc/passwd", "re");
  		if (passwd != NULL) {
- 			while (fgets(buf, sizeof(buf), passwd) != NULL) {
- 				if ((buf[userlen] == ':') &&
+ 			size_t n = 0, userlen;
+ 			ssize_t r;
