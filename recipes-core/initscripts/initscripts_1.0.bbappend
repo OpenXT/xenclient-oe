@@ -11,7 +11,7 @@ SRC_URI += " \
     file://volatiles \
 "
 
-SRC_URI:append:openxt-installer += " \
+SRC_URI:append:openxt-installer = " \
     file://mountefi.sh \
 "
 
