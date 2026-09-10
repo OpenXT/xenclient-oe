@@ -19,7 +19,9 @@ INSANE_SKIP:${PN} = "src-uri-bad"
 S = "${UNPACKDIR}/${BPN}-${PV}"
 
 EXTRA_OECONF += " --disable-usercheck"
-CFLAGS:append = " -Wno-error=unused-parameter -Wno-error=strict-aliasing -std=gnu89"
+# -std=gnu89: old C dialect. -fcommon: tcsd.h tentatives (tcsd_sa_int/chld)
+# are included from multiple TUs; GCC 10+ defaults to -fno-common.
+CFLAGS:append = " -Wno-error=unused-parameter -Wno-error=strict-aliasing -std=gnu89 -fcommon"
 
 inherit update-rc.d useradd autotools-brokensep pkgconfig
 
