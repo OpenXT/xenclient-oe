@@ -28,7 +28,7 @@ PACKAGES = " \
     ${PN} \
     "
 
-PROVIDES =+ "virtual/xenstored"
+PROVIDES =+ "virtual-xenstored"
 
 DEPENDS += " \
     util-linux \
@@ -45,7 +45,7 @@ FILES:${PN}-xenstored = " \
     ${INIT_D_DIR}/xenstored.${PN}-xenstored \
     ${sysconfdir}/xen/oxenstored.conf \
     "
-RPROVIDES:${PN}-xenstored = "virtual/xenstored"
+RPROVIDES:${PN}-xenstored = "virtual-xenstored"
 
 EXTRA_OECONF:remove = "--disable-ocamltools"
 

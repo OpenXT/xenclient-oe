@@ -17,7 +17,7 @@ PACKAGES += " \
     ${PN}-libxenmanage-dev \
     "
 
-PROVIDES =+ "virtual/xenstored"
+PROVIDES =+ "virtual-xenstored"
 
 FILES:${PN}-libxenmanage = "${libdir}/libxenmanage.so.*"
 FILES:${PN}-libxenmanage-dev = " \
