@@ -1,8 +1,15 @@
+dbus: add DOMID authentication mechanism for OpenXT
+
+OpenXT uses a D-Bus "DOMID" auth mechanism so service VMs can prove
+their Xen domain id, plus GetConnectionDOMID / dbus_connection_get_domid
+helpers. Rebased onto dbus 1.16 credentials (named struct fields,
+pid_fd, unix_gids).
+
 Upstream-Status: Inappropriate [OpenXT]
 
---- a/bus/driver.c
-+++ b/bus/driver.c
-@@ -1682,6 +1682,80 @@ bus_driver_handle_get_connection_unix_us
+--- a/bus/driver.c	2025-02-27 11:29:06.000000000 -0500
++++ b/bus/driver.c	2026-09-10 11:17:49.323745725 -0400
+@@ -1697,6 +1697,80 @@
  }
  
  static dbus_bool_t
@@ -83,7 +90,7 @@ Upstream-Status: Inappropriate [OpenXT]
  bus_driver_handle_get_connection_unix_process_id (DBusConnection *connection,
  						  BusTransaction *transaction,
  						  DBusMessage    *message,
-@@ -2469,6 +2543,10 @@ static const MessageHandler dbus_message
+@@ -2573,6 +2647,10 @@
      DBUS_TYPE_UINT32_AS_STRING,
      bus_driver_handle_get_connection_unix_process_id,
      METHOD_FLAG_ANY_PATH },
@@ -94,9 +101,9 @@ Upstream-Status: Inappropriate [OpenXT]
    { "GetAdtAuditSessionData",
      DBUS_TYPE_STRING_AS_STRING,
      DBUS_TYPE_ARRAY_AS_STRING DBUS_TYPE_BYTE_AS_STRING,
---- a/dbus/dbus-auth.c
-+++ b/dbus/dbus-auth.c
-@@ -1160,6 +1160,11 @@ handle_server_data_external_mech (DBusAu
+--- a/dbus/dbus-auth.c	2025-02-27 11:29:06.000000000 -0500
++++ b/dbus/dbus-auth.c	2026-09-10 11:17:49.323745725 -0400
+@@ -1178,6 +1178,11 @@
    if (_dbus_credentials_are_superset (auth->credentials,
                                        auth->desired_identity))
      {
@@ -108,7 +115,7 @@ Upstream-Status: Inappropriate [OpenXT]
        /* client has authenticated */
        if (!_dbus_credentials_add_credentials (auth->authorized_identity,
                                                auth->desired_identity))
-@@ -1250,6 +1255,145 @@ handle_client_shutdown_external_mech (DB
+@@ -1278,6 +1283,145 @@
  }
  
  /*
@@ -254,7 +261,7 @@ Upstream-Status: Inappropriate [OpenXT]
   * ANONYMOUS mechanism
   */
  
-@@ -1370,6 +1514,14 @@ all_mechanisms[] = {
+@@ -1403,6 +1547,14 @@
      handle_client_data_external_mech,
      NULL, NULL,
      handle_client_shutdown_external_mech },
@@ -269,9 +276,9 @@ Upstream-Status: Inappropriate [OpenXT]
    { "DBUS_COOKIE_SHA1",
      handle_server_data_cookie_sha1_mech,
      NULL, NULL,
---- a/dbus/dbus-bus.c
-+++ b/dbus/dbus-bus.c
-@@ -926,6 +926,71 @@ dbus_bus_get_unix_user (DBusConnection *
+--- a/dbus/dbus-bus.c	2025-02-27 11:29:06.000000000 -0500
++++ b/dbus/dbus-bus.c	2026-09-10 11:17:49.323745725 -0400
+@@ -929,6 +929,71 @@
    return (unsigned long) uid;
  }
  
@@ -343,9 +350,9 @@ Upstream-Status: Inappropriate [OpenXT]
  /**
   * Asks the bus to return its globally unique ID, as described in the
   * D-Bus specification. For the session bus, this is useful as a way
---- a/dbus/dbus-bus.h
-+++ b/dbus/dbus-bus.h
-@@ -56,6 +56,10 @@ unsigned long   dbus_bus_get_unix_user
+--- a/dbus/dbus-bus.h	2025-02-27 11:29:06.000000000 -0500
++++ b/dbus/dbus-bus.h	2026-09-10 11:17:49.323745725 -0400
+@@ -58,6 +58,10 @@
  			                   const char     *name,
                                             DBusError      *error);
  DBUS_EXPORT
@@ -356,9 +363,9 @@ Upstream-Status: Inappropriate [OpenXT]
  char*           dbus_bus_get_id           (DBusConnection *connection,
                                             DBusError      *error);
  DBUS_EXPORT
---- a/dbus/dbus-connection.c
-+++ b/dbus/dbus-connection.c
-@@ -5244,6 +5244,25 @@ dbus_connection_get_unix_user (DBusConne
+--- a/dbus/dbus-connection.c	2025-02-27 11:29:06.000000000 -0500
++++ b/dbus/dbus-connection.c	2026-09-10 11:17:49.327745725 -0400
+@@ -5262,6 +5262,25 @@
    return result;
  }
  
@@ -384,9 +391,9 @@ Upstream-Status: Inappropriate [OpenXT]
  /**
   * Gets the process ID of the connection if any.
   * Returns #TRUE if the pid is filled in.
---- a/dbus/dbus-connection.h
-+++ b/dbus/dbus-connection.h
-@@ -263,6 +263,9 @@ DBUS_EXPORT
+--- a/dbus/dbus-connection.h	2025-02-27 11:29:06.000000000 -0500
++++ b/dbus/dbus-connection.h	2026-09-10 11:17:49.327745725 -0400
+@@ -265,6 +265,9 @@
  dbus_bool_t        dbus_connection_get_unix_user                (DBusConnection             *connection,
                                                                   unsigned long              *uid);
  DBUS_EXPORT
@@ -396,43 +403,46 @@ Upstream-Status: Inappropriate [OpenXT]
  dbus_bool_t        dbus_connection_get_unix_process_id          (DBusConnection             *connection,
                                                                   unsigned long              *pid);
  DBUS_EXPORT
---- a/dbus/dbus-credentials.c
-+++ b/dbus/dbus-credentials.c
-@@ -49,6 +49,7 @@ struct DBusCredentials {
-   int refcount;
-   dbus_uid_t unix_uid;
+--- a/dbus/dbus-credentials.c	2025-02-27 11:29:06.000000000 -0500
++++ b/dbus/dbus-credentials.c	2026-09-10 11:18:38.759745423 -0400
+@@ -64,6 +64,7 @@
+   size_t n_unix_gids;
    dbus_pid_t pid;
+   int pid_fd;
 +  dbus_int32_t domid;
    char *windows_sid;
    char *linux_security_label;
    void *adt_audit_data;
-@@ -79,6 +80,7 @@ _dbus_credentials_new (void)
-   creds->refcount = 1;
-   creds->unix_uid = DBUS_UID_UNSET;
+@@ -97,6 +98,7 @@
+   creds->n_unix_gids = 0;
    creds->pid = DBUS_PID_UNSET;
+   creds->pid_fd = -1;
 +  creds->domid = DBUS_DOMID_UNSET;
    creds->windows_sid = NULL;
    creds->linux_security_label = NULL;
    creds->adt_audit_data = NULL;
-@@ -87,6 +89,17 @@ _dbus_credentials_new (void)
+@@ -105,6 +107,20 @@
    return creds;
  }
  
-+dbus_bool_t _dbus_credentials_add_domid(DBusCredentials *credentials, dbus_int32_t domid)
++dbus_bool_t
++_dbus_credentials_add_domid (DBusCredentials *credentials,
++                             dbus_int32_t     domid)
 +{
 +  credentials->domid = domid;
 +  return TRUE;
 +}
 +
-+dbus_int32_t _dbus_credentials_get_domid(DBusCredentials *credentials)
++dbus_int32_t
++_dbus_credentials_get_domid (DBusCredentials *credentials)
 +{
 +  return credentials->domid;
 +}
 +
  /**
-  * Creates a new object with credentials (user ID and process ID) from the current process.
+  * Creates a new object with the most important credentials (user ID and process ID) from the current process.
   * @returns the new object or #NULL if no memory
-@@ -267,6 +280,8 @@ _dbus_credentials_include (DBusCredentia
+@@ -382,6 +398,8 @@
        return credentials->linux_security_label != NULL;
      case DBUS_CREDENTIAL_ADT_AUDIT_DATA_ID:
        return credentials->adt_audit_data != NULL;
@@ -441,7 +451,7 @@ Upstream-Status: Inappropriate [OpenXT]
      default:
        _dbus_assert_not_reached ("Unknown credential enum value");
        return FALSE;
-@@ -366,6 +381,8 @@ _dbus_credentials_are_superset (DBusCred
+@@ -509,6 +527,8 @@
    return
      (possible_subset->pid == DBUS_PID_UNSET ||
       possible_subset->pid == credentials->pid) &&
@@ -449,9 +459,9 @@ Upstream-Status: Inappropriate [OpenXT]
 +     possible_subset->domid == credentials->domid) &&
      (possible_subset->unix_uid == DBUS_UID_UNSET ||
       possible_subset->unix_uid == credentials->unix_uid) &&
-     (possible_subset->windows_sid == NULL ||
-@@ -395,7 +412,8 @@ _dbus_credentials_are_empty (DBusCredent
-     credentials->unix_uid == DBUS_UID_UNSET &&
+     (possible_subset->unix_gids == NULL ||
+@@ -545,7 +565,8 @@
+     credentials->n_unix_gids == 0 &&
      credentials->windows_sid == NULL &&
      credentials->linux_security_label == NULL &&
 -    credentials->adt_audit_data == NULL;
@@ -460,7 +470,7 @@ Upstream-Status: Inappropriate [OpenXT]
  }
  
  /**
-@@ -439,6 +457,9 @@ _dbus_credentials_add_credentials (DBusC
+@@ -595,6 +616,9 @@
                                        other_credentials) &&
      _dbus_credentials_add_credential (credentials,
                                        DBUS_CREDENTIAL_WINDOWS_SID,
@@ -470,10 +480,10 @@ Upstream-Status: Inappropriate [OpenXT]
                                        other_credentials);
  }
  
-@@ -490,6 +511,12 @@ _dbus_credentials_add_credential (DBusCr
-       if (!_dbus_credentials_add_adt_audit_data (credentials, other_credentials->adt_audit_data, other_credentials->adt_audit_data_size))
-         return FALSE;
+@@ -675,6 +699,12 @@
+       _dbus_credentials_take_pid_fd (credentials, pid_fd);
      }
+ #endif
 +  else if (which == DBUS_CREDENTIAL_DOMID &&
 +           other_credentials->domid != DBUS_DOMID_UNSET)
 +    {
@@ -483,47 +493,44 @@ Upstream-Status: Inappropriate [OpenXT]
  
    return TRUE;
  }
-@@ -506,6 +533,7 @@ _dbus_credentials_clear (DBusCredentials
-   credentials->unix_uid = DBUS_UID_UNSET;
+@@ -701,6 +731,7 @@
+   credentials->n_unix_gids = 0;
    dbus_free (credentials->windows_sid);
    credentials->windows_sid = NULL;
 +  credentials->domid = DBUS_DOMID_UNSET;
    dbus_free (credentials->linux_security_label);
    credentials->linux_security_label = NULL;
    dbus_free (credentials->adt_audit_data);
---- a/dbus/dbus-credentials.h
-+++ b/dbus/dbus-credentials.h
-@@ -35,7 +35,8 @@ typedef enum {
-   DBUS_CREDENTIAL_UNIX_USER_ID,
-   DBUS_CREDENTIAL_ADT_AUDIT_DATA_ID,
+--- a/dbus/dbus-credentials.h	2025-02-27 11:29:06.000000000 -0500
++++ b/dbus/dbus-credentials.h	2026-09-10 11:18:18.223745549 -0400
+@@ -40,6 +40,7 @@
    DBUS_CREDENTIAL_LINUX_SECURITY_LABEL,
--  DBUS_CREDENTIAL_WINDOWS_SID
-+  DBUS_CREDENTIAL_WINDOWS_SID,
-+  DBUS_CREDENTIAL_DOMID
+   DBUS_CREDENTIAL_WINDOWS_SID,
+   DBUS_CREDENTIAL_UNIX_PROCESS_FD,
++  DBUS_CREDENTIAL_DOMID,
  } DBusCredentialType;
  
  DBUS_PRIVATE_EXPORT
-@@ -52,6 +53,8 @@ dbus_bool_t      _dbus_credentials_add_p
+@@ -59,6 +60,8 @@
  DBUS_PRIVATE_EXPORT
  dbus_bool_t      _dbus_credentials_add_unix_uid             (DBusCredentials    *credentials,
                                                               dbus_uid_t          uid);
 +dbus_bool_t      _dbus_credentials_add_domid                (DBusCredentials    *credentials,
 +                                                             dbus_int32_t        domid);
  DBUS_PRIVATE_EXPORT
- dbus_bool_t      _dbus_credentials_add_windows_sid          (DBusCredentials    *credentials,
-                                                              const char         *windows_sid);
-@@ -68,6 +71,8 @@ dbus_pid_t       _dbus_credentials_get_p
+ void             _dbus_credentials_take_unix_gids           (DBusCredentials    *credentials,
+                                                              dbus_gid_t         *gids,
+@@ -80,6 +83,7 @@
+ int              _dbus_credentials_get_pid_fd               (DBusCredentials    *credentials);
  DBUS_PRIVATE_EXPORT
  dbus_uid_t       _dbus_credentials_get_unix_uid             (DBusCredentials    *credentials);
- DBUS_PRIVATE_EXPORT
 +dbus_int32_t     _dbus_credentials_get_domid                (DBusCredentials    *credentials);
-+DBUS_PRIVATE_EXPORT
- const char*      _dbus_credentials_get_windows_sid          (DBusCredentials    *credentials);
- const char *     _dbus_credentials_get_linux_security_label (DBusCredentials    *credentials);
- void *           _dbus_credentials_get_adt_audit_data       (DBusCredentials    *credentials);
---- a/dbus/dbus-sysdeps.h
-+++ b/dbus/dbus-sysdeps.h
-@@ -142,6 +142,8 @@ typedef unsigned long dbus_gid_t;
+ DBUS_PRIVATE_EXPORT
+ dbus_bool_t      _dbus_credentials_get_unix_gids            (DBusCredentials    *credentials,
+                                                              const dbus_gid_t  **gids,
+--- a/dbus/dbus-sysdeps.h	2025-02-27 11:29:06.000000000 -0500
++++ b/dbus/dbus-sysdeps.h	2026-09-10 11:17:49.327745725 -0400
+@@ -149,6 +149,8 @@
  /** an invalid GID used to represent an uninitialized dbus_gid_t field */
  #define DBUS_GID_UNSET ((dbus_gid_t) -1)
  
@@ -532,9 +539,9 @@ Upstream-Status: Inappropriate [OpenXT]
  /** an appropriate printf format for dbus_pid_t */
  #define DBUS_PID_FORMAT "%lu"
  /** an appropriate printf format for dbus_uid_t */
---- a/dbus/dbus-transport.c
-+++ b/dbus/dbus-transport.c
-@@ -1355,6 +1355,29 @@ _dbus_transport_get_unix_user (DBusTrans
+--- a/dbus/dbus-transport.c	2025-02-27 11:29:06.000000000 -0500
++++ b/dbus/dbus-transport.c	2026-09-10 11:17:49.327745725 -0400
+@@ -1358,6 +1358,29 @@
      return FALSE;
  }
  
@@ -564,9 +571,9 @@ Upstream-Status: Inappropriate [OpenXT]
  /**
   * See dbus_connection_get_unix_process_id().
   *
---- a/dbus/dbus-transport.h
-+++ b/dbus/dbus-transport.h
-@@ -74,6 +74,8 @@ dbus_bool_t        _dbus_transport_get_s
+--- a/dbus/dbus-transport.h	2025-02-27 11:29:06.000000000 -0500
++++ b/dbus/dbus-transport.h	2026-09-10 11:17:49.327745725 -0400
+@@ -77,6 +77,8 @@
                                                             DBusSocket                 *fd_p);
  dbus_bool_t        _dbus_transport_get_unix_user          (DBusTransport              *transport,
                                                             unsigned long              *uid);
