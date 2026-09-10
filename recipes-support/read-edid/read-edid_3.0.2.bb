@@ -10,7 +10,8 @@ SRC_URI[sha256sum] = "c7c6d8440f5b90f98e276829271ccea5b2ff5a3413df8a0f87ec09f834
 inherit pkgconfig cmake
 
 # Don't build the classic VBE interface at all
-EXTRA_OECMAKE = " -DCLASSICBUILD=OFF "
+# CMake 4 dropped compatibility with cmake_minimum_required < 3.5.
+EXTRA_OECMAKE = " -DCLASSICBUILD=OFF -DCMAKE_POLICY_VERSION_MINIMUM=3.5 "
 
 do_install() {
     install -d ${D}${bindir}
