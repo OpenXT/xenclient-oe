@@ -28,14 +28,14 @@ RDEPENDS:sync-cmd += " \
 PV = "0+git${SRCPV}"
 
 SRCREV = "${AUTOREV}"
-SRC_URI = "git://github.com/OpenXT/sync-client.git;protocol=https \
+SRC_URI = "git://github.com/OpenXT/sync-client.git;protocol=https;branch=master \
            file://sync-client-daemon.initscript"
 
 INITSCRIPT_NAME = "sync-client-daemon"
 INITSCRIPT_PARAMS = "defaults 85 15"
 
 
-inherit distutils3
+inherit setuptools3
 inherit update-rc.d
 
 FILES:${PN} += "/etc/init.d/${INITSCRIPT_NAME}"
