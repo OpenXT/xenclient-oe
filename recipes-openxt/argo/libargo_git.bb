@@ -10,5 +10,7 @@ S = "${UNPACKDIR}/${BP}/libargo"
 inherit autotools-brokensep pkgconfig lib_package
 
 EXTRA_OECONF += "--with-pic"
+# ttcp.c still uses K&R empty prototypes; GCC 15/C23 treats foo() as foo(void).
+CFLAGS:append = " -std=gnu89"
 
 RDEPENDS:${PN} += "argo-module"
