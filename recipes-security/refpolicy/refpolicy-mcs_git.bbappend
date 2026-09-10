@@ -201,23 +201,29 @@ modules.conf) from the configuration elements passed by the layer. \
 See 'make conf' of the refpolicy for more information."
 do_policy_conf[dirs] = "${B}"
 
-# segenxml produces incomplete policy.xml after the 2.20260312 rebase.
-# Keep make conf working by substituting an empty policy document.
-do_compile:prepend() {
+# OpenXT already wrote modules.conf. Skip make conf (broken XML) and drop
+# entries whose .if files are not in this refpolicy tree.
+do_compile() {
     python3 <<PY
 from pathlib import Path
-p = Path("${S}/support/sedoctool.py")
-t = p.read_text()
-t = t.replace(
-    'error("Error while parsing xml")',
-    'return __import__("xml.dom.minidom", fromlist=["parseString"]).parseString("<policy></policy>")',
-)
-t = t.replace(
-    'print("warning: Error while parsing xml")',
-    'return __import__("xml.dom.minidom", fromlist=["parseString"]).parseString("<policy></policy>")',
-)
-p.write_text(t)
+s = Path("${S}")
+conf = s / "policy/modules.conf"
+ifs = {p.stem for p in (s / "policy/modules").rglob("*.if")}
+out = []
+for line in conf.read_text().splitlines():
+    stripped = line.strip()
+    if not stripped or stripped.startswith("#") or "=" not in stripped:
+        out.append(line)
+        continue
+    name = stripped.split("=", 1)[0].strip()
+    if name in ifs:
+        out.append(line)
+    else:
+        out.append("# dropped missing module %s" % name)
+conf.write_text("\n".join(out) + "\n")
 PY
+    disable_policy_modules
+    oe_runmake policy
 }
 
 do_install:append() {
