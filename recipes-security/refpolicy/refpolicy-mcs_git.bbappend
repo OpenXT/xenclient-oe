@@ -283,6 +283,111 @@ EOF
     if ! grep -q 'type xend_config_t' "${S}/policy/modules/system/xen.te"; then
         printf '\ntype xend_config_t;\nfiles_type(xend_config_t)\n' >> "${S}/policy/modules/system/xen.te"
     fi
+    # Compatibility stubs for interfaces removed or renamed in refpolicy 2.2026.
+    mkdir -p "${S}/policy/modules/system"
+    cat > "${S}/policy/modules/system/openxtcompat.te" <<'EOF'
+policy_module(openxtcompat)
+EOF
+    : > "${S}/policy/modules/system/openxtcompat.fc"
+    cat > "${S}/policy/modules/system/openxtcompat.if" <<'EOF'
+interface(`dev_search_xen',`
+	gen_require(`
+		type device_t;
+	')
+	allow $1 device_t:dir search_dir_perms;
+')
+interface(`dev_filetrans_blktap',`
+	gen_require(`
+		type device_t;
+	')
+	allow $1 device_t:dir add_entry_dir_perms;
+')
+interface(`dev_rw_xenpriv',`
+	gen_require(`
+		type device_t;
+	')
+	allow $1 device_t:chr_file rw_chr_file_perms;
+')
+interface(`hal_dbus_chat',`
+	gen_require(`
+		type system_dbusd_t;
+		class dbus send_msg;
+	')
+	allow $1 system_dbusd_t:dbus send_msg;
+')
+interface(`init_daemon_pid_file',`
+	gen_require(`
+		attribute pidfile;
+	')
+	typeattribute $1 pidfile;
+')
+interface(`modutils_domtrans_depmod',`
+	gen_require(`
+		type device_t;
+	')
+')
+interface(`modutils_domtrans_insmod',`
+	gen_require(`
+		type device_t;
+	')
+')
+interface(`networkmanager_create_cert_files',`
+	gen_require(`
+		type device_t;
+	')
+')
+interface(`networkmanager_manage_cert_dirs',`
+	gen_require(`
+		type device_t;
+	')
+')
+interface(`networkmanager_manage_etc',`
+	gen_require(`
+		type device_t;
+	')
+')
+interface(`networkmanager_read_cert_files',`
+	gen_require(`
+		type device_t;
+	')
+')
+interface(`networkmanager_read_etc_rw',`
+	gen_require(`
+		type device_t;
+	')
+')
+interface(`networkmanager_var_lib_filetrans',`
+	gen_require(`
+		type device_t;
+	')
+')
+interface(`ssh_use_fds',`
+	gen_require(`
+		type device_t;
+	')
+')
+interface(`sysnet_read_dhcpc_pid',`
+	gen_require(`
+		type device_t;
+	')
+')
+interface(`udev_read_db',`
+	gen_require(`
+		type device_t;
+	')
+')
+interface(`udev_read_pid_files',`
+	gen_require(`
+		type device_t;
+	')
+')
+interface(`vt_ioctl',`
+	gen_require(`
+		type device_t;
+	')
+')
+EOF
+    echo 'openxtcompat = module' >> "${S}/policy/modules.conf"
     disable_policy_modules
     oe_runmake policy
 }
