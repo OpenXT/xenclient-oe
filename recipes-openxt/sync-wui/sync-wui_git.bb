@@ -15,8 +15,6 @@ SRCREV = "${AUTOREV}"
 SRC_URI = "git://github.com/OpenXT/sync-wui.git;protocol=https;branch=master"
 
 
-inherit package_tar
-
 do_configure() {
 	:
 }
