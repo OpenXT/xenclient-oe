@@ -1,11 +1,11 @@
 FILESEXTRAPATHS:prepend := "${THISDIR}/patches:"
 
-SRC_URI += " \
+SRC_URI:append:class-target = " \
     file://add-domid-authentication.patch \
     file://fix-segfault-bus_connection_disconnected.patch \
 "
 
-do_install:append() {
+do_install:append:class-target() {
     # Disable EXTERNAL authentification scheme on the system-wide bus.
     # This is "controversial" (to say the least).
     # It is currently required for scripts and programs in service-vms that
