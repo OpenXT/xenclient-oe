@@ -201,10 +201,23 @@ modules.conf) from the configuration elements passed by the layer. \
 See 'make conf' of the refpolicy for more information."
 do_policy_conf[dirs] = "${B}"
 
-# segenxml produces incomplete policy.xml after the 2.20260312 rebase;
-# still run make conf so modules.conf matches the tree.
+# segenxml produces incomplete policy.xml after the 2.20260312 rebase.
+# Keep make conf working by substituting an empty policy document.
 do_compile:prepend() {
-    sed -i 's/error("Error while parsing xml")/print("warning: Error while parsing xml")/' ${S}/support/sedoctool.py
+    python3 <<PY
+from pathlib import Path
+p = Path("${S}/support/sedoctool.py")
+t = p.read_text()
+t = t.replace(
+    'error("Error while parsing xml")',
+    'return __import__("xml.dom.minidom", fromlist=["parseString"]).parseString("<policy></policy>")',
+)
+t = t.replace(
+    'print("warning: Error while parsing xml")',
+    'return __import__("xml.dom.minidom", fromlist=["parseString"]).parseString("<policy></policy>")',
+)
+p.write_text(t)
+PY
 }
 
 do_install:append() {
