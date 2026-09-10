@@ -201,6 +201,13 @@ modules.conf) from the configuration elements passed by the layer. \
 See 'make conf' of the refpolicy for more information."
 do_policy_conf[dirs] = "${B}"
 
+# OpenXT already generated modules.conf. Skip make conf: segenxml/sedoctool
+# fail on incomplete interface XML after the 2.20260312 rebase.
+do_compile() {
+    disable_policy_modules
+    oe_runmake policy
+}
+
 do_install:append() {
     install -d ${D}/etc/selinux
     install -m 644 ${UNPACKDIR}/config ${D}/etc/selinux/config

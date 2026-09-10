@@ -12,6 +12,8 @@ inherit pkgconfig cmake
 # Don't build the classic VBE interface at all
 # CMake 4 dropped compatibility with cmake_minimum_required < 3.5.
 EXTRA_OECMAKE = " -DCLASSICBUILD=OFF -DCMAKE_POLICY_VERSION_MINIMUM=3.5 "
+# get-edid.c and i2c.c both tentatively define quiet.
+TARGET_CFLAGS:append = " -fcommon"
 
 do_install() {
     install -d ${D}${bindir}

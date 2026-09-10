@@ -54,6 +54,15 @@ EXTRA_OEMAKE = "\
 
 COMPATIBLE_HOST = 'i686-oe-linux|(x86_64.*).*-linux|aarch64.*-linux'
 
+# gnu-efi 4 efibind.h includes stddef.h before UINTN. Cryptlib's stddef.h
+# must not pull efilib at that point.
+do_configure:prepend() {
+    sed -i '/#include <OpenSslSupport.h>/i\
+#ifdef X86_64_EFI_BIND\
+#else' ${S}/Cryptlib/Include/stddef.h
+    echo '#endif' >> ${S}/Cryptlib/Include/stddef.h
+}
+
 do_install() {
     install -d ${D}/boot/
     install -m 0600 "${B}/shimx64.efi" ${D}/boot/
