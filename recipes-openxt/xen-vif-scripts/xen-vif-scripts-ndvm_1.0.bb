@@ -1,6 +1,6 @@
 SUMMARY = "OpenXT customized Xen hotplug script for vif/vwif in NDVM."
 LICENSE = "LGPL-2.1-only"
-LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/LGPL-2.1;md5=1a6d268fd218675ffea8be556788b780"
+LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/LGPL-2.1-only;md5=1a6d268fd218675ffea8be556788b780"
 
 SRC_URI = " \
     file://vif \
