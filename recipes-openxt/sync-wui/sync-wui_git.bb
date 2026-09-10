@@ -12,7 +12,7 @@ XENCLIENT_RELEASE ?= "unknown"
 PV = "0+git${SRCPV}"
 
 SRCREV = "${AUTOREV}"
-SRC_URI = "git://github.com/OpenXT/sync-wui.git;protocol=https"
+SRC_URI = "git://github.com/OpenXT/sync-wui.git;protocol=https;branch=master"
 
 
 inherit package_tar

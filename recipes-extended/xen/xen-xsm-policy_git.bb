@@ -7,7 +7,7 @@ XEN_REL ?= "4.21"
 PV = "${XEN_REL}+git${SRCPV}"
 
 SRCREV = "${AUTOREV}"
-SRC_URI = "git://github.com/OpenXT/xsm-policy.git;protocol=https"
+SRC_URI = "git://github.com/OpenXT/xsm-policy.git;protocol=https;branch=master"
 
 
 FILES:${PN} += "/etc/xen/refpolicy/policy/policy.24"

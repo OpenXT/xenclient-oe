@@ -12,7 +12,7 @@ DEPENDS += " \
 
 PV = "0+git${SRCPV}"
 
-SRC_URI = "git://github.com/OpenXT/toolstack.git;protocol=https"
+SRC_URI = "git://github.com/OpenXT/toolstack.git;protocol=https;branch=master"
 SRCREV = "${AUTOREV}"
 
 

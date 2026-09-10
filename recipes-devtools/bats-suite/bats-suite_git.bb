@@ -2,7 +2,7 @@ SUMMARY = "OpenXT bats test scripts."
 LICENSE = "MIT"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=c93f84859222e5549645b5fee3d87947"
 
-SRC_URI = "git://github.com/OpenXT/bats-suite.git;protocol=https"
+SRC_URI = "git://github.com/OpenXT/bats-suite.git;protocol=https;branch=master"
 SRCREV = "${AUTOREV}"
 
 

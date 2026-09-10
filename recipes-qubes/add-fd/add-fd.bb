@@ -5,7 +5,7 @@ LIC_FILES_CHKSUM = " \
 "
 
 SRC_URI = " \
-    git://github.com/QubesOS/qubes-vmm-xen-stubdom-linux/ \
+    git://github.com/QubesOS/qubes-vmm-xen-stubdom-linux/;branch=master;protocol=https \
 "
 SRCREV = "2a814bd1edaf549ef9252eb6747aa6137abf9831"
 

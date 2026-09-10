@@ -6,7 +6,7 @@ DEPENDS = "xen-tools"
 PV = "0+git${SRCPV}"
 
 SRCREV = "${AUTOREV}"
-SRC_URI = "git://github.com/OpenXT/libxenbackend.git;protocol=https"
+SRC_URI = "git://github.com/OpenXT/libxenbackend.git;protocol=https;branch=master"
 
 
 EXTRA_OEMAKE += "LIBDIR=${STAGING_LIBDIR}"

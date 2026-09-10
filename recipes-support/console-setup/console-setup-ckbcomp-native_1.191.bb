@@ -5,7 +5,7 @@ RDEPENDS:${PN} = "perl-native"
 
 # Don't bother building the whole package. We only want the ckbcomp script.
 
-SRC_URI = "git://salsa.debian.org/installer-team/console-setup.git;protocol=https"
+SRC_URI = "git://salsa.debian.org/installer-team/console-setup.git;protocol=https;branch=master"
 # The hash of the 1.191 tag:
 SRCREV = "681544fa6481fb62b362f4fadeda5bbdf3389307"
 

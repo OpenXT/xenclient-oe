@@ -5,7 +5,7 @@ XEN_BRANCH ?= "stable-${XEN_REL}"
 SRCREV ?= "${AUTOREV}"
 
 SRC_URI = " \
-    git://xenbits.xen.org/xen.git;branch=${XEN_BRANCH} \
+    git://xenbits.xen.org/xen.git;branch=${XEN_BRANCH};protocol=git \
     file://xenstored.initscript \
     file://oxenstored.conf \
     "
