@@ -1,7 +1,6 @@
 FILESEXTRAPATHS:prepend := "${THISDIR}/${BPN}:"
 
 SRC_URI += " \
-    file://0001-apply-obtain_device_list_from_udev-to-all-libudev-us.patch \
     file://yocto-initscripts.patch \
     file://volatiles.99_cryptsetup \
 "
