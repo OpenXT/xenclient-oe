@@ -284,6 +284,9 @@ EOF
     if ! grep -q 'type xend_config_t' "${S}/policy/modules/system/xen.te"; then
         printf '\ntype xend_config_t;\nfiles_type(xend_config_t)\n' >> "${S}/policy/modules/system/xen.te"
     fi
+    if ! grep -q 'type xend_t;' "${S}/policy/modules/system/xen.te"; then
+        printf '\ntype xend_t;\ndomain_type(xend_t)\ntype xend_tmp_t;\nfiles_tmp_file(xend_tmp_t)\n' >> "${S}/policy/modules/system/xen.te"
+    fi
     # Compatibility stubs for interfaces removed or renamed in refpolicy 2.2026.
     mkdir -p "${S}/policy/modules/system"
     cat > "${S}/policy/modules/system/openxtcompat.te" <<'EOF'
