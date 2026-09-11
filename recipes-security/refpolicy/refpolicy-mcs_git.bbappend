@@ -494,10 +494,7 @@ rebuild_policy() {
         "${STAGING_DIR_NATIVE}${sbindir_native}/sefcontext_compile"
 }
 
-do_install:append() {
-    install -d ${D}/etc/selinux
-    install -m 644 ${UNPACKDIR}/config ${D}/etc/selinux/config
-}
+# meta-selinux install_config already writes ${sysconfdir}/selinux/config.
 
 sysroot_stage_all:append () {
     sysroot_stage_dir ${D}${sysconfdir} ${SYSROOT_DESTDIR}${sysconfdir}
