@@ -1,5 +1,6 @@
 FILESEXTRAPATHS:prepend := "${THISDIR}/${BPN}:"
 OPENXT_REFPOLICY_STUB := "${THISDIR}/files/stub-missing-interfaces.py"
+OPENXT_REFPOLICY_REBUILD := "${THISDIR}/files/rebuild-policy.sh"
 
 # Configuration.
 SRC_URI += " \
@@ -482,6 +483,15 @@ PY
     disable_policy_modules
     export EXTRA_OEMAKE="${EXTRA_OEMAKE}"
     python3 ${OPENXT_REFPOLICY_STUB} "${S}" "${B}" "${T}"
+}
+
+rebuild_policy() {
+    sh ${OPENXT_REFPOLICY_REBUILD} \
+        "${D}" \
+        "${POLICY_NAME}" \
+        "${POLICY_STORE_ROOT}" \
+        "${STAGING_DIR_NATIVE}${base_sbindir_native}/setfiles" \
+        "${STAGING_DIR_NATIVE}${sbindir_native}/sefcontext_compile"
 }
 
 do_install:append() {

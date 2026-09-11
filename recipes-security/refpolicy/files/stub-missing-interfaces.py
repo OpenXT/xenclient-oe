@@ -60,7 +60,7 @@ for i in range(40):
             compat_b.write_text(text)
         wipe_tmp()
         continue
-    tokens = sorted(set(token_re.findall(r.stdout + r.stderr)) - skip_tokens)
+    tokens = sorted(set(token_re.findall(r.stdout + r.stderr)) - skip_tokens - existing)
     if not tokens:
         sys.exit(r.returncode or 1)
     text = compat.read_text()
