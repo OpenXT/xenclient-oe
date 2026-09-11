@@ -461,8 +461,9 @@ interface(`dev_create_sysfs_nodes',`
 EOF
     echo 'openxtcompat = module' >> "${S}/policy/modules.conf"
     # Generate corenetwork.te/.if from m4 templates (normally make conf).
-    rm -f "${S}/policy/modules/kernel/corenetwork.te"
-    oe_runmake policy/modules/kernel/corenetwork.te policy/modules/kernel/corenetwork.if || true
+    rm -f "${S}/policy/modules/kernel/corenetwork.te" \
+          "${S}/policy/modules/kernel/corenetwork.if"
+    oe_runmake policy/modules/kernel/corenetwork.te policy/modules/kernel/corenetwork.if
     python3 - "${S}" <<'PY'
 import sys
 from pathlib import Path
