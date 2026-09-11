@@ -49,6 +49,8 @@ PACKAGES += " \
 FILES:${PN} = "/install/*"
 FILES:${PN}-answerfiles = "/*.ans"
 FILES:${PN}-part2 = "/*"
+# part2 ships a file named /run; QA_EMPTY_DIRS expects /run to be a dir.
+INSANE_SKIP:${PN}-part2 += "empty-dirs"
 
 RDEPENDS:${PN} = " \
     busybox \
