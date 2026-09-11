@@ -16,6 +16,12 @@ skip_tokens = {
 }
 dup_re = re.compile(r"duplicate definition of ([a-z][a-z0-9_]*)\(\)")
 oq, cq = chr(96), "'"
+existing = set()
+iface_re = re.compile(r"interface\(" + re.escape(oq) + r"([^" + re.escape(cq) + r"]+)" + re.escape(cq))
+for p in (s / "policy/modules").rglob("*.if"):
+    if p.name == "openxtcompat.if":
+        continue
+    existing.update(iface_re.findall(p.read_text(errors="replace")))
 
 
 def wipe_tmp():

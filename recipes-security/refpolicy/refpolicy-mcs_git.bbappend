@@ -303,6 +303,23 @@ EOF
     if ! grep -q 'type xend_t;' "${S}/policy/modules/system/xen.te"; then
         printf '\ntype xend_t;\ndomain_type(xend_t)\ntype xend_tmp_t;\nfiles_tmp_file(xend_tmp_t)\n' >> "${S}/policy/modules/system/xen.te"
     fi
+    # container_mountpoint lives in container.if; the double-quoted
+    # optional_policy in corenetwork.te still expands it when container
+    # is not a base module. Comment the call out.
+    python3 - "${S}" <<'PY'
+import sys
+from pathlib import Path
+p = Path(sys.argv[1]) / "policy/modules/kernel/corenetwork.te"
+t = p.read_text()
+start = t.find("container_mountpoint(tun_tap_device_t)")
+if start != -1:
+    # drop the surrounding optional_policy(`` ... '') block
+    pre = t.rfind("optional_policy", 0, start)
+    post = t.find("'')", start)
+    if pre != -1 and post != -1:
+        t = t[:pre] + t[post + 3:]
+        p.write_text(t)
+PY
     # Compatibility stubs for interfaces removed or renamed in refpolicy 2.2026.
     mkdir -p "${S}/policy/modules/system"
     cat > "${S}/policy/modules/system/openxtcompat.te" <<'EOF'
@@ -457,12 +474,7 @@ interface(`dev_create_sysfs_nodes',`
 		type device_t;
 	')
 ')
-interface(`container_mountpoint',`
-	gen_require(`
-		type device_t;
-	')
-	typeattribute $1 device_t;
-')
+
 EOF
     echo 'openxtcompat = module' >> "${S}/policy/modules.conf"
     disable_policy_modules
