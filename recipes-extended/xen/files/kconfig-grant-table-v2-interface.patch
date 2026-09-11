@@ -126,7 +126,7 @@ Signed-off-by: Christopher Clark <christopher.clark6@baesystems.com>
      /* Resource limits of the domain. */
      unsigned int          max_grant_frames;
      unsigned int          max_maptrack_frames;
-@@ -83,7 +85,9 @@ struct grant_table {
+@@ -87,7 +89,9 @@ struct grant_table {
      union {
          void **shared_raw;
          struct grant_entry_v1 **shared_v1;
@@ -136,7 +136,7 @@ Signed-off-by: Christopher Clark <christopher.clark6@baesystems.com>
      };
      /* State grant table (see include/public/grant_table.h). */
      grant_status_t       **status;
-@@ -178,9 +182,19 @@ static int cf_check parse_gnttab_max_map
+@@ -182,9 +186,19 @@ static int cf_check parse_gnttab_max_map
                                opt_max_maptrack_frames_val);
  }
  
@@ -156,7 +156,7 @@ Signed-off-by: Christopher Clark <christopher.clark6@baesystems.com>
  
  unsigned int __read_mostly opt_gnttab_max_version = GNTTAB_MAX_VERSION;
  static bool __read_mostly opt_transitive_grants = true;
-@@ -310,26 +324,52 @@ nr_maptrack_frames(struct grant_table *t
+@@ -314,26 +328,52 @@ nr_maptrack_frames(struct grant_table *t
  #define SHGNT_PER_PAGE_V1 (PAGE_SIZE / sizeof(grant_entry_v1_t))
  #define shared_entry_v1(t, e) \
      ((t)->shared_v1[(e)/SHGNT_PER_PAGE_V1][(e)%SHGNT_PER_PAGE_V1])
@@ -210,7 +210,7 @@ Signed-off-by: Christopher Clark <christopher.clark6@baesystems.com>
      }
  
      ASSERT_UNREACHABLE();
-@@ -709,7 +749,7 @@ get_maptrack_handle(
+@@ -713,7 +753,7 @@ get_maptrack_handle(
  /* Number of grant table entries. Caller must hold d's grant table lock. */
  static unsigned int nr_grant_entries(struct grant_table *gt)
  {
@@ -219,7 +219,7 @@ Signed-off-by: Christopher Clark <christopher.clark6@baesystems.com>
      {
  #define f2e(nr, ver) (((nr) << PAGE_SHIFT) / sizeof(grant_entry_v##ver##_t))
      case 1:
-@@ -719,7 +759,7 @@ static unsigned int nr_grant_entries(str
+@@ -723,7 +763,7 @@ static unsigned int nr_grant_entries(str
          /* Make sure we return a value independently of speculative execution */
          block_speculation();
          return f2e(nr_grant_frames(gt), 1);
@@ -228,7 +228,7 @@ Signed-off-by: Christopher Clark <christopher.clark6@baesystems.com>
      case 2:
          BUILD_BUG_ON(f2e(INITIAL_NR_GRANT_FRAMES, 2) <
                       GNTTAB_NR_RESERVED_ENTRIES);
-@@ -727,6 +767,7 @@ static unsigned int nr_grant_entries(str
+@@ -731,6 +771,7 @@ static unsigned int nr_grant_entries(str
          /* Make sure we return a value independently of speculative execution */
          block_speculation();
          return f2e(nr_grant_frames(gt), 2);
@@ -236,7 +236,7 @@ Signed-off-by: Christopher Clark <christopher.clark6@baesystems.com>
  #undef f2e
      }
  
-@@ -819,6 +860,7 @@ done:
+@@ -823,6 +864,7 @@ done:
      return rc;
  }
  
@@ -244,7 +244,7 @@ Signed-off-by: Christopher Clark <christopher.clark6@baesystems.com>
  static int _set_status_v2(const grant_entry_header_t *shah,
                            grant_status_t *status,
                            struct domain *rd,
-@@ -903,7 +945,7 @@ static int _set_status_v2(const grant_en
+@@ -907,7 +949,7 @@ static int _set_status_v2(const grant_en
  done:
      return rc;
  }
@@ -253,7 +253,7 @@ Signed-off-by: Christopher Clark <christopher.clark6@baesystems.com>
  
  static int _set_status(const grant_entry_header_t *shah,
                         grant_status_t *status,
-@@ -914,11 +956,14 @@ static int _set_status(const grant_entry
+@@ -918,11 +960,14 @@ static int _set_status(const grant_entry
                         int mapflag,
                         domid_t ldomid)
  {
@@ -269,7 +269,7 @@ Signed-off-by: Christopher Clark <christopher.clark6@baesystems.com>
  }
  
  /*
-@@ -1092,23 +1137,20 @@ map_grant_ref(
+@@ -1099,23 +1144,20 @@ map_grant_ref(
      }
  
      /* Make sure we do not access memory speculatively */
@@ -296,7 +296,39 @@ Signed-off-by: Christopher Clark <christopher.clark6@baesystems.com>
  
              rc = get_paged_frame(gfn, &mfn, &pg,
                                   op->flags & GNTMAP_readonly, rd);
-@@ -1790,6 +1832,12 @@ static int
+@@ -1350,7 +1392,7 @@ map_grant_ref(
+ 
+     grant_read_lock(rgt);
+ 
+-    if ( unlikely(evaluate_nospec((rgt->gt_version == 1) !=
++    if ( unlikely(evaluate_nospec((get_gt_version(rgt) == 1) !=
+                                   (status == &shah->flags))) )
+     {
+         /*
+@@ -1359,9 +1401,7 @@ map_grant_ref(
+          * will have been cleared anyway by the version change.
+          */
+         if ( ref < GNTTAB_NR_RESERVED_ENTRIES )
+-            status = evaluate_nospec(rgt->gt_version == 1)
+-                     ? &shah->flags
+-                     : &status_entry(rgt, ref);
++            status = status_addr(rgt, op->ref, &shah->flags);
+         else
+             status = NULL;
+     }
+@@ -1627,10 +1667,7 @@ unmap_common_complete(struct gnttab_unma
+ 
+     act = active_entry_acquire(rgt, op->ref);
+ 
+-    if ( evaluate_nospec(rgt->gt_version == 1) )
+-        status = &shared_entry_v1(rgt, op->ref).flags;
+-    else if ( evaluate_nospec(op->ref < nr_grant_entries(rgt)) )
+-        status = &status_entry(rgt, op->ref);
++    status = status_addr(rgt, op->ref, &shared_entry_v1(rgt, op->ref).flags);
+ 
+     pg = !is_iomem_page(act->mfn) ? mfn_to_page(op->mfn) : NULL;
+ 
+@@ -1811,6 +1848,12 @@ static int
  gnttab_populate_status_frames(struct domain *d, struct grant_table *gt,
                                unsigned int req_nr_frames)
  {
@@ -309,7 +341,7 @@ Signed-off-by: Christopher Clark <christopher.clark6@baesystems.com>
      unsigned int i;
      unsigned int req_status_frames;
  
-@@ -1892,6 +1940,7 @@ gnttab_unpopulate_status_frames(struct d
+@@ -1913,6 +1956,7 @@ gnttab_unpopulate_status_frames(struct d
  
      return 0;
  }
@@ -317,7 +349,7 @@ Signed-off-by: Christopher Clark <christopher.clark6@baesystems.com>
  
  /*
   * Grow the grant table. The caller must hold the grant table's
-@@ -1932,7 +1981,7 @@ gnttab_grow_table(struct domain *d, unsi
+@@ -1953,7 +1997,7 @@ gnttab_grow_table(struct domain *d, unsi
      }
  
      /* Status pages - version 2 */
@@ -326,7 +358,7 @@ Signed-off-by: Christopher Clark <christopher.clark6@baesystems.com>
      {
          if ( gnttab_populate_status_frames(d, gt, req_nr_frames) )
              goto shared_alloc_failed;
-@@ -2004,7 +2053,9 @@ int grant_table_init(struct domain *d, i
+@@ -2025,7 +2069,9 @@ int grant_table_init(struct domain *d, i
      percpu_rwlock_resource_init(&gt->lock, grant_rwlock);
      spin_lock_init(&gt->maptrack_lock);
  
@@ -336,7 +368,7 @@ Signed-off-by: Christopher Clark <christopher.clark6@baesystems.com>
      gt->max_grant_frames = max_grant_frames;
      gt->max_maptrack_frames = max_maptrack_frames;
      gt->max_version = max_grant_version;
-@@ -2107,7 +2158,7 @@ gnttab_setup_table(
+@@ -2128,7 +2174,7 @@ gnttab_setup_table(
      }
  
      if ( (op.nr_frames > nr_grant_frames(gt) ||
@@ -345,7 +377,7 @@ Signed-off-by: Christopher Clark <christopher.clark6@baesystems.com>
             (grant_to_status_frames(op.nr_frames) > nr_status_frames(gt)))) &&
           gnttab_grow_table(d, op.nr_frames) )
      {
-@@ -2269,6 +2320,7 @@ gnttab_transfer(
+@@ -2293,6 +2339,7 @@ gnttab_transfer(
      mfn_t mfn;
      unsigned int max_bitsize;
      struct active_grant_entry *act;
@@ -353,7 +385,7 @@ Signed-off-by: Christopher Clark <christopher.clark6@baesystems.com>
  
      if ( !opt_grant_transfer )
          return -EOPNOTSUPP;
-@@ -2356,7 +2408,7 @@ gnttab_transfer(
+@@ -2380,7 +2427,7 @@ gnttab_transfer(
          }
  
          max_bitsize = domain_clamp_alloc_bitsize(
@@ -362,7 +394,60 @@ Signed-off-by: Christopher Clark <christopher.clark6@baesystems.com>
                 ? BITS_PER_LONG + PAGE_SHIFT : 32 + PAGE_SHIFT);
          if ( max_bitsize < BITS_PER_LONG + PAGE_SHIFT &&
               (mfn_x(mfn) >> (max_bitsize - PAGE_SHIFT)) )
-@@ -2575,7 +2627,6 @@ acquire_grant_for_copy(
+@@ -2484,22 +2531,12 @@ gnttab_transfer(
+             goto release;
+         }
+ 
+-        if ( evaluate_nospec(ver == 1) )
+-        {
+-            grant_entry_v1_t *sha = &shared_entry_v1(e->grant_table, gop.ref);
++        frame = shared_entry_full_frame(e->grant_table, gop.ref);
++        guest_physmap_add_page(e, _gfn(frame), mfn, 0);
+ 
+-            rc = guest_physmap_add_page(e, _gfn(sha->frame), mfn, 0);
+-            if ( !paging_mode_translate(e) )
+-                sha->frame = mfn_x(mfn);
+-        }
+-        else
+-        {
+-            grant_entry_v2_t *sha = &shared_entry_v2(e->grant_table, gop.ref);
++        if ( !paging_mode_translate(e) )
++            set_shared_entry(e->grant_table, gop.ref, mfn_x(mfn));
+ 
+-            rc = guest_physmap_add_page(e, _gfn(sha->full_page.frame), mfn, 0);
+-            if ( !paging_mode_translate(e) )
+-                sha->full_page.frame = mfn_x(mfn);
+-        }
+         smp_wmb();
+         shared_entry_header(e->grant_table, gop.ref)->flags |=
+             GTF_transfer_completed;
+@@ -2543,21 +2580,21 @@ release_grant_for_copy(
+ 
+     act = active_entry_acquire(rgt, gref);
+     mfn = act->mfn;
++    status = status_addr(rgt, gref, &shared_entry_v1(rgt, gref).flags);
+ 
+-    if ( evaluate_nospec(rgt->gt_version == 1) )
++    if ( evaluate_nospec(get_gt_version(rgt) == 1) )
+     {
+-        status = &shared_entry_v1(rgt, gref).flags;
+         td = rd;
+         trans_gref = gref;
+     }
++#ifdef CONFIG_GRANT_TABLE_V2
+     else
+     {
+-        if ( evaluate_nospec(gref < nr_grant_entries(rgt)) )
+-            status = &status_entry(rgt, gref);
+         td = (act->src_domid == rd->domain_id)
+              ? rd : knownalive_domain_from_domid(act->src_domid);
+         trans_gref = act->trans_gref;
+     }
++#endif
+ 
+     if ( readonly )
+     {
+@@ -2608,7 +2645,6 @@ acquire_grant_for_copy(
      struct active_grant_entry *act;
      grant_status_t *status;
      uint32_t old_pin;
@@ -370,7 +455,7 @@ Signed-off-by: Christopher Clark <christopher.clark6@baesystems.com>
      grant_ref_t trans_gref;
      struct domain *td;
      mfn_t grant_mfn;
-@@ -2599,6 +2650,7 @@ acquire_grant_for_copy(
+@@ -2632,6 +2668,7 @@ acquire_grant_for_copy(
      /* This call also ensures the above check cannot be passed speculatively */
      shah = shared_entry_header(rgt, gref);
      act = active_entry_acquire(rgt, gref);
@@ -378,7 +463,7 @@ Signed-off-by: Christopher Clark <christopher.clark6@baesystems.com>
  
      /* If already pinned, check the active domid and avoid refcnt overflow. */
      if ( act->pin &&
-@@ -2612,20 +2664,22 @@ acquire_grant_for_copy(
+@@ -2645,20 +2682,22 @@ acquire_grant_for_copy(
          goto unlock_out;
      }
  
@@ -403,9 +488,9 @@ Signed-off-by: Christopher Clark <christopher.clark6@baesystems.com>
          if ( (!old_pin || (!readonly &&
                             !(old_pin & (GNTPIN_devw_mask|GNTPIN_hstw_mask)))) &&
               (rc = _set_status_v2(shah, status, rd, act, readonly, 0,
-@@ -2751,10 +2805,12 @@ acquire_grant_for_copy(
-             act->is_sub_page = true;
-         }
+@@ -2791,10 +2830,12 @@ acquire_grant_for_copy(
+         else
+             atomic_dec(&rgt->nr_v2_ops);
      }
 -    else if ( !old_pin ||
 +    else
@@ -418,7 +503,7 @@ Signed-off-by: Christopher Clark <christopher.clark6@baesystems.com>
                                 readonly, 0, ldom)) != GNTST_okay )
               goto unlock_out;
  
-@@ -3168,6 +3224,17 @@ static long
+@@ -3226,6 +3267,17 @@ static long
  gnttab_set_version(XEN_GUEST_HANDLE_PARAM(gnttab_set_version_t) uop)
  {
      gnttab_set_version_t op;
@@ -436,7 +521,7 @@ Signed-off-by: Christopher Clark <christopher.clark6@baesystems.com>
      struct domain *currd = current->domain;
      struct grant_table *gt = currd->grant_table;
      grant_entry_v1_t reserved_entries[GNTTAB_NR_RESERVED_ENTRIES];
-@@ -3312,8 +3379,10 @@ gnttab_set_version(XEN_GUEST_HANDLE_PARA
+@@ -3381,8 +3433,10 @@ gnttab_set_version(XEN_GUEST_HANDLE_PARA
          res = -EFAULT;
  
      return res;
@@ -447,7 +532,7 @@ Signed-off-by: Christopher Clark <christopher.clark6@baesystems.com>
  static long
  gnttab_get_status_frames(XEN_GUEST_HANDLE_PARAM(gnttab_get_status_frames_t) uop,
                           unsigned int count)
-@@ -3386,6 +3455,7 @@ gnttab_get_status_frames(XEN_GUEST_HANDL
+@@ -3455,6 +3509,7 @@ gnttab_get_status_frames(XEN_GUEST_HANDL
  
      return 0;
  }
@@ -455,7 +540,7 @@ Signed-off-by: Christopher Clark <christopher.clark6@baesystems.com>
  
  static long
  gnttab_get_version(XEN_GUEST_HANDLE_PARAM(gnttab_get_version_t) uop)
-@@ -3408,7 +3478,7 @@ gnttab_get_version(XEN_GUEST_HANDLE_PARA
+@@ -3477,7 +3532,7 @@ gnttab_get_version(XEN_GUEST_HANDLE_PARA
          return rc;
      }
  
@@ -464,7 +549,7 @@ Signed-off-by: Christopher Clark <christopher.clark6@baesystems.com>
  
      rcu_unlock_domain(d);
  
-@@ -3466,7 +3536,7 @@ swap_grant_ref(grant_ref_t ref_a, grant_
+@@ -3535,7 +3590,7 @@ swap_grant_ref(grant_ref_t ref_a, grant_
          goto out;
      }
  
@@ -473,7 +558,7 @@ Signed-off-by: Christopher Clark <christopher.clark6@baesystems.com>
      {
          grant_entry_v1_t shared;
  
-@@ -3474,6 +3544,7 @@ swap_grant_ref(grant_ref_t ref_a, grant_
+@@ -3543,6 +3598,7 @@ swap_grant_ref(grant_ref_t ref_a, grant_
          shared_entry_v1(gt, ref_a) = shared_entry_v1(gt, ref_b);
          shared_entry_v1(gt, ref_b) = shared;
      }
@@ -481,7 +566,7 @@ Signed-off-by: Christopher Clark <christopher.clark6@baesystems.com>
      else
      {
          grant_entry_v2_t shared;
-@@ -3488,6 +3559,7 @@ swap_grant_ref(grant_ref_t ref_a, grant_
+@@ -3557,6 +3613,7 @@ swap_grant_ref(grant_ref_t ref_a, grant_
          shared_entry_v2(gt, ref_b) = shared;
          status_entry(gt, ref_b) = status;
      }
@@ -489,7 +574,7 @@ Signed-off-by: Christopher Clark <christopher.clark6@baesystems.com>
  
  out:
      if ( act_b != NULL )
-@@ -3752,10 +3824,12 @@ long do_grant_table_op(
+@@ -3821,10 +3878,12 @@ long do_grant_table_op(
          rc = gnttab_set_version(guest_handle_cast(uop, gnttab_set_version_t));
          break;
  
@@ -502,7 +587,7 @@ Signed-off-by: Christopher Clark <christopher.clark6@baesystems.com>
  
      case GNTTABOP_get_version:
          rc = gnttab_get_version(guest_handle_cast(uop, gnttab_get_version_t));
-@@ -3884,10 +3958,7 @@ int gnttab_release_mappings(struct domai
+@@ -3953,10 +4012,7 @@ int gnttab_release_mappings(struct domai
  
          act = active_entry_acquire(rgt, ref);
          sha = shared_entry_header(rgt, ref);
@@ -514,7 +599,7 @@ Signed-off-by: Christopher Clark <christopher.clark6@baesystems.com>
  
          pg = !is_iomem_page(act->mfn) ? mfn_to_page(act->mfn) : NULL;
  
-@@ -4053,17 +4124,18 @@ int mem_sharing_gref_to_gfn(struct grant
+@@ -4122,17 +4178,18 @@ int mem_sharing_gref_to_gfn(struct grant
  
      grant_read_lock(gt);
  
@@ -535,7 +620,7 @@ Signed-off-by: Christopher Clark <christopher.clark6@baesystems.com>
      else
      {
          const grant_entry_v2_t *sha2 = &shared_entry_v2(gt, ref);
-@@ -4074,16 +4146,12 @@ int mem_sharing_gref_to_gfn(struct grant
+@@ -4143,16 +4200,12 @@ int mem_sharing_gref_to_gfn(struct grant
          else
             *gfn = _gfn(sha2->full_page.frame);
      }
@@ -554,7 +639,7 @@ Signed-off-by: Christopher Clark <christopher.clark6@baesystems.com>
  
      grant_read_unlock(gt);
  
-@@ -4095,6 +4163,9 @@ int mem_sharing_gref_to_gfn(struct grant
+@@ -4164,6 +4217,9 @@ int mem_sharing_gref_to_gfn(struct grant
  static int gnttab_get_status_frame_mfn(struct domain *d,
                                         unsigned int idx, mfn_t *mfn)
  {
@@ -564,7 +649,7 @@ Signed-off-by: Christopher Clark <christopher.clark6@baesystems.com>
      const struct grant_table *gt = d->grant_table;
  
      ASSERT(gt->gt_version == 2);
-@@ -4128,6 +4199,7 @@ static int gnttab_get_status_frame_mfn(s
+@@ -4197,6 +4253,7 @@ static int gnttab_get_status_frame_mfn(s
      /* Make sure idx is bounded wrt nr_status_frames */
      *mfn = _mfn(virt_to_mfn(
                  gt->status[array_index_nospec(idx, nr_status_frames(gt))]));
@@ -572,7 +657,7 @@ Signed-off-by: Christopher Clark <christopher.clark6@baesystems.com>
      return 0;
  }
  
-@@ -4137,7 +4209,7 @@ static int gnttab_get_shared_frame_mfn(s
+@@ -4206,7 +4263,7 @@ static int gnttab_get_shared_frame_mfn(s
  {
      const struct grant_table *gt = d->grant_table;
  
@@ -581,7 +666,7 @@ Signed-off-by: Christopher Clark <christopher.clark6@baesystems.com>
  
      if ( idx >= nr_grant_frames(gt) )
      {
-@@ -4210,7 +4282,7 @@ int gnttab_acquire_resource(
+@@ -4279,7 +4336,7 @@ int gnttab_acquire_resource(
          break;
  
      case XENMEM_resource_grant_table_id_status:
@@ -590,7 +675,7 @@ Signed-off-by: Christopher Clark <christopher.clark6@baesystems.com>
              break;
  
          /* Check that void ** is a suitable representation for gt->status. */
-@@ -4262,7 +4334,7 @@ int gnttab_map_frame(struct domain *d, u
+@@ -4332,7 +4389,7 @@ int gnttab_map_frame_begin(
  
      grant_write_lock(gt);
  
@@ -599,7 +684,7 @@ Signed-off-by: Christopher Clark <christopher.clark6@baesystems.com>
      {
          idx &= ~XENMAPIDX_grant_table_status;
          status = true;
-@@ -4305,7 +4377,7 @@ static void gnttab_usage_print(struct do
+@@ -4383,7 +4440,7 @@ static void gnttab_usage_print(struct do
  
      printk("grant-table for remote d%d (v%u)\n"
             "  %u frames (%u max), %u maptrack frames (%u max)\n",
@@ -608,7 +693,7 @@ Signed-off-by: Christopher Clark <christopher.clark6@baesystems.com>
             nr_grant_frames(gt), gt->max_grant_frames,
             nr_maptrack_frames(gt), gt->max_maptrack_frames);
  
-@@ -4325,17 +4397,8 @@ static void gnttab_usage_print(struct do
+@@ -4403,17 +4460,8 @@ static void gnttab_usage_print(struct do
          }
  
          sha = shared_entry_header(gt, ref);
