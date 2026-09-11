@@ -217,7 +217,7 @@ s = Path("${S}")
 mods = s / "policy/modules"
 # corenetwork.if is generated from corenetwork.if.in; treat both as present.
 for p in mods.rglob("*"):
-    if p.name.endswith(".if.in") or p.name.endswith(".te.in"):
+    if p.name.endswith(".if.in"):
         dest = p.with_name(p.name[:-3])
         if not dest.exists():
             dest.write_bytes(p.read_bytes())
@@ -477,6 +477,9 @@ interface(`dev_create_sysfs_nodes',`
 
 EOF
     echo 'openxtcompat = module' >> "${S}/policy/modules.conf"
+    # Generate corenetwork.te/.if from m4 templates (normally make conf).
+    rm -f "${S}/policy/modules/kernel/corenetwork.te"
+    oe_runmake policy/modules/kernel/corenetwork.te policy/modules/kernel/corenetwork.if || true
     disable_policy_modules
     export EXTRA_OEMAKE="${EXTRA_OEMAKE}"
     python3 ${OPENXT_REFPOLICY_STUB} "${S}" "${B}" "${T}"
