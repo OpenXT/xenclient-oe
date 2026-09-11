@@ -17,6 +17,9 @@ export IMAGE_BASENAME = "xenclient-installer-image"
 
 COMPATIBLE_MACHINE = "(openxt-installer)"
 
+# glibc no longer ships locale-base-c; C locale is built in.
+IMAGE_LINGUAS = "en-us en-gb"
+
 BAD_RECOMMENDATIONS += " \
     ${@bb.utils.contains('IMAGE_FEATURES', 'web-certificates', '', 'ca-certificates', d)} \
 "

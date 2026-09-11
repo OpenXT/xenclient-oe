@@ -5,6 +5,8 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/GPL-2.0-only;md5=801f80980d171d
 PR = "r11"
 
 inherit packagegroup
+# xen-tools libraries are dynamically renamed (libxenguest4.21, ...).
+PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 RDEPENDS:${PN} = " \
     acms \
