@@ -205,11 +205,27 @@ do_policy_conf[dirs] = "${B}"
 # OpenXT already wrote modules.conf. Skip make conf (broken XML) and drop
 # entries whose .if files are not in this refpolicy tree.
 do_compile() {
+    rm -f "${S}/policy/modules.conf"
+    for e in ${UNPACKDIR}/policy/modules*.conf; do
+        if [ -e "${e}" ]; then
+            cat "${e}" >> "${S}/policy/modules.conf"
+        fi
+    done
     python3 <<PY
 from pathlib import Path
 s = Path("${S}")
+mods = s / "policy/modules"
+# corenetwork.if is generated from corenetwork.if.in; treat both as present.
+for p in mods.rglob("*"):
+    if p.name.endswith(".if.in") or p.name.endswith(".te.in"):
+        dest = p.with_name(p.name[:-3])
+        if not dest.exists():
+            dest.write_bytes(p.read_bytes())
+names = set()
+for p in mods.rglob("*"):
+    if p.suffix in {".if", ".te", ".fc"} or p.name.endswith(".if.in") or p.name.endswith(".te.in"):
+        names.add(p.name.split(".")[0])
 conf = s / "policy/modules.conf"
-ifs = {p.stem for p in (s / "policy/modules").rglob("*.if")}
 out = []
 for line in conf.read_text().splitlines():
     stripped = line.strip()
@@ -217,7 +233,7 @@ for line in conf.read_text().splitlines():
         out.append(line)
         continue
     name = stripped.split("=", 1)[0].strip()
-    if name in ifs:
+    if name in names:
         out.append(line)
     else:
         out.append("# dropped missing module %s" % name)
