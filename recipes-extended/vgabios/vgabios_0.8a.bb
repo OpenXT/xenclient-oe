@@ -5,7 +5,10 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=fae731a3adbc92fd8bb1730d1f2455bc"
 
 # meta-virtualization dropped this firmware recipe; Xen HVM still stages
 # vgabios-0.8a.bin from the sysroot. Carry it here with OpenXT VBE patches.
+DEPENDS = "dev86-native"
+
 SRC_URI = "${SAVANNAH_GNU_MIRROR}/vgabios/${BP}.tgz \
+    file://build-cc.patch \
     file://xen-fix-vbe-size-computation-overflow.patch \
     file://xen-fix-vbe-unsupported-mode.patch \
     file://xen-reduce-stack-usage.patch \
@@ -20,6 +23,8 @@ SRC_URI[sha256sum] = "481042240ef0f1c918780c92a6bb42ad4d3f5d989b29502fa7ee7faf13
 S = "${UNPACKDIR}/${BP}"
 
 COMPATIBLE_HOST = "(i.86|x86_64).*-linux"
+
+EXTRA_OEMAKE = "HOSTCC='${BUILD_CC}'"
 
 do_compile() {
     oe_runmake
