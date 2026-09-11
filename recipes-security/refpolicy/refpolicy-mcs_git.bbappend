@@ -457,6 +457,12 @@ interface(`dev_create_sysfs_nodes',`
 		type device_t;
 	')
 ')
+interface(`container_mountpoint',`
+	gen_require(`
+		type device_t;
+	')
+	typeattribute $1 device_t;
+')
 EOF
     echo 'openxtcompat = module' >> "${S}/policy/modules.conf"
     disable_policy_modules

@@ -15,7 +15,7 @@ skip_tokens = {
     "true", "false", "module", "allow", "dontaudit", "auditallow",
 }
 dup_re = re.compile(r"duplicate definition of ([a-z][a-z0-9_]*)\(\)")
-bq = chr(96)
+oq, cq = chr(96), "'"
 
 
 def wipe_tmp():
@@ -44,7 +44,7 @@ for i in range(40):
         for name in dups:
             sys.stderr.write("removing duplicate stub %s\n" % name)
             text = re.sub(
-                r"\ninterface\(" + re.escape(bq + name + bq) + r",[\s\S]*?\n" + re.escape(bq + ")") + r"\n",
+                r"\ninterface\(" + re.escape(oq + name + cq) + r",[\s\S]*?\n" + re.escape(cq + ")") + r"\n",
                 "\n",
                 text,
                 count=1,
@@ -60,13 +60,13 @@ for i in range(40):
     text = compat.read_text()
     added = 0
     for token in tokens:
-        marker = "interface(%s%s%s" % (bq, token, bq)
+        marker = "interface(%s%s%s" % (oq, token, cq)
         if marker in text:
             sys.stderr.write("token %s already stubbed\n" % token)
             continue
         sys.stderr.write("stubbing missing interface %s\n" % token)
         text += "\ninterface(%s%s%s,%s\n\tgen_require(%s\n\t\ttype device_t;\n\t%s)\n%s)\n" % (
-            bq, token, bq, bq, bq, bq, bq)
+            oq, token, cq, oq, oq, cq, cq)
         added += 1
     if added == 0:
         sys.exit(r.returncode or 1)
