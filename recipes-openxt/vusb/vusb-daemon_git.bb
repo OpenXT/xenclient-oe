@@ -18,7 +18,7 @@ EXTRA_OECONF += "--with-libxenstore=${STAGING_LIBDIR}"
 
 inherit autotools update-rc.d pkgconfig xc-rpcgen-c
 
-CFLAGS:append = " -Wno-error=format-truncation"
+CFLAGS:append = " -Wno-error=format-truncation -fcommon"
 
 INITSCRIPT_NAME = "xenclient-vusb-daemon"
 INITSCRIPT_PARAMS = "defaults 60 19"
