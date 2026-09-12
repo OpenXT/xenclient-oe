@@ -10,7 +10,7 @@ COMPATIBLE_MACHINE = "xenclient-dom0"
 # to exist before that machine has been built.
 STUBDOMAIN_DIR = "${DEPLOY_DIR}/images/${STUBDOMAIN_MACHINE}"
 STUBDOMAIN_NAME = "xenclient-stubdomain-initramfs-image"
-STUBDOMAIN_IMAGE = "${STUBDOMAIN_DIR}/${STUBDOMAIN_NAME}-${STUBDOMAIN_MACHINE}.cpio.gz"
+STUBDOMAIN_IMAGE = "${STUBDOMAIN_DIR}/${STUBDOMAIN_NAME}-${STUBDOMAIN_MACHINE}.rootfs.cpio.gz"
 
 SRC_URI = ""
 S = "${UNPACKDIR}"
