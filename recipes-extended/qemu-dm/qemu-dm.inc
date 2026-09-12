@@ -53,6 +53,9 @@ S = "${UNPACKDIR}/qemu-${PV}"
 
 inherit autotools-brokensep pkgconfig python3native
 
+# QEMU 4.1 configure is not GNU autotools; --disable-static is unknown.
+DISABLE_STATIC = ""
+
 require recipes-extended/qemu-dm/qemu-dm-vglass.inc
 
 # Include a minimal amount of blobs by default.
