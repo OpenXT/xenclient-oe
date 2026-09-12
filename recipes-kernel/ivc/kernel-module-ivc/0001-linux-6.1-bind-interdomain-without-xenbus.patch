@@ -1,0 +1,35 @@
+Linux 6.1 bind_interdomain_evtchn_to_irqhandler_lateeoi takes a
+xenbus_device * (otherend_id) rather than (remote_dom, remote_port).
+IVC is not a xenbus frontend; bind the remote port via the hypercall
+and then use bind_evtchn_to_irqhandler_lateeoi on the local port.
+
+Upstream-Status: Inappropriate [OpenXT / linux-openxt 6.1]
+
+--- a/ks/platform/linux/platform.c
++++ b/ks/platform/linux/platform.c
+@@ -806,10 +806,21 @@
+     info->callback = callback;
+     if(interDomain)
+     {
+-        info->irq = bind_interdomain_evtchn_to_irqhandler_lateeoi(
+-                    remoteDomId, port,
+-                    ks_platform_event_interrupt_handler,
+-                    0, "libivc", info);
++        struct evtchn_bind_interdomain bind = {
++            .remote_dom = remoteDomId,
++            .remote_port = port,
++        };
++
++        rc = HYPERVISOR_event_channel_op(EVTCHNOP_bind_interdomain, &bind);
++        if (rc) {
++            vfree(info);
++            return rc;
++        }
++        info->event_channel = bind.local_port;
++        info->irq = bind_evtchn_to_irqhandler_lateeoi(
++                    bind.local_port,
++                    ks_platform_event_interrupt_handler,
++                    0, "libivc", info);
+     }
+     else
+     {

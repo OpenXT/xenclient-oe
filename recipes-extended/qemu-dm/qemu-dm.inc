@@ -78,7 +78,6 @@ PACKAGES =+ "${PN}-icons"
 
 EXTRA_OECONF += " \
     --target-list=i386-softmmu \
-    --disable-werror \
     --disable-auth-pam \
     --disable-bluez \
     --disable-bochs \
@@ -133,7 +132,7 @@ EXTRA_OECONF += " \
     --enable-pie \
     --enable-readonly-ide \
     --enable-trace-backends=nop \
-    --enable-werror \
+    --disable-werror \
     --enable-xen \
     --extra-cflags="${CFLAGS}" \
 "
