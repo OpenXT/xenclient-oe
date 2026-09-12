@@ -5,6 +5,9 @@ SRC_URI:append = "\
     file://xenstored.initscript \
     file://xen-init-dom0.initscript \
     file://xl.conf \
+    file://10-ether.network \
+    file://10-xenbr0.netdev \
+    file://10-xenbr0.network \
 "
 
 RDEPENDS:${PN}-xl += " ${PN}-scripts-block"
