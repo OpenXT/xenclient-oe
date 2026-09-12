@@ -18,7 +18,7 @@ PV = "4.1.0"
 # Leave this in it's own definition so that it can be replaced with a local
 # tarball (the QEMU download speed is terrible). If this is combined with the
 # other patches, it doesn't seem to work
-SRC_URI = "http://wiki.qemu-project.org/download/qemu-${PV}.tar.bz2"
+SRC_URI = "https://download.qemu.org/qemu-${PV}.tar.bz2"
 
 # QEMU Patch Queue
 SRC_URI += "file://compile-time-stubdom-flag.patch \
