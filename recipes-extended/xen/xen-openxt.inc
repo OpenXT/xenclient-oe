@@ -25,8 +25,9 @@ EXTRA_OEMAKE += " \
     XEN_VENDORVERSION=-xc \
     "
 # Since this recipe forces the hypervisor build to target 64-bit architecture
-# even when MACHINE is 32-bit, disable this usual arch sanity check:
-INSANE_SKIP:${PN}-dbg = "arch"
+# even when MACHINE is 32-bit, disable this usual arch sanity check.
+# Use += so meta-virt's buildpaths skip on xen-syms is kept.
+INSANE_SKIP:${PN}-dbg += "arch"
 
 do_configure() {
     echo "debug := n" > .config
