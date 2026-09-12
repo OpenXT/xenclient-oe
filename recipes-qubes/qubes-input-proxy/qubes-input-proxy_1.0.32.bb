@@ -17,6 +17,10 @@ FILES:${PN}-receiver = "\
     ${sysconfdir}/modules-load.d/ \
 "
 
+do_compile() {
+    oe_runmake -C src CFLAGS="${CFLAGS} -Wall -Wextra -O2 -std=gnu99 -Wno-error=calloc-transposed-args"
+}
+
 do_install() {
     oe_runmake -C src install DESTDIR=${D}
 
