@@ -24,8 +24,9 @@ pid_t child, waited_child;
 static int child_running;
 
 static
-void sig_child()
+void sig_child(int sig)
 {
+    (void)sig;
 	int wstatus;
 
 	waited_child = waitpid(-1, &wstatus, WNOHANG);
