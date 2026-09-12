@@ -78,6 +78,7 @@ PACKAGES =+ "${PN}-icons"
 
 EXTRA_OECONF += " \
     --target-list=i386-softmmu \
+    --disable-werror \
     --disable-auth-pam \
     --disable-bluez \
     --disable-bochs \
