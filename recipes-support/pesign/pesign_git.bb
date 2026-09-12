@@ -35,8 +35,8 @@ EXTRA_OEMAKE += "\
     C_INCLUDE_PATH=${STAGING_INCDIR}/efivar \
 "
 
-# Newer libefivar's efivar-time.h needs efi_time_t from efivar-types.h first.
-CFLAGS:append = " -include ${STAGING_INCDIR}/efivar/efivar-types.h"
+# Newer libefivar needs types+guids before efivar-time.h.
+CFLAGS:append = " -include ${STAGING_INCDIR}/efivar/efivar.h"
 
 do_install() {
     install -d ${D}${bindir}
