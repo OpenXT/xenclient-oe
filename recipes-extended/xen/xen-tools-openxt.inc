@@ -13,12 +13,8 @@ SRC_URI:append = "\
 RDEPENDS:${PN}-xl += " ${PN}-scripts-block"
 RDEPENDS:${PN}-libxenlight += " varstored-watch"
 
-PACKAGES += " \
-    ${PN}-libxenhypfs \
-    ${PN}-libxenhypfs-dev \
-    ${PN}-libxenmanage \
-    ${PN}-libxenmanage-dev \
-    "
+# libxenhypfs, libxenmanage, xenhypfs, xen-ucode are already in
+# meta-virt xen-tools.inc PACKAGES.
 
 PROVIDES =+ "virtual-xenstored"
 
@@ -53,17 +49,8 @@ FILES:${PN}-libxenhypfs-dev = " \
 FILES:${PN}-xenhypfs = " \
     ${sbindir}/xenhypfs \
 "
-PACKAGES += "${PN}-xenhypfs"
 
-FILES:${PN}-xen-ucode = " \
-    ${sbindir}/xen-ucode \
-"
-PACKAGES += "${PN}-xen-ucode"
-
-FILES:${PN}-tests = " \
-    ${libdir}/xen/bin/test-* \
-"
-PACKAGES += "${PN}-tests"
+FILES:${PN}-test += "${libdir}/xen/bin/test-*"
 
 FILES:${PN}-misc += " \
     ${sbindir}/xen-access \
@@ -119,8 +106,6 @@ pkg_prerm:${PN}-xenstored () {
 }
 
 do_install:append() {
-    install -d ${D}${datadir}/pkgconfig
-
     install -d ${D}${INIT_D_DIR}
     install -m 0755 ${UNPACKDIR}/xenconsoled.initscript \
                     ${D}${INIT_D_DIR}/xenconsoled
