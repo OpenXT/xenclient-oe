@@ -10,7 +10,7 @@ SRC_URI += " \
 
 CFLAGS:prepend = " -I${STAGING_INCDIR}/libnl3 "
 
-CFLAGS:append = " -Wno-unused-parameter -Wno-deprecated-declarations "
+CFLAGS:append = " -Wno-unused-parameter -Wno-deprecated-declarations -Wno-error=stringop-truncation "
 
 S = "${UNPACKDIR}/${BP}/xcpmd"
 
