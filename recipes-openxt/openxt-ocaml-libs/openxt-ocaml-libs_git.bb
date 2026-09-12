@@ -12,8 +12,11 @@ DEPENDS += " \
 
 PV = "0+git${SRCPV}"
 
-SRC_URI = "git://github.com/OpenXT/toolstack.git;protocol=https;branch=master"
+SRC_URI = "git://github.com/OpenXT/toolstack.git;protocol=https;branch=master \
+    file://0001-unixext-rename-bool-parameter-for-C23.patch \
+"
 SRCREV = "${AUTOREV}"
+FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 
 
 inherit ocaml findlib
