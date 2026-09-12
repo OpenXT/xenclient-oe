@@ -65,4 +65,7 @@ CFLAGS += "-std=gnu17"
 # ar.c:615:23: error: passing argument 1 of 'ctime' from incompatible pointer type [-Wincompatible-pointer-types]
 CFLAGS += "-Wno-error=incompatible-pointer-types"
 
+# GCC 15: unproto/tok_io.c returns without a value from a non-void function
+CFLAGS += "-Wno-error=return-mismatch"
+
 EXTRA_OEMAKE += "CFLAGS='${CFLAGS}'"
