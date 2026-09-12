@@ -5,8 +5,14 @@ DEPENDS = "xen-tools libxclogging libevent"
 
 require xclibs.inc
 
+FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
+SRC_URI += "file://0001-do-not-build-sample.patch"
+
 S = "${UNPACKDIR}/${BP}/xcxenstore"
 
 ASNEEDED = ""
 
 inherit autotools-brokensep pkgconfig
+
+# sample/teststore.c uses implicit declarations; GCC 15 errors on it.
+EXTRA_OEMAKE += "SUBDIRS=src"
