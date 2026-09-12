@@ -15,7 +15,8 @@ B = "${S}"
 
 DEFAULT_PREFERENCE = "1"
 
-PACKAGES += "vchan-socket-proxy"
+# Prepend so this package owns the binary before meta-virt ${PN}-vchan.
+PACKAGES =+ "vchan-socket-proxy"
 FILES:vchan-socket-proxy = " \
     ${bindir}/vchan-socket-proxy \
 "
