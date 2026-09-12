@@ -89,9 +89,11 @@ do_install() {
     install -m 0755 ${S}/varstored ${D}/usr/sbin/varstored
 
     install -d ${D}/usr/bin
-    install -m 0755 ${S}/tools/varstore-{get,set,ls,rm,sb-state} ${D}/usr/bin
+    install -m 0755 ${S}/tools/varstore-get ${S}/tools/varstore-set \
+                    ${S}/tools/varstore-ls ${S}/tools/varstore-rm \
+                    ${S}/tools/varstore-sb-state ${D}/usr/bin
 
     install -d ${D}/var/lib/varstored
-    install -m 0755 ${S}/{PK.auth,KEK.auth,db.auth} ${D}/var/lib/varstored
+    install -m 0755 ${S}/PK.auth ${S}/KEK.auth ${S}/db.auth ${D}/var/lib/varstored
     install -m 0755 ${UNPACKDIR}/dbx.auth ${D}/var/lib/varstored
 }
